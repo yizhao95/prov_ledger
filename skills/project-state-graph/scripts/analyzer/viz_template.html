@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>__TITLE__ — state graph</title>
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+  :root { --blue:#0053e2; --ink:#16191f; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:var(--ink); }
+  header { background:var(--blue); color:#fff; padding:10px 16px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  header .stats { font-size:12px; opacity:.9; }
+  #wrap { display:flex; height:calc(100vh - 44px); }
+  #panel { width:260px; overflow:auto; border-right:1px solid #e3e6ea; padding:12px; }
+  #net { flex:1; }
+  .group { margin-bottom:16px; }
+  .group h2 { font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#5a6573; margin:0 0 8px; }
+  label { display:flex; align-items:center; gap:8px; font-size:13px; padding:3px 0; cursor:pointer; }
+  .swatch { width:12px; height:12px; border-radius:3px; display:inline-block; }
+  .btn-row { display:flex; gap:6px; margin-bottom:8px; }
+  button { font-size:12px; padding:4px 8px; border:1px solid #cdd2d9; background:#f6f7f9; border-radius:6px; cursor:pointer; }
+  button:hover { background:#eceef1; }
+  #search { width:100%; padding:6px 8px; margin-bottom:10px; border:1px solid #cdd2d9; border-radius:6px; font-size:13px; }
+  .count { color:#8a93a0; font-size:11px; margin-left:auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>__TITLE__ · project state graph</h1>
+  <span class="stats" id="stats"></span>
+</header>
+<div id="wrap">
+  <div id="panel">
+    <input id="search" placeholder="Search node label…" />
+    <div class="btn-row">
+      <button id="fit">Fit</button>
+      <button id="physics">Toggle physics</button>
+    </div>
+    <div class="group">
+      <h2>Node types</h2>
+      <div class="btn-row">
+        <button data-all="node" data-on="1">All</button>
+        <button data-all="node" data-on="0">None</button>
+      </div>
+      <div id="nodeFilters"></div>
+    </div>
+    <div class="group">
+      <h2>Edge types</h2>
+      <div class="btn-row">
+        <button data-all="edge" data-on="1">All</button>
+        <button data-all="edge" data-on="0">None</button>
+      </div>
+      <div id="edgeFilters"></div>
+    </div>
+  </div>
+  <div id="net"></div>
+</div>
+<script>
+const GRAPH_DATA = __GRAPH_DATA__;
+const allNodes = GRAPH_DATA.nodes;
+const allEdges = GRAPH_DATA.edges.map((e, i) => Object.assign({id: i}, e));
+
+const enabledNodeTypes = new Set(GRAPH_DATA.node_types);
+const enabledEdgeTypes = new Set(GRAPH_DATA.edge_types);
+
+const nodesDS = new vis.DataSet([]);
+const edgesDS = new vis.DataSet([]);
+const container = document.getElementById('net');
+const network = new vis.Network(container, {nodes:nodesDS, edges:edgesDS}, {
+  nodes:{ shape:'dot', size:10, font:{size:12} },
+  edges:{ arrows:'to', color:{opacity:0.4}, smooth:{type:'continuous'} },
+  physics:{ stabilization:true, barnesHut:{gravitationalConstant:-8000, springLength:120} },
+  interaction:{ hover:true, tooltipDelay:120 }
+});
+
+function countById(arr,key){const m={};arr.forEach(x=>{m[x[key]]=(m[x[key]]||0)+1});return m;}
+const nodeTypeCounts = countById(allNodes,'node_type');
+const edgeTypeCounts = countById(allEdges,'edge_type');
+function colorFor(t){const n=allNodes.find(x=>x.node_type===t);return n?n.color:'#999';}
+
+function buildFilters(){
+  const nf=document.getElementById('nodeFilters');
+  GRAPH_DATA.node_types.forEach(t=>{
+    const id='nt_'+t;
+    nf.insertAdjacentHTML('beforeend',
+      '<label><input type="checkbox" id="'+id+'" checked>'+
+      '<span class="swatch" style="background:'+colorFor(t)+'"></span>'+t+
+      '<span class="count">'+(nodeTypeCounts[t]||0)+'</span></label>');
+    nf.querySelector('#'+CSS.escape(id)).addEventListener('change',e=>{
+      e.target.checked?enabledNodeTypes.add(t):enabledNodeTypes.delete(t);render();});
+  });
+  const ef=document.getElementById('edgeFilters');
+  GRAPH_DATA.edge_types.forEach(t=>{
+    const id='et_'+t;
+    ef.insertAdjacentHTML('beforeend',
+      '<label><input type="checkbox" id="'+id+'" checked>'+t+
+      '<span class="count">'+(edgeTypeCounts[t]||0)+'</span></label>');
+    ef.querySelector('#'+CSS.escape(id)).addEventListener('change',e=>{
+      e.target.checked?enabledEdgeTypes.add(t):enabledEdgeTypes.delete(t);render();});
+  });
+}
+
+function render(){
+  const term=(document.getElementById('search').value||'').toLowerCase();
+  const visNodes = allNodes.filter(n=>enabledNodeTypes.has(n.node_type) &&
+    (!term || (n.label||'').toLowerCase().includes(term)));
+  const visIds = new Set(visNodes.map(n=>n.id));
+  const visEdges = allEdges.filter(e=>enabledEdgeTypes.has(e.edge_type) &&
+    visIds.has(e.from) && visIds.has(e.to));
+  nodesDS.clear(); edgesDS.clear();
+  nodesDS.add(visNodes); edgesDS.add(visEdges);
+  document.getElementById('stats').textContent =
+    visNodes.length+'/'+allNodes.length+' nodes · '+visEdges.length+'/'+allEdges.length+' edges';
+}
+
+document.querySelectorAll('button[data-all]').forEach(b=>{
+  b.addEventListener('click',()=>{
+    const on=b.dataset.on==='1';
+    const isNode=b.dataset.all==='node';
+    const types=isNode?GRAPH_DATA.node_types:GRAPH_DATA.edge_types;
+    const set=isNode?enabledNodeTypes:enabledEdgeTypes;
+    set.clear(); if(on) types.forEach(t=>set.add(t));
+    types.forEach(t=>{const cb=document.getElementById((isNode?'nt_':'et_')+t);if(cb)cb.checked=on;});
+    render();
+  });
+});
+document.getElementById('search').addEventListener('input',render);
+document.getElementById('fit').addEventListener('click',()=>network.fit());
+let phys=true;
+document.getElementById('physics').addEventListener('click',()=>{phys=!phys;network.setOptions({physics:phys});});
+
+buildFilters();
+render();
+network.fit();
+</script>
+</body>
+</html>

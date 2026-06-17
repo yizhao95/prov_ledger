@@ -1,0 +1,13 @@
+[project]
+name = "update-project-state-graph-scripts"
+version = "0.1.0"
+description = "Review scripts for the update-project-state-graph skill"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
