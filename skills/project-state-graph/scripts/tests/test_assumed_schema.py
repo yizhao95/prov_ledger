@@ -27,7 +27,7 @@ def _node_meta(conn, type_name, node_name):
 
 SQL_PY = '''\
 def load_sales():
-    return run("SELECT store_id, amount, ts FROM `wmt.retail.sales`")
+    return run("SELECT store_id, amount, ts FROM `demo.retail.sales`")
 '''
 
 
@@ -45,7 +45,7 @@ def sql_analyzed(tmp_path):
 
 
 def test_sql_table_gains_assumed_schema(sql_analyzed):
-    meta = _node_meta(sql_analyzed, "bq_dataset", "wmt.retail.sales")
+    meta = _node_meta(sql_analyzed, "bq_dataset", "demo.retail.sales")
     assert "assumed_schema" in meta
     cols = meta["assumed_schema"]
     # assumed_schema is {column: dtype}; dtype may be 'unknown' from a bare SELECT
@@ -58,13 +58,13 @@ def test_assumed_schema_absent_is_tolerated(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "loader.py").write_text(
-        'def load():\n    return run("SELECT * FROM `wmt.retail.x`")\n'
+        'def load():\n    return run("SELECT * FROM `demo.retail.x`")\n'
     )
     conn = store.init_db(str(tmp_path / "g.db"))
     file_map = walker.walk(conn, str(repo))
     py_ast.analyze(conn, str(repo), file_map)
     sql_refs.analyze(conn, str(repo), file_map)
-    meta = _node_meta(conn, "bq_dataset", "wmt.retail.x")
+    meta = _node_meta(conn, "bq_dataset", "demo.retail.x")
     # either no assumed_schema, or it's just {'*': ...}; both are acceptable
     assert meta.get("assumed_schema", {}) in ({}, {"*": "unknown"}) or "*" in meta.get("assumed_schema", {})
     conn.close()

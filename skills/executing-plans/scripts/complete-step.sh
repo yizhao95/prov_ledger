@@ -10,5 +10,11 @@ if [[ $# -ne 1 ]]; then
     exit 2
 fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYBIN="${PYBIN:-${HOME}/skill-workspace/orchestrator/.venv/bin/python}"
+# Resolve a Python interpreter: explicit PYBIN -> repo-local .venv ->
+# internal workspace venv -> system python3. Self-contained for a fresh clone.
+if [[ -z "${PYBIN:-}" ]]; then
+    for _cand in "${SCRIPT_DIR}/../../../.venv/bin/python" "${HOME}/skill-workspace/orchestrator/.venv/bin/python" "$(command -v python3 || true)"; do
+        if [[ -n "${_cand}" && -x "${_cand}" ]]; then PYBIN="${_cand}"; break; fi
+    done
+fi
 exec "${PYBIN}" "${SCRIPT_DIR}/_apply_op.py" --op complete-step "$1"

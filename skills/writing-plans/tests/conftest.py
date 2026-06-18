@@ -12,9 +12,12 @@ from pathlib import Path
 
 import pytest
 
-# Allow importing the orchestrator package directly (it's not pip-installed,
-# just sitting on disk). Path: ~/skill-workspace/orchestrator/orchestrator/
-ORCH_ROOT = Path.home() / "skill-workspace" / "orchestrator"
+# Import the orchestrator package directly (it's not pip-installed, just on disk).
+# Prefer the repo-bundled orchestrator-backend/ so a fresh public clone is
+# self-contained; fall back to the author's internal workspace path otherwise.
+_BUNDLED_ORCH = Path(__file__).resolve().parents[3] / "orchestrator-backend"
+_DEV_ORCH = Path.home() / "skill-workspace" / "orchestrator"
+ORCH_ROOT = _BUNDLED_ORCH if (_BUNDLED_ORCH / "orchestrator" / "__init__.py").exists() else _DEV_ORCH
 sys.path.insert(0, str(ORCH_ROOT))
 
 from orchestrator import db as orch_db  # noqa: E402

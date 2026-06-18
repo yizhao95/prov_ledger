@@ -23,7 +23,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-ORCH_ROOT = Path.home() / "skill-workspace" / "orchestrator"
+# Prefer the repo-bundled orchestrator-backend (self-contained public clone);
+# fall back to the author's internal workspace install otherwise.
+_BUNDLED_ORCH = Path(__file__).resolve().parents[3] / "orchestrator-backend"
+_DEV_ORCH = Path.home() / "skill-workspace" / "orchestrator"
+ORCH_ROOT = _BUNDLED_ORCH if (_BUNDLED_ORCH / "orchestrator" / "__init__.py").exists() else _DEV_ORCH
 sys.path.insert(0, str(ORCH_ROOT))
 
 from orchestrator import api, db  # noqa: E402

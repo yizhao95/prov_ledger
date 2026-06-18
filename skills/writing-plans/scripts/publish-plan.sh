@@ -26,7 +26,13 @@ fi
 
 INPUT="$1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYBIN="${PYBIN:-${HOME}/skill-workspace/orchestrator/.venv/bin/python}"
+# Resolve a Python interpreter: explicit PYBIN -> repo-local .venv ->
+# internal workspace venv -> system python3. Self-contained for a fresh clone.
+if [[ -z "${PYBIN:-}" ]]; then
+    for _cand in "${SCRIPT_DIR}/../../../.venv/bin/python" "${HOME}/skill-workspace/orchestrator/.venv/bin/python" "$(command -v python3 || true)"; do
+        if [[ -n "${_cand}" && -x "${_cand}" ]]; then PYBIN="${_cand}"; break; fi
+    done
+fi
 
 if [[ ! -x "${PYBIN}" ]]; then
     echo "❌ publish-plan: python interpreter not found at ${PYBIN}" >&2

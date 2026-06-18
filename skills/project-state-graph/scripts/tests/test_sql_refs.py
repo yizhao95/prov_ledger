@@ -4,15 +4,15 @@ import pytest
 from analyzer import py_ast, sql_refs, store, walker
 
 PY_SAMPLE = '''\
-PROJECT = "wmt-proj"
+PROJECT = "demo-proj"
 
 
 def build_query(store_id):
-    return f"SELECT a, b FROM `wmt-proj.retail.events` WHERE store = {store_id}"
+    return f"SELECT a, b FROM `demo-proj.retail.events` WHERE store = {store_id}"
 
 
 def write_results():
-    return "INSERT INTO `wmt-proj.retail.summary` SELECT * FROM `wmt-proj.retail.events`"
+    return "INSERT INTO `demo-proj.retail.summary` SELECT * FROM `demo-proj.retail.events`"
 '''
 
 SQL_SAMPLE = "SELECT x FROM sales JOIN inventory ON sales.id = inventory.id\n"
@@ -63,14 +63,14 @@ def test_sql_file_tables_become_nodes(analyzed):
 
 def test_bq_dataset_nodes_from_python_strings(analyzed):
     bq = _node_names(analyzed, "bq_dataset")
-    assert "wmt-proj.retail.events" in bq
+    assert "demo-proj.retail.events" in bq
 
 
 def test_reads_sql_edge_from_enclosing_function(analyzed):
     reads = {(s, d) for s, d in _edges(analyzed, "reads_sql")}
-    assert ("build_query", "wmt-proj.retail.events") in reads
+    assert ("build_query", "demo-proj.retail.events") in reads
 
 
 def test_writes_sql_edge_for_insert_target(analyzed):
     writes = {(s, d) for s, d in _edges(analyzed, "writes_sql")}
-    assert ("write_results", "wmt-proj.retail.summary") in writes
+    assert ("write_results", "demo-proj.retail.summary") in writes
