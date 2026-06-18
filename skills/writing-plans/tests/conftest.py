@@ -1,0 +1,42 @@
+"""Shared fixtures for writing-plans script tests.
+
+Each test gets its OWN ephemeral SQLite DB so we never touch the real
+~/skill-workspace/orchestrator.db. Migrations are applied against the
+ephemeral DB so the schema (Plans / Steps / SkillActivations) is real.
+"""
+from __future__ import annotations
+
+import sqlite3
+import sys
+from pathlib import Path
+
+import pytest
+
+# Import the orchestrator package directly (it's not pip-installed, just on disk).
+# Prefer the repo-bundled orchestrator-backend/ so a fresh public clone is
+# self-contained; fall back to the author's internal workspace path otherwise.
+_BUNDLED_ORCH = Path(__file__).resolve().parents[3] / "orchestrator-backend"
+_DEV_ORCH = Path.home() / "skill-workspace" / "orchestrator"
+ORCH_ROOT = _BUNDLED_ORCH if (_BUNDLED_ORCH / "orchestrator" / "__init__.py").exists() else _DEV_ORCH
+sys.path.insert(0, str(ORCH_ROOT))
+
+from orchestrator import db as orch_db  # noqa: E402
+
+SKILL_DIR = Path(__file__).parent.parent
+SCRIPTS_DIR = SKILL_DIR / "scripts"
+
+
+@pytest.fixture
+def tmp_db(tmp_path: Path) -> Path:
+    """Fresh SQLite DB with all migrations applied. Path returned for CLI use."""
+    db_path = tmp_path / "test_orchestrator.db"
+    conn = sqlite3.connect(str(db_path))
+    orch_db.run_migrations(conn)
+    conn.close()
+    return db_path
+
+
+@pytest.fixture
+def scripts_dir() -> Path:
+    """Path to writing-plans/scripts/ — used to invoke publish-plan.sh."""
+    return SCRIPTS_DIR

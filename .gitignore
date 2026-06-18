@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+.venv-*/
+venv/
+env/
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Orchestrator runtime database (created at runtime, never committed)
+orchestrator.db
+orchestrator.db-wal
+orchestrator.db-shm
+*.sqlite
+*.sqlite3
+.test-orch.db*
+
+# Project state graphs (built artifacts)
+*-state-graph.db
+provledger.*.db
+
+# uv lockfiles regenerate per-environment
+uv.lock
+
+# Node (dashboard tooling, if any)
+node_modules/
+
+# OS / editor noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Logs
+*.log

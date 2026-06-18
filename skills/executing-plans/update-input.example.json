@@ -1,0 +1,90 @@
+{
+  "_comment": "8 worked examples — one per op. Each is a valid input file you'd pass to the matching scripts/<op>.sh. Pick the one matching your write op, copy, edit values, save, then: bash ~/.code_puppy/skills/executing-plans/scripts/<op>.sh path/to/input.json",
+
+  "run_step__shell_command": {
+    "_use_with": "scripts/run-step.sh",
+    "_why": "PREFERRED PATH for shell-based steps. Bundles start+exec+complete with auto-captured log_context. Eliminates the 'forgot to pass log_context' footgun the same way migration 006 eliminated 'forgot to call finish-plan'.",
+    "step_id": "deep-health-20260514153045-E",
+    "type": "COMMAND",
+    "command": "pytest tests/test_deep_health.py -v"
+  },
+
+  "run_step__with_summary": {
+    "_use_with": "scripts/run-step.sh",
+    "_why": "Override the auto-generated summary with a curated one-liner.",
+    "step_id": "deep-health-20260514153045-F",
+    "type": "COMMAND",
+    "command": "alembic upgrade head",
+    "summary": "Migrated DB to head: adds Steps.is_review + idx_steps_plan_review."
+  },
+
+  "start_step__minimal": {
+    "_use_with": "scripts/start-step.sh",
+    "step_id": "deep-health-20260514153045-A"
+  },
+
+  "start_step__sub_agent": {
+    "_use_with": "scripts/start-step.sh",
+    "step_id": "auth-refactor-20260514153045-G",
+    "type": "SUB_AGENT",
+    "agent_input": "Refactor app/auth/oauth.py: extract OAuthClient.fetch_token into a separate token_service module. Preserve public API. Run pytest after."
+  },
+
+  "complete_step__with_summary": {
+    "_use_with": "scripts/complete-step.sh",
+    "step_id": "deep-health-20260514153045-A",
+    "summary": "Read app/health.py + identified 3 singletons: db_session, worker_registry, disk_monitor. Mapped to 4 probe functions for deep_health()."
+  },
+
+  "complete_step__sub_agent_with_output": {
+    "_use_with": "scripts/complete-step.sh",
+    "step_id": "auth-refactor-20260514153045-G",
+    "summary": "Sub-agent extracted token_service module + 6 tests pass + zero public-API regression",
+    "agent_output": "Created app/auth/token_service.py with TokenService class. OAuthClient now delegates fetch_token() to it. tests/test_oauth.py and tests/test_token_service.py both green. No callers broken."
+  },
+
+  "complete_step__with_inline_log": {
+    "_use_with": "scripts/complete-step.sh",
+    "_why": "Use inline log_context (Bug 2 fix) when you have raw output ready at completion time — saves a separate append-log call and ensures the log isn't forgotten. Same `--- ts ---` delimiter as append-log so dashboard counters keep working.",
+    "step_id": "deep-health-20260514153045-E",
+    "summary": "deep_health endpoint added; all 4 probes return correct ProbeResult; pytest green",
+    "log_context": "$ pytest tests/test_deep_health.py -v\ntests/test_deep_health.py::test_all_healthy PASSED\ntests/test_deep_health.py::test_db_unreachable PASSED\ntests/test_deep_health.py::test_disk_full PASSED\ntests/test_deep_health.py::test_worker_unresponsive PASSED\n4 passed in 0.18s"
+  },
+
+  "fail_step": {
+    "_use_with": "scripts/fail-step.sh",
+    "step_id": "deep-health-20260514153045-E",
+    "reason": "pytest tests/test_deep_health.py::test_db_unreachable_returns_503 failed — mock raises wrong exception type. Need to revisit ProbeResult contract."
+  },
+
+  "append_log__shell_output": {
+    "_use_with": "scripts/append-log.sh",
+    "step_id": "deep-health-20260514153045-E",
+    "text": "$ pytest tests/test_deep_health.py -v\n========================= test session starts =========================\ntests/test_deep_health.py::test_all_healthy PASSED\ntests/test_deep_health.py::test_db_unreachable PASSED\ntests/test_deep_health.py::test_disk_low PASSED\ntests/test_deep_health.py::test_no_workers PASSED\ntests/test_deep_health.py::test_concurrent_probes PASSED\n========================= 5 passed in 0.42s ========================="
+  },
+
+  "deviate": {
+    "_use_with": "scripts/deviate.sh",
+    "parent_step_id": "deep-health-20260514153045-C",
+    "justification": "Implementation revealed need for a shared ProbeResult contract before the 4 probes can be written independently — extracting it as a sub-step.",
+    "sub_steps": [
+      "TEST: tests/test_probe_result.py — ProbeResult dataclass: status field accepts 'ok'/'warn'/'down', extra dict carries arbitrary metadata, .to_json() serializes correctly",
+      "CODE: app/health/probe_result.py — ProbeResult dataclass with status + extra + to_json",
+      "CODE: refactor 4 probe functions to return ProbeResult instead of bare dicts"
+    ]
+  },
+
+  "record_skill__deferred_load": {
+    "_use_with": "scripts/record-skill.sh",
+    "plan_id": "deep-health-20260514153045",
+    "name": "systematic-debugging",
+    "source": "deferred-load",
+    "step_id": "deep-health-20260514153045-E",
+    "reason": "Test failure at step E surfaced — activating systematic-debugging to root-cause before proceeding"
+  },
+
+  "finish_plan": {
+    "_use_with": "scripts/finish-plan.sh",
+    "plan_id": "deep-health-20260514153045"
+  }
+}

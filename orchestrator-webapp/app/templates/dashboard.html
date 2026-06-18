@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <!-- Top action bar: navigation + viewing context -->
+  <div class="mb-4 flex items-center justify-between gap-3">
+    {% if viewing_plan_id %}
+      {# Viewing a historical plan — user likely arrived from /history.
+         Show BOTH "Back to Home" (primary) and "Back to History" (secondary)
+         so they can navigate either direction without using browser back. #}
+      <div class="flex items-center gap-2">
+        <a href="/"
+           class="inline-flex items-center gap-2 px-4 py-2 bg-brand-blue text-white rounded-lg
+                  shadow hover:bg-blue-700 active:bg-blue-800 text-sm font-semibold transition">
+          🏠 Back to Home
+        </a>
+        <a href="/history"
+           class="inline-flex items-center gap-2 px-4 py-2 bg-white border border-brand-blue text-brand-blue
+                  rounded-lg shadow-sm hover:bg-blue-50 active:bg-blue-100 text-sm font-semibold transition">
+          ← Back to History
+        </a>
+      </div>
+      <span class="text-xs text-brand-gray italic">📜 Viewing historical plan</span>
+    {% else %}
+      {# Default: latest plan — show Show History button #}
+      <span class="text-sm font-semibold text-brand-gray">📍 Latest Plan</span>
+      <a href="/history"
+         class="inline-flex items-center gap-2 px-4 py-2 bg-white border border-brand-blue text-brand-blue
+                rounded-lg shadow-sm hover:bg-blue-50 active:bg-blue-100 text-sm font-semibold transition">
+        📚 Show History →
+      </a>
+    {% endif %}
+  </div>
+
+  <!-- Polling div: query param threads through so historical view stays on its plan -->
+  <div id="dashboard-content"
+       hx-get="/api/dashboard{% if viewing_plan_id %}?plan={{ viewing_plan_id }}{% endif %}"
+       hx-trigger="load, every 2s"
+       hx-swap="innerHTML">
+    {% include "_dashboard_partial.html" %}
+  </div>
+{% endblock %}

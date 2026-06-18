@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}provLedger Dashboard{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'brand-blue':   '#0053e2',
+            'brand-spark':  '#ffc220',
+            'brand-green':  '#2a8703',
+            'brand-red':    '#ea1100',
+            'brand-gray':   '#74767c',
+            'brand-bg':     '#f8f9fb',
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    /* respect prefers-reduced-motion */
+    @media (prefers-reduced-motion: reduce) {
+      .animate-pulse, .animate-ping { animation: none !important; }
+    }
+    /* live-dot indicator */
+    .live-dot {
+      display: inline-block;
+      width: 0.6rem;
+      height: 0.6rem;
+      border-radius: 50%;
+      background: #2a8703;
+      box-shadow: 0 0 0 0 rgba(42, 135, 3, 0.6);
+      animation: live-pulse 2s infinite;
+    }
+    @keyframes live-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(42, 135, 3, 0.6); }
+      70%  { box-shadow: 0 0 0 0.5rem rgba(42, 135, 3, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(42, 135, 3, 0); }
+    }
+    /* preserve scroll on htmx swap */
+    .preserve-scroll { overflow-y: auto; max-height: 16rem; }
+  </style>
+  <script>
+    // Preserve <details> open state across HTMX swaps.
+    // Each <details> must have an id attr for keying.
+    //
+    // NOTE: this script runs in <head>, so document.body is NULL here.
+    // Attach all listeners to `document` (htmx events bubble to document).
+    (function() {
+      const KEY = 'webapp_open_details';
+      function getOpen() {
+        try { return new Set(JSON.parse(sessionStorage.getItem(KEY) || '[]')); }
+        catch(e) { return new Set(); }
+      }
+      function saveOpen(set) {
+        sessionStorage.setItem(KEY, JSON.stringify([...set]));
+      }
+      function reapplyOpen() {
+        const open = getOpen();
+        document.querySelectorAll('details[id]').forEach(d => {
+          // Only force-open if persisted; never force-close (let server
+          // decide initial state for IN_PROGRESS rows).
+          if (open.has(d.id) && !d.open) d.open = true;
+        });
+      }
+
+      // 1. User toggle → persist to sessionStorage.
+      //    `toggle` events don't bubble, so use capture phase on document.
+      document.addEventListener('toggle', (e) => {
+        if (e.target.tagName !== 'DETAILS' || !e.target.id) return;
+        const open = getOpen();
+        if (e.target.open) open.add(e.target.id); else open.delete(e.target.id);
+        saveOpen(open);
+      }, true);
+
+      // 2. After every HTMX settle → re-apply persisted open state.
+      //    htmx:afterSettle fires after the swap + settle phase completes.
+      document.addEventListener('htmx:afterSettle', reapplyOpen);
+
+      // 3. Initial page load → re-apply (in case sessionStorage has state
+      //    from a previous full-page load).
+      document.addEventListener('DOMContentLoaded', reapplyOpen);
+
+      // 4. ETag / 304 Not Modified handling.
+      //
+      //   Why we manage ETags in JS instead of relying on the browser HTTP
+      //   cache: when the browser HTTP cache intercepts a 304, it materializes
+      //   the cached response body back to the XHR as a 200 OK — so HTMX
+      //   would NEVER see the 304 and would happily swap an identical DOM
+      //   every 2s, destroying any open <details>.
+      //
+      //   By tracking the ETag ourselves and pairing it with `Cache-Control:
+      //   no-store` from the server, we force HTMX to see the raw 304 status
+      //   so we can cancel the swap.
+      let lastEtag = null;
+
+      // (a) Before each htmx request → attach our last-seen ETag
+      document.addEventListener('htmx:configRequest', (e) => {
+        if (lastEtag) {
+          e.detail.headers['If-None-Match'] = lastEtag;
+        }
+      });
+
+      // (b) After each response → capture the new ETag (if any)
+      document.addEventListener('htmx:afterRequest', (e) => {
+        const xhr = e.detail.xhr;
+        if (!xhr) return;
+        const newEtag = xhr.getResponseHeader('ETag');
+        if (newEtag) lastEtag = newEtag;
+      });
+
+      // (c) On 304 → cancel the swap so the DOM stays exactly as-is
+      document.addEventListener('htmx:beforeSwap', (e) => {
+        if (e.detail.xhr && e.detail.xhr.status === 304) {
+          e.detail.shouldSwap = false;
+          e.detail.isError = false;
+        }
+      });
+    })();
+  </script>
+</head>
+<body class="bg-brand-bg text-gray-900 font-sans">
+  <header class="bg-brand-blue text-white px-6 py-4 shadow-md">
+    <div class="max-w-6xl mx-auto flex items-center justify-between">
+      <h1 class="text-xl font-bold">
+        🧾 provLedger Dashboard
+      </h1>
+      <div class="text-sm flex items-center gap-2">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span>LIVE — auto-refresh 2s</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto p-6">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="text-center text-xs text-brand-gray py-4">
+    Reading <code>~/skill-workspace/orchestrator.db</code> read-only · WAL mode ·
+    FastAPI + HTMX + Tailwind
+  </footer>
+</body>
+</html>

@@ -1,0 +1,266 @@
+{% if error %}
+  <div class="bg-brand-red text-white p-4 rounded-lg shadow">
+    <strong>⚠️ Error:</strong> {{ error }}
+  </div>
+{% elif not plan %}
+  <div class="bg-yellow-50 border border-yellow-300 text-yellow-900 p-4 rounded-lg">
+    No plans in the database yet. Run <code class="font-mono bg-white px-1 rounded">orchestrator-cli.py init-plan ...</code> to create one.
+  </div>
+{% else %}
+  {% set badge = status_badge(plan.status) %}
+
+  <!-- Plan card -->
+  <section class="bg-white rounded-lg shadow p-5 mb-4 border border-gray-200">
+    <div class="flex items-start justify-between mb-2">
+      <div class="flex-1 min-w-0 pr-3">
+        {# Card title is the SHORT title (first sentence of user_query, or plan_id fallback).
+           The FULL user_query is rendered below in its own "Original Query" block when
+           viewing the plan-detail page (viewing_plan_id set) — keeps cards scannable. #}
+        <h2 class="text-base font-bold text-gray-900">{{ short_title(plan) }}</h2>
+        <p class="text-xs font-mono text-brand-gray mt-1">{{ plan.plan_id }}</p>
+        <p class="text-sm text-gray-700 mt-2">{{ plan.original_goal }}</p>
+      </div>
+      <span class="px-3 py-1 rounded-full text-sm font-semibold {{ badge[1] }} flex-shrink-0">
+        {{ badge[0] }} {{ plan.status }}
+      </span>
+    </div>
+    <div class="text-xs text-brand-gray flex flex-wrap gap-x-4 gap-y-1 mt-3">
+      <span>Started: {{ plan.created_at }}</span>
+      {% if plan.completed_at %}<span>Completed: {{ plan.completed_at }}</span>{% endif %}
+      <span>Revisions: {{ plan.revision_count }}/{{ plan.max_revisions }}</span>
+      <span>Steps: {{ completed }}/{{ total_steps }}</span>
+    </div>
+    <div class="mt-3 h-2 bg-gray-200 rounded-full overflow-hidden" role="progressbar"
+         aria-valuenow="{{ progress_pct }}" aria-valuemin="0" aria-valuemax="100">
+      <div class="h-full bg-brand-green transition-all duration-500"
+           style="width: {{ progress_pct }}%"></div>
+    </div>
+    <div class="text-xs text-brand-gray mt-1">{{ progress_pct }}% complete</div>
+  </section>
+
+  {# Skills Activated panel: pulls from SkillActivations (migration 005).
+     - Recorded at init-plan time via `--skill NAME:SOURCE` (writing-plans skill).
+     - Recorded mid-flight via `record-skill` (executing-plans skill, Trigger 5).
+     - Empty list (legacy plans / forgot to record) renders as a soft "(none recorded)"
+       hint, NOT an error — the user explicitly wants legacy plans to show "null". #}
+  <section class="bg-white rounded-lg shadow p-5 mb-4 border border-gray-200">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
+        🧠 Skills Activated
+        <span class="text-xs font-normal text-brand-gray">(loaded for this plan)</span>
+      </h3>
+      {% if skills %}
+        <span class="text-xs text-brand-gray">{{ skills|length }} activation{{ '' if skills|length == 1 else 's' }}</span>
+      {% endif %}
+    </div>
+    {% if skills %}
+      <div class="flex flex-wrap gap-2">
+        {% for sk in skills %}
+          {% set src = source_badge(sk.source) %}
+          <div class="inline-flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1"
+               title="{{ sk.reason or 'no reason recorded' }} — activated {{ sk.activated_at }}{% if sk.step_id %} under step {{ sk.step_id }}{% endif %}">
+            <span class="text-sm font-mono text-gray-900">{{ sk.skill_name }}</span>
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border {{ src[2] }}">
+              {{ src[0] }} {{ src[1] }}
+            </span>
+            {% if sk.step_id %}
+              <a href="#step-{{ sk.step_id }}"
+                 class="text-[10px] font-mono text-brand-blue hover:underline"
+                 title="Activated mid-flight under {{ sk.step_id }} — click to jump">
+                @{{ sk.step_id.split('-')[-1] }}
+              </a>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      {# Legacy plans (created before --skill convention) and plans where the
+         agent forgot to record skills both end up here. Render as "null" per
+         user spec — a soft hint, not an error. #}
+      <p class="text-xs text-brand-gray italic">
+        null — no skill activations recorded for this plan
+        <span class="text-brand-gray/70">(legacy plan, or agent forgot <code class="font-mono">--skill</code> at init-plan)</span>
+      </p>
+    {% endif %}
+  </section>
+
+  {# Original Query block: full verbatim user_query, shown as a collapsible <details>.
+     - On the latest-plan view: collapsed by default — doesn't crowd the dashboard.
+     - On the /plan/<id> detail view: open by default — user explicitly clicked into
+       this plan and probably wants the full context immediately.
+     - Hidden entirely if user_query is NULL (legacy plans). #}
+  {% if plan.user_query %}
+    <details class="bg-white rounded-lg shadow border border-brand-blue/30 mb-4"
+             {% if viewing_plan_id %}open{% endif %}>
+      <summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-brand-blue
+                      hover:bg-blue-50 rounded-lg select-none">
+        📝 Original Query <span class="text-xs text-brand-gray font-normal ml-2">(verbatim user prompt)</span>
+      </summary>
+      <div class="px-5 pb-4 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{{ plan.user_query }}</div>
+    </details>
+  {% endif %}
+
+  <!-- Steps — each is an expandable <details> with full log + agent I/O -->
+  <section class="space-y-2 mb-4">
+    <!-- Column header strip (matches summary widths below) -->
+    <div class="px-4 py-2 flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">
+      <span class="w-8">#</span>
+      <span class="w-36">Type</span>
+      <span class="flex-1">Description</span>
+      <span class="w-32 text-center">Status</span>
+      <span class="w-20 text-right">Duration</span>
+    </div>
+
+    {# ── Tree-aware step rendering ────────────────────────────────────────────
+       `steps` here is the tree returned by queries.build_step_tree() — each step
+       has `children: list[dict]` and `parallel_group_id: int|None`. Siblings
+       sharing a parallel_group_id ran in overlapping time windows; we render
+       them side-by-side in a flex row with a dashed left-border accent + a
+       ⫲ parallel badge. Sequential siblings keep the vertical stack.
+
+       Backward-compat: if a step lacks `children` or `parallel_group_id`, the
+       macros still work (treat as leaf / sequential). #}
+
+    {% macro render_step_card(s) -%}
+      {% set sb = status_badge(s.status) %}
+      {% set tb = type_badge(s.step_type) %}
+      <details id="step-{{ s.step_id }}"
+               class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden
+                      {% if s.status == 'IN_PROGRESS' %}ring-2 ring-brand-spark{% endif %}">
+        <summary class="px-4 py-3 cursor-pointer hover:bg-gray-50 flex items-center gap-3 select-none">
+          <span class="font-mono text-xs text-brand-gray w-8">{{ s.step_id.split('-')[-1] }}</span>
+          <span class="w-36">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border {{ tb[2] }}"
+                  title="Type: {{ tb[1] }}">
+              {{ tb[0] }} {{ tb[1] }}
+            </span>
+          </span>
+          <span class="flex-1 text-sm text-gray-800">
+            {% if s.depth_level > 0 %}<span class="text-brand-gray">{{ '↳ ' * s.depth_level }}</span>{% endif %}
+            {{ s.description }}
+          </span>
+          <span class="w-32 text-center">
+            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-semibold {{ sb[1] }}">
+              {{ sb[0] }} {{ s.status }}
+            </span>
+          </span>
+          <span class="text-xs text-brand-gray w-20 text-right">
+            {{ format_duration(s.started_at, s.completed_at) }}
+          </span>
+        </summary>
+
+        <div class="border-t border-gray-200 bg-gray-50 px-4 py-3 space-y-3">
+          <div class="text-xs text-brand-gray flex flex-wrap gap-x-4">
+            <span>step_id: <code class="font-mono">{{ s.step_id }}</code></span>
+            {% if s.started_at %}<span>Started: {{ s.started_at }}</span>{% endif %}
+            {% if s.completed_at %}<span>Completed: {{ s.completed_at }}</span>{% endif %}
+            {% if s.parent_step_id %}<span>Parent: <code class="font-mono">{{ s.parent_step_id }}</code></span>{% endif %}
+            {% if s.parallel_group_id %}<span class="text-amber-700">⫲ ran in parallel with siblings (group {{ s.parallel_group_id }})</span>{% endif %}
+          </div>
+
+          {% if s.step_type == 'SUB_AGENT' %}
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <div class="text-xs font-semibold text-pink-800 mb-1">📥 Agent Input</div>
+                <pre class="bg-pink-50 border border-pink-200 rounded p-2 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto">{{ s.agent_input or '(not recorded)' }}</pre>
+              </div>
+              <div>
+                <div class="text-xs font-semibold text-pink-800 mb-1">📤 Agent Output</div>
+                <pre class="bg-pink-50 border border-pink-200 rounded p-2 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto">{{ s.agent_output or '(not recorded)' }}</pre>
+              </div>
+            </div>
+          {% endif %}
+
+          {% if s.summary %}
+            <div class="mb-3">
+              <div class="text-xs font-semibold text-emerald-800 mb-1 flex items-center gap-2">
+                <span>📌 Summary</span>
+                <span class="text-xs font-normal text-brand-gray">(human-curated)</span>
+              </div>
+              <div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-900 whitespace-pre-wrap leading-relaxed">{{ s.summary }}</div>
+            </div>
+          {% endif %}
+
+          <div>
+            <div class="text-xs font-semibold text-gray-700 mb-1 flex items-center justify-between">
+              <span>📜 Log <span class="font-normal text-brand-gray">(raw machine output)</span></span>
+              {% if s.log_context %}
+                {% set total_entries = count_log_entries(s.log_context) %}
+                {% if total_entries > 10 %}
+                  <span class="text-xs text-brand-gray italic">showing last 10 of {{ total_entries }} entries</span>
+                {% else %}
+                  <span class="text-xs text-brand-gray">{{ total_entries }} entr{{ 'y' if total_entries == 1 else 'ies' }}</span>
+                {% endif %}
+              {% endif %}
+            </div>
+            {% if s.log_context %}
+              <pre class="bg-white border border-gray-200 rounded p-2 text-xs font-mono whitespace-pre-wrap max-h-64 overflow-auto">{{ get_last_n_log_entries(s.log_context, 10) }}</pre>
+            {% else %}
+              <p class="text-xs text-brand-gray italic">(no raw output captured for this step)</p>
+            {% endif %}
+          </div>
+        </div>
+      </details>
+      {# Recurse into children (sub-steps from deviations). #}
+      {% if s.children %}
+        <div class="ml-6 mt-2 space-y-2 border-l-2 border-gray-200 pl-3">
+          {{ render_siblings(s.children) }}
+        </div>
+      {% endif %}
+    {%- endmacro %}
+
+    {% macro render_siblings(siblings) -%}
+      {# Walk siblings in order. Whenever the next step shares a parallel_group_id
+         with the current run, accumulate them into a flex-row group. Otherwise
+         render the run + emit a single sequential card. #}
+      {% set ns = namespace(buffer=[], current_group=None) %}
+      {% for s in siblings %}
+        {% set gid = s.parallel_group_id %}
+        {% if gid and gid == ns.current_group %}
+          {# extend current parallel run #}
+          {% set _ = ns.buffer.append(s) %}
+        {% else %}
+          {# flush previous run #}
+          {% if ns.buffer %}
+            {% if ns.buffer|length > 1 %}
+              <div class="border-l-4 border-dashed border-brand-spark pl-3 py-1 mb-2">
+                <div class="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-2">
+                  <span>⫲ Parallel branch ({{ ns.buffer|length }} steps ran concurrently)</span>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-2">
+                  {% for ps in ns.buffer %}{{ render_step_card(ps) }}{% endfor %}
+                </div>
+              </div>
+            {% else %}
+              {{ render_step_card(ns.buffer[0]) }}
+            {% endif %}
+          {% endif %}
+          {% set ns.buffer = [s] %}
+          {% set ns.current_group = gid %}
+        {% endif %}
+      {% endfor %}
+      {# flush trailing run #}
+      {% if ns.buffer %}
+        {% if ns.buffer|length > 1 %}
+          <div class="border-l-4 border-dashed border-brand-spark pl-3 py-1 mb-2">
+            <div class="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-2">
+              <span>⫲ Parallel branch ({{ ns.buffer|length }} steps ran concurrently)</span>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-2">
+              {% for ps in ns.buffer %}{{ render_step_card(ps) }}{% endfor %}
+            </div>
+          </div>
+        {% else %}
+          {{ render_step_card(ns.buffer[0]) }}
+        {% endif %}
+      {% endif %}
+    {%- endmacro %}
+
+    {{ render_siblings(steps) }}
+  </section>
+
+  <div class="text-xs text-brand-gray mt-4 text-center">
+    {{ total_plans }} total plans in DB · {{ db_size_kb }} KB
+    · click any step to expand its log (last 10 entries) + sub-agent I/O
+  </div>
+{% endif %}

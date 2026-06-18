@@ -1,0 +1,22 @@
+-- Migration 004: per-step `summary` column
+--
+-- Adds a single nullable column to Steps:
+--   summary — a 1-line human-curated description of WHAT THE STEP ACCOMPLISHED.
+--             Distinct from `log_context` (raw machine output: CLI stdout,
+--             API responses, command execution traces).
+--
+-- BEFORE this migration:
+--   log_context held a mix of raw output AND human summaries. They got
+--   conflated because there was nowhere else to put curated text.
+--
+-- AFTER this migration:
+--   - log_context  → ONLY raw machine output (messy, multi-entry, last-10 cap)
+--   - summary      → ONE curated sentence per step, set via `set-summary` CLI
+--
+-- Backfill (handled by step C of plan log-vs-summary-separation-20260428190949):
+--   Existing log_context contents are actually summaries that were written
+--   when no separate column existed. The backfill script MOVES them into
+--   summary and clears log_context — honest about the fact that no real
+--   raw logs were ever captured for those steps.
+
+ALTER TABLE Steps ADD COLUMN summary TEXT;

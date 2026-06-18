@@ -1,0 +1,24 @@
+[project]
+name = "orchestrator"
+version = "0.1.0"
+description = "Phase 1 orchestration harness — SQLite-backed plan/step state machine"
+requires-python = ">=3.10"
+dependencies = []  # stdlib only
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+# Explicit so setuptools doesn't try (and fail) to auto-discover migrations/ + tests/
+# as Python packages — they're SQL data and test code respectively, not importable
+# packages. (Fix for issue #18 bootstrap failure.)
+packages = ["orchestrator"]
+
+[dependency-groups]
+dev = ["pytest>=7"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-v"

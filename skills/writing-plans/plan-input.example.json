@@ -1,0 +1,46 @@
+{
+  "_comment": "Worked example. Copy, edit, then run: bash scripts/publish-plan.sh plan-input.example.json",
+  "goal": "Add /api/health/deep endpoint that surfaces DB + disk + worker pool status as JSON",
+
+  "prefix": "deep-health",
+
+  "max_revisions": 5,
+
+  "user_query": "we keep getting paged for /api/health returning 200 even when DB is wedged — give me a deep health check",
+
+  "skills": [
+    {"name": "writing-plans",                  "source": "iron-law"},
+    {"name": "executing-plans",                "source": "iron-law"},
+    {"name": "test-driven-development",        "source": "iron-law"},
+    {"name": "verification-before-completion", "source": "iron-law"},
+    {"name": "fastapi-routing",                "source": "auto-search"}
+  ],
+
+  "steps": [
+    {"description": "ANALYSIS: read app/health.py + identify the DB session + worker registry singletons (~2k ctx)",
+     "type": "ANALYSIS",
+     "ctx_estimate_k": 2},
+
+    {"description": "TEST: write tests/test_deep_health.py covering — (a) all subsystems healthy → 200 + status='ok', (b) DB unreachable (mock raises) → 503 + db.status='down' + other subsystems still reported, (c) disk free <5% → 503 + disk.status='warn' + percent_used in payload, (d) worker pool empty → 503 + workers.status='no-workers' + count=0, (e) one slow subsystem doesn't block others (concurrent probe under 1s)",
+     "type": "CODE"},
+
+    {"description": "CODE: implement app/health.py::deep_health() — ProbeResult dataclass + 4 async probes (db_ping, disk_check, worker_count, latency_self) + asyncio.gather aggregation + status='ok' iff all subsystem.status=='ok' + 503 status code on any failure",
+     "type": "CODE"},
+
+    {"description": "CODE: register GET /api/health/deep in app/main.py (1-line router include) — keep existing /api/health untouched for backwards compat",
+     "type": "CODE"},
+
+    {"description": "COMMAND: pytest tests/test_deep_health.py -v — must be 5/5 green",
+     "type": "COMMAND"},
+
+    {"description": "DOCUMENTATION: append /api/health/deep section to docs/api.md with example 200 + 503 payloads",
+     "type": "DOCUMENTATION"},
+
+    {"description": "SUB_AGENT [parallel-safe]: rewrite the auth subsystem's health probe to use the new ProbeResult contract — touches 6 files across auth/ tree, dispatched separately to keep main session sharp",
+     "type": "SUB_AGENT",
+     "ctx_estimate_k": 14},
+
+    {"description": "COMMAND: smoke-test against running dev server — curl localhost:8000/api/health/deep | jq, expect status=ok and 4 subsystems listed",
+     "type": "COMMAND"}
+  ]
+}

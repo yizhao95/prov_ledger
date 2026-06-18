@@ -1,0 +1,9 @@
+# Deep-graph artifacts + envs — never commit generated state
+*.db
+*-state-graph.*
+graphs/
+project-graphs/
+__pycache__/
+.venv/
+.pytest_cache/
+uv.lock

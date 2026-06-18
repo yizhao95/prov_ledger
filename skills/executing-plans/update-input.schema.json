@@ -1,0 +1,107 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/yizhao95/prov_ledger/main/skills/executing-plans/update-input.schema.json",
+  "title": "update-input",
+  "description": "Discriminated-union schema for the 8 deterministic write-ops in executing-plans/scripts/. Each script dispatches by filename, so the 'op' field is implicit (matched against the script name). The schema documents the per-op input shape so agents have one canonical reference.",
+  "oneOf": [
+    {
+      "title": "run-step",
+      "description": "Bundled start + shell exec + complete/fail with AUTO-CAPTURED log_context. Preferred path for COMMAND/CODE/TEST steps — eliminates the 'forgot to pass log_context' footgun. Exits with the wrapped command's true exit code; auto-fail-step on non-zero. Output truncated to 16 KiB (head 8 KiB + marker + tail 8 KiB).",
+      "type": "object",
+      "required": ["step_id", "type", "command"],
+      "additionalProperties": false,
+      "properties": {
+        "step_id":       {"type": "string", "minLength": 1},
+        "type":          {"enum": ["THINKING","ANALYSIS","CODE","COMMAND","DOCUMENTATION","SUB_AGENT"]},
+        "command":       {"type": "string", "minLength": 1, "description": "Passed verbatim to `bash -c $command`. Heredocs/pipes/&&/|| all allowed."},
+        "summary":       {"type": "string", "description": "Optional ONE-line curated summary. Defaults to 'run-step: <command-truncated-80>'."},
+        "allow_nonzero": {"type": "boolean", "description": "Reserved for future use. v1 must be false or absent — non-zero always auto-fail-steps."}
+      }
+    },
+    {
+      "title": "start-step",
+      "description": "PENDING → IN_PROGRESS. Optionally sets step_type, agent_input, and inline log_context (e.g. process launch banner).",
+      "type": "object",
+      "required": ["step_id"],
+      "additionalProperties": false,
+      "properties": {
+        "step_id":     {"type": "string", "minLength": 1},
+        "type":        {"enum": ["THINKING","ANALYSIS","CODE","COMMAND","DOCUMENTATION","SUB_AGENT"]},
+        "agent_input": {"type": "string", "description": "Required when type=SUB_AGENT — the verbatim prompt sent to the delegated agent"},
+        "log_context": {"type": "string", "description": "Optional initial log entry (e.g. launch banner, kickoff timestamp). Same format as append-log."}
+      }
+    },
+    {
+      "title": "complete-step",
+      "description": "IN_PROGRESS → COMPLETED. Optionally records summary, agent_output, and inline log_context (raw shell/tool output — same path as append-log).",
+      "type": "object",
+      "required": ["step_id"],
+      "additionalProperties": false,
+      "properties": {
+        "step_id":      {"type": "string", "minLength": 1},
+        "summary":      {"type": "string", "description": "ONE human-curated sentence describing what was done. Distinct from log_context."},
+        "agent_output": {"type": "string", "description": "Required when this step had type=SUB_AGENT — the agent's response"},
+        "log_context":  {"type": "string", "description": "Optional raw output (shell stdout, test output, tool log). Appended to Steps.log_context with `--- ts ---` delimiter — same format as append-log.sh. Use this INSTEAD OF a separate append-log call when you have the output ready at completion time."}
+      }
+    },
+    {
+      "title": "fail-step",
+      "description": "* → FAILED. Reason appended to log_context. Optional inline log_context for the failure output (highly recommended — explains WHY).",
+      "type": "object",
+      "required": ["step_id"],
+      "additionalProperties": false,
+      "properties": {
+        "step_id":     {"type": "string", "minLength": 1},
+        "reason":      {"type": "string"},
+        "log_context": {"type": "string", "description": "Optional raw failure output (stack trace, error log). Strongly recommended for failures — the dashboard shows it in the step's log panel."}
+      }
+    },
+    {
+      "title": "append-log",
+      "description": "Append raw machine output to Steps.log_context (auto-truncated). No status transition.",
+      "type": "object",
+      "required": ["step_id", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "step_id": {"type": "string", "minLength": 1},
+        "text":    {"type": "string", "minLength": 1, "description": "Raw output to append. Telemetry truncates to last ~50 lines / ~1000 tokens."}
+      }
+    },
+    {
+      "title": "deviate",
+      "description": "Mid-flight plan revision. Inserts new sub-steps under parent + increments revision_count. Circuit breakers: revision_count ≤ max_revisions, depth ≤ 3.",
+      "type": "object",
+      "required": ["parent_step_id", "justification", "sub_steps"],
+      "additionalProperties": false,
+      "properties": {
+        "parent_step_id": {"type": "string", "minLength": 1},
+        "justification":  {"type": "string", "minLength": 1, "description": "Why the plan needed to change. Logged for audit."},
+        "sub_steps":      {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    {
+      "title": "record-skill",
+      "description": "INSERT into SkillActivations. Use for skills loaded mid-flight (source typically 'deferred-load'). For init-time skills, use writing-plans/publish-plan.sh's skills[] array instead.",
+      "type": "object",
+      "required": ["plan_id", "name", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "plan_id": {"type": "string", "minLength": 1},
+        "name":    {"type": "string", "minLength": 1, "description": "Skill name (matches ~/.code_puppy/skills/<name>/)"},
+        "source":  {"enum": ["iron-law", "auto-search", "explicit-mention", "deferred-load"]},
+        "step_id": {"type": "string", "description": "Optional — anchor activation to the step where it surfaced"},
+        "reason":  {"type": "string", "description": "Optional — short note on what triggered the activation"}
+      }
+    },
+    {
+      "title": "finish-plan",
+      "description": "IN_PROGRESS → COMPLETED at the plan level. Idempotent: rejects already-COMPLETED plans.",
+      "type": "object",
+      "required": ["plan_id"],
+      "additionalProperties": false,
+      "properties": {
+        "plan_id": {"type": "string", "minLength": 1}
+      }
+    }
+  ]
+}
