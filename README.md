@@ -170,6 +170,31 @@ prov_ledger/
 
 ## 🚀 Installation
 
+### Recommended — install as a Claude Code plugin (one command)
+
+```text
+/plugin marketplace add yizhao95/prov_ledger
+/plugin install provledger@provledger
+```
+
+Dependencies install themselves on first session: a background `SessionStart`
+bootstrap builds **one** venv at `~/skill-workspace/.venv` (override with
+`PROVLEDGER_VENV`) and installs `requirements.txt`. It is idempotent — warm
+sessions are a no-op. Launch the review dashboard any time with
+**`/provledger-dashboard`**.
+
+> **Companion (recommended):** install the
+> [`superpowers`](https://github.com/obra/superpowers) plugin for the full set of
+> supporting process skills. provLedger bundles only its evolved and novel skills
+> (`writing-plans`, `executing-plans`, `project-state-graph`,
+> `update-project-state-graph`, plus locally-adapted `brainstorming`,
+> `systematic-debugging`, `test-driven-development`,
+> `subagent-driven-development`) and treats superpowers as a **soft dependency**:
+> the byte-identical `verification-before-completion` skill is not bundled and is
+> provided by superpowers when present.
+
+### Manual / development install
+
 See **[INSTALL.md](INSTALL.md)** for the full guide. Quick start:
 
 ```bash
@@ -177,27 +202,21 @@ See **[INSTALL.md](INSTALL.md)** for the full guide. Quick start:
 git clone git@github.com:yizhao95/prov_ledger.git
 cd prov_ledger
 
-# 2. Create a virtual environment (Python 3.13 recommended)
-python3 -m venv .venv
-source .venv/bin/activate
+# 2. Bootstrap dependencies into the unified venv (idempotent)
+bash scripts/bootstrap.sh
+PY=~/skill-workspace/.venv/bin/python
 
-# 3. Install dependencies
-pip install pytest fastapi "uvicorn[standard]" jinja2 \
-    tree-sitter tree-sitter-css tree-sitter-html \
-    tree-sitter-javascript tree-sitter-python
+# 3. Run the test suites to confirm a healthy install (run each separately —
+#    each suite has its own pyproject/pythonpath; one combined invocation breaks)
+$PY -m pytest orchestrator-backend -q
+$PY -m pytest orchestrator-webapp  -q
+$PY -m pytest skills/writing-plans/tests -q
+$PY -m pytest skills/executing-plans -q
+$PY -m pytest skills/project-state-graph/scripts/tests -q
+$PY -m pytest skills/update-project-state-graph/scripts/tests -q
 
-# 4. Run the test suites to confirm a healthy install
-python -m pytest orchestrator-backend -q
-python -m pytest orchestrator-webapp  -q
-python -m pytest skills/writing-plans/tests -q
-python -m pytest skills/executing-plans -q
-python -m pytest skills/project-state-graph/scripts/tests -q
-python -m pytest skills/update-project-state-graph/scripts/tests -q
-
-# 5. Launch the dashboard
-cd orchestrator-webapp
-ORCH_DB=~/skill-workspace/orchestrator.db \
-    python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
+# 4. Launch the dashboard
+PROVLEDGER_WEBAPP_DIR=orchestrator-webapp bash orchestrator-webapp/launch_dashboard.sh
 # → open http://127.0.0.1:8765
 ```
 
