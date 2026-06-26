@@ -29,13 +29,21 @@
       {% if plan.completed_at %}<span>Completed: {{ plan.completed_at }}</span>{% endif %}
       <span>Revisions: {{ plan.revision_count }}/{{ plan.max_revisions }}</span>
       <span>Steps: {{ completed }}/{{ total_steps }}</span>
+      {% if failed %}
+      <span class="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold">
+        ⚠️ {{ failed }} step{{ '' if failed == 1 else 's' }} failed
+      </span>
+      {% endif %}
     </div>
+    {# DASH-UX3: the bar turns red the moment any step fails, so failure leads. #}
     <div class="mt-3 h-2 bg-gray-200 rounded-full overflow-hidden" role="progressbar"
          aria-valuenow="{{ progress_pct }}" aria-valuemin="0" aria-valuemax="100">
-      <div class="h-full bg-brand-green transition-all duration-500"
+      <div class="h-full {{ 'bg-red-500' if has_failure else 'bg-brand-green' }} transition-all duration-500"
            style="width: {{ progress_pct }}%"></div>
     </div>
-    <div class="text-xs text-brand-gray mt-1">{{ progress_pct }}% complete</div>
+    <div class="text-xs {{ 'text-red-600 font-semibold' if has_failure else 'text-brand-gray' }} mt-1">
+      {{ progress_pct }}% complete{% if failed %} · {{ failed }} failed{% endif %}
+    </div>
   </section>
 
   {# Skills Activated panel: pulls from SkillActivations (migration 005).
@@ -124,9 +132,12 @@
     {% macro render_step_card(s) -%}
       {% set sb = status_badge(s.status) %}
       {% set tb = type_badge(s.step_type) %}
+      {# DASH-UX1/UX3: auto-expand the running step (its live log is the whole point
+         of the dashboard) and any failed step (so failures are never hidden). #}
       <details id="step-{{ s.step_id }}"
+               {% if s.status in ('IN_PROGRESS', 'FAILED') %}open{% endif %}
                class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden
-                      {% if s.status == 'IN_PROGRESS' %}ring-2 ring-brand-spark{% endif %}">
+                      {% if s.status == 'IN_PROGRESS' %}ring-2 ring-brand-spark{% elif s.status == 'FAILED' %}ring-2 ring-red-400{% endif %}">
         <summary class="px-4 py-3 cursor-pointer hover:bg-gray-50 flex items-center gap-3 select-none">
           <span class="font-mono text-xs text-brand-gray w-8">{{ s.step_id.split('-')[-1] }}</span>
           <span class="w-36">
