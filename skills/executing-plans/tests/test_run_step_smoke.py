@@ -42,6 +42,28 @@ def _plan_status(db_path: Path, plan_id: str) -> str:
         conn.close()
 
 
+def test_malicious_step_id_is_not_executed(run_script_fn, seeded_plan, tmp_db, tmp_path):
+    # SK-S1: a step_id crafted to inject a shell command must NOT execute it.
+    sentinel = tmp_path / "pwned"
+    result = run_script_fn(
+        "run-step",
+        {"step_id": f"x$(touch {sentinel})", "type": "COMMAND", "command": "echo hi"},
+        tmp_db,
+    )
+    assert not sentinel.exists(), "injected command in step_id was executed (eval injection)"
+
+
+def test_step_id_with_metachars_does_not_execute(run_script_fn, seeded_plan, tmp_db, tmp_path):
+    # SK-S1: spaces / semicolons in step_id must not break parsing into commands.
+    sentinel = tmp_path / "space-pwned"
+    result = run_script_fn(
+        "run-step",
+        {"step_id": f"a b; touch {sentinel}", "type": "COMMAND", "command": "echo hi"},
+        tmp_db,
+    )
+    assert not sentinel.exists(), "metachars in step_id were executed"
+
+
 def test_success(run_script_fn, seeded_plan, tmp_db):
     """Success path: exit 0 → step COMPLETED, command stdout in log_context."""
     step_id = seeded_plan["step_ids"][0]
