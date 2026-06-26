@@ -29,6 +29,38 @@ def conn(tmp_path):
     return c
 
 
+def test_add_entry_records_plan_id(conn):
+    # SK-D1: provenance plan recorded on the entry.
+    eid = ledger_store.add_entry(
+        conn, project="proj", kind="decision", statement="s", rationale="r",
+        plan_id="plan-123")
+    row = conn.execute("SELECT plan_id FROM LedgerEntries WHERE id=?", (eid,)).fetchone()
+    assert row["plan_id"] == "plan-123"
+
+
+def test_supersede_records_lineage(conn):
+    # SK-D1: superseded_by + updated_at form an auditable lineage.
+    old = ledger_store.add_entry(conn, project="p", kind="decision", statement="old")
+    new = ledger_store.add_entry(conn, project="p", kind="decision", statement="new")
+    ledger_store.supersede_entry(conn, old, superseded_by=new)
+    row = conn.execute("SELECT status, superseded_by, updated_at FROM LedgerEntries WHERE id=?",
+                       (old,)).fetchone()
+    assert row["status"] == "superseded"
+    assert row["superseded_by"] == new
+    assert row["updated_at"] is not None
+
+
+def test_record_hit_increments_count(conn):
+    # SK-D1: surfacing an entry bumps hit_count + last_matched_at.
+    eid = ledger_store.add_entry(conn, project="p", kind="decision", statement="s")
+    ledger_store.record_hit(conn, eid)
+    ledger_store.record_hit(conn, eid)
+    row = conn.execute("SELECT hit_count, last_matched_at FROM LedgerEntries WHERE id=?",
+                       (eid,)).fetchone()
+    assert row["hit_count"] == 2
+    assert row["last_matched_at"] is not None
+
+
 def test_add_entry_round_trip(conn):
     eid = ledger_store.add_entry(
         conn, project="proj", kind="decision",
