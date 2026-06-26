@@ -29,6 +29,7 @@ TEMPLATES.env.globals["source_badge"] = queries.source_badge
 TEMPLATES.env.globals["get_last_n_log_entries"] = queries.get_last_n_log_entries
 TEMPLATES.env.globals["count_log_entries"] = queries.count_log_entries
 TEMPLATES.env.globals["short_title"] = queries.short_title
+TEMPLATES.env.globals["relative_time"] = queries.relative_time
 
 app = FastAPI(title="provLedger Dashboard", version="0.1.0")
 
@@ -44,7 +45,8 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         return {
             "request": request, "error": msg, "plan": None, "steps": [],
             "skills": [], "completed": 0, "failed": 0, "total_steps": 0,
-            "progress_pct": 0, "has_failure": False,
+            "progress_pct": 0, "has_failure": False, "current_step": None,
+            "deviations": [],
             "total_plans": 0, "db_size_kb": 0, "viewing_plan_id": plan_id,
         }
 
@@ -74,6 +76,8 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         skills = queries.get_skills_for_plan(conn, plan["plan_id"]) if plan else []
         completed = queries.count_completed_steps(steps)
         failed = sum(1 for s in steps if s["status"] == "FAILED")
+        current_step = next((s for s in steps if s["status"] == "IN_PROGRESS"), None)  # UX2
+        deviations = queries.get_deviations(conn, plan["plan_id"]) if plan else []     # UX4
         total_plans = queries.count_total_plans(conn)
         db_size_kb = queries.get_db_size_kb()
     except sqlite3.Error as e:
@@ -91,6 +95,8 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         "completed": completed,
         "failed": failed,
         "has_failure": failed > 0,
+        "current_step": current_step,
+        "deviations": deviations,
         "total_steps": len(steps),
         "progress_pct": int(100 * completed / len(steps)) if steps else 0,
         "total_plans": total_plans,

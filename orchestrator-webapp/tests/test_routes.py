@@ -23,13 +23,20 @@ from orchestrator import api, db as odb  # noqa: E402
 def _seed_db(path: Path) -> dict:
     conn = odb.open_db(path)
     odb.run_migrations(conn)
-    r = api.initialize_plan(conn, "Refactor the demo pipeline", ["step one", "step two"])
-    s0, s1 = r["step_ids"]
+    r = api.initialize_plan(conn, "Refactor the demo pipeline",
+                            ["step one", "step two", "step three"])
+    s0, s1, s2 = r["step_ids"]
     api.start_step(conn, s0)
     api.complete_step(conn, s0)
     api.start_step(conn, s1)
     api.fail_step(conn, s1, reason="upstream schema changed")
-    conn.close()
+    api.start_step(conn, s2)
+    # a deviation so the revision-history panel (UX4) has something to show
+    api.evaluate_and_update_plan(
+        conn, deviation_detected=True, target_step_id=s2,
+        justification="switch to rolling-window split to avoid temporal leakage",
+        new_sub_steps=["use TimeSeriesSplit"])
+    conn.close()  # s2 stays IN_PROGRESS -> drives the "Running now" banner (UX2)
     return r
 
 
@@ -72,6 +79,31 @@ def test_plan_not_found_does_not_500(client):
     r = client.get("/plan/does-not-exist")
     assert r.status_code == 200
     assert "Plan not found" in r.text
+
+
+def test_current_activity_banner(client):
+    # DASH-UX2: the running step is surfaced in a "Running now" banner.
+    r = client.get("/api/dashboard")
+    assert r.status_code == 200
+    assert "Running now" in r.text
+
+
+def test_revision_history_panel(client):
+    # DASH-UX4: deviation justification (why the plan changed) is rendered.
+    r = client.get("/api/dashboard")
+    assert r.status_code == 200
+    assert "Revision history" in r.text
+    assert "rolling-window split" in r.text
+
+
+def test_relative_time_helper():
+    # DASH-UX5: pure helper — recent past renders as "ago", junk is passed through.
+    from datetime import datetime, timezone, timedelta
+    from app import queries
+    past = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")
+    assert queries.relative_time(past).endswith("ago")
+    assert queries.relative_time(None) == "—"
+    assert queries.relative_time("not-a-date") == "not-a-date"
 
 
 def test_db_is_opened_read_only(client):
