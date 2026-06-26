@@ -1,0 +1,8 @@
+{
+  "name": "provledger",
+  "version": "0.1.0",
+  "description": "Provenance + ledger discipline for data-science coding agents: a SQLite plan/step orchestrator, a project state graph with code+data contract gates, and a live review dashboard. Pairs with the 'superpowers' plugin (optional but recommended).",
+  "author": { "name": "yzhao", "email": "yzhao950213@gmail.com" },
+  "homepage": "https://github.com/yizhao95/prov_ledger",
+  "license": "MIT"
+}
