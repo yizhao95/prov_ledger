@@ -104,9 +104,10 @@ launches the dashboard.
 
 ### 3.3 Dependency bootstrap (the core of "reduce install difficulty")
 
-- **Single source of truth:** `requirements.txt` with **pinned** versions
-  (pytest, fastapi, uvicorn[standard], jinja2, tree-sitter + grammars). Backend is
-  stdlib-only; deps exist for the dashboard, the graph analyzers, and tests.
+- **Single source of truth:** `requirements.txt` consolidating all deps
+  (pytest, fastapi, uvicorn[standard], jinja2, tree-sitter + grammars), version-
+  floored to the already-validated pyproject constraints. Backend is stdlib-only;
+  deps exist for the dashboard, the graph analyzers, and tests.
 - **`scripts/bootstrap.sh`** — idempotent:
   1. Resolve venv dir: `${PROVLEDGER_VENV:-$HOME/skill-workspace/.venv}`.
   2. If a **marker file** keyed on the SHA-256 of `requirements.txt` already
