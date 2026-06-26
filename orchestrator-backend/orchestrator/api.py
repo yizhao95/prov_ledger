@@ -331,11 +331,35 @@ def detect_registered_project(
     ).fetchall()
     texts.extend(r["description"] for r in step_rows)
 
-    haystack = _normalize_project_token(" ".join(texts))
+    # BE-S1: match on word boundaries, not raw substring. Splitting into word
+    # tokens (then matching a project's collapsed name against a CONTIGUOUS RUN of
+    # tokens) keeps variance tolerance — "demo app" / "demo-app" / "demoapp" all
+    # match "demo-app" — while preventing a short name like "app" from matching
+    # inside an unrelated word like "happens".
+    hay_words = [w for w in re.split(r"[-_\s]+", " ".join(texts).lower()) if w]
     for norm_name, canonical in normalized:
-        if norm_name and norm_name in haystack:
+        if norm_name and _matches_token_run(hay_words, norm_name):
             return canonical
     return None
+
+
+def _matches_token_run(words: list[str], target: str) -> bool:
+    """True if `target` equals the concatenation of some contiguous run of `words`.
+
+    `target` is an already-collapsed project name (no separators). A single-word
+    project matches a standalone token; a multi-word project matches adjacent
+    tokens whose concatenation equals it.
+    """
+    n = len(words)
+    for i in range(n):
+        acc = ""
+        for j in range(i, n):
+            acc += words[j]
+            if len(acc) > len(target):
+                break
+            if acc == target:
+                return True
+    return False
 
 
 def _open_agent_review(conn: sqlite3.Connection, plan_id: str, review_step_id: str) -> str:

@@ -90,3 +90,19 @@ def test_returns_canonical_name_not_variance(conn, tmp_path):
     _plan_with_text(conn, "plan-canon", "Touch DEMOAPP internals", ["CODE: x"])
     result = api.detect_registered_project(conn, "plan-canon", registry_path=reg)
     assert result == "demo-app"  # canonical, not 'DEMOAPP'
+
+
+def test_short_name_not_matched_as_substring(conn, tmp_path):
+    # BE-S1: a short registered name must NOT match inside an unrelated word.
+    reg = _registry(tmp_path, "app", "core")
+    _plan_with_text(conn, "plan-fp",
+                    "Document what happens in the database layer",
+                    ["ANALYSIS: read the encoder core-dump notes"])
+    # 'app' must not match 'happens'; 'core' MUST match the standalone 'core' token
+    assert api.detect_registered_project(conn, "plan-fp", registry_path=reg) == "core"
+
+
+def test_short_name_matches_standalone_token(conn, tmp_path):
+    reg = _registry(tmp_path, "app")
+    _plan_with_text(conn, "plan-ok", "Refactor the app entrypoint", ["CODE: x"])
+    assert api.detect_registered_project(conn, "plan-ok", registry_path=reg) == "app"
