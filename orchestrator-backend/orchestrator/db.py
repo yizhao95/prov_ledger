@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -88,6 +89,18 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+@contextmanager
+def transaction(conn: sqlite3.Connection):
+    """Group multiple `commit=False` writes into one atomic unit (BE-C4).
+
+    Commits once on success, rolls back on any exception, so a compound operation
+    (e.g. insert N sub-steps + bump revision + record deviation) can never leave a
+    plan half-mutated. Helpers called inside MUST be passed ``commit=False``.
+    """
+    with conn:  # sqlite3 connection CM: commit on success, rollback on exception
+        yield conn
+
+
 # ── Plan CRUD ─────────────────────────────────────────────────────────────────
 def insert_plan(
     conn: sqlite3.Connection,
@@ -125,17 +138,20 @@ def set_plan_impact_context(conn: sqlite3.Connection, plan_id: str, impact_conte
     conn.commit()
 
 
-def update_plan_status(conn: sqlite3.Connection, plan_id: str, new_status: str) -> None:
+def update_plan_status(conn: sqlite3.Connection, plan_id: str, new_status: str,
+                       commit: bool = True) -> None:
     completed_at = _now() if new_status in ("COMPLETED", "FAILED") else None
     conn.execute(
         "UPDATE Plans SET status = ?, updated_at = ?, "
         "completed_at = COALESCE(?, completed_at) WHERE plan_id = ?",
         (new_status, _now(), completed_at, plan_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
-def set_review_state(conn: sqlite3.Connection, plan_id: str, review_state: str | None) -> None:
+def set_review_state(conn: sqlite3.Connection, plan_id: str, review_state: str | None,
+                     commit: bool = True) -> None:
     """Set a plan's park-for-review state (BE-D4): 'awaiting_agent' | 'reviewed' | None.
 
     Lets the dashboard answer "which plans are blocked on agent review?" with a
@@ -145,12 +161,14 @@ def set_review_state(conn: sqlite3.Connection, plan_id: str, review_state: str |
         "UPDATE Plans SET review_state = ?, updated_at = ? WHERE plan_id = ?",
         (review_state, _now(), plan_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
-def increment_revision(conn: sqlite3.Connection, plan_id: str) -> int:
+def increment_revision(conn: sqlite3.Connection, plan_id: str, commit: bool = True) -> int:
     conn.execute("UPDATE Plans SET revision_count = revision_count + 1 WHERE plan_id = ?", (plan_id,))
-    conn.commit()
+    if commit:
+        conn.commit()
     row = conn.execute("SELECT revision_count FROM Plans WHERE plan_id = ?", (plan_id,)).fetchone()
     return row["revision_count"] if row else 0
 
@@ -162,6 +180,7 @@ def insert_deviation(
     justification: str,
     new_step_ids: list[str] | None = None,
     revision_count: int | None = None,
+    commit: bool = True,
 ) -> int:
     """Record a deviation in the Deviations history table. Returns deviation_id.
 
@@ -174,7 +193,8 @@ def insert_deviation(
         (plan_id, target_step_id, justification,
          json.dumps(new_step_ids or []), revision_count),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return int(cur.lastrowid)
 
 
@@ -200,6 +220,7 @@ def insert_step(
     completed_at: str | None = None,
     log_context: str = "",
     step_type: str | None = None,
+    commit: bool = True,
 ) -> None:
     if step_type is not None and step_type not in VALID_STEP_TYPES:
         raise ValueError(f"step_type must be one of {VALID_STEP_TYPES}, got {step_type!r}")
@@ -211,7 +232,8 @@ def insert_step(
         (step_id, plan_id, parent_step_id, description, status, execution_order,
          depth_level, log_context, started_at, completed_at, step_type),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def get_step(conn: sqlite3.Connection, step_id: str) -> dict | None:
@@ -241,6 +263,7 @@ def update_step_status(
     new_status: str,
     set_started: bool = False,
     set_completed: bool = False,
+    commit: bool = True,
 ) -> None:
     sets = ["status = ?", "updated_at = ?"]
     params: list = [new_status, _now()]
@@ -254,7 +277,8 @@ def update_step_status(
         params.append(_now())
     params.append(step_id)
     conn.execute(f"UPDATE Steps SET {', '.join(sets)} WHERE step_id = ?", params)
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def set_failure_reason(conn: sqlite3.Connection, step_id: str, reason: str) -> None:
