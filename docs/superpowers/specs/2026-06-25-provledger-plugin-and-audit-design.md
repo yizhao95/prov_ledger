@@ -21,10 +21,15 @@ Three driving constraints from the maintainer:
 2. **Do not ship duplicate skills.** Skills that merely copy upstream Superpowers
    become a soft dependency on the `superpowers` plugin; only evolved/novel skills
    are bundled.
-3. **Core semantics are frozen; quality is fair game.** The state machine,
-   migrations, and contract gates keep their behavior. Code readability, dashboard
+3. **Everything is fair game; correctness is the only floor.** No subsystem is
+   frozen. The state-machine semantics, the data classification/storage model
+   (both the orchestration store and the project-state graph), and the database
+   schema (including adding columns that make future tasks easier) are all valid
+   audit and change targets — alongside code readability, dashboard
    readability/UX, and the quality of the harness content itself (skill prompts,
-   instructions) are explicit improvement targets.
+   instructions). The only hard floor: changes must be **migration-safe** and the
+   **test suite must stay green** (with tests updated to match intended new
+   behavior). See §2 guardrails.
 
 ---
 
@@ -45,9 +50,18 @@ P0 runs first because its findings inform both the packaging (what to fix while
 restructuring) and P2 (what to optimize). P1 ships before P2 because it is the
 highest-value, best-bounded change.
 
+**Guardrails (not frozen, but disciplined):**
+- **Migration-safe only.** Never edit an already-applied migration (001–009);
+  schema and data-model changes ship as new forward migrations (010+) with a
+  tested upgrade path on existing databases.
+- **Green suite is the gate.** Behavioral changes (state machine, contract gates,
+  storage) are allowed, but every change is TDD-guarded and the full suite passes;
+  tests are updated to encode the intended new behavior, not deleted to hide
+  regressions.
+- Any column added must have a stated purpose ("useful for future tasks") and be
+  populated/read by real code, not left dangling.
+
 **Non-goals (YAGNI):**
-- No change to the orchestrator state-machine semantics, migration contracts, or
-  the code/data contract-gate logic.
 - No new runtime services beyond the existing dashboard.
 - No publishing to npm / external registries; distribution is via the GitHub
   marketplace entry only.
@@ -174,18 +188,23 @@ Audit dimensions:
 6. **Readability** — code clarity AND dashboard readability/UX.
 7. **Harness quality** — clarity and correctness of the skill prompts/instructions
    themselves.
+8. **Data model & storage redesign** — whether the orchestration store and the
+   project-state graph classify and persist data in the best shape; candidate
+   schema improvements and **new columns that would make future tasks easier**
+   (e.g. richer step/impact/ledger metadata). State-machine semantics are in scope
+   here too.
 
-The maintainer selects which findings proceed to P2. Core semantics stay frozen;
-everything else is a candidate.
+The maintainer selects which findings proceed to P2. Nothing is off-limits;
+the only floor is migration-safety + a green suite (§2 guardrails).
 
 ---
 
 ## 5 · P2 — Optimization Design
 
 Implement only the maintainer-selected P0 findings. Each change is TDD-guarded
-(failing test → fix → green) and must not alter frozen core semantics. Internal
-interfaces may change if external behavior is preserved and tests are updated to
-match.
+(failing test → fix → green). Behavioral, schema, and data-model changes are
+permitted under the §2 guardrails: new forward migrations only, a tested upgrade
+path on existing DBs, and tests updated to encode the intended new behavior.
 
 ---
 
