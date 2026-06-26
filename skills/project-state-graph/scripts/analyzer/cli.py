@@ -69,6 +69,7 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True) ->
     conn = store.init_db(db_path)
     run_id = store.start_run(conn, project_name=project,
                              commit_sha=info["commit_sha"])
+    store.reset_graph(conn)  # PSG-C1: idempotent rebuild — clear prior graph rows
     try:
         file_map = walker.walk(conn, repo_path)
         py_ast.analyze(conn, repo_path, file_map)
@@ -86,6 +87,7 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True) ->
         profiles.analyze(conn, repo_path, file_map)
         if build_cards:
             cards.build_symbol_cards(conn)  # also builds consistency cards
+        store.stamp_run(conn, run_id)  # PSG-D2: tag this rebuild's rows
     finally:
         store.finish_run(conn, run_id)
         conn.close()
