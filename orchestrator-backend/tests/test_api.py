@@ -73,6 +73,26 @@ def test_evaluate_with_deviation_inserts_substeps(conn):
     assert all(c["parent_step_id"] == sid for c in children)
 
 
+def test_evaluate_persists_deviation_justification(conn):
+    # BE-C1: the justification must survive in a queryable Deviations row.
+    r = api.initialize_plan(conn, "g", ["a"])
+    sid = r["step_ids"][0]
+    out = api.evaluate_and_update_plan(
+        conn,
+        deviation_detected=True,
+        target_step_id=sid,
+        justification="rolling-window split, not random — avoids temporal leakage",
+        new_sub_steps=["use TimeSeriesSplit"],
+    )
+    devs = db.get_deviations(conn, r["plan_id"])
+    assert len(devs) == 1
+    assert devs[0]["justification"] == "rolling-window split, not random — avoids temporal leakage"
+    assert devs[0]["target_step_id"] == sid
+    assert devs[0]["revision_count"] == 1
+    assert out["new_step_ids"][0] in devs[0]["new_step_ids"]  # JSON list contains the sub-step
+    assert out["deviation_id"] == devs[0]["deviation_id"]
+
+
 def test_evaluate_blocks_substeps_into_completed_step(conn):
     """Cannot insert children under a COMPLETED parent (circuit breaker #1)."""
     r = api.initialize_plan(conn, "g", ["a"])

@@ -4,6 +4,7 @@ Thin CRUD wrappers + migration runner. No ORM. Stdlib sqlite3 only.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -138,6 +139,37 @@ def increment_revision(conn: sqlite3.Connection, plan_id: str) -> int:
     conn.commit()
     row = conn.execute("SELECT revision_count FROM Plans WHERE plan_id = ?", (plan_id,)).fetchone()
     return row["revision_count"] if row else 0
+
+
+def insert_deviation(
+    conn: sqlite3.Connection,
+    plan_id: str,
+    target_step_id: str | None,
+    justification: str,
+    new_step_ids: list[str] | None = None,
+    revision_count: int | None = None,
+) -> int:
+    """Record a deviation in the Deviations history table. Returns deviation_id.
+
+    This is the durable "why a plan changed" audit trail (migration 010).
+    """
+    cur = conn.execute(
+        """INSERT INTO Deviations
+           (plan_id, target_step_id, justification, new_step_ids, revision_count)
+           VALUES (?, ?, ?, ?, ?)""",
+        (plan_id, target_step_id, justification,
+         json.dumps(new_step_ids or []), revision_count),
+    )
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def get_deviations(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
+    """All deviations for a plan, oldest first."""
+    rows = conn.execute(
+        "SELECT * FROM Deviations WHERE plan_id = ? ORDER BY deviation_id", (plan_id,)
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ── Step CRUD ─────────────────────────────────────────────────────────────────

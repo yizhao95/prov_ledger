@@ -152,10 +152,15 @@ def evaluate_and_update_plan(
             new_step_ids.append(sid)
 
     new_revision = db.increment_revision(conn, plan["plan_id"])
+    deviation_id = db.insert_deviation(
+        conn, plan["plan_id"], target_step_id, justification,
+        new_step_ids=new_step_ids, revision_count=new_revision,
+    )
     result: dict = {
         "accepted": True,
         "new_step_ids": new_step_ids,
         "justification_logged": justification,
+        "deviation_id": deviation_id,
         "revision_count": new_revision,
     }
     if warning:
