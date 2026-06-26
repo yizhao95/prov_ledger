@@ -20,6 +20,66 @@
 
 ---
 
+### Task 0: Fix non-reproducible baseline (gating)
+
+**Why first:** the documented baseline ("464 passed, 1 skipped") is not reproducible on a clean machine — `skills/writing-plans/tests/test_ledger_cli.py` hardcodes `~/skill-workspace/orchestrator/.venv/bin/python` and bypasses `conftest.py`, so 3 tests fail with `FileNotFoundError` anywhere that venv is absent. Until this is fixed, "green suite is the gate" cannot hold. (Finding SK-BASE.)
+
+**Files:**
+- Modify: `skills/writing-plans/tests/test_ledger_cli.py:18-22`
+
+**Interfaces:**
+- Consumes: `conftest.py` (already provides the orchestrator import path, preferring bundled `orchestrator-backend/`); `sys.executable`.
+- Produces: an environment-independent test module.
+
+- [ ] **Step 1: Reproduce the failure**
+
+Run: `python -m pytest skills/writing-plans/tests/test_ledger_cli.py -q`
+Expected: 3 failed — `FileNotFoundError: ...skill-workspace/orchestrator/.venv/bin/python`.
+
+- [ ] **Step 2: Apply the fix**
+
+Replace this block (lines 18-22):
+
+```python
+SKILL_DIR = Path(__file__).resolve().parent.parent
+SCRIPTS = SKILL_DIR / "scripts"
+ORCH_ROOT = Path.home() / "skill-workspace" / "orchestrator"
+sys.path.insert(0, str(ORCH_ROOT))
+from orchestrator import db as orch_db  # noqa: E402
+
+PYBIN = ORCH_ROOT / ".venv" / "bin" / "python"
+```
+
+with:
+
+```python
+SKILL_DIR = Path(__file__).resolve().parent.parent
+SCRIPTS = SKILL_DIR / "scripts"
+# The orchestrator import path is provided by conftest.py (it prefers the
+# bundled orchestrator-backend/ so a fresh clone is self-contained).
+from orchestrator import db as orch_db  # noqa: E402
+
+# Run the CLI with the interpreter running the tests. ledger_cli.py is
+# stdlib-only, so no special venv is required. (Previously hardcoded
+# ~/skill-workspace/orchestrator/.venv, which broke the suite on any machine
+# without that hand-made venv.)
+PYBIN = Path(sys.executable)
+```
+
+- [ ] **Step 3: Verify green**
+
+Run: `python -m pytest skills/writing-plans/tests/test_ledger_cli.py -q`
+Expected: PASS — the 3 previously-failing tests now pass; suite has no failures.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add skills/writing-plans/tests/test_ledger_cli.py
+git commit -m "fix(tests): use sys.executable in ledger_cli tests so the baseline is reproducible on any machine"
+```
+
+---
+
 ### Task 1: Static packaging metadata (manifest + marketplace + requirements)
 
 **Files:**
@@ -825,7 +885,7 @@ python -m pytest \
   -q
 ```
 
-Expected: the 6 original suites still total **464 passed, 1 skipped**, plus the new `tests/` packaging suite all green. (If Task 7 dropped duplicate skills, no test suite is removed — none of the dropped skills had tests.)
+Expected: **no failures** across all suites. Note the real reproducible baseline after Task 0 is writing-plans = 42 passed + 2 skipped (the 3 hardcoded-interpreter failures fixed; the 2 skips are environment-conditional), so the grand total is **462 passed, 3 skipped** — not the README's "464 passed, 1 skipped", which only held on the author's machine. The new top-level `tests/` packaging suite is additionally all green. (Task 7 removes no test suite — none of the dropped skills had tests.)
 
 - [ ] **Step 2: Write the clean-install smoke script**
 
