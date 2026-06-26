@@ -14,6 +14,16 @@ def test_truncate_empty():
     assert truncate_for_log("") == ""
 
 
+def test_truncate_few_but_long_lines_no_negative_elided():
+    # BE-C6: 6 very long lines exceed MAX_CHARS but are <=10 lines; the old
+    # head+tail path produced "[-4 lines elided]" and duplicated content.
+    raw = "\n".join(["x" * 2000 for _ in range(6)])
+    out = truncate_for_log(raw)
+    assert "elided" not in out          # no head/tail summary for <=10 lines
+    assert "[truncated]" in out         # hard char-truncation path used
+    assert len(out) < len(raw)          # actually truncated
+
+
 def test_truncate_at_max_lines_unchanged():
     s = "\n".join(f"line {i}" for i in range(MAX_LINES))
     assert truncate_for_log(s) == s

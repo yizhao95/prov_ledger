@@ -20,15 +20,24 @@ def truncate_for_log(raw: str) -> str:
         lines = lines[-MAX_LINES:]
     out = "\n".join(lines)
     if len(out) > MAX_CHARS_BEFORE_SUMMARY:
-        head = lines[:5]
-        tail = lines[-5:]
-        out = (
+        header = (
             f"[summarized — original was {len(raw)} chars / "
             f"{len(raw.splitlines())} lines]\n"
-            + "\n".join(head)
-            + f"\n... [{len(lines) - 10} lines elided] ...\n"
-            + "\n".join(tail)
         )
+        if len(lines) > 10:
+            # Enough lines to summarize head+tail without overlap.
+            head = lines[:5]
+            tail = lines[-5:]
+            out = (
+                header
+                + "\n".join(head)
+                + f"\n... [{len(lines) - 10} lines elided] ...\n"
+                + "\n".join(tail)
+            )
+        else:
+            # Few but very long lines: head+tail would overlap and the elided
+            # count would go negative — hard-truncate by characters instead.
+            out = header + out[:MAX_CHARS_BEFORE_SUMMARY] + "\n... [truncated] ..."
     return out
 
 

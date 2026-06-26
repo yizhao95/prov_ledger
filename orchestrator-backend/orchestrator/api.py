@@ -191,7 +191,11 @@ def complete_step(conn: sqlite3.Connection, step_id: str) -> dict:
 
 
 def fail_step(conn: sqlite3.Connection, step_id: str, reason: str = "") -> dict:
-    """Any non-terminal → FAILED. Appends reason to log."""
+    """Fail a started step (STARTING/IN_PROGRESS/NEEDS_REVIEW → FAILED).
+
+    PENDING steps cannot be failed — the state machine rejects PENDING → FAILED
+    (start the step first). Persists the reason to Steps.failure_reason and the log.
+    """
     step = db.get_step(conn, step_id)
     if not step:
         raise ValueError(f"step_id not found: {step_id}")
