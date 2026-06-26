@@ -198,6 +198,7 @@ def fail_step(conn: sqlite3.Connection, step_id: str, reason: str = "") -> dict:
     state_machine.validate_transition(step["status"], "FAILED")
     db.update_step_status(conn, step_id, "FAILED", set_completed=True)
     if reason:
+        db.set_failure_reason(conn, step_id, reason)
         telemetry.append_step_log(conn, step_id, f"[FAILED] {reason}")
     return db.get_step(conn, step_id)
 
@@ -353,6 +354,7 @@ def _open_agent_review(conn: sqlite3.Connection, plan_id: str, review_step_id: s
 
     db.update_step_status(conn, review_step_id, "NEEDS_REVIEW")
     db.update_plan_status(conn, plan_id, "IN_PROGRESS")
+    db.set_review_state(conn, plan_id, "awaiting_agent")  # BE-D4
     db.increment_revision(conn, plan_id)
 
     review_row = db.get_step(conn, review_step_id)
@@ -452,6 +454,7 @@ def review_and_complete(
         if child["status"] == "COMPLETED":
             db.update_step_status(conn, review_step_id, "COMPLETED", set_completed=True)
             db.update_plan_status(conn, plan_id, "COMPLETED")
+            db.set_review_state(conn, plan_id, "reviewed")  # BE-D4
             return {
                 "ready": True,
                 "plan_status": "COMPLETED",
@@ -463,6 +466,7 @@ def review_and_complete(
         if child["status"] == "FAILED":
             db.update_step_status(conn, review_step_id, "FAILED", set_completed=True)
             db.update_plan_status(conn, plan_id, "FAILED")
+            db.set_review_state(conn, plan_id, "reviewed")  # BE-D4
             return {
                 "ready": True,
                 "plan_status": "FAILED",

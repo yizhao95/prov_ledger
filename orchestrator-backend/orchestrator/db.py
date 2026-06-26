@@ -128,8 +128,22 @@ def set_plan_impact_context(conn: sqlite3.Connection, plan_id: str, impact_conte
 def update_plan_status(conn: sqlite3.Connection, plan_id: str, new_status: str) -> None:
     completed_at = _now() if new_status in ("COMPLETED", "FAILED") else None
     conn.execute(
-        "UPDATE Plans SET status = ?, completed_at = COALESCE(?, completed_at) WHERE plan_id = ?",
-        (new_status, completed_at, plan_id),
+        "UPDATE Plans SET status = ?, updated_at = ?, "
+        "completed_at = COALESCE(?, completed_at) WHERE plan_id = ?",
+        (new_status, _now(), completed_at, plan_id),
+    )
+    conn.commit()
+
+
+def set_review_state(conn: sqlite3.Connection, plan_id: str, review_state: str | None) -> None:
+    """Set a plan's park-for-review state (BE-D4): 'awaiting_agent' | 'reviewed' | None.
+
+    Lets the dashboard answer "which plans are blocked on agent review?" with a
+    single indexed column instead of joining to Steps.
+    """
+    conn.execute(
+        "UPDATE Plans SET review_state = ?, updated_at = ? WHERE plan_id = ?",
+        (review_state, _now(), plan_id),
     )
     conn.commit()
 
@@ -228,16 +242,30 @@ def update_step_status(
     set_started: bool = False,
     set_completed: bool = False,
 ) -> None:
-    sets = ["status = ?"]
-    params: list = [new_status]
+    sets = ["status = ?", "updated_at = ?"]
+    params: list = [new_status, _now()]
     if set_started:
         sets.append("started_at = ?")
         params.append(_now())
     if set_completed:
-        sets.append("completed_at = ?")
+        # COALESCE: never re-stamp an already-set completed_at (BE-C5) — the first
+        # terminal time is the truth, re-completion must not overwrite it.
+        sets.append("completed_at = COALESCE(completed_at, ?)")
         params.append(_now())
     params.append(step_id)
     conn.execute(f"UPDATE Steps SET {', '.join(sets)} WHERE step_id = ?", params)
+    conn.commit()
+
+
+def set_failure_reason(conn: sqlite3.Connection, step_id: str, reason: str) -> None:
+    """Persist a step's failure reason as a first-class column (BE-D3).
+
+    Survives log_context truncation; the dashboard reads this directly.
+    """
+    conn.execute(
+        "UPDATE Steps SET failure_reason = ?, updated_at = ? WHERE step_id = ?",
+        (reason, _now(), step_id),
+    )
     conn.commit()
 
 
