@@ -80,3 +80,30 @@ def test_edge_metadata_records_variable(analyzed):
     import json
     meta = [json.loads(m) for _, _, m in rows if m]
     assert any("var" in d for d in meta)
+
+
+def test_cross_module_same_name_resolves_correctly(tmp_path):
+    # PSG-C2: two modules each define produce/consume; the feed edge in module a
+    # must bind a.produce -> a.consume, never b's (the old last-wins bug).
+    from analyzer import dataflow, py_ast, store, walker
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "a.py").write_text(
+        "def produce():\n    return 1\n\n"
+        "def consume(v):\n    return v\n\n"
+        "def flow():\n    x = produce()\n    consume(x)\n")
+    (repo / "pkg" / "b.py").write_text(
+        "def produce():\n    return 2\n\ndef consume(v):\n    return v\n")
+    conn = store.init_db(str(tmp_path / "g.db"))
+    fm = walker.walk(conn, str(repo))
+    py_ast.analyze(conn, str(repo), fm)
+    dataflow.analyze(conn, str(repo), fm)
+    rows = conn.execute(
+        """SELECT s.qualified_name, d.qualified_name
+           FROM edge e JOIN edge_type t ON t.id=e.edge_type_id
+           JOIN node s ON s.id=e.src_node_id JOIN node d ON d.id=e.dst_node_id
+           WHERE t.name='downstream_data_feed'""").fetchall()
+    pairs = {(r[0], r[1]) for r in rows}
+    conn.close()
+    assert ("pkg.a.produce", "pkg.a.consume") in pairs
+    assert ("pkg.b.produce", "pkg.a.consume") not in pairs
