@@ -5,6 +5,29 @@ install, and launching the dashboard.
 
 ---
 
+## 0 · Fastest path — install as a Claude Code plugin
+
+```text
+/plugin marketplace add yizhao95/prov_ledger
+/plugin install provledger@provledger
+```
+
+Dependencies install themselves on first session (a background `SessionStart`
+bootstrap builds one venv at `~/skill-workspace/.venv` and installs
+`requirements.txt`; warm sessions are a no-op). Launch the dashboard with
+`/provledger-dashboard`.
+
+**Companion (recommended):** install the
+[`superpowers`](https://github.com/obra/superpowers) plugin. provLedger treats it
+as a **soft dependency** — the byte-identical `verification-before-completion`
+skill is not bundled and comes from superpowers when present; the other shared
+skills are bundled with local adaptations. Everything still works without
+superpowers, just with fewer supporting process skills.
+
+The rest of this guide is the **manual / development** install.
+
+---
+
 ## 1 · Prerequisites
 
 | Requirement | Notes |

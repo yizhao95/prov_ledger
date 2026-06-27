@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# pl-python — resolve the provLedger interpreter and exec it with all args.
+# Prefers the unified venv python; falls back to system python3 with a warning.
+set -uo pipefail
+
+VENV="${PROVLEDGER_VENV:-${HOME}/skill-workspace/.venv}"
+VENV_PY="${VENV}/bin/python"
+
+if [[ -x "${VENV_PY}" ]]; then
+    exec "${VENV_PY}" "$@"
+fi
+
+SYS_PY="$(command -v python3 || true)"
+if [[ -n "${SYS_PY}" ]]; then
+    echo "⚠️  pl-python warning: unified venv python not found at ${VENV_PY}; falling back to ${SYS_PY}. Run scripts/bootstrap.sh to set up dependencies." >&2
+    exec "${SYS_PY}" "$@"
+fi
+
+echo "❌ pl-python: no python interpreter found (venv or system)." >&2
+exit 1

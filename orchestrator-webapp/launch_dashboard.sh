@@ -14,11 +14,14 @@
 
 set -uo pipefail
 
-PORT=8765
+PORT="${PROVLEDGER_DASH_PORT:-8765}"
 URL="http://127.0.0.1:${PORT}"
-APP_DIR="${HOME}/skill-workspace/orchestrator-webapp"
-VENV_PY="${APP_DIR}/.venv/bin/uvicorn"
-LOG="/tmp/webapp-server.log"
+# App dir: prefer the bundled webapp (this script's own dir), overridable for
+# the legacy workspace copy via PROVLEDGER_WEBAPP_DIR.
+APP_DIR="${PROVLEDGER_WEBAPP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+VENV="${PROVLEDGER_VENV:-${HOME}/skill-workspace/.venv}"
+VENV_PY="${VENV}/bin/uvicorn"
+LOG="${PROVLEDGER_DASH_LOG:-/tmp/webapp-server.log}"
 
 # 1. Already running and healthy?
 if curl -sf "${URL}/api/health" > /dev/null 2>&1; then
@@ -36,7 +39,7 @@ fi
 # 3. Sanity: app dir exists?
 if [[ ! -x "${VENV_PY}" ]]; then
     echo "❌ uvicorn not found at ${VENV_PY}"
-    echo "   Run: cd ${APP_DIR} && uv venv && uv pip install fastapi 'uvicorn[standard]' jinja2"
+    echo "   Run: bash \"${CLAUDE_PLUGIN_ROOT:-<plugin-root>}/scripts/bootstrap.sh\" to install dependencies."
     exit 1
 fi
 

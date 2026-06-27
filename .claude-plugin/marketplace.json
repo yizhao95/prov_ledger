@@ -1,0 +1,11 @@
+{
+  "name": "provledger",
+  "owner": { "name": "yzhao", "email": "yzhao950213@gmail.com" },
+  "plugins": [
+    {
+      "name": "provledger",
+      "source": "./",
+      "description": "Provenance + ledger discipline for data-science coding agents."
+    }
+  ]
+}

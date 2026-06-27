@@ -15,11 +15,15 @@ import pytest
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPTS = SKILL_DIR / "scripts"
-ORCH_ROOT = Path.home() / "skill-workspace" / "orchestrator"
-sys.path.insert(0, str(ORCH_ROOT))
+# The orchestrator import path is provided by conftest.py (it prefers the
+# bundled orchestrator-backend/ so a fresh clone is self-contained).
 from orchestrator import db as orch_db  # noqa: E402
 
-PYBIN = ORCH_ROOT / ".venv" / "bin" / "python"
+# Run the CLI with the interpreter running the tests. ledger_cli.py is
+# stdlib-only, so no special venv is required. (Previously hardcoded
+# ~/skill-workspace/orchestrator/.venv, which broke the suite on any machine
+# without that hand-made venv.)
+PYBIN = Path(sys.executable)
 
 
 @pytest.fixture
