@@ -310,6 +310,13 @@ import re
 
 _SELECT_RE = re.compile(r"\bselect\b(.*?)\bfrom\b", re.IGNORECASE | re.DOTALL)
 _IDENT_RE = re.compile(r"[A-Za-z_]\w*")
+# FROM/JOIN <table> — used to scope which readers a changed .sql file implicates.
+_FROM_JOIN_RE = re.compile(r"\b(?:FROM|JOIN)\s+`?([A-Za-z_][\w.]*)`?", re.IGNORECASE)
+
+
+def _sql_tables(text: str) -> set[str]:
+    """Table names referenced by FROM/JOIN in a SQL string (PSG-C6)."""
+    return {m.group(1) for m in _FROM_JOIN_RE.finditer(text or "")}
 
 
 def _split_top_level(clause: str) -> list[str]:
@@ -389,20 +396,37 @@ def sql_contract(db_path: str, repo: str, base: str, head: str) -> dict:
     gaps: list[dict] = []
     try:
         for path in sql_files:
-            base_cols = extract_sql_projection(git_show(repo, base, path))
-            head_cols = extract_sql_projection(git_show(repo, head, path))
+            base_text = git_show(repo, base, path)
+            head_text = git_show(repo, head, path)
+            base_cols = extract_sql_projection(base_text)
+            head_cols = extract_sql_projection(head_text)
             removed = base_cols - head_cols
             added = head_cols - base_cols
             if not removed and not added:
                 continue
-            # readers of any sql_table this file feeds (best-effort: all sql readers)
-            readers = conn.execute(
-                """SELECT DISTINCT src.name AS reader, src.file_path AS file
-                   FROM edge e
-                   JOIN edge_type et ON et.id = e.edge_type_id
-                   JOIN node src ON src.id = e.src_node_id
-                   WHERE et.name = 'reads_sql'"""
-            ).fetchall()
+            # PSG-C6: scope readers to those reading a table THIS file references,
+            # instead of flagging every reads_sql reader in the repo. If we can't
+            # parse any table name, fall back to all readers (don't miss a break).
+            tables = _sql_tables(base_text) | _sql_tables(head_text)
+            if tables:
+                placeholders = ",".join("?" * len(tables))
+                readers = conn.execute(
+                    f"""SELECT DISTINCT src.name AS reader, src.file_path AS file
+                        FROM edge e
+                        JOIN edge_type et ON et.id = e.edge_type_id
+                        JOIN node src ON src.id = e.src_node_id
+                        JOIN node dst ON dst.id = e.dst_node_id
+                        WHERE et.name = 'reads_sql' AND dst.name IN ({placeholders})""",
+                    tuple(sorted(tables)),
+                ).fetchall()
+            else:
+                readers = conn.execute(
+                    """SELECT DISTINCT src.name AS reader, src.file_path AS file
+                       FROM edge e
+                       JOIN edge_type et ON et.id = e.edge_type_id
+                       JOIN node src ON src.id = e.src_node_id
+                       WHERE et.name = 'reads_sql'"""
+                ).fetchall()
             for col in sorted(removed):
                 if not readers:
                     gaps.append({"kind": "sql_column_removed", "column": col,

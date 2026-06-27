@@ -9,6 +9,7 @@ Read-only access to ~/skill-workspace/orchestrator.db. Never mutates.
 """
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -28,6 +29,7 @@ TEMPLATES.env.globals["source_badge"] = queries.source_badge
 TEMPLATES.env.globals["get_last_n_log_entries"] = queries.get_last_n_log_entries
 TEMPLATES.env.globals["count_log_entries"] = queries.count_log_entries
 TEMPLATES.env.globals["short_title"] = queries.short_title
+TEMPLATES.env.globals["relative_time"] = queries.relative_time
 
 app = FastAPI(title="provLedger Dashboard", version="0.1.0")
 
@@ -39,41 +41,50 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
     Otherwise the named plan is loaded — used by /plan/{plan_id} and
     by /api/dashboard?plan=<id>.
     """
+    def _error_ctx(msg: str) -> dict:
+        return {
+            "request": request, "error": msg, "plan": None, "steps": [],
+            "skills": [], "completed": 0, "failed": 0, "total_steps": 0,
+            "progress_pct": 0, "has_failure": False, "current_step": None,
+            "deviations": [],
+            "total_plans": 0, "db_size_kb": 0, "viewing_plan_id": plan_id,
+        }
+
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:
-        return {
-            "request": request,
-            "error": f"orchestrator.db not found: {e}. Have you run any plans yet?",
-            "plan": None,
-            "steps": [],
-            "skills": [],
-            "total_plans": 0,
-            "db_size_kb": 0,
-        }
-    plan = queries.get_plan_by_id(conn, plan_id) if plan_id else queries.get_latest_plan(conn)
-    if plan_id and not plan:
-        # Asked for a specific plan that doesn't exist
+        return _error_ctx(f"orchestrator.db not found: {e}. Have you run any plans yet?")
+    except sqlite3.Error as e:  # DASH-BUG2: locked/corrupt DB degrades, not 500s
+        return _error_ctx(f"database error: {e}")
+
+    # DASH-BUG2: any query below can raise sqlite3.OperationalError ("database is
+    # locked") while the orchestrator writes. Degrade to an error context instead
+    # of a 500. conn is always closed (BUG1: no leaked handles on any path).
+    try:
+        plan = queries.get_plan_by_id(conn, plan_id) if plan_id else queries.get_latest_plan(conn)
+        if plan_id and not plan:
+            # Asked for a specific plan that doesn't exist — reuse conn (BUG1).
+            total_plans = queries.count_total_plans(conn)
+            db_size_kb = queries.get_db_size_kb()
+            ctx = _error_ctx(f"Plan not found: {plan_id}")
+            ctx["total_plans"] = total_plans
+            ctx["db_size_kb"] = db_size_kb
+            return ctx
+        steps = queries.get_steps_for_plan(conn, plan["plan_id"]) if plan else []
+        # Convert flat list → tree (parent→children) with parallel-group annotations.
+        steps_tree = queries.build_step_tree(steps) if steps else []
+        skills = queries.get_skills_for_plan(conn, plan["plan_id"]) if plan else []
+        completed = queries.count_completed_steps(steps)
+        failed = sum(1 for s in steps if s["status"] == "FAILED")
+        current_step = next((s for s in steps if s["status"] == "IN_PROGRESS"), None)  # UX2
+        deviations = queries.get_deviations(conn, plan["plan_id"]) if plan else []     # UX4
+        total_plans = queries.count_total_plans(conn)
+        db_size_kb = queries.get_db_size_kb()
+    except sqlite3.Error as e:
+        return _error_ctx(f"database error: {e}")
+    finally:
         conn.close()
-        return {
-            "request": request,
-            "error": f"Plan not found: {plan_id}",
-            "plan": None,
-            "steps": [],
-            "skills": [],
-            "total_plans": queries.count_total_plans(queries.open_db_readonly()),
-            "db_size_kb": queries.get_db_size_kb(),
-        }
-    steps = queries.get_steps_for_plan(conn, plan["plan_id"]) if plan else []
-    # Convert flat list → tree (parent→children) with parallel-group annotations.
-    # The template's render_siblings macro expects this shape; passing the flat
-    # list still works (children=[] fallback) but you lose the parallel badges.
-    steps_tree = queries.build_step_tree(steps) if steps else []
-    skills = queries.get_skills_for_plan(conn, plan["plan_id"]) if plan else []
-    completed = queries.count_completed_steps(steps)
-    total_plans = queries.count_total_plans(conn)
-    db_size_kb = queries.get_db_size_kb()
-    conn.close()
+
     return {
         "request": request,
         "error": None,
@@ -82,6 +93,10 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         "steps_flat": steps,   # kept for any downstream code that expects flat
         "skills": skills,
         "completed": completed,
+        "failed": failed,
+        "has_failure": failed > 0,
+        "current_step": current_step,
+        "deviations": deviations,
         "total_steps": len(steps),
         "progress_pct": int(100 * completed / len(steps)) if steps else 0,
         "total_plans": total_plans,
@@ -141,9 +156,11 @@ def dashboard_partial(request: Request, plan: str | None = None):
     #    short-circuit BEFORE rendering the template.
     try:
         conn = queries.open_db_readonly()
-        etag = queries.compute_etag(conn)
-        conn.close()
-    except FileNotFoundError:
+        try:
+            etag = queries.compute_etag(conn)
+        finally:
+            conn.close()
+    except (FileNotFoundError, sqlite3.Error):
         etag = '"no-db"'
 
     # ETag varies by which plan we're showing — prefix with plan_id (or 'latest')
@@ -172,8 +189,10 @@ def health():
     """JSON ping. Useful for `curl` smoke tests + monitoring."""
     try:
         conn = queries.open_db_readonly()
-        plan = queries.get_latest_plan(conn)
-        conn.close()
+        try:
+            plan = queries.get_latest_plan(conn)
+        finally:
+            conn.close()
         return JSONResponse({
             "ok": True,
             "latest_plan_id": plan["plan_id"] if plan else None,
@@ -181,3 +200,5 @@ def health():
         })
     except FileNotFoundError:
         return JSONResponse({"ok": False, "error": "orchestrator.db not found"}, status_code=503)
+    except sqlite3.Error as e:  # DASH-BUG2: locked/corrupt DB → structured 503
+        return JSONResponse({"ok": False, "error": f"database error: {e}"}, status_code=503)

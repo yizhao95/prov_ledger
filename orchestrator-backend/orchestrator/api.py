@@ -139,23 +139,30 @@ def evaluate_and_update_plan(
     # HardStop is intentionally NOT caught — it propagates up as agent-pause signal
 
     new_step_ids: list[str] = []
-    if new_sub_steps:
-        existing_children = db.get_children(conn, target_step_id)
-        for i, desc in enumerate(new_sub_steps):
+    existing_children = db.get_children(conn, target_step_id) if new_sub_steps else []
+    # BE-C4: sub-step inserts + revision bump + deviation record are one atomic
+    # unit — an interruption mid-sequence must not leave the plan half-mutated.
+    with db.transaction(conn):
+        for i, desc in enumerate(new_sub_steps or []):
             sid = f"{target_step_id}.{len(existing_children) + i + 1}"
             db.insert_step(
                 conn, sid, target["plan_id"], desc,
                 execution_order=target["execution_order"] * 100 + i,
                 parent_step_id=target_step_id,
                 depth_level=target["depth_level"] + 1,
+                commit=False,
             )
             new_step_ids.append(sid)
-
-    new_revision = db.increment_revision(conn, plan["plan_id"])
+        new_revision = db.increment_revision(conn, plan["plan_id"], commit=False)
+        deviation_id = db.insert_deviation(
+            conn, plan["plan_id"], target_step_id, justification,
+            new_step_ids=new_step_ids, revision_count=new_revision, commit=False,
+        )
     result: dict = {
         "accepted": True,
         "new_step_ids": new_step_ids,
         "justification_logged": justification,
+        "deviation_id": deviation_id,
         "revision_count": new_revision,
     }
     if warning:
@@ -186,13 +193,18 @@ def complete_step(conn: sqlite3.Connection, step_id: str) -> dict:
 
 
 def fail_step(conn: sqlite3.Connection, step_id: str, reason: str = "") -> dict:
-    """Any non-terminal → FAILED. Appends reason to log."""
+    """Fail a started step (STARTING/IN_PROGRESS/NEEDS_REVIEW → FAILED).
+
+    PENDING steps cannot be failed — the state machine rejects PENDING → FAILED
+    (start the step first). Persists the reason to Steps.failure_reason and the log.
+    """
     step = db.get_step(conn, step_id)
     if not step:
         raise ValueError(f"step_id not found: {step_id}")
     state_machine.validate_transition(step["status"], "FAILED")
     db.update_step_status(conn, step_id, "FAILED", set_completed=True)
     if reason:
+        db.set_failure_reason(conn, step_id, reason)
         telemetry.append_step_log(conn, step_id, f"[FAILED] {reason}")
     return db.get_step(conn, step_id)
 
@@ -321,11 +333,35 @@ def detect_registered_project(
     ).fetchall()
     texts.extend(r["description"] for r in step_rows)
 
-    haystack = _normalize_project_token(" ".join(texts))
+    # BE-S1: match on word boundaries, not raw substring. Splitting into word
+    # tokens (then matching a project's collapsed name against a CONTIGUOUS RUN of
+    # tokens) keeps variance tolerance — "demo app" / "demo-app" / "demoapp" all
+    # match "demo-app" — while preventing a short name like "app" from matching
+    # inside an unrelated word like "happens".
+    hay_words = [w for w in re.split(r"[-_\s]+", " ".join(texts).lower()) if w]
     for norm_name, canonical in normalized:
-        if norm_name and norm_name in haystack:
+        if norm_name and _matches_token_run(hay_words, norm_name):
             return canonical
     return None
+
+
+def _matches_token_run(words: list[str], target: str) -> bool:
+    """True if `target` equals the concatenation of some contiguous run of `words`.
+
+    `target` is an already-collapsed project name (no separators). A single-word
+    project matches a standalone token; a multi-word project matches adjacent
+    tokens whose concatenation equals it.
+    """
+    n = len(words)
+    for i in range(n):
+        acc = ""
+        for j in range(i, n):
+            acc += words[j]
+            if len(acc) > len(target):
+                break
+            if acc == target:
+                return True
+    return False
 
 
 def _open_agent_review(conn: sqlite3.Connection, plan_id: str, review_step_id: str) -> str:
@@ -346,22 +382,26 @@ def _open_agent_review(conn: sqlite3.Connection, plan_id: str, review_step_id: s
         # Already opened — return the first child (there is only ever one).
         return existing[0]["step_id"]
 
-    db.update_step_status(conn, review_step_id, "NEEDS_REVIEW")
-    db.update_plan_status(conn, plan_id, "IN_PROGRESS")
-    db.increment_revision(conn, plan_id)
-
     review_row = db.get_step(conn, review_step_id)
     child_id = f"{review_step_id}.1"
-    db.insert_step(
-        conn,
-        child_id,
-        plan_id,
-        "AGENT REVIEW: project-state-graph consistency review (LLM sub-agent)",
-        execution_order=(review_row["execution_order"] or 0) * 100,
-        parent_step_id=review_step_id,
-        depth_level=(review_row["depth_level"] or 0) + 1,
-        step_type="SUB_AGENT",
-    )
+    # BE-C4: the review-step flip + plan-state writes + child insert are one
+    # atomic unit; a crash mid-sequence must not park a plan with no child step.
+    with db.transaction(conn):
+        db.update_step_status(conn, review_step_id, "NEEDS_REVIEW", commit=False)
+        db.update_plan_status(conn, plan_id, "IN_PROGRESS", commit=False)
+        db.set_review_state(conn, plan_id, "awaiting_agent", commit=False)  # BE-D4
+        db.increment_revision(conn, plan_id, commit=False)
+        db.insert_step(
+            conn,
+            child_id,
+            plan_id,
+            "AGENT REVIEW: project-state-graph consistency review (LLM sub-agent)",
+            execution_order=(review_row["execution_order"] or 0) * 100,
+            parent_step_id=review_step_id,
+            depth_level=(review_row["depth_level"] or 0) + 1,
+            step_type="SUB_AGENT",
+            commit=False,
+        )
     return child_id
 
 
@@ -447,6 +487,7 @@ def review_and_complete(
         if child["status"] == "COMPLETED":
             db.update_step_status(conn, review_step_id, "COMPLETED", set_completed=True)
             db.update_plan_status(conn, plan_id, "COMPLETED")
+            db.set_review_state(conn, plan_id, "reviewed")  # BE-D4
             return {
                 "ready": True,
                 "plan_status": "COMPLETED",
@@ -458,6 +499,7 @@ def review_and_complete(
         if child["status"] == "FAILED":
             db.update_step_status(conn, review_step_id, "FAILED", set_completed=True)
             db.update_plan_status(conn, plan_id, "FAILED")
+            db.set_review_state(conn, plan_id, "reviewed")  # BE-D4
             return {
                 "ready": True,
                 "plan_status": "FAILED",

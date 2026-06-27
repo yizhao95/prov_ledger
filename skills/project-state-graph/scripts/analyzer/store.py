@@ -31,7 +31,8 @@ CREATE TABLE IF NOT EXISTS node (
     file_path      TEXT,
     line_start     INTEGER,
     line_end       INTEGER,
-    metadata_json  TEXT
+    metadata_json  TEXT,
+    run_id         INTEGER REFERENCES analysis_run(id)
 );
 CREATE TABLE IF NOT EXISTS edge_type (
     id          INTEGER PRIMARY KEY,
@@ -43,7 +44,8 @@ CREATE TABLE IF NOT EXISTS edge (
     edge_type_id  INTEGER NOT NULL REFERENCES edge_type(id),
     src_node_id   INTEGER NOT NULL REFERENCES node(id),
     dst_node_id   INTEGER NOT NULL REFERENCES node(id),
-    metadata_json TEXT
+    metadata_json TEXT,
+    run_id        INTEGER REFERENCES analysis_run(id)
 );
 CREATE TABLE IF NOT EXISTS analysis_run (
     id           INTEGER PRIMARY KEY,
@@ -55,9 +57,13 @@ CREATE TABLE IF NOT EXISTS analysis_run (
 );
 CREATE INDEX IF NOT EXISTS idx_node_node_type_id ON node(node_type_id);
 CREATE INDEX IF NOT EXISTS idx_node_file_path     ON node(file_path);
+CREATE INDEX IF NOT EXISTS idx_node_qualified_name ON node(qualified_name);
+CREATE INDEX IF NOT EXISTS idx_node_name          ON node(name);
+CREATE INDEX IF NOT EXISTS idx_node_run_id        ON node(run_id);
 CREATE INDEX IF NOT EXISTS idx_edge_src_node_id   ON edge(src_node_id);
 CREATE INDEX IF NOT EXISTS idx_edge_dst_node_id   ON edge(dst_node_id);
 CREATE INDEX IF NOT EXISTS idx_edge_edge_type_id  ON edge(edge_type_id);
+CREATE INDEX IF NOT EXISTS idx_edge_run_id        ON edge(run_id);
 """
 
 
@@ -66,8 +72,37 @@ def init_db(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(_SCHEMA)
+    # Defensive: an older graph DB may predate the run_id columns (PSG-D2). The
+    # CREATE TABLE IF NOT EXISTS above won't add them, so ALTER if missing.
+    for table in ("node", "edge"):
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+        if "run_id" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN run_id INTEGER")
     conn.commit()
     return conn
+
+
+def reset_graph(conn: sqlite3.Connection) -> None:
+    """Clear graph + card rows before a rebuild (PSG-C1).
+
+    Re-running the analyzer over an existing DB previously DOUBLED the whole graph
+    (add_node/add_edge are unconditional INSERTs). Wiping the graph and card tables
+    first makes a rebuild idempotent. analysis_run history is intentionally kept.
+    Order respects the node(id) foreign keys: cards + edge before node.
+    """
+    for table in ("consistency_card", "symbol_card", "edge", "node"):
+        try:
+            conn.execute(f"DELETE FROM {table}")
+        except sqlite3.OperationalError:
+            pass  # card tables may not exist yet on a fresh DB
+    conn.commit()
+
+
+def stamp_run(conn: sqlite3.Connection, run_id: int) -> None:
+    """Tag every graph row produced by this rebuild with its run_id (PSG-D2)."""
+    conn.execute("UPDATE node SET run_id = ? WHERE run_id IS NULL", (run_id,))
+    conn.execute("UPDATE edge SET run_id = ? WHERE run_id IS NULL", (run_id,))
+    conn.commit()
 
 
 def _get_or_create(conn: sqlite3.Connection, table: str, name: str) -> int:

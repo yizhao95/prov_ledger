@@ -449,3 +449,47 @@ def format_duration(started_at: str | None, completed_at: str | None) -> str:
         return f"{seconds // 60}m {seconds % 60}s"
     except (ValueError, TypeError):
         return "—"
+
+
+def relative_time(ts: str | None) -> str:
+    """Human "time ago" for a stored UTC timestamp (DASH-UX5).
+
+    Returns "—" for missing values and the raw string if it can't be parsed,
+    so a malformed timestamp never breaks the page.
+    """
+    if not ts:
+        return "—"
+    try:
+        from datetime import datetime, timezone
+        t = datetime.fromisoformat(ts)
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        secs = int((datetime.now(timezone.utc) - t).total_seconds())
+        if secs < 0:
+            secs = 0
+        if secs < 60:
+            return f"{secs}s ago"
+        if secs < 3600:
+            return f"{secs // 60}m ago"
+        if secs < 86400:
+            return f"{secs // 3600}h ago"
+        return f"{secs // 86400}d ago"
+    except (ValueError, TypeError):
+        return ts
+
+
+def get_deviations(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
+    """Read the deviation/revision history for a plan (DASH-UX4).
+
+    Reads the Deviations table (orchestrator migration 010). Degrades to [] on an
+    older DB that predates the table, so the dashboard stays robust + read-only.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT deviation_id, target_step_id, justification, revision_count, "
+            "created_at FROM Deviations WHERE plan_id = ? ORDER BY deviation_id",
+            (plan_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.Error:
+        return []

@@ -74,8 +74,11 @@ import base64
 def b64(s: str) -> str:
     return base64.b64encode(s.encode("utf-8")).decode("ascii")
 
-print(f"STEP_ID={data['step_id']}")
-print(f"STEP_TYPE={data['type']}")
+# SK-S1: base64 STEP_ID/STEP_TYPE too. They were printed raw and `eval`-ed, so a
+# step_id like `x$(touch pwned)` or one with spaces executed/garbled. base64
+# output is [A-Za-z0-9+/=] only — safe to eval — then decoded back to literals.
+print(f"STEP_ID_B64={b64(data['step_id'])}")
+print(f"STEP_TYPE_B64={b64(data['type'])}")
 print(f"CMD_B64={b64(data['command'])}")
 print(f"SUMMARY_B64={b64(summary)}")
 PYEOF
@@ -85,6 +88,8 @@ if [[ $PARSE_RC -ne 0 ]]; then
     exit $PARSE_RC
 fi
 eval "${PARSED}"
+STEP_ID="$(echo "${STEP_ID_B64}" | base64 -d)"
+STEP_TYPE="$(echo "${STEP_TYPE_B64}" | base64 -d)"
 COMMAND="$(echo "${CMD_B64}" | base64 -d)"
 SUMMARY="$(echo "${SUMMARY_B64}" | base64 -d)"
 

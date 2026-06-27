@@ -194,8 +194,10 @@ def _check_dtype_present(conn) -> Dict[str, Any]:
 
 def _check_dtype_consistency_e2e(conn) -> Dict[str, Any]:
     """ERROR: a produced data_var's dtype must agree with what each consumer
-    expects. We walk produces (fn->dv, type=A) + consumes (dv->fn, type=B);
-    A != B (both known) is an end-to-end dtype break."""
+    expects. We compare the producer's output type against the CONSUMER's declared
+    param type (consumes.metadata.expected_type, PSG-C4) — falling back to the
+    legacy `type` field when a consumer's expected type wasn't resolved. A mismatch
+    of two known concrete types is an end-to-end dtype break."""
     import json
     produced_type: Dict[int, str] = {}
     for _src, dv, meta in conn.execute(
@@ -212,7 +214,8 @@ def _check_dtype_consistency_e2e(conn) -> Dict[str, Any]:
            WHERE t.name='consumes'"""
     ).fetchall():
         info = json.loads(meta) if meta else {}
-        want = info.get("type", "unknown")
+        # PSG-C4: prefer the consumer's declared param type; fall back to legacy.
+        want = info.get("expected_type") or info.get("type", "unknown")
         have = produced_type.get(int(dv), "unknown")
         if want not in (None, "unknown") and have not in (None, "unknown") \
                 and want != have:

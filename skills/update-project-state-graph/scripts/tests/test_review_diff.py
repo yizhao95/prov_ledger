@@ -84,6 +84,36 @@ def test_changed_symbols_detects_removed_def(repo):
     assert "old_name" in removed
 
 
+def test_changed_symbols_handles_deleted_file(repo):
+    # PSG-C7: a fully deleted file's removed defs attach to that file (+++ /dev/null).
+    base = _git(repo, "rev-parse", "HEAD")
+    (repo / "extra.py").write_text("def gone():\n    return 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add extra")
+    base2 = _git(repo, "rev-parse", "HEAD")
+    (repo / "extra.py").unlink()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "delete extra")
+    syms = review_diff.changed_symbols(str(repo), base2, "HEAD")
+    removed = [s for s in syms if s["old_name"] == "gone"]
+    assert removed, "removed def in a deleted file must be detected"
+    assert removed[0]["file"] == "extra.py"
+
+
+def test_changed_symbols_ignores_indented_methods(repo):
+    # PSG-C7: an indented method rename must NOT be reported as a top-level change.
+    base = _git(repo, "rev-parse", "HEAD")
+    (repo / "cls.py").write_text("class C:\n    def m_old(self):\n        return 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add cls")
+    (repo / "cls.py").write_text("class C:\n    def m_new(self):\n        return 1\n")
+    _git(repo, "commit", "-aqm", "rename method")
+    syms = review_diff.changed_symbols(str(repo), base, "HEAD")
+    names = {s["old_name"] for s in syms} | {s.get("new_name") for s in syms}
+    assert "m_old" not in names, "indented method captured as top-level symbol"
+    assert "C" not in names, "unchanged class reported as a spurious rename"
+
+
 # ── stale_references ─────────────────────────────────────────────────────────────
 
 def _build_graph(db_path: Path):

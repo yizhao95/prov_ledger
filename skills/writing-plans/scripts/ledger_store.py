@@ -32,17 +32,21 @@ def add_entry(conn: sqlite3.Connection, *, project: str, kind: str,
               statement: str, rationale: str = "",
               subjects: Optional[List[str]] = None,
               keywords: Optional[List[str]] = None,
-              source: str = "manual") -> int:
+              source: str = "manual",
+              plan_id: Optional[str] = None) -> int:
     """Insert one ledger entry. Returns the new row id. Raises ValueError on a
-    bad kind (caught before hitting the DB so callers get a clean message)."""
+    bad kind (caught before hitting the DB so callers get a clean message).
+
+    `plan_id` (SK-D1) records the provenance plan that produced this decision.
+    """
     if kind not in VALID_KINDS:
         raise ValueError(f"invalid kind {kind!r}; must be one of {VALID_KINDS}")
     cur = conn.execute(
         "INSERT INTO LedgerEntries "
-        "(project, kind, subjects, keywords, statement, rationale, source) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "(project, kind, subjects, keywords, statement, rationale, source, plan_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (project, kind, json.dumps(subjects or []), json.dumps(keywords or []),
-         statement, rationale, source))
+         statement, rationale, source, plan_id))
     conn.commit()
     return int(cur.lastrowid)
 
@@ -65,8 +69,28 @@ def get_entries(conn: sqlite3.Connection, project: str, *,
 query_entries = get_entries
 
 
-def supersede_entry(conn: sqlite3.Connection, entry_id: int) -> None:
-    """Mark an entry superseded so it stops surfacing as a reminder."""
-    conn.execute("UPDATE LedgerEntries SET status = 'superseded' WHERE id = ?",
-                 (entry_id,))
+def supersede_entry(conn: sqlite3.Connection, entry_id: int,
+                    superseded_by: Optional[int] = None) -> None:
+    """Mark an entry superseded so it stops surfacing as a reminder.
+
+    `superseded_by` (SK-D1) records which entry replaced it, and `updated_at`
+    records when — turning supersession into an auditable lineage.
+    """
+    conn.execute(
+        "UPDATE LedgerEntries SET status = 'superseded', superseded_by = ?, "
+        "updated_at = strftime('%Y-%m-%d %H:%M:%S','now') WHERE id = ?",
+        (superseded_by, entry_id))
+    conn.commit()
+
+
+def record_hit(conn: sqlite3.Connection, entry_id: int) -> None:
+    """Bump an entry's hit_count + last_matched_at (SK-D1).
+
+    Called when an entry is surfaced as a plan-time reminder, so frequently-
+    confirmed memories can later be ranked higher.
+    """
+    conn.execute(
+        "UPDATE LedgerEntries SET hit_count = hit_count + 1, "
+        "last_matched_at = strftime('%Y-%m-%d %H:%M:%S','now') WHERE id = ?",
+        (entry_id,))
     conn.commit()

@@ -230,7 +230,8 @@ def analyze(
                 fn_id, _c = _resolve_unique(fn.name)
                 _trace_consumes(conn, fn, callables, var_of, consumes_e,
                                 _resolve_unique,
-                                params_of.get(fn_id) if fn_id is not None else None)
+                                params_of.get(fn_id) if fn_id is not None else None,
+                                all_params=params_of)
 
 
 def _tainted_names_in(node, tainted):
@@ -253,8 +254,26 @@ def _tainted_names_in(node, tainted):
     return found
 
 
+def _expected_param_type(cparams, slot):
+    """The consumer's DECLARED type for the param a value fills (PSG-C4).
+
+    cparams is {param_name: (data_var_id, dtype)} in param order (self/cls already
+    excluded). slot is ("pos", index) or ("kw", name). Returns None when it can't
+    be resolved, so an ambiguous call never fabricates an expected type.
+    """
+    if not cparams:
+        return None
+    kind, k = slot
+    names = list(cparams)
+    if kind == "pos":
+        return cparams[names[k]][1] if 0 <= k < len(names) else None
+    if kind == "kw":
+        return cparams[k][1] if k in cparams else None
+    return None
+
+
 def _trace_consumes(conn, fn, callables, var_of, consumes_e, resolve_unique,
-                    param_map=None):
+                    param_map=None, all_params=None):
     # var name -> (data_var_id, dtype, producer_fn_id_or_None)
     # producer_fn_id is the function that produced the value (for self-consume
     # guarding); None when the value is one of THIS function's own parameters.
@@ -302,14 +321,18 @@ def _trace_consumes(conn, fn, callables, var_of, consumes_e, resolve_unique,
         cid, cconf = resolve_unique(cname)
         if cid is None:
             continue
-        # Candidate tainted names from positional AND keyword arguments.
-        candidates = []
-        for arg in sub.args:
-            candidates.extend(_tainted_names_in(arg, tainted))
+        # Candidate tainted names from positional AND keyword arguments, each
+        # tagged with the consumer param slot it fills (for the expected type).
+        slots = []  # (var_name, is_direct, slot)
+        for i, arg in enumerate(sub.args):
+            for vn, direct in _tainted_names_in(arg, tainted):
+                slots.append((vn, direct, ("pos", i)))
         for kw in sub.keywords:
-            if kw.value is not None:
-                candidates.extend(_tainted_names_in(kw.value, tainted))
-        for var_name, is_direct in candidates:
+            if kw.value is not None and kw.arg is not None:
+                for vn, direct in _tainted_names_in(kw.value, tainted):
+                    slots.append((vn, direct, ("kw", kw.arg)))
+        cparams = (all_params or {}).get(cid)
+        for var_name, is_direct, slot in slots:
             dv_id, type_str, producer_fn = tainted[var_name]
             # skip a value flowing into its own producer (recursion noise)
             if producer_fn is not None and cid == producer_fn:
@@ -319,8 +342,10 @@ def _trace_consumes(conn, fn, callables, var_of, consumes_e, resolve_unique,
                 continue
             seen.add(key)
             conf = cconf if is_direct else "inferred"
-            store.add_edge(
-                conn, consumes_e, dv_id, cid,
-                metadata={"type": type_str, "confidence": conf,
-                          "var": var_name},
-            )
+            meta = {"type": type_str, "confidence": conf, "var": var_name}
+            # PSG-C4: record the CONSUMER's declared param type so the e2e dtype
+            # gate compares producer-output vs consumer-expected (not a tautology).
+            expected = _expected_param_type(cparams, slot)
+            if expected is not None:
+                meta["expected_type"] = expected
+            store.add_edge(conn, consumes_e, dv_id, cid, metadata=meta)

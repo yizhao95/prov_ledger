@@ -48,8 +48,10 @@ def resolve_range(repo: str, registered_sha: str) -> tuple[str, str, str]:
     return (registered_sha, "HEAD", "local")
 
 
-# Matches a removed (`-def foo(`) or added (`+def foo(`) function/class header.
-_DEF_RE = re.compile(r"^([+-])\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_]\w*)")
+# Matches a removed (`-def foo(`) or added (`+def foo(`) TOP-LEVEL function/class
+# header. PSG-C7: no `\s*` after the sign, so an indented method (`-    def m`) is
+# NOT captured as if it were top-level (the rename heuristic relied on that).
+_DEF_RE = re.compile(r"^([+-])(?:async\s+)?(?:def|class)\s+([A-Za-z_]\w*)")
 
 
 def changed_symbols(repo: str, base: str, head: str) -> list[dict]:
@@ -58,25 +60,38 @@ def changed_symbols(repo: str, base: str, head: str) -> list[dict]:
     A symbol present on a removed line but absent from added lines is 'removed'.
     A symbol removed AND a different symbol added in the same file is reported as
     a 'renamed' pair (best-effort: 1 removed + 1 added in a file).
+
+    PSG-C7: tracks the source (`--- a/`) and target (`+++ b/`) paths separately and
+    handles `/dev/null`, so a fully deleted file's removed defs attach to that file
+    instead of leaking onto the previous one.
     """
     diff = _git(repo, "diff", f"{base}..{head}")
     per_file_removed: dict[str, list[str]] = {}
     per_file_added: dict[str, list[str]] = {}
-    current_file = None
+    a_file = None  # source path (from --- a/...), None for an added file
+    b_file = None  # target path (from +++ b/...), None for a deleted file
     for line in diff.splitlines():
-        if line.startswith("+++ b/"):
-            current_file = line[6:]
-            per_file_removed.setdefault(current_file, [])
-            per_file_added.setdefault(current_file, [])
+        if line.startswith("--- "):
+            a_file = None if line.rstrip().endswith("/dev/null") else line[6:]
+            continue
+        if line.startswith("+++ "):
+            b_file = None if line.rstrip().endswith("/dev/null") else line[6:]
+            f = b_file or a_file  # attribute to the surviving path; a/ for deletes
+            if f is not None:
+                per_file_removed.setdefault(f, [])
+                per_file_added.setdefault(f, [])
             continue
         m = _DEF_RE.match(line)
-        if not m or current_file is None:
+        if not m:
+            continue
+        f = b_file or a_file
+        if f is None:
             continue
         sign, name = m.group(1), m.group(2)
         if sign == "-":
-            per_file_removed[current_file].append(name)
+            per_file_removed.setdefault(f, []).append(name)
         else:
-            per_file_added[current_file].append(name)
+            per_file_added.setdefault(f, []).append(name)
 
     results: list[dict] = []
     for f, removed in per_file_removed.items():

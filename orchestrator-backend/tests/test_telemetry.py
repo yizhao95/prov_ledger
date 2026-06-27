@@ -14,6 +14,35 @@ def test_truncate_empty():
     assert truncate_for_log("") == ""
 
 
+def test_truncate_few_but_long_lines_no_negative_elided():
+    # BE-C6: <=10 long lines exceed the char cap. The old head[:5]+tail[-5:] path
+    # overlapped (duplicating lines) and produced "[-N lines elided]". The fix:
+    # non-overlapping head/tail, elided clamped >= 0, content not duplicated.
+    chunk = "x" * 2000
+    raw = "\n".join([chunk for _ in range(6)])  # 6 lines, ~12000 chars
+    out = truncate_for_log(raw)
+    assert "elided" not in out          # 6 lines -> 0 elided -> no elision marker
+    assert "summarized" in out          # still labeled as summarized
+    assert out.count(chunk) == 6        # all content preserved, NO duplication
+
+
+def test_truncate_many_lines_still_summarizes():
+    # >10 lines that exceed the char cap are head+tail summarized with a positive
+    # elided count.
+    raw = "\n".join([f"line {i} " + "y" * 300 for i in range(40)])
+    out = truncate_for_log(raw)
+    assert "[30 lines elided]" in out   # 40 lines -> 40-10 = 30 elided
+
+
+def test_truncate_many_lines_still_summarizes():
+    # >10 lines that exceed the char cap are still head+tail summarized.
+    raw = "\n".join([f"line {i} " + "y" * 300 for i in range(40)])
+    out = truncate_for_log(raw)
+    assert "elided" in out
+    assert "[20 lines elided]" not in out  # MAX_LINES=50 keeps 40, elided=40-10=30
+    assert "[30 lines elided]" in out
+
+
 def test_truncate_at_max_lines_unchanged():
     s = "\n".join(f"line {i}" for i in range(MAX_LINES))
     assert truncate_for_log(s) == s

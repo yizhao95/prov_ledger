@@ -87,6 +87,51 @@ def test_running_twice_does_not_crash(tmp_path):
     assert runs == 2
 
 
+def test_rebuild_is_idempotent_no_duplication(tmp_path):
+    # PSG-C1: re-running over the same DB must NOT double the graph.
+    repo = _make_repo(tmp_path)
+    db = tmp_path / "demo-state-graph.db"
+    _run_cli(repo, "--project", "demo", "--db-path", str(db))
+    conn = sqlite3.connect(str(db))
+    n1 = conn.execute("SELECT COUNT(*) FROM node").fetchone()[0]
+    e1 = conn.execute("SELECT COUNT(*) FROM edge").fetchone()[0]
+    conn.close()
+    assert n1 > 0
+    _run_cli(repo, "--project", "demo", "--db-path", str(db))
+    conn = sqlite3.connect(str(db))
+    n2 = conn.execute("SELECT COUNT(*) FROM node").fetchone()[0]
+    e2 = conn.execute("SELECT COUNT(*) FROM edge").fetchone()[0]
+    conn.close()
+    assert n2 == n1, f"nodes duplicated on rebuild: {n1} -> {n2}"
+    assert e2 == e1, f"edges duplicated on rebuild: {e1} -> {e2}"
+
+
+def test_graph_rows_stamped_with_latest_run_id(tmp_path):
+    # PSG-D2: every node/edge carries the run_id of the rebuild that produced it.
+    repo = _make_repo(tmp_path)
+    db = tmp_path / "demo-state-graph.db"
+    _run_cli(repo, "--project", "demo", "--db-path", str(db))
+    _run_cli(repo, "--project", "demo", "--db-path", str(db))
+    conn = sqlite3.connect(str(db))
+    latest = conn.execute("SELECT MAX(id) FROM analysis_run").fetchone()[0]
+    null_nodes = conn.execute("SELECT COUNT(*) FROM node WHERE run_id IS NULL").fetchone()[0]
+    distinct = conn.execute("SELECT DISTINCT run_id FROM node").fetchall()
+    conn.close()
+    assert null_nodes == 0
+    assert distinct == [(latest,)], f"all nodes should belong to the latest run: {distinct}"
+
+
+def test_qualified_name_index_exists(tmp_path):
+    # PSG-D3: the most-queried columns are indexed.
+    repo = _make_repo(tmp_path)
+    db = tmp_path / "demo-state-graph.db"
+    _run_cli(repo, "--project", "demo", "--db-path", str(db))
+    conn = sqlite3.connect(str(db))
+    idx = {r[1] for r in conn.execute("PRAGMA index_list(node)")}
+    conn.close()
+    assert {"idx_node_qualified_name", "idx_node_name"} <= idx
+
+
 def test_routes_extracted(tmp_path):
     repo = _make_repo(tmp_path)
     db = tmp_path / "demo-state-graph.db"

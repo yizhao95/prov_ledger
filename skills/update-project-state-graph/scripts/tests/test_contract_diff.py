@@ -488,6 +488,45 @@ def test_sql_contract_added_column_is_flagged(tmp_path):
     assert any("region" in g.get("detail", "") for g in rep["gaps"])
 
 
+def test_sql_contract_scopes_readers_to_changed_table(tmp_path):
+    # PSG-C6: changing one table's query must not implicate readers of OTHER tables.
+    repo = _init_repo(tmp_path)
+    (repo / "query.sql").write_text("SELECT store_id, amount FROM sales.daily\n")
+    base = _commit(repo, "base")
+    (repo / "query.sql").write_text("SELECT store_id FROM sales.daily\n")  # drop amount
+    head = _commit(repo, "drop amount")
+
+    db = tmp_path / "g.db"
+    c = sqlite3.connect(str(db))
+    c.executescript("""
+        CREATE TABLE node_type (id INTEGER PRIMARY KEY, name TEXT UNIQUE, description TEXT);
+        CREATE TABLE node (id INTEGER PRIMARY KEY, node_type_id INTEGER, name TEXT,
+                           qualified_name TEXT, file_path TEXT, line_start INTEGER,
+                           line_end INTEGER, metadata_json TEXT);
+        CREATE TABLE edge_type (id INTEGER PRIMARY KEY, name TEXT UNIQUE, description TEXT);
+        CREATE TABLE edge (id INTEGER PRIMARY KEY, edge_type_id INTEGER, src_node_id INTEGER,
+                           dst_node_id INTEGER, metadata_json TEXT);
+    """)
+    c.execute("INSERT INTO node_type (id, name) VALUES (1,'function'),(2,'sql_table')")
+    c.execute("INSERT INTO edge_type (id, name) VALUES (1,'reads_sql')")
+    c.execute("INSERT INTO node (id,node_type_id,name,qualified_name,file_path) "
+              "VALUES (1,1,'load_sales','load_sales','loader.py')")
+    c.execute("INSERT INTO node (id,node_type_id,name,qualified_name,file_path) "
+              "VALUES (2,2,'sales.daily','sales.daily','query.sql')")
+    c.execute("INSERT INTO node (id,node_type_id,name,qualified_name,file_path) "
+              "VALUES (3,1,'load_other','load_other','other.py')")
+    c.execute("INSERT INTO node (id,node_type_id,name,qualified_name,file_path) "
+              "VALUES (4,2,'other.table','other.table','other.sql')")
+    c.execute("INSERT INTO edge (edge_type_id,src_node_id,dst_node_id) VALUES (1,1,2),(1,3,4)")
+    c.commit()
+    c.close()
+
+    rep = contract_diff.sql_contract(str(db), str(repo), base, head)
+    details = " ".join(g.get("detail", "") for g in rep["gaps"])
+    assert "load_sales" in details, "the reader of the changed table must be flagged"
+    assert "load_other" not in details, "a reader of an unrelated table must NOT be flagged"
+
+
 def test_sql_contract_no_change_clean(tmp_path):
     repo = _init_repo(tmp_path)
     (repo / "query.sql").write_text("SELECT store_id, amount FROM sales.daily\n")

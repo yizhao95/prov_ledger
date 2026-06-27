@@ -20,15 +20,20 @@ def truncate_for_log(raw: str) -> str:
         lines = lines[-MAX_LINES:]
     out = "\n".join(lines)
     if len(out) > MAX_CHARS_BEFORE_SUMMARY:
-        head = lines[:5]
-        tail = lines[-5:]
-        out = (
+        header = (
             f"[summarized — original was {len(raw)} chars / "
             f"{len(raw.splitlines())} lines]\n"
-            + "\n".join(head)
-            + f"\n... [{len(lines) - 10} lines elided] ...\n"
-            + "\n".join(tail)
         )
+        # Head + tail with a middle elision. BE-C6: make head and tail
+        # NON-OVERLAPPING and clamp the elided count to >= 0. The old code used
+        # lines[:5] + lines[-5:], which for <=10 lines overlapped (duplicating
+        # content) and computed a negative "[-N lines elided]". Starting the tail
+        # at max(5, len-5) guarantees no overlap and a non-negative count.
+        head = lines[:5]
+        tail_start = max(5, len(lines) - 5)
+        elided = tail_start - 5
+        middle = f"... [{elided} lines elided] ...\n" if elided else ""
+        out = header + "\n".join(head) + "\n" + middle + "\n".join(lines[tail_start:])
     return out
 
 
