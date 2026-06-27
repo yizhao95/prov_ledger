@@ -147,24 +147,50 @@ philosophy. This repository builds on that foundation.
 
 ```
 prov_ledger/
+├── .claude-plugin/            # plugin.json + marketplace.json (one-command install)
+├── hooks/                     # SessionStart hook → async dependency bootstrap
+├── commands/                  # /provledger-dashboard slash command
+├── scripts/                   # bootstrap.sh, pl-python, smoke_install.sh
+├── requirements.txt           # consolidated dependency set
 ├── orchestrator-backend/      # Pillar A — SQLite plan/step state machine (stdlib only)
-│   ├── orchestrator/          # api.py, db.py, state_machine.py, circuit_breakers.py
-│   ├── migrations/            # 001..009 SQL migrations
-│   └── tests/                 # 111 tests
+│   ├── orchestrator/          # api.py, db.py, state_machine.py, circuit_breakers.py, telemetry.py
+│   ├── migrations/            # 001..011 SQL migrations
+│   └── tests/
 ├── orchestrator-webapp/       # Live read-only provLedger Dashboard (FastAPI + HTMX)
 │   └── app/                   # main.py, queries.py, templates/
 ├── orchestrator-cli.py        # CLI entry point
+├── docs/                      # full architecture / reference / guides / development docs
 └── skills/
     ├── writing-plans/             # ← evolved from Superpowers
     ├── executing-plans/           # ← evolved from Superpowers
     ├── project-state-graph/       # Pillar B — deep code/data graph builder
     ├── update-project-state-graph/# Pillar B — reviewer / contract gates
-    ├── brainstorming/             # supporting process skills
+    ├── brainstorming/             # supporting process skills (locally adapted)
     ├── systematic-debugging/
-    ├── verification-before-completion/
     ├── test-driven-development/
     └── subagent-driven-development/
 ```
+
+> The `superpowers` plugin is a recommended companion: the byte-identical
+> `verification-before-completion` skill is not bundled and is provided by
+> superpowers when present.
+
+---
+
+## 📚 Documentation
+
+This README is the high-level entry point. A full, in-repo documentation tree
+under `docs/` breaks down every subsystem in depth:
+
+| Area | Path | Covers |
+|---|---|---|
+| **Architecture** | `docs/architecture/` | the two pillars, backbone × LLM layer, data flow, dashboard, skills layer |
+| **Reference** | `docs/reference/` | data model (migrations 001–011), state machine, API, CLI, graph schema, scripts |
+| **Guides** | `docs/guides/` | installation, end-to-end task lifecycle, dashboard, ledger |
+| **Development** | `docs/development/` | testing, verification flows, migrations, contributing |
+
+Start at `docs/README.md` for the full index. Design, audit, and plan records
+from the build live under `docs/superpowers/`.
 
 ---
 
