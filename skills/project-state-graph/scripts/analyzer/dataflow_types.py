@@ -23,7 +23,24 @@ import os
 import sqlite3
 from typing import Dict, Optional, Tuple
 
-from . import store
+from . import _resolve, store
+from .py_ast import _module_name
+
+
+def _iter_funcs(tree, module):
+    """Yield (fn_node, qualified_name) for top-level functions and class methods.
+
+    Matches py_ast's node set + qualified_name scheme (module.fn, module.Class.method)
+    so each function resolves to its OWN unique node id — fixing the C3 bug where a
+    second same-named function collapsed onto the first via simple-name resolution.
+    """
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node, f"{module}.{node.name}"
+        elif isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    yield item, f"{module}.{node.name}.{item.name}"
 
 
 def _callable_index(conn: sqlite3.Connection) -> Dict[str, list]:
@@ -143,7 +160,8 @@ def analyze(
     consumes_e = store.get_or_create_edge_type(conn, "consumes")
     feeds_e = store.get_or_create_edge_type(conn, "feeds")
 
-    callables = _callable_index(conn)
+    idx = _resolve.build_index(conn)
+    callables = _callable_index(conn)  # retained for _trace_consumes signature
     repo_root = os.path.abspath(repo_root)
 
     # function/method node id -> (data_var id, type, confidence)
@@ -151,13 +169,14 @@ def analyze(
     # function/method node id -> {param_name: (data_var_id, dtype)}
     params_of: Dict[int, dict] = {}
 
-    def _resolve_unique(name: str) -> Tuple[Optional[int], str]:
-        ids = callables.get(name)
-        if not ids:
-            return None, "inferred"
-        if len(ids) == 1:
-            return ids[0], "high"
-        return ids[0], "inferred"
+    def _mk_call_resolver(module: str):
+        """Resolve a CALL-TARGET name with the call site's module context (PSG-C2):
+        qualified/unique -> that node; ambiguous -> first candidate (inferred);
+        unknown -> (None, "inferred")."""
+        def _r(name: str) -> Tuple[Optional[int], str]:
+            cands = idx.resolve(name, module=module)
+            return cands[0] if cands else (None, "inferred")
+        return _r
 
     # Pass 0: type every function INPUT parameter (total dtype coverage).
     for rel_path in file_map:
@@ -169,10 +188,9 @@ def analyze(
                 tree = ast.parse(fh.read())
         except (SyntaxError, UnicodeDecodeError):
             continue
-        for fn in ast.walk(tree):
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            fn_id, _conf = _resolve_unique(fn.name)
+        module = _module_name(rel_path)
+        for fn, qual in _iter_funcs(tree, module):
+            fn_id = idx.by_qual.get(qual)   # PSG-C3: self id by UNIQUE qualified name
             if fn_id is None:
                 continue
             pmap = _emit_params(conn, fn, fn_id, dv_type, feeds_e, rel_path)
@@ -189,12 +207,11 @@ def analyze(
                 tree = ast.parse(fh.read())
         except (SyntaxError, UnicodeDecodeError):
             continue
-        for fn in ast.walk(tree):
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
+        module = _module_name(rel_path)
+        for fn, qual in _iter_funcs(tree, module):
             if not _has_return_value(fn):
                 continue
-            fn_id, _conf = _resolve_unique(fn.name)
+            fn_id = idx.by_qual.get(qual)   # PSG-C3: each same-named fn keeps its own
             if fn_id is None or fn_id in var_of:
                 continue
             type_str, conf = _infer_return_type(fn)
@@ -203,7 +220,7 @@ def analyze(
             )
             dv_id = store.add_node(
                 conn, dv_type, name=f"{fn.name}:return",
-                qualified_name=f"{fn.name}:return", file_path=rel_path,
+                qualified_name=f"{qual}:return", file_path=rel_path,
                 line_start=fn.lineno,
                 metadata={"type": type_str, "dtype": type_str,
                           "dtype_provenance": provenance, "confidence": conf,
@@ -225,13 +242,14 @@ def analyze(
                 tree = ast.parse(fh.read())
         except (SyntaxError, UnicodeDecodeError):
             continue
-        for fn in ast.walk(tree):
-            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                fn_id, _c = _resolve_unique(fn.name)
-                _trace_consumes(conn, fn, callables, var_of, consumes_e,
-                                _resolve_unique,
-                                params_of.get(fn_id) if fn_id is not None else None,
-                                all_params=params_of)
+        module = _module_name(rel_path)
+        resolver = _mk_call_resolver(module)
+        for fn, qual in _iter_funcs(tree, module):
+            fn_id = idx.by_qual.get(qual)
+            _trace_consumes(conn, fn, callables, var_of, consumes_e,
+                            resolver,
+                            params_of.get(fn_id) if fn_id is not None else None,
+                            all_params=params_of)
 
 
 def _tainted_names_in(node, tainted):

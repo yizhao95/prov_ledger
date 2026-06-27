@@ -144,25 +144,54 @@ import json
 import sqlite3
 
 
-def _card_for(conn: sqlite3.Connection, qualified_name: str) -> Optional[dict]:
-    """Return the consistency_card dict for a function by qualified_name or name."""
-    row = conn.execute(
-        """SELECT cc.card_json
-           FROM consistency_card cc JOIN node n ON n.id = cc.symbol_id
-           WHERE n.qualified_name = ? OR n.name = ?
-           LIMIT 1""",
-        (qualified_name, qualified_name.split(".")[-1]),
-    ).fetchone()
-    return json.loads(row[0]) if row and row[0] else None
+def _module_from_path(path: str) -> str:
+    """'pkg/a.py' -> 'pkg.a' (matches the graph's module-qualified names)."""
+    p = path[:-3] if path.endswith(".py") else path
+    return p.replace("\\", "/").replace("/", ".")
 
 
-def _file_of(conn: sqlite3.Connection, name: str) -> Optional[str]:
-    """Resolve a symbol name (or qualified_name) to its file_path in the graph."""
-    row = conn.execute(
-        "SELECT file_path FROM node WHERE qualified_name = ? OR name = ? LIMIT 1",
-        (name, name),
-    ).fetchone()
-    return row[0] if row else None
+def _card_for(conn: sqlite3.Connection, qualified_name: str,
+              module: Optional[str] = None) -> Optional[dict]:
+    """Consistency card for a function (PSG-C5).
+
+    Resolve by MODULE-qualified name first (extract_python_signatures emits
+    `helper` / `C.m` without a module, so we prepend the changed file's module);
+    fall back to a bare-name match ONLY when it is UNIQUE. An ambiguous bare name
+    returns None — never an arbitrary wrong card (which produced false PASSes).
+    """
+    for q in ([f"{module}.{qualified_name}"] if module else []) + [qualified_name]:
+        row = conn.execute(
+            """SELECT cc.card_json FROM consistency_card cc
+               JOIN node n ON n.id = cc.symbol_id WHERE n.qualified_name = ?""",
+            (q,),
+        ).fetchone()
+        if row:
+            return json.loads(row[0]) if row[0] else None
+    bare = qualified_name.split(".")[-1]
+    rows = conn.execute(
+        """SELECT cc.card_json FROM consistency_card cc
+           JOIN node n ON n.id = cc.symbol_id WHERE n.name = ?""",
+        (bare,),
+    ).fetchall()
+    if len(rows) == 1:
+        return json.loads(rows[0][0]) if rows[0][0] else None
+    return None  # ambiguous or absent — do not guess
+
+
+def _file_of(conn: sqlite3.Connection, name: str,
+             module: Optional[str] = None) -> Optional[str]:
+    """Resolve a symbol to its file_path (PSG-C5): qualified first, then UNIQUE
+    bare name only (no silent LIMIT 1 over ambiguous candidates)."""
+    for q in ([f"{module}.{name}"] if module else []) + [name]:
+        row = conn.execute(
+            "SELECT file_path FROM node WHERE qualified_name = ?", (q,)
+        ).fetchone()
+        if row:
+            return row[0]
+    rows = conn.execute(
+        "SELECT file_path FROM node WHERE name = ?", (name.split(".")[-1],)
+    ).fetchall()
+    return rows[0][0] if len(rows) == 1 else None
 
 
 def _verdict(gaps: list[dict], clean_text: str, header: str) -> dict:
@@ -197,7 +226,10 @@ def signature_contract(db_path: str, repo: str, base: str, head: str) -> dict:
     for path in py_files:
         base_fp = extract_python_signatures(git_show(repo, base, path))
         head_fp = extract_python_signatures(git_show(repo, head, path))
-        changes.extend(compare_signatures(base_fp, head_fp))
+        module = _module_from_path(path)  # PSG-C5: qualify changed symbols by module
+        for ch in compare_signatures(base_fp, head_fp):
+            ch["module"] = module
+            changes.append(ch)
 
     if not changes:
         return {"ok": True, "gaps": [],
@@ -209,7 +241,7 @@ def signature_contract(db_path: str, repo: str, base: str, head: str) -> dict:
     try:
         for ch in changes:
             qname = ch["qualified_name"]
-            card = _card_for(conn, qname)
+            card = _card_for(conn, qname, module=ch.get("module"))
             if card is None:
                 continue  # changed fn not in graph (new code) — nothing downstream
             dependents = list(card.get("callers", []))
