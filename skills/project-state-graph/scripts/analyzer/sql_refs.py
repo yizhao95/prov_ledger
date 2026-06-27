@@ -13,7 +13,8 @@ import re
 import sqlite3
 from typing import Dict
 
-from . import store
+from . import _resolve, store
+from .py_ast import _module_name
 
 # FROM/JOIN <identifier>   (plain SQL tables)
 _TABLE_RE = re.compile(
@@ -109,7 +110,7 @@ def analyze(
     reads_e = store.get_or_create_edge_type(conn, "reads_sql")
     writes_e = store.get_or_create_edge_type(conn, "writes_sql")
 
-    callables = _callable_index(conn)
+    idx = _resolve.build_index(conn)
     repo_root = os.path.abspath(repo_root)
 
     # cache: table/bq name -> node id (dedupe)
@@ -139,23 +140,24 @@ def analyze(
             for name in read_tables:
                 _merge_assumed_schema(conn, table_node(name), proj)
         elif rel_path.endswith(".py"):
-            _scan_python(conn, abs_path, callables, table_node,
+            _scan_python(conn, abs_path, idx, _module_name(rel_path), table_node,
                          reads_e, writes_e)
 
 
-def _scan_python(conn, abs_path, callables, table_node, reads_e, writes_e) -> None:
+def _scan_python(conn, abs_path, idx, module, table_node, reads_e, writes_e) -> None:
     try:
         with open(abs_path, encoding="utf-8") as fh:
             tree = ast.parse(fh.read())
     except (SyntaxError, UnicodeDecodeError):
         return
 
-    for fn in ast.walk(tree):
-        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+    # PSG-C2: resolve the ENCLOSING function to its own unique node by qualified
+    # name (was: global last-wins callables[fn.name], which could attribute a SQL
+    # read to a same-named function in another module).
+    for fn, qual in _resolve.iter_funcs(tree, module):
+        fn_id = idx.by_qual.get(qual)
+        if fn_id is None:
             continue
-        if fn.name not in callables:
-            continue
-        fn_id = callables[fn.name]
         for sub in ast.walk(fn):
             text = _string_value(sub)
             if not text or not _looks_like_sql(text):
