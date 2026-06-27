@@ -206,6 +206,39 @@ def get_deviations(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# ── Data profile (migration 012) ────────────────────────────────────────────────
+def insert_data_profile(conn: sqlite3.Connection, rows: list[dict], commit: bool = True) -> int:
+    """Write runtime profile rows (from orchestrator.profiler). Returns row count."""
+    for r in rows:
+        conn.execute(
+            """INSERT INTO data_profile
+               (project, plan_id, step_id, dataset, column_name, dtype,
+                null_frac, row_count, distinct_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (r.get("project"), r.get("plan_id"), r.get("step_id"), r["dataset"],
+             r["column_name"], r.get("dtype"), r.get("null_frac"),
+             r.get("row_count"), r.get("distinct_count")),
+        )
+    if commit:
+        conn.commit()
+    return len(rows)
+
+
+def get_data_profile(conn: sqlite3.Connection, dataset: str,
+                     project: str | None = None) -> list[dict]:
+    """Profile rows for a dataset (optionally scoped to a project), oldest first."""
+    if project is None:
+        rows = conn.execute(
+            "SELECT * FROM data_profile WHERE dataset = ? ORDER BY id", (dataset,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM data_profile WHERE dataset = ? AND project = ? ORDER BY id",
+            (dataset, project),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 # ── Step CRUD ─────────────────────────────────────────────────────────────────
 def insert_step(
     conn: sqlite3.Connection,
