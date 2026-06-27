@@ -10,7 +10,8 @@ import os
 import sqlite3
 from typing import Dict
 
-from . import store
+from . import _resolve, store
+from .py_ast import _module_name
 
 HTTP_METHODS = {"get", "post", "put", "delete", "patch", "head", "options"}
 
@@ -23,7 +24,7 @@ def analyze(
     route_t = store.get_or_create_node_type(conn, "route")
     defines_e = store.get_or_create_edge_type(conn, "defines")
     handles_e = store.get_or_create_edge_type(conn, "handles")
-    callables = _callable_index(conn)
+    idx = _resolve.build_index(conn)
     repo_root = os.path.abspath(repo_root)
 
     for rel_path, file_node in file_map.items():
@@ -35,9 +36,9 @@ def analyze(
                 tree = ast.parse(fh.read())
         except (SyntaxError, UnicodeDecodeError):
             continue
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
+        # PSG-C2: iterate via qualified names so a handler binds to its OWN node,
+        # not a global same-named function (was callables[node.name]).
+        for node, qual in _resolve.iter_funcs(tree, _module_name(rel_path)):
             for deco in node.decorator_list:
                 info = _route_info(deco)
                 if info is None:
@@ -50,8 +51,9 @@ def analyze(
                     metadata={"method": method.upper(), "handler": node.name},
                 )
                 store.add_edge(conn, defines_e, file_node, rid)
-                if node.name in callables:
-                    store.add_edge(conn, handles_e, rid, callables[node.name])
+                handler_id = idx.by_qual.get(qual)
+                if handler_id is not None:
+                    store.add_edge(conn, handles_e, rid, handler_id)
 
 
 def _route_info(deco):

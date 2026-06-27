@@ -226,3 +226,25 @@ def test_endpoint_is_a_profile_node(tmp_path):
     )
     conn = _analyze_with_routes(tmp_path, src)
     assert "endpoint" in _profile_nodes(conn)
+
+
+def test_same_named_ml_functions_both_tagged(tmp_path):
+    # PSG-C2/finding-7: two modules define go() that does ML; BOTH must be tagged
+    # ml-training (old last-wins symbols[fn.name] tagged one + sym_ids dropped one).
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "a.py").write_text("def go():\n    train()\n")
+    (repo / "pkg" / "b.py").write_text("def go():\n    train()\n")
+    conn = store.init_db(str(tmp_path / "g.db"))
+    fm = walker.walk(conn, str(repo))
+    py_ast.analyze(conn, str(repo), fm)
+    profiles.analyze(conn, str(repo), fm)
+    rows = conn.execute(
+        """SELECT s.qualified_name
+           FROM edge e JOIN edge_type t ON t.id=e.edge_type_id
+           JOIN node s ON s.id=e.src_node_id
+           JOIN node d ON d.id=e.dst_node_id
+           WHERE t.name='tagged_profile' AND d.name='ml-training'""").fetchall()
+    conn.close()
+    quals = {r[0] for r in rows}
+    assert "pkg.a.go" in quals and "pkg.b.go" in quals

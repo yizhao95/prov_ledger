@@ -24,7 +24,8 @@ import os
 import sqlite3
 from typing import Dict, Set
 
-from . import store
+from . import _resolve, store
+from .py_ast import _module_name
 
 PROFILE_NAMES = (
     "function-calling",
@@ -67,8 +68,11 @@ def _call_name(func) -> str | None:
     return None
 
 
-def _ml_symbols(repo_root: str, file_map: Dict[str, int], symbols: Dict[str, int]) -> Set[int]:
-    """Function ids whose body calls train_test_split / .fit / .train."""
+def _ml_symbols(repo_root: str, file_map: Dict[str, int], idx) -> Set[int]:
+    """Function ids whose body calls train_test_split / .fit / .train.
+
+    PSG-C2: resolve each function to its OWN node by qualified name (was a global
+    last-wins symbols[fn.name], which tagged an arbitrary same-named node)."""
     found: Set[int] = set()
     repo_root = os.path.abspath(repo_root)
     for rel_path in file_map:
@@ -80,14 +84,13 @@ def _ml_symbols(repo_root: str, file_map: Dict[str, int], symbols: Dict[str, int
                 tree = ast.parse(fh.read())
         except (SyntaxError, UnicodeDecodeError):
             continue
-        for fn in ast.walk(tree):
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            if fn.name not in symbols:
+        for fn, qual in _resolve.iter_funcs(tree, _module_name(rel_path)):
+            fn_id = idx.by_qual.get(qual)
+            if fn_id is None:
                 continue
             for sub in ast.walk(fn):
                 if isinstance(sub, ast.Call) and _call_name(sub.func) in _ML_CALL_NAMES:
-                    found.add(symbols[fn.name])
+                    found.add(fn_id)
                     break
     return found
 
@@ -114,8 +117,10 @@ def analyze(
             else store.add_node(conn, profile_t, name=name, qualified_name=name)
         )
 
-    symbols = _symbol_index(conn)
-    sym_ids = set(symbols.values())
+    # PSG-C2: sym_ids must be EVERY function/method id, not the last-wins
+    # name->id map's values (which silently omits collided same-named nodes).
+    idx = _resolve.build_index(conn)
+    sym_ids = {i for ids in idx.by_name.values() for i in ids}
 
     # ---- gather membership sets (all derived from existing edges) ----
     callers = _ids_with_edge(conn, "calls", side="src") & sym_ids
@@ -150,7 +155,7 @@ def analyze(
     writes = _ids_with_edge(conn, "writes_sql", side="src") & sym_ids
     data_eng = reads & writes
 
-    ml = _ml_symbols(repo_root, file_map, symbols)
+    ml = _ml_symbols(repo_root, file_map, idx)
 
     membership: Dict[str, Set[int]] = {
         "pipeline": pipeline_steps,
