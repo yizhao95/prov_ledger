@@ -540,3 +540,48 @@ def test_sql_contract_no_change_clean(tmp_path):
     rep = contract_diff.sql_contract(str(db), str(repo), base, head)
     assert rep["ok"] is True
     assert rep["gaps"] == []
+
+
+# ── PSG-C5: card/file resolution must be module-qualified, not arbitrary ──────────
+
+def _graph_two_helpers(db_path):
+    import sqlite3
+    c = sqlite3.connect(str(db_path))
+    c.executescript("""
+        CREATE TABLE node_type (id INTEGER PRIMARY KEY, name TEXT UNIQUE);
+        CREATE TABLE node (id INTEGER PRIMARY KEY, node_type_id INTEGER, name TEXT,
+                           qualified_name TEXT, file_path TEXT);
+        CREATE TABLE consistency_card (symbol_id INTEGER PRIMARY KEY, card_json TEXT);
+    """)
+    c.execute("INSERT INTO node_type (id, name) VALUES (1, 'function')")
+    c.execute("INSERT INTO node (id, node_type_id, name, qualified_name, file_path) "
+              "VALUES (1, 1, 'helper', 'pkg.a.helper', 'pkg/a.py')")
+    c.execute("INSERT INTO node (id, node_type_id, name, qualified_name, file_path) "
+              "VALUES (2, 1, 'helper', 'pkg.b.helper', 'pkg/b.py')")
+    c.execute("INSERT INTO consistency_card (symbol_id, card_json) VALUES (1, ?)",
+              ('{"callers": ["caller_a"]}',))
+    c.execute("INSERT INTO consistency_card (symbol_id, card_json) VALUES (2, ?)",
+              ('{"callers": ["caller_b"]}',))
+    c.commit()
+    return c
+
+
+def test_card_for_resolves_by_module(tmp_path):
+    c = _graph_two_helpers(tmp_path / "g.db")
+    try:
+        # module-qualified -> the RIGHT helper's card
+        assert contract_diff._card_for(c, "helper", module="pkg.a")["callers"] == ["caller_a"]
+        assert contract_diff._card_for(c, "helper", module="pkg.b")["callers"] == ["caller_b"]
+        # ambiguous bare name (no module) -> None, never an arbitrary card
+        assert contract_diff._card_for(c, "helper") is None
+    finally:
+        c.close()
+
+
+def test_file_of_module_qualified_and_unique_only(tmp_path):
+    c = _graph_two_helpers(tmp_path / "g.db")
+    try:
+        assert contract_diff._file_of(c, "helper", module="pkg.a") == "pkg/a.py"
+        assert contract_diff._file_of(c, "helper") is None  # ambiguous -> no guess
+    finally:
+        c.close()
