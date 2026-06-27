@@ -239,6 +239,69 @@ def get_data_profile(conn: sqlite3.Connection, dataset: str,
     return [dict(r) for r in rows]
 
 
+# ── LLM decisions (migration 013) ───────────────────────────────────────────────
+def insert_llm_decision(
+    conn: sqlite3.Connection, *, decision: str,
+    project: str | None = None, plan_id: str | None = None, step_id: str | None = None,
+    dataset: str | None = None, column: str | None = None,
+    observed_before: str | None = None, observed_after: str | None = None,
+    drift_kind: str | None = None, rationale: str | None = None,
+    action: str | None = None, outcome: str | None = None,
+    human_feedback: str | None = None, failure: bool = False,
+    sync_ledger: bool = True, commit: bool = True,
+) -> int:
+    """Record an LLM data decision and (by default) auto-sync it to the ledger.
+
+    The ledger sync writes directly to LedgerEntries in this same DB (no import of
+    the writing-plans skill, to avoid a backend→skill dependency). A `failure`
+    decision becomes a ledger `anti_pattern`; otherwise a `decision` — so the next
+    plan's fuzzy match surfaces it ("never repeat a mistake").
+    """
+    cur = conn.execute(
+        """INSERT INTO llm_decisions
+           (project, plan_id, step_id, dataset, column_name, observed_before,
+            observed_after, drift_kind, decision, rationale, action, outcome,
+            human_feedback)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (project, plan_id, step_id, dataset, column, observed_before,
+         observed_after, drift_kind, decision, rationale, action, outcome,
+         human_feedback),
+    )
+    decision_id = int(cur.lastrowid)
+
+    if sync_ledger:
+        subjects = json.dumps([s for s in (dataset, column) if s])
+        keywords = json.dumps([drift_kind] if drift_kind else [])
+        conn.execute(
+            """INSERT INTO LedgerEntries
+               (project, kind, subjects, keywords, statement, rationale, source, plan_id)
+               VALUES (?, ?, ?, ?, ?, ?, 'llm_decision', ?)""",
+            (project or "", "anti_pattern" if failure else "decision",
+             subjects, keywords, decision, rationale, plan_id),
+        )
+
+    if commit:
+        conn.commit()
+    return decision_id
+
+
+def get_llm_decisions(conn: sqlite3.Connection, dataset: str | None = None,
+                      project: str | None = None) -> list[dict]:
+    """LLM decisions, optionally scoped to a dataset and/or project, oldest first."""
+    clauses, params = [], []
+    if dataset is not None:
+        clauses.append("dataset = ?")
+        params.append(dataset)
+    if project is not None:
+        clauses.append("project = ?")
+        params.append(project)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM llm_decisions{where} ORDER BY id", params
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 # ── Step CRUD ─────────────────────────────────────────────────────────────────
 def insert_step(
     conn: sqlite3.Connection,
