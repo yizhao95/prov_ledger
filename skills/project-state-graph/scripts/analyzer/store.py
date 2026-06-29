@@ -32,7 +32,11 @@ CREATE TABLE IF NOT EXISTS node (
     line_start     INTEGER,
     line_end       INTEGER,
     metadata_json  TEXT,
-    run_id         INTEGER REFERENCES analysis_run(id)
+    run_id         INTEGER REFERENCES analysis_run(id),
+    dtype          TEXT,
+    dtype_provenance TEXT,
+    data_class     TEXT,
+    nullable       INTEGER
 );
 CREATE TABLE IF NOT EXISTS edge_type (
     id          INTEGER PRIMARY KEY,
@@ -45,7 +49,8 @@ CREATE TABLE IF NOT EXISTS edge (
     src_node_id   INTEGER NOT NULL REFERENCES node(id),
     dst_node_id   INTEGER NOT NULL REFERENCES node(id),
     metadata_json TEXT,
-    run_id        INTEGER REFERENCES analysis_run(id)
+    run_id        INTEGER REFERENCES analysis_run(id),
+    confidence    TEXT
 );
 CREATE TABLE IF NOT EXISTS analysis_run (
     id           INTEGER PRIMARY KEY,
@@ -55,6 +60,11 @@ CREATE TABLE IF NOT EXISTS analysis_run (
     finished_at  TEXT,
     tool_version TEXT
 );
+"""
+
+# Indexes are created AFTER the defensive column-ALTER (init_db), so upgrading an
+# older DB that predates a column doesn't fail building that column's index.
+_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_node_node_type_id ON node(node_type_id);
 CREATE INDEX IF NOT EXISTS idx_node_file_path     ON node(file_path);
 CREATE INDEX IF NOT EXISTS idx_node_qualified_name ON node(qualified_name);
@@ -64,6 +74,8 @@ CREATE INDEX IF NOT EXISTS idx_edge_src_node_id   ON edge(src_node_id);
 CREATE INDEX IF NOT EXISTS idx_edge_dst_node_id   ON edge(dst_node_id);
 CREATE INDEX IF NOT EXISTS idx_edge_edge_type_id  ON edge(edge_type_id);
 CREATE INDEX IF NOT EXISTS idx_edge_run_id        ON edge(run_id);
+CREATE INDEX IF NOT EXISTS idx_node_dtype          ON node(dtype);
+CREATE INDEX IF NOT EXISTS idx_edge_confidence     ON edge(confidence);
 """
 
 
@@ -71,15 +83,24 @@ def init_db(path: str) -> sqlite3.Connection:
     """Create (if needed) and return a connection to the state-graph DB."""
     conn = sqlite3.connect(path)
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(_SCHEMA)
-    # Defensive: an older graph DB may predate the run_id columns (PSG-D2). The
-    # CREATE TABLE IF NOT EXISTS above won't add them, so ALTER if missing.
-    for table in ("node", "edge"):
-        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
-        if "run_id" not in cols:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN run_id INTEGER")
+    conn.executescript(_SCHEMA)  # tables only
+    # Defensive: an older graph DB may predate columns added after its creation
+    # (PSG-D2 run_id, PSG-D1 dtype/confidence). CREATE TABLE IF NOT EXISTS won't
+    # add them, so ALTER if missing — BEFORE building indexes on those columns.
+    _ensure_columns(conn, "node", {
+        "run_id": "INTEGER", "dtype": "TEXT", "dtype_provenance": "TEXT",
+        "data_class": "TEXT", "nullable": "INTEGER"})
+    _ensure_columns(conn, "edge", {"run_id": "INTEGER", "confidence": "TEXT"})
+    conn.executescript(_INDEXES)
     conn.commit()
     return conn
+
+
+def _ensure_columns(conn: sqlite3.Connection, table: str, cols: dict) -> None:
+    existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    for col, decl in cols.items():
+        if col not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
 
 
 def reset_graph(conn: sqlite3.Connection) -> None:
@@ -135,15 +156,22 @@ def add_node(
     line_end: Optional[int] = None,
     metadata: Optional[dict] = None,
 ) -> int:
+    md = metadata or {}
+    # PSG-D1: mirror typed fields from metadata into first-class indexed columns
+    # (keep metadata_json too for back-compat). Callers don't change.
+    nullable = md.get("nullable")
     cur = conn.execute(
         """INSERT INTO node
            (node_type_id, name, qualified_name, file_path,
-            line_start, line_end, metadata_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            line_start, line_end, metadata_json,
+            dtype, dtype_provenance, data_class, nullable)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             node_type_id, name, qualified_name, file_path,
             line_start, line_end,
             json.dumps(metadata) if metadata is not None else None,
+            md.get("dtype"), md.get("dtype_provenance"), md.get("data_class"),
+            int(nullable) if isinstance(nullable, bool) else nullable,
         ),
     )
     conn.commit()
@@ -158,13 +186,15 @@ def add_edge(
     *,
     metadata: Optional[dict] = None,
 ) -> int:
+    md = metadata or {}
     cur = conn.execute(
         """INSERT INTO edge
-           (edge_type_id, src_node_id, dst_node_id, metadata_json)
-           VALUES (?, ?, ?, ?)""",
+           (edge_type_id, src_node_id, dst_node_id, metadata_json, confidence)
+           VALUES (?, ?, ?, ?, ?)""",
         (
             edge_type_id, src_node_id, dst_node_id,
             json.dumps(metadata) if metadata is not None else None,
+            md.get("confidence"),  # PSG-D1: mirror into an indexed column
         ),
     )
     conn.commit()

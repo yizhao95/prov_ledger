@@ -17,7 +17,7 @@ def _mk(path, data_nodes):
         CREATE TABLE node_type (id INTEGER PRIMARY KEY, name TEXT UNIQUE, description TEXT);
         CREATE TABLE node (id INTEGER PRIMARY KEY, node_type_id INTEGER, name TEXT,
                            qualified_name TEXT, file_path TEXT, line_start INTEGER,
-                           line_end INTEGER, metadata_json TEXT);
+                           line_end INTEGER, metadata_json TEXT, dtype TEXT);
         CREATE TABLE edge_type (id INTEGER PRIMARY KEY, name TEXT UNIQUE, description TEXT);
         CREATE TABLE edge (id INTEGER PRIMARY KEY, edge_type_id INTEGER, src_node_id INTEGER,
                            dst_node_id INTEGER, metadata_json TEXT);
@@ -29,8 +29,8 @@ def _mk(path, data_nodes):
     for name, dtype in data_nodes:
         meta = json.dumps({"dtype": dtype}) if dtype is not None else None
         c.execute(
-            "INSERT INTO node (node_type_id,name,qualified_name,file_path,metadata_json) "
-            "VALUES (1,?,?,?,?)", (name, name, "m.py", meta))
+            "INSERT INTO node (node_type_id,name,qualified_name,file_path,metadata_json,dtype) "
+            "VALUES (1,?,?,?,?,?)", (name, name, "m.py", meta, dtype))
     c.commit()
     c.close()
 
