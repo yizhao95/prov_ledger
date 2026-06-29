@@ -156,13 +156,17 @@ def dtype_coverage(conn) -> Dict[str, Any]:
     pct = round(100*typed/total, 1), and 0.0 for an empty data surface (no
     ZeroDivision). Every data gate is exactly as strong as this number.
     """
-    rows = conn.execute(
-        """SELECT n.metadata_json
-           FROM node n JOIN node_type t ON n.node_type_id=t.id
+    # PSG-D1: set-based count over the indexed `dtype` column (no per-row
+    # json.loads). `dtype` mirrors metadata["dtype"]; 'unknown'/''/NULL == untyped.
+    total = conn.execute(
+        """SELECT COUNT(*) FROM node n JOIN node_type t ON n.node_type_id=t.id
            WHERE t.name IN ('column', 'data_var')"""
-    ).fetchall()
-    typed = sum(1 for (meta,) in rows if _dtype_is_typed(meta))
-    total = len(rows)
+    ).fetchone()[0]
+    typed = conn.execute(
+        """SELECT COUNT(*) FROM node n JOIN node_type t ON n.node_type_id=t.id
+           WHERE t.name IN ('column', 'data_var')
+             AND n.dtype IS NOT NULL AND n.dtype NOT IN ('unknown', '')"""
+    ).fetchone()[0]
     unknown = total - typed
     pct = round(100.0 * typed / total, 1) if total else 0.0
     return {"typed": typed, "unknown": unknown, "total": total, "pct": pct}
