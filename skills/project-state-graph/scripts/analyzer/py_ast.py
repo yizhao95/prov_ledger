@@ -6,7 +6,7 @@ import os
 import sqlite3
 from typing import Dict
 
-from . import store
+from . import _resolve, store
 
 
 def _qual(module: str, *parts: str) -> str:
@@ -73,6 +73,9 @@ def analyze(
 
     repo_root = os.path.abspath(repo_root)
 
+    # Phase 1: create function/class/method nodes + defines/imports edges for
+    # ALL files first (no call edges yet). Collect @property method names globally.
+    property_names: set[str] = set()
     for rel_path, file_node in file_map.items():
         if not rel_path.endswith(".py"):
             continue
@@ -83,7 +86,24 @@ def analyze(
         except (SyntaxError, UnicodeDecodeError):
             continue
         module = _module_name(rel_path)
-        _ModuleVisitor(conn, rel_path, module, file_node, types, edges).run(tree)
+        v = _ModuleVisitor(conn, rel_path, module, file_node, types, edges)
+        v.run(tree)
+        property_names |= v.property_names
+
+    # Phase 2: resolve call edges GLOBALLY now that every node exists, so
+    # cross-module calls resolve (PSG-C2/#8) and same-named calls bind correctly.
+    idx = _resolve.build_index(conn)
+    for rel_path in file_map:
+        if not rel_path.endswith(".py"):
+            continue
+        abs_path = os.path.join(repo_root, rel_path)
+        try:
+            with open(abs_path, encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        _collect_calls_global(conn, tree, _module_name(rel_path), idx,
+                              edges["calls"], property_names)
 
 
 class _ModuleVisitor:
@@ -118,16 +138,8 @@ class _ModuleVisitor:
                 self._add_function(node)
             elif isinstance(node, ast.ClassDef):
                 self._add_class(node)
-
-        # Second pass: call edges from each callable body.
-        for node in tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                self._collect_calls(node, self.callables[_qual(self.module, node.name)])
-            elif isinstance(node, ast.ClassDef):
-                for item in node.body:
-                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        qn = _qual(self.module, node.name, item.name)
-                        self._collect_calls(item, self.callables[qn])
+        # Call edges are resolved in a SECOND GLOBAL pass (see analyze /
+        # _collect_calls_global) so cross-module calls can resolve.
 
     def _add_import(self, target: str) -> None:
         mod_node = store.add_node(
@@ -208,6 +220,59 @@ class _ModuleVisitor:
         if isinstance(func, ast.Attribute):
             return func.attr
         return None
+
+
+def _collect_calls_global(conn, tree, module, idx, calls_e, property_names) -> None:
+    """Resolve `calls` edges for one module against the GLOBAL index (PSG-C2/#8).
+
+    Name calls (`foo()`) resolve module-qualified first, then cross-module unique,
+    then per-candidate (inferred). Attribute calls (`obj.foo()`) resolve by SIMPLE
+    NAME only (no `module.name` top-level fast-path) so `self.foo()` is never bound
+    to a same-named top-level function at high confidence (PSG-#4). Ambiguity emits
+    one inferred edge per candidate; (src, dst) is de-duplicated per function.
+    """
+    for fn, qual in _resolve.iter_funcs(tree, module):
+        src_id = idx.by_qual.get(qual)
+        if src_id is None:
+            continue
+        # Enclosing class (if this is a method): qual is module.Class.method.
+        tail = qual[len(module) + 1:]
+        klass = tail.split(".")[0] if "." in tail else None
+        seen: set[int] = set()
+        for sub in ast.walk(fn):
+            if isinstance(sub, ast.Call):
+                name = _resolve.call_name(sub.func)
+                if not name:
+                    continue
+                func = sub.func
+                if isinstance(func, ast.Attribute):
+                    recv = func.value
+                    if isinstance(recv, ast.Name) and recv.id == "self" and klass:
+                        # self.foo() -> THIS class's method (PSG-#4), not a
+                        # same-named top-level function.
+                        cands = idx.resolve(name, module=module, klass=klass)
+                    else:
+                        cands = idx.resolve(name)  # other attribute: simple-name only
+                else:
+                    cands = idx.resolve(name, module=module)
+                _emit_calls(conn, calls_e, src_id, cands, seen,
+                            line=getattr(sub, "lineno", None))
+            elif isinstance(sub, ast.Attribute) and isinstance(sub.ctx, ast.Load):
+                # `obj.prop` read of a known @property counts as a call.
+                if sub.attr in property_names:
+                    _emit_calls(conn, calls_e, src_id, idx.resolve(sub.attr), seen,
+                                line=getattr(sub, "lineno", None), via="property")
+
+
+def _emit_calls(conn, calls_e, src_id, cands, seen, line=None, via=None) -> None:
+    for dst_id, conf in cands:
+        if dst_id == src_id or dst_id in seen:
+            continue
+        seen.add(dst_id)
+        meta = {"line": line, "confidence": conf}
+        if via:
+            meta["via"] = via
+        store.add_edge(conn, calls_e, src_id, dst_id, metadata=meta)
 
 
 def _is_property(node) -> bool:
