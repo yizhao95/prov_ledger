@@ -169,15 +169,6 @@ def analyze(
     # function/method node id -> {param_name: (data_var_id, dtype)}
     params_of: Dict[int, dict] = {}
 
-    def _mk_call_resolver(module: str):
-        """Resolve a CALL-TARGET name with the call site's module context (PSG-C2):
-        qualified/unique -> that node; ambiguous -> first candidate (inferred);
-        unknown -> (None, "inferred")."""
-        def _r(name: str) -> Tuple[Optional[int], str]:
-            cands = idx.resolve(name, module=module)
-            return cands[0] if cands else (None, "inferred")
-        return _r
-
     # Pass 0: type every function INPUT parameter (total dtype coverage).
     for rel_path in file_map:
         if not rel_path.endswith(".py"):
@@ -243,11 +234,9 @@ def analyze(
         except (SyntaxError, UnicodeDecodeError):
             continue
         module = _module_name(rel_path)
-        resolver = _mk_call_resolver(module)
         for fn, qual in _iter_funcs(tree, module):
             fn_id = idx.by_qual.get(qual)
-            _trace_consumes(conn, fn, callables, var_of, consumes_e,
-                            resolver,
+            _trace_consumes(conn, fn, idx, module, var_of, consumes_e,
                             params_of.get(fn_id) if fn_id is not None else None,
                             all_params=params_of)
 
@@ -290,7 +279,7 @@ def _expected_param_type(cparams, slot):
     return None
 
 
-def _trace_consumes(conn, fn, callables, var_of, consumes_e, resolve_unique,
+def _trace_consumes(conn, fn, idx, module, var_of, consumes_e,
                     param_map=None, all_params=None):
     # var name -> (data_var_id, dtype, producer_fn_id_or_None)
     # producer_fn_id is the function that produced the value (for self-consume
@@ -313,7 +302,7 @@ def _trace_consumes(conn, fn, callables, var_of, consumes_e, resolve_unique,
             pname = _call_name(stmt.value.func)
             if pname is None:
                 continue
-            pid, _ = resolve_unique(pname)
+            pid = idx.resolve_one(pname, module=module)  # taint binds ONE producer
             if pid is None or pid not in var_of:
                 continue
             dv_id, type_str, _ = var_of[pid]
@@ -336,11 +325,12 @@ def _trace_consumes(conn, fn, callables, var_of, consumes_e, resolve_unique,
         cname = _call_name(sub.func)
         if cname is None:
             continue
-        cid, cconf = resolve_unique(cname)
-        if cid is None:
+        # PSG-C2: resolve the consumer with module context. Ambiguous -> emit ONE
+        # edge per candidate (each `inferred`), never an arbitrary single pick.
+        candidates = idx.resolve(cname, module=module)
+        if not candidates:
             continue
-        # Candidate tainted names from positional AND keyword arguments, each
-        # tagged with the consumer param slot it fills (for the expected type).
+        # Tainted args tagged with the param slot they fill (for the expected type).
         slots = []  # (var_name, is_direct, slot)
         for i, arg in enumerate(sub.args):
             for vn, direct in _tainted_names_in(arg, tainted):
@@ -349,21 +339,22 @@ def _trace_consumes(conn, fn, callables, var_of, consumes_e, resolve_unique,
             if kw.value is not None and kw.arg is not None:
                 for vn, direct in _tainted_names_in(kw.value, tainted):
                     slots.append((vn, direct, ("kw", kw.arg)))
-        cparams = (all_params or {}).get(cid)
-        for var_name, is_direct, slot in slots:
-            dv_id, type_str, producer_fn = tainted[var_name]
-            # skip a value flowing into its own producer (recursion noise)
-            if producer_fn is not None and cid == producer_fn:
-                continue
-            key = (dv_id, cid, var_name)
-            if key in seen:
-                continue
-            seen.add(key)
-            conf = cconf if is_direct else "inferred"
-            meta = {"type": type_str, "confidence": conf, "var": var_name}
-            # PSG-C4: record the CONSUMER's declared param type so the e2e dtype
-            # gate compares producer-output vs consumer-expected (not a tautology).
-            expected = _expected_param_type(cparams, slot)
-            if expected is not None:
-                meta["expected_type"] = expected
-            store.add_edge(conn, consumes_e, dv_id, cid, metadata=meta)
+        for cid, cconf in candidates:
+            cparams = (all_params or {}).get(cid)
+            for var_name, is_direct, slot in slots:
+                dv_id, type_str, producer_fn = tainted[var_name]
+                # skip a value flowing into its own producer (recursion noise)
+                if producer_fn is not None and cid == producer_fn:
+                    continue
+                key = (dv_id, cid, var_name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                conf = cconf if is_direct else "inferred"
+                meta = {"type": type_str, "confidence": conf, "var": var_name}
+                # PSG-C4: the CONSUMER's declared param type so the e2e dtype gate
+                # compares producer-output vs consumer-expected (not a tautology).
+                expected = _expected_param_type(cparams, slot)
+                if expected is not None:
+                    meta["expected_type"] = expected
+                store.add_edge(conn, consumes_e, dv_id, cid, metadata=meta)

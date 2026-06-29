@@ -14,7 +14,8 @@ import os
 import sqlite3
 from typing import Dict, Optional
 
-from . import store
+from . import _resolve, store
+from .py_ast import _module_name
 
 _READ_METHODS = {"get", "head", "options"}
 _WRITE_METHODS = {"post", "put", "patch", "delete"}
@@ -29,7 +30,7 @@ def analyze(
     api_t = store.get_or_create_node_type(conn, "api_source")
     reads_e = store.get_or_create_edge_type(conn, "reads_api")
     writes_e = store.get_or_create_edge_type(conn, "writes_api")
-    callables = _callable_index(conn)
+    idx = _resolve.build_index(conn)
     repo_root = os.path.abspath(repo_root)
 
     cache: Dict[str, int] = {}
@@ -48,12 +49,11 @@ def analyze(
                 tree = ast.parse(fh.read())
         except (SyntaxError, UnicodeDecodeError):
             continue
-        for fn in ast.walk(tree):
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        # PSG-C2: enclosing function resolved by unique qualified name.
+        for fn, qual in _resolve.iter_funcs(tree, _module_name(rel_path)):
+            fn_id = idx.by_qual.get(qual)
+            if fn_id is None:
                 continue
-            if fn.name not in callables:
-                continue
-            fn_id = callables[fn.name]
             # A-4: collect the keys the function subscripts off any dict/json
             # (best-effort proxy for the columns it expects the API to return).
             expected_keys = _subscript_keys(fn)

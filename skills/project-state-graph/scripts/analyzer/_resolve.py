@@ -13,6 +13,22 @@ import ast
 from typing import Optional
 
 
+def iter_funcs(tree, module):
+    """Yield (fn_node, qualified_name) for top-level functions and class methods,
+    matching py_ast's node set + qualified_name scheme (module.fn, module.Class.method).
+
+    Lets an analyzer resolve the ENCLOSING function to its OWN unique node id
+    (idx.by_qual[qual]) instead of a global last-wins simple-name lookup.
+    """
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node, f"{module}.{node.name}"
+        elif isinstance(node, ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    yield item, f"{module}.{node.name}.{item.name}"
+
+
 def build_index(conn) -> "CallableIndex":
     """Load all callable nodes once into a resolver index."""
     rows = conn.execute(
