@@ -18,6 +18,7 @@ from . import (
     dataflow,
     dataflow_types,
     de_overlay,
+    leakage,
     ml_overlay,
     pipeline,
     profiles,
@@ -84,6 +85,7 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True) ->
         ts_polyglot.analyze(conn, repo_path, file_map)
         ml_overlay.analyze(conn, repo_path, file_map)
         de_overlay.analyze(conn, repo_path, file_map)
+        leakage.analyze(conn, repo_path, file_map)  # Phase 4.1 silent-failure gate
         profiles.analyze(conn, repo_path, file_map)
         if build_cards:
             cards.build_symbol_cards(conn)  # also builds consistency cards
