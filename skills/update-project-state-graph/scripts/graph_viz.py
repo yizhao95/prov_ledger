@@ -21,6 +21,7 @@ package, so this module is byte-identical-portable into the review skill too.
 """
 from __future__ import annotations
 
+import html as _html
 import json
 import os
 import sqlite3
@@ -382,15 +383,28 @@ _BUILDERS = {
 }
 
 
+def _safe_json(data) -> str:
+    """json.dumps hardened for embedding inside a <script> block (PSG-S1).
+
+    json.dumps does NOT escape ``</script>`` or U+2028/U+2029, so a repo-derived
+    node name / path containing ``</script>`` would break out of the script tag
+    (stored XSS when the viz is opened). Escape the unsafe code points.
+    """
+    return (json.dumps(data)
+            .replace("<", "\\u003c").replace(">", "\\u003e")
+            .replace("&", "\\u0026")
+            .replace(" ", "\\u2028").replace(" ", "\\u2029"))
+
+
 def write_html(db_path: str, out_path: str, *, level: str = "full",
                title: str = "state-graph", include_data_vars: bool = False) -> str:
     if level not in _BUILDERS:
         raise ValueError(f"unknown level: {level!r} (use {list(_BUILDERS)})")
     data = _BUILDERS[level](db_path, include_data_vars)
     html = (_TEMPLATE
-            .replace("__TITLE__", title)
-            .replace("__LEVEL__", level)
-            .replace("__GRAPH_DATA__", json.dumps(data)))
+            .replace("__TITLE__", _html.escape(title))   # PSG-S1: escape title
+            .replace("__LEVEL__", _html.escape(level))
+            .replace("__GRAPH_DATA__", _safe_json(data)))
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(html)

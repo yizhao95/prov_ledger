@@ -19,10 +19,20 @@ the analyzer package, so this module is byte-portable into the reviewer skill.
 """
 from __future__ import annotations
 
+import html as _html
 import json
 import os
 import sqlite3
 from typing import Dict, List, Optional
+
+
+def _safe_json(data) -> str:
+    """json.dumps hardened for <script> embedding (PSG-S1): escape </script>
+    breakout and U+2028/U+2029."""
+    return (json.dumps(data)
+            .replace("<", "\\u003c").replace(">", "\\u003e")
+            .replace("&", "\\u0026")
+            .replace(" ", "\\u2028").replace(" ", "\\u2029"))
 
 # ── palette ────────────────────────────────────────────────────────────
 BRAND_BLUE = "#0053e2"
@@ -492,11 +502,11 @@ def write_slices(db_path: str, out_path: str, *, title: str = "state-graph") -> 
         "callchain_default": _default_focus(db_path),
     }
     html = (_SLICE_TEMPLATE
-            .replace("__TITLE__", title)
+            .replace("__TITLE__", _html.escape(title))       # PSG-S1
             .replace("__COVPCT__", str(cov["pct"]))
             .replace("__COVTYPED__", str(cov["typed"]))
             .replace("__COVUNK__", str(cov["unknown"]))
-            .replace("__DATA__", json.dumps(data)))
+            .replace("__DATA__", _safe_json(data)))          # PSG-S1: </script>-safe
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as fh:
         fh.write(html)
