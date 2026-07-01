@@ -139,6 +139,62 @@ def _scan_function(fn) -> List[dict]:
     return leaks
 
 
+_MODEL_DATA_METHODS = _FIT_METHODS | _EVAL_METHODS
+_VALIDATOR_NAMES = {"validate", "check", "check_schema", "expect", "assert_schema"}
+
+
+def _function_has_guard(fn) -> bool:
+    """A function 'guards' its data if it asserts or calls a validator (pandera/GE
+    style). Conservative: any guard in the function suppresses the warning."""
+    for sub in ast.walk(fn):
+        if isinstance(sub, ast.Assert):
+            return True
+        if isinstance(sub, ast.Call):
+            f = sub.func
+            name = f.id if isinstance(f, ast.Name) else (
+                f.attr if isinstance(f, ast.Attribute) else None)
+            if name and ("validat" in name.lower() or name in _VALIDATOR_NAMES):
+                return True
+    return False
+
+
+def detect_unguarded_inputs(source: str) -> List[dict]:
+    """Model inputs (.fit/.predict/... args) in a function with NO validation
+    guard (Phase 4.2, example B static half). Value-level failures like an all-null
+    batch -> predict all-0 can only be caught at runtime; the static gate just
+    ensures a guard EXISTS."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return []
+    out: List[dict] = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        inputs = []
+        for sub in ast.walk(fn):
+            if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr in _MODEL_DATA_METHODS):
+                dv = _first_arg_name(sub)
+                recv = _attr_root(sub.func.value)
+                if dv and recv:
+                    inputs.append((recv, dv, sub.func.attr))
+        if not inputs or _function_has_guard(fn):
+            continue
+        seen = set()
+        for recv, dv, meth in inputs:
+            if (recv, dv) in seen:
+                continue
+            seen.add((recv, dv))
+            out.append({
+                "function": fn.name, "model": recv, "input": dv, "method": meth,
+                "detail": (f"model input '{dv}' fed to '{recv}.{meth}' with no "
+                           f"validation guard in '{fn.name}' — a null/degenerate "
+                           f"batch would fail silently (e.g. predict all-0)"),
+            })
+    return out
+
+
 def scan(repo_root: str, file_map: Dict[str, int]) -> List[dict]:
     """Leakage findings across all .py files in the repo."""
     repo_root = os.path.abspath(repo_root)
@@ -161,7 +217,6 @@ def analyze(conn: sqlite3.Connection, repo_root: str,
             file_map: Dict[str, int]) -> None:
     """Analyzer entry point: emit one `leakage` node per finding so selfcheck can
     gate on it (ERROR)."""
-    import json
     leak_t = store.get_or_create_node_type(conn, "leakage")
     for leak in scan(repo_root, file_map):
         store.add_node(
@@ -169,3 +224,22 @@ def analyze(conn: sqlite3.Connection, repo_root: str,
             qualified_name=f"{leak.get('file', '')}:{leak['function']}:{leak['model']}",
             file_path=leak.get("file"), metadata={**leak, "kind": "data_leakage"},
         )
+
+    # Phase 4.2: unguarded model inputs (emit `unguarded_input` nodes).
+    repo_abs = os.path.abspath(repo_root)
+    unguarded_t = store.get_or_create_node_type(conn, "unguarded_input")
+    for rel_path in file_map:
+        if not rel_path.endswith(".py"):
+            continue
+        try:
+            with open(os.path.join(repo_abs, rel_path), encoding="utf-8") as fh:
+                src = fh.read()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for f in detect_unguarded_inputs(src):
+            store.add_node(
+                conn, unguarded_t, name=f"{f['function']}:{f['input']}",
+                qualified_name=f"{rel_path}:{f['function']}:{f['input']}",
+                file_path=rel_path, metadata={**f, "file": rel_path,
+                                              "kind": "unguarded_model_input"},
+            )

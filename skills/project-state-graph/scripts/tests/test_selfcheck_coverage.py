@@ -20,7 +20,7 @@ def _mk(path, data_nodes):
                            line_end INTEGER, metadata_json TEXT, dtype TEXT);
         CREATE TABLE edge_type (id INTEGER PRIMARY KEY, name TEXT UNIQUE, description TEXT);
         CREATE TABLE edge (id INTEGER PRIMARY KEY, edge_type_id INTEGER, src_node_id INTEGER,
-                           dst_node_id INTEGER, metadata_json TEXT);
+                           dst_node_id INTEGER, metadata_json TEXT, confidence TEXT);
         CREATE TABLE analysis_run (id INTEGER PRIMARY KEY, commit_sha TEXT);
         INSERT INTO node_type (name) VALUES ('data_var');
         INSERT INTO analysis_run (commit_sha) VALUES ('deadbeef');
