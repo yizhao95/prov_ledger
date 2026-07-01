@@ -282,6 +282,62 @@ def _check_dtype_coverage(conn) -> Dict[str, Any]:
             "coverage": cov}
 
 
+def _check_resolution_coverage(conn) -> Dict[str, Any]:
+    """WARNING (Phase 4.3): share of confidence-tagged edges resolved at HIGH vs
+    `inferred` (ambiguous same-name). Uses the Phase-3 `confidence` column to make
+    edge-resolution incompleteness a visible number — a downstream-completeness
+    proxy. Never flips overall ok (a metric, not a hard gate)."""
+    total = conn.execute(
+        "SELECT COUNT(*) FROM edge WHERE confidence IS NOT NULL").fetchone()[0]
+    if total == 0:
+        return {"name": "resolution_coverage", "ok": True, "severity": "warning",
+                "detail": "no confidence-tagged edges yet"}
+    inferred = conn.execute(
+        "SELECT COUNT(*) FROM edge WHERE confidence = 'inferred'").fetchone()[0]
+    high = total - inferred
+    pct = round(100.0 * high / total, 1)
+    return {"name": "resolution_coverage", "ok": inferred == 0, "severity": "warning",
+            "detail": f"edge resolution: {pct}% high-confidence "
+                      f"({high}/{total}); {inferred} ambiguous (inferred)"}
+
+
+def _check_unguarded_model_inputs(conn) -> Dict[str, Any]:
+    """WARNING (Phase 4.2): model inputs fed to .fit/.predict with no validation
+    guard. leakage.analyze emits `unguarded_input` nodes; value-level failures
+    (e.g. an all-null batch -> predict all-0) need a runtime guard."""
+    n = conn.execute(
+        """SELECT COUNT(*) FROM node nd JOIN node_type t ON nd.node_type_id=t.id
+           WHERE t.name='unguarded_input'"""
+    ).fetchone()[0]
+    if n == 0:
+        return {"name": "unguarded_model_inputs", "ok": True, "severity": "warning",
+                "detail": "all model inputs have a validation guard (or none present)"}
+    return {"name": "unguarded_model_inputs", "ok": False, "severity": "warning",
+            "detail": f"{n} model input(s) fed to fit/predict without a validation guard"}
+
+
+def _check_no_data_leakage(conn) -> Dict[str, Any]:
+    """ERROR (Phase 4.1): a model must not fit AND evaluate on the same-source
+    data without a proper split. leakage.analyze emits one `leakage` node per
+    finding; any such node fails this gate."""
+    import json
+    rows = conn.execute(
+        """SELECT n.metadata_json FROM node n JOIN node_type t ON n.node_type_id=t.id
+           WHERE t.name='leakage'"""
+    ).fetchall()
+    if not rows:
+        return {"name": "no_data_leakage", "ok": True, "severity": "error",
+                "detail": "no data-leakage (train/test dual-use) detected"}
+    details = []
+    for (meta,) in rows:
+        info = json.loads(meta) if meta else {}
+        details.append(info.get("detail", "data leakage"))
+    sample = "; ".join(details[:3])
+    more = "" if len(details) <= 3 else f" (+{len(details) - 3} more)"
+    return {"name": "no_data_leakage", "ok": False, "severity": "error",
+            "detail": f"{len(details)} data-leakage finding(s): {sample}{more}"}
+
+
 _CHECKS = [
     _check_node_types_nonempty,
     _check_no_dangling_edges,
@@ -294,6 +350,9 @@ _CHECKS = [
     _check_dtype_consistency_e2e,
     _check_lineage_no_dangling,
     _check_profile_assigned,
+    _check_resolution_coverage,
+    _check_unguarded_model_inputs,
+    _check_no_data_leakage,
 ]
 
 
