@@ -45,6 +45,15 @@ DECLARED_SCHEMA = {
     "ymin": "float", "ymax": "float", "class": "str",
 }
 
+# DEMO_PACE (seconds, default 0) inserts a beat between the demo's acts —
+# used only when recording the GIF; tests and CI run with no pauses.
+_PACE = float(os.environ.get("DEMO_PACE", "0") or 0)
+def _beat(mult: float = 1.0) -> None:
+    if _PACE:
+        import time
+        time.sleep(_PACE * mult)
+
+
 # ── tiny ANSI layer (NO_COLOR-aware) ──────────────────────────────────────────
 _TTY = os.environ.get("NO_COLOR") is None
 def _c(code: str, s: str) -> str:
@@ -143,11 +152,14 @@ def main() -> int:
     print(dim(f"           (eval harness: segment purity {purity_v1:.2f} "
               f"— nobody is looking at this yet)"))
 
+    _beat(2.0)
+
     # ── the catch: Intent vs Actual ──────────────────────────────────────────
     print(bold("\n── verify · declared Intent vs runtime Actual ──"))
     api.start_step(conn, s_verify)
     drifts_v1 = contract_panel(actual_v1)
     assert drifts_v1, "demo invariant: the drifted feed must MISMATCH"
+    _beat(3.0)
 
     # ── the decision loop: record -> revise through the backbone -> re-verify ─
     print(bold("\n── revise · LLM decision, recorded + applied through the backbone ──"))
@@ -202,6 +214,8 @@ def main() -> int:
         reprofile=lambda: holder["actual_v2"],
     )
 
+    _beat(1.5)
+
     # ── v2: verified ─────────────────────────────────────────────────────────
     print(bold("\n── v2 · re-verify against the restored feed ──"))
     drifts_v2 = contract_panel(holder["actual_v2"])
@@ -216,13 +230,15 @@ def main() -> int:
     ledger = conn.execute(
         "SELECT COUNT(*) FROM LedgerEntries WHERE plan_id = ?", (plan_id,)).fetchone()
 
+    _beat(2.0)
     print(bold("\n═══ outcome ═══"))
     print(f"  purity   {red(f'{purity_v1:.2f} (collapsed)')}  →  "
           f"{green(f'{purity_v2:.2f} (verified)')}")
     print(f"  decision recorded: {dec[0]} → {dec[1]} → {dec[2]}"
           f"  ·  ledger entries: {ledger[0]} (anti-pattern remembered)")
-    print(dim(f"\n  replay it in the dashboard (read-only):\n"
-              f"    ORCH_DB={DB_PATH} bash orchestrator-webapp/launch_dashboard.sh\n"))
+    print(dim("\n  replay it in the dashboard (read-only), from the repo root:\n"
+              f"    ORCH_DB=$PWD/{DB_PATH.relative_to(REPO)} "
+              "bash orchestrator-webapp/launch_dashboard.sh\n"))
 
     # ── self-check: the demo must reproduce or fail loudly ───────────────────
     ok = (drifts_v1 and not drifts_v2
