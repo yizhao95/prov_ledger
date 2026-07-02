@@ -30,10 +30,19 @@ def _step_label(index: int) -> str:
 
 
 # ── Tool 1: initialize_plan ────────────────────────────────────────────
+def _step_spec(spec) -> tuple[str, str | None]:
+    """Normalize a step spec — a bare description string, or a dict of
+    {description, step_type?} — to (description, step_type).
+    step_type validity is enforced by db.insert_step."""
+    if isinstance(spec, str):
+        return spec, None
+    return spec["description"], spec.get("step_type")
+
+
 def initialize_plan(
     conn: sqlite3.Connection,
     original_goal: str,
-    initial_steps: list[str],
+    initial_steps: list,
     plan_id_prefix: str = "plan",
     max_revisions: int = 5,
     user_query: str | None = None,
@@ -42,6 +51,10 @@ def initialize_plan(
     """Create a new plan with N top-level steps. Returns {plan_id, step_ids}.
 
     `original_goal` is the agent's one-line summary of intent.
+    `initial_steps` items are bare description strings, or dicts of
+    {description, step_type?} so a type declared at plan time lands at publish
+    (previously it was silently dropped; run-step may still set/override the
+    type at execution time).
     `user_query` is the verbatim prompt the human typed (optional, used as
     history-page title).
     `skills_activated` is an optional list of dicts recording which skills were
@@ -54,11 +67,13 @@ def initialize_plan(
     plan_id = f"{plan_id_prefix}-{_now_compact()}"
     db.insert_plan(conn, plan_id, original_goal, max_revisions=max_revisions, user_query=user_query)
     step_ids = []
-    for i, desc in enumerate(initial_steps):
+    for i, spec in enumerate(initial_steps):
+        desc, step_type = _step_spec(spec)
         sid = f"{plan_id}-{_step_label(i)}"
         db.insert_step(
             conn, sid, plan_id, desc,
             execution_order=i, depth_level=0, parent_step_id=None,
+            step_type=step_type,
         )
         step_ids.append(sid)
 
@@ -111,9 +126,11 @@ def evaluate_and_update_plan(
     deviation_detected: bool,
     target_step_id: str | None = None,
     justification: str | None = None,
-    new_sub_steps: list[str] | None = None,
+    new_sub_steps: list | None = None,
 ) -> dict:
-    """Register a deviation; optionally insert sub-steps. Enforces all 3 circuit breakers."""
+    """Register a deviation; optionally insert sub-steps. Enforces all 3 circuit
+    breakers. Sub-step items are description strings or {description, step_type?}
+    dicts (same shapes as initialize_plan's initial_steps)."""
     if not deviation_detected:
         return {"accepted": True, "no_changes": True}
     if not target_step_id or not justification:
@@ -143,13 +160,15 @@ def evaluate_and_update_plan(
     # BE-C4: sub-step inserts + revision bump + deviation record are one atomic
     # unit — an interruption mid-sequence must not leave the plan half-mutated.
     with db.transaction(conn):
-        for i, desc in enumerate(new_sub_steps or []):
+        for i, spec in enumerate(new_sub_steps or []):
+            desc, step_type = _step_spec(spec)
             sid = f"{target_step_id}.{len(existing_children) + i + 1}"
             db.insert_step(
                 conn, sid, target["plan_id"], desc,
                 execution_order=target["execution_order"] * 100 + i,
                 parent_step_id=target_step_id,
                 depth_level=target["depth_level"] + 1,
+                step_type=step_type,
                 commit=False,
             )
             new_step_ids.append(sid)

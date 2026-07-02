@@ -120,9 +120,12 @@ def main() -> int:
     plan = api.initialize_plan(
         conn,
         "Segment shelf detection events into 6 product-category groups",
-        ["Ingest upstream detection events",
-         "Cluster events into 6 category segments and evaluate purity",
-         "Verify the data contract (Intent vs Actual) and sign off"],
+        [{"description": "Ingest upstream detection events",
+          "step_type": "COMMAND"},
+         {"description": "Cluster events into 6 category segments and evaluate purity",
+          "step_type": "COMMAND"},
+         {"description": "Verify the data contract (Intent vs Actual) and sign off",
+          "step_type": "ANALYSIS"}],
         user_query="Segment the shelf-monitor detection feed into 6 "
                    "product-category groups and report segment purity.",
     )
@@ -190,8 +193,10 @@ def main() -> int:
             conn, deviation_detected=True, target_step_id=s_verify,
             justification=f"data contract MISMATCH ({d['kind']}: `{d['column']}`): "
                           "upstream dropped the class enrichment; restoring it and re-running.",
-            new_sub_steps=["Re-ingest events from the fixed upstream feed",
-                           "Re-run clustering on the restored feed"])
+            new_sub_steps=[{"description": "Re-ingest events from the fixed upstream feed",
+                            "step_type": "COMMAND"},
+                           {"description": "Re-run clustering on the restored feed",
+                            "step_type": "COMMAND"}])
         assert dev["accepted"], dev
         sub_ingest, sub_cluster = dev["new_step_ids"]
         print(f"  deviation recorded (rev {dev['revision_count']}) "
