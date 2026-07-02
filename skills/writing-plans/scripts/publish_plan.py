@@ -149,11 +149,22 @@ def _validate(data: dict) -> None:
         _die("'max_revisions' must be a positive integer (default: 5)")
 
 
-def _step_descriptions(steps: list) -> list[str]:
-    """Normalize bare-string and {description: ...} step shapes to a list of strings."""
+def _normalize_steps(steps: list) -> list:
+    """Normalize plan-input step shapes for api.initialize_plan.
+
+    Bare strings pass through; {description, type?} objects become
+    {description, step_type?} so a type declared in the plan-input actually
+    lands on the Step row (it used to be silently dropped here — every step
+    rendered 'untyped' on the dashboard until run-step set it at execution
+    time)."""
     out = []
     for s in steps:
-        out.append(s if isinstance(s, str) else s["description"])
+        if isinstance(s, str):
+            out.append(s)
+        elif s.get("type"):
+            out.append({"description": s["description"], "step_type": s["type"]})
+        else:
+            out.append(s["description"])
     return out
 
 
@@ -208,7 +219,7 @@ def main() -> None:
     result = api.initialize_plan(
         conn,
         original_goal=data["goal"],
-        initial_steps=_step_descriptions(data["steps"]),
+        initial_steps=_normalize_steps(data["steps"]),
         plan_id_prefix=data["prefix"],
         max_revisions=data.get("max_revisions", 5),
         user_query=data.get("user_query"),

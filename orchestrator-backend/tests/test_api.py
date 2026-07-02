@@ -24,6 +24,37 @@ def test_initialize_plan_rejects_empty_steps(conn):
         api.initialize_plan(conn, "g", [])
 
 
+def test_initialize_plan_accepts_typed_steps(conn):
+    """A declared step_type lands on the Step row at publish time (it used to
+    be silently dropped — everything rendered 'untyped' on the dashboard)."""
+    r = api.initialize_plan(conn, "g", [
+        {"description": "read the code", "step_type": "ANALYSIS"},
+        {"description": "implement it", "step_type": "CODE"},
+        "run the tests",  # bare string still works, stays untyped
+    ])
+    steps = db.get_steps(conn, r["plan_id"])
+    assert [s["step_type"] for s in steps] == ["ANALYSIS", "CODE", None]
+
+
+def test_initialize_plan_rejects_invalid_step_type(conn):
+    with pytest.raises(ValueError):
+        api.initialize_plan(conn, "g", [{"description": "x", "step_type": "BOGUS"}])
+
+
+def test_deviation_sub_steps_accept_types(conn):
+    r = api.initialize_plan(conn, "g", ["a"])
+    sid = r["step_ids"][0]
+    api.start_step(conn, sid)
+    out = api.evaluate_and_update_plan(
+        conn, deviation_detected=True, target_step_id=sid,
+        justification="need typed recovery sub-steps",
+        new_sub_steps=[{"description": "re-run it", "step_type": "COMMAND"},
+                       "and a bare one"])
+    assert out["accepted"]
+    subs = [db.get_step(conn, s) for s in out["new_step_ids"]]
+    assert [s["step_type"] for s in subs] == ["COMMAND", None]
+
+
 def test_start_complete_step_happy_path(conn):
     r = api.initialize_plan(conn, "g", ["a", "b"])
     sid = r["step_ids"][0]

@@ -87,6 +87,23 @@ def test_valid_json_publishes(tmp_path: Path, tmp_db: Path, scripts_dir: Path):
     conn.close()
 
 
+def test_declared_step_types_persist(tmp_path: Path, tmp_db: Path, scripts_dir: Path):
+    """A 'type' declared on a step object lands on the Step row — it used to be
+    silently dropped by publish (dashboard showed every step 'untyped')."""
+    input_path = tmp_path / "input.json"
+    input_path.write_text(json.dumps(_valid_input_dict()))
+    result = _run_publish(scripts_dir, input_path, tmp_db)
+    assert result.returncode == 0, f"stderr: {result.stderr!r}"
+    payload = json.loads(result.stdout)
+    conn = sqlite3.connect(str(tmp_db))
+    types = [r[0] for r in conn.execute(
+        "SELECT step_type FROM Steps WHERE plan_id = ? ORDER BY execution_order",
+        (payload["plan_id"],))]
+    conn.close()
+    # the 3 declared steps + the auto-appended REVIEW marker step (untyped)
+    assert types[:3] == ["CODE", "CODE", "COMMAND"]
+
+
 def test_valid_yaml_publishes(tmp_path: Path, tmp_db: Path, scripts_dir: Path):
     """YAML input with same fields publishes equivalently."""
     input_path = tmp_path / "input.yaml"
