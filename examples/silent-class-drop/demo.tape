@@ -26,4 +26,4 @@ Show
 
 Type "python run_demo.py"
 Enter
-Sleep 20
+Sleep 26

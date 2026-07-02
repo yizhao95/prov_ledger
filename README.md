@@ -9,7 +9,7 @@ checks whether the *data* actually kept its promises.** It gives a data
 scientist's coding agent a plan-to-verified-change audit trail, and treats your
 data schema as a contract instead of an assumption.
 
-![The dashboard watching a green pipeline get caught wrong: steps complete, then the verify step fails red with the contract MISMATCH reason, the drift → decision trail appears, the plan revises itself and closes — with the failure still visible](docs/media/silent-class-drop-dashboard.gif)
+![A 5-step plan runs live on the dashboard: published PENDING, steps execute (explore, contract, ingest, cluster — green), then the verify step fails red with the contract MISMATCH reason and its log, the drift → decision trail appears in the Data panel, deviation sub-steps recover, and the plan closes with the failure still visible](docs/media/silent-class-drop-dashboard.gif)
 
 *(Prefer the terminal? The same arc as a CLI recording:
 [silent-class-drop.gif](docs/media/silent-class-drop.gif).)*
@@ -31,6 +31,10 @@ Every catch and every LLM decision about it is **recorded** — to a decision
 ledger that gets fuzzy-matched into the next plan, so the same mistake is not
 repeated.
 
+| Live task tracking (plan + steps + data panel) | Pipeline dataflow, understood from the code |
+|---|---|
+| ![dashboard tracking the demo plan: typed step tree with deviation sub-steps, revision history, and the data panel showing the drift → decision trail](docs/media/dashboard-task.png) | ![dataflow + dtype slice of the ingest→cluster pipeline, rendered from the project-state-graph (dashboard view WIP)](docs/media/dataflow.png) |
+
 ---
 
 ## 🕐 Try it in 2 minutes
@@ -51,10 +55,6 @@ success → **MISMATCH** → recorded decision → plan revision through the bac
 ORCH_DB=$PWD/examples/silent-class-drop/demo-orchestrator.db \
   bash orchestrator-webapp/launch_dashboard.sh   # → http://127.0.0.1:8765
 ```
-
-| Live task tracking (plan + steps + data panel) | Pipeline dataflow, understood from the code |
-|---|---|
-| ![dashboard tracking the demo plan: step tree with deviation sub-steps, revision history, and the data panel showing the drift → decision trail](docs/media/dashboard-task.png) | ![dataflow + dtype slice of the ingest→cluster pipeline, rendered from the project-state-graph (dashboard view WIP)](docs/media/dataflow.png) |
 
 See [`examples/silent-class-drop/`](examples/silent-class-drop/) for how the
 demo works and how to regenerate the media.

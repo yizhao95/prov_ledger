@@ -4,3 +4,4 @@ upstream_drifted.json
 ground_truth.csv
 demo-orchestrator.db
 .venv/
+declared_schema.json
