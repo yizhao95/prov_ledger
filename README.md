@@ -9,7 +9,10 @@ checks whether the *data* actually kept its promises.** It gives a data
 scientist's coding agent a plan-to-verified-change audit trail, and treats your
 data schema as a contract instead of an assumption.
 
-![A green pipeline caught wrong: exit 0, COMPLETED — then the data contract flags the silently dropped column, the plan revises itself, and the rerun verifies](docs/media/silent-class-drop.gif)
+![The dashboard watching a green pipeline get caught wrong: steps complete, then the verify step fails red with the contract MISMATCH reason, the drift → decision trail appears, the plan revises itself and closes — with the failure still visible](docs/media/silent-class-drop-dashboard.gif)
+
+*(Prefer the terminal? The same arc as a CLI recording:
+[silent-class-drop.gif](docs/media/silent-class-drop.gif).)*
 
 **What it catches** — each of these is verified by code in this repo today:
 

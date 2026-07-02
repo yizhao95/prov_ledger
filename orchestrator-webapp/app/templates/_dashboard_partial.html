@@ -294,6 +294,12 @@
         </summary>
 
         <div class="border-t border-gray-200 bg-gray-50 px-4 py-3 space-y-3">
+          {# BE-D3 surfaced: WHY the step failed, without digging through the log. #}
+          {% if s.status == 'FAILED' and s.failure_reason %}
+            <div class="text-sm text-red-800 bg-red-50 border border-red-300 rounded px-3 py-2">
+              ⚠️ {{ s.failure_reason }}
+            </div>
+          {% endif %}
           <div class="text-xs text-brand-gray flex flex-wrap gap-x-4">
             <span>step_id: <code class="font-mono">{{ s.step_id }}</code></span>
             {% if s.started_at %}<span>Started: {{ s.started_at }}</span>{% endif %}

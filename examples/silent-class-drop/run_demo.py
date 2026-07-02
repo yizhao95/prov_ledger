@@ -159,6 +159,13 @@ def main() -> int:
     api.start_step(conn, s_verify)
     drifts_v1 = contract_panel(actual_v1)
     assert drifts_v1, "demo invariant: the drifted feed must MISMATCH"
+    # The failure is FIRST-CLASS: the verify step FAILS with the contract
+    # verdict as its reason (red on the dashboard, never hidden). Recovery
+    # happens through sub-steps under it — the state machine's designed path.
+    api.fail_step(conn, s_verify,
+                  reason="data contract MISMATCH (column_dropped: `class`) — "
+                         "upstream feed is missing a required enrichment column")
+    print(f"  step 3/3 verify   {red('FAILED')}  (contract MISMATCH recorded)")
     _beat(3.0)
 
     # ── the decision loop: record -> revise through the backbone -> re-verify ─
@@ -219,8 +226,10 @@ def main() -> int:
     # ── v2: verified ─────────────────────────────────────────────────────────
     print(bold("\n── v2 · re-verify against the restored feed ──"))
     drifts_v2 = contract_panel(holder["actual_v2"])
-    api.append_log(conn, s_verify, "contract re-verified after upstream fix")
-    api.complete_step(conn, s_verify)
+    # s_verify stays FAILED (terminal); its completed sub-steps are the
+    # recovery, which is exactly how the plan-level rollup reads it.
+    api.append_log(conn, s_verify, "contract re-verified after upstream fix "
+                                   "(recovered via sub-steps)")
     api.complete_plan(conn, plan_id)
     purity_v2 = holder["purity_v2"]
 
@@ -248,6 +257,9 @@ def main() -> int:
     plan_row = conn.execute("SELECT status FROM Plans WHERE plan_id = ?",
                             (plan_id,)).fetchone()
     ok = ok and plan_row[0] == "COMPLETED"
+    vrow = conn.execute("SELECT status, failure_reason FROM Steps WHERE step_id = ?",
+                        (s_verify,)).fetchone()
+    ok = ok and vrow[0] == "FAILED" and "MISMATCH" in (vrow[1] or "")
     conn.close()
     print(green("  SELF-CHECK OK") if ok else red("  SELF-CHECK FAILED"))
     return 0 if ok else 1

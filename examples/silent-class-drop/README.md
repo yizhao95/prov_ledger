@@ -26,7 +26,9 @@ The demo runs the whole arc against the real orchestrator backbone:
    steps COMPLETED. The false success.
 2. **Catch** — the verify step compares the declared data **Intent**
    (`box_id, xmin, xmax, ymin, ymax, class`) against the runtime **Actual**
-   profile → **MISMATCH**, `class` is missing.
+   profile → **MISMATCH**, `class` is missing. The verify step **FAILS** with
+   the verdict as its `failure_reason` — on the dashboard that's a red step
+   card with the reason banner, never hidden, even after the plan recovers.
 3. **Revise** — the decision loop records the LLM decision (and the
    anti-pattern in the ledger, so it's never repeated), then revises the plan
    through the backbone: a recorded deviation inserts sub-steps. Nothing ever
@@ -78,8 +80,17 @@ real-world-derived. All numbers above are deterministic (seed 42, pinned deps).
 
 ## Regenerating the media
 
-`docs/media/silent-class-drop.gif` (needs [vhs](https://github.com/charmbracelet/vhs),
-ttyd and ffmpeg on PATH; ~20s, <1MB):
+`docs/media/silent-class-drop-dashboard.gif` — the README hero: the demo as
+the **live dashboard** sees it (green steps → verify step FAILS red with the
+MISMATCH reason → drift → decision trail → recovered, failure kept visible).
+Needs playwright (`python -m playwright install chromium`) + ffmpeg:
+
+```bash
+python examples/silent-class-drop/record_dashboard.py   # from the repo root
+```
+
+`docs/media/silent-class-drop.gif` — the same arc as a terminal recording
+(needs [vhs](https://github.com/charmbracelet/vhs), ttyd and ffmpeg on PATH):
 
 ```bash
 vhs examples/silent-class-drop/demo.tape        # from the repo root
