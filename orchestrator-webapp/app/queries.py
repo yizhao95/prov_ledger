@@ -19,6 +19,16 @@ DEFAULT_DB_PATH = Path(
 )
 
 
+def db_path_display() -> str:
+    """The DB path the dashboard is actually reading (footer), ~-abbreviated.
+
+    Was a hardcoded string before, which lied whenever ORCH_DB pointed
+    somewhere else (e.g. the silent-class-drop demo DB)."""
+    p = str(DEFAULT_DB_PATH)
+    home = str(Path.home())
+    return "~" + p[len(home):] if p.startswith(home) else p
+
+
 def open_db_readonly(path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     """Open SQLite read-only with WAL enabled (non-blocking concurrent reads).
 

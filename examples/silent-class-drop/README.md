@@ -75,3 +75,30 @@ plus the drift → decision → outcome trail.
 Data is **synthetic and illustrative**; the failure mechanism it reproduces —
 an upstream column silently disappearing while everything stays green — is
 real-world-derived. All numbers above are deterministic (seed 42, pinned deps).
+
+## Regenerating the media
+
+`docs/media/silent-class-drop.gif` (needs [vhs](https://github.com/charmbracelet/vhs),
+ttyd and ffmpeg on PATH; ~20s, <1MB):
+
+```bash
+vhs examples/silent-class-drop/demo.tape        # from the repo root
+```
+
+`docs/media/dashboard-task.png` — run the demo, launch the dashboard against
+`demo-orchestrator.db` (command above), open the plan view, expand the
+📊 Data + Revision history panels, screenshot at 1440px wide.
+
+`docs/media/dataflow.png` — build the project-state-graph over the two
+business files and render the dataflow slice:
+
+```bash
+mkdir -p /tmp/scd-pipeline
+cp examples/silent-class-drop/{gen_upstream.py,cluster_and_eval.py} /tmp/scd-pipeline/
+cd skills/project-state-graph/scripts
+python -m analyzer /tmp/scd-pipeline --project silent-class-drop --db-path /tmp/scd.db
+python viz_slices.py /tmp/scd.db /tmp/scd-slices.html --title "silent-class-drop · ingest → cluster"
+# open /tmp/scd-slices.html, ① Dataflow + datatype tab, screenshot
+```
+The image is labeled "dashboard view WIP" because the dataflow view is rendered
+from the project-state-graph, not yet embedded in the dashboard.

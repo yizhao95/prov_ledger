@@ -31,6 +31,7 @@ TEMPLATES.env.globals["count_log_entries"] = queries.count_log_entries
 TEMPLATES.env.globals["short_title"] = queries.short_title
 TEMPLATES.env.globals["relative_time"] = queries.relative_time
 TEMPLATES.env.globals["outcome_badge"] = queries.outcome_badge
+TEMPLATES.env.globals["db_path_display"] = queries.db_path_display
 
 app = FastAPI(title="provLedger Dashboard", version="0.1.0")
 
