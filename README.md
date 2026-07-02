@@ -1,12 +1,78 @@
 # 🧾 provLedger
 
-**prov**enance **+** **Ledger** — a memory system that makes a data scientist's coding
-agent reason with engineering discipline: it holds a complete, auditable chain from
-**plan → verified change**, and treats **upstream data as a first-class contract**
-rather than an assumption.
+![tests](https://img.shields.io/badge/tests-556%20passing-brightgreen)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
 
-> *"My coding agent should, in every situation, hold a complete reasoning chain —
-> and never repeat a past mistake."*
+**Your pipeline exited 0 and every step went green — provLedger is the layer that
+checks whether the *data* actually kept its promises.** It gives a data
+scientist's coding agent a plan-to-verified-change audit trail, and treats your
+data schema as a contract instead of an assumption.
+
+![A green pipeline caught wrong: exit 0, COMPLETED — then the data contract flags the silently dropped column, the plan revises itself, and the rerun verifies](docs/media/silent-class-drop.gif)
+
+**What it catches** — each of these is verified by code in this repo today:
+
+- **A silently dropped or retyped upstream column.** The job still exits 0;
+  the declared Intent vs runtime Actual check flags `column_dropped` /
+  `dtype_changed` before the wrong numbers ship. That's the GIF above —
+  reproduce it with `make demo` (segment purity 0.31 vs 0.91).
+- **Data leakage.** A model fit and evaluated on data with the same lineage
+  root, without a proper train/test split, is flagged as an ERROR by the
+  state-graph's leakage gate.
+- **Degenerate outputs.** A label column collapsing to a single value
+  (`cardinality_collapse` — the "model predicts all zeros" class) or a null
+  fraction spiking are caught by runtime profiling + drift detection.
+
+Every catch and every LLM decision about it is **recorded** — to a decision
+ledger that gets fuzzy-matched into the next plan, so the same mistake is not
+repeated.
+
+---
+
+## 🕐 Try it in 2 minutes
+
+From a fresh clone, no services, no external data:
+
+```bash
+git clone https://github.com/yizhao95/prov_ledger.git
+cd prov_ledger
+make demo
+```
+
+This runs the full arc offline and deterministically (seed 42): v1 false
+success → **MISMATCH** → recorded decision → plan revision through the backbone
+→ v2 **VERIFIED**. Then replay it in the read-only dashboard:
+
+```bash
+ORCH_DB=$PWD/examples/silent-class-drop/demo-orchestrator.db \
+  bash orchestrator-webapp/launch_dashboard.sh   # → http://127.0.0.1:8765
+```
+
+| Live task tracking (plan + steps + data panel) | Pipeline dataflow, understood from the code |
+|---|---|
+| ![dashboard tracking the demo plan: step tree with deviation sub-steps, revision history, and the data panel showing the drift → decision trail](docs/media/dashboard-task.png) | ![dataflow + dtype slice of the ingest→cluster pipeline, rendered from the project-state-graph (dashboard view WIP)](docs/media/dataflow.png) |
+
+See [`examples/silent-class-drop/`](examples/silent-class-drop/) for how the
+demo works and how to regenerate the media.
+
+---
+
+## 📜 Your data schema is a contract
+
+This is the differentiated idea. Generic agent frameworks verify that *code*
+ran; provLedger also verifies that *data* is what the plan said it would be:
+
+- A step declares a data **Intent** (required columns + dtypes). The runtime
+  **Actual** is profiled from the real records (`data_profile`), and drift
+  between them — dropped columns, dtype flips, null spikes, cardinality
+  collapse — is detected mechanically, not by asking the LLM to notice.
+- A DataFrame-producing function's "signature" is its column-set + per-column
+  dtypes, held as typed `data_var` nodes with `produces`/`consumes` edges in a
+  code/data graph — so *"changed output type → who breaks?"* is one lookup.
+- Every drift decision the LLM makes (adapt downstream / fix upstream / halt)
+  is recorded in `llm_decisions` and auto-synced to the ledger; failures become
+  anti-patterns that surface at the next plan.
 
 ---
 
@@ -14,6 +80,9 @@ rather than an assumption.
 
 A data scientist's agent that thinks less like a careless coder and more like a
 disciplined engineer — **without losing the data-science instincts.**
+
+> *"My coding agent should, in every situation, hold a complete reasoning chain —
+> and never repeat a past mistake."*
 
 - **Half 1 — Complete reasoning chain in scope.** Before writing code, the agent
   should know which modules / functions / variables / DataFrame columns a change
@@ -29,6 +98,23 @@ disciplined engineer — **without losing the data-science instincts.**
 
 ## 1 · Two Pillars, One Database Discipline
 
+```mermaid
+flowchart LR
+    subgraph A[Pillar A · Orchestrator]
+        WP[writing-plans] --> EX[executing-plans]
+    end
+    subgraph B[Pillar B · Project State Graph]
+        AN[analyzers] --> G[(state-graph.db)]
+        G --> RV[update-project-state-graph<br/>contract gates]
+    end
+    DB[(orchestrator.db<br/>plans · steps · data_profile<br/>llm_decisions · ledger)]
+    WP -- publish plan --> DB
+    EX -- log + profile --> DB
+    G -- impact / review --> WP
+    RV -- close gate --> EX
+    DASH[read-only dashboard] -.reads.-> DB
+```
+
 Two independently useful subsystems that share **one philosophy** and **one SQLite store**.
 
 | | Pillar | Records |
@@ -40,12 +126,15 @@ Two independently useful subsystems that share **one philosophy** and **one SQLi
 **Pillar A — Orchestrator.** A SQLite-backed plan/step state machine driven by two
 iron-law skills (`writing-plans`, `executing-plans`). The LLM composes a plan and
 calls thin shell wrappers; a Python + SQL backbone validates every transition,
-enforces circuit breakers, and captures logs.
+enforces circuit breakers, and captures logs. The same backbone carries the
+data-first runtime loop: `profiler` (runtime Actual) → `drift` (vs the declared
+Intent) → `data_loop` (decision → fix through the backbone → re-verify).
 
 **Pillar B — Project State Graph.** A two-layer map of a repo: a deep SQLite
-node/edge graph built by analyzers, plus a human-readable `ARCHITECTURE.md`. A
-companion reviewer (`update-project-state-graph`) checks each change against the
-graph at close time — code contracts **and** data contracts.
+node/edge graph built by analyzers (Python via AST; JS / HTML / CSS structures
+via tree-sitter), plus a human-readable `ARCHITECTURE.md`. A companion reviewer
+(`update-project-state-graph`) checks each change against the graph at close
+time — code contracts **and** data contracts.
 
 🔗 **How they connect:** the graph is read at two moments — once at **planning time**
 (predict impact, including upstream-data assumptions) and once at **review time**
@@ -62,11 +151,16 @@ into a Python + SQL backbone and leave only genuine decisions to the LLM.
 
 | Layer | Owns |
 |---|---|
-| **LLM decides** | What to do next · which symbols / columns a feature touches · how to write the code · whether a deviation is needed |
-| **Backbone records / enforces** | State transitions · circuit breakers · log capture · dependency edges from AST · code & data contract gates · plan closure |
+| **LLM decides** | What to do next · which symbols / columns a feature touches · how to write the code · whether a deviation is needed · what to do about a data drift |
+| **Backbone records / enforces** | State transitions · circuit breakers · log capture · dependency edges from AST · code & data contract gates · runtime data profiling + drift detection · plan closure |
 
 **The rule:** *every invariant the backbone enforces is one the LLM can never
 accidentally violate.* The LLM may be creative; the backbone may not.
+
+There is exactly **one write path**: humans give natural-language feedback to the
+agent, the agent's changes go through `writing-plans` → `executing-plans` with the
+same tests, circuit breakers, and contract gates every time. Nothing — including
+the dashboard — writes to the database directly.
 
 🔬 **Why this is the data-science-shaped version:** a software engineer's agent must
 not break the call graph. A data scientist's agent must not break the call graph
@@ -113,14 +207,19 @@ philosophy. This repository builds on that foundation.
   breaks?"* into a single lookup.
 - **DataFrame-aware contracts** — a DataFrame-producing function's "signature" is its
   column-set + per-column dtypes; dropped / renamed / retyped columns are caught.
+- **Runtime data profiling + drift detection** (`profiler` / `drift` / `data_loop`)
+  — the declared Intent is checked against the profiled Actual at run time;
+  drifts drive a recorded decision loop (see the demo).
+- **Silent-failure gates in the graph** — data-leakage detection (same-lineage
+  fit + eval without a proper split → ERROR) and unguarded-model-input warnings.
 - **Plan-time impact pre-flight** (`impact_preflight.py`) — forward impact analysis
   (declared targets, upstream assumptions, capability boundary) attached to each plan.
-- **A decision-memory ledger** (`ledger_store` / `ledger_cli`) — past decisions and
-  anti-patterns surfaced by fuzzy match at plan time as advisory reminders (never a
-  hard gate).
+- **A decision-memory ledger** (`ledger_store` / `ledger_cli` / `llm_decisions`) —
+  past decisions and anti-patterns surfaced by fuzzy match at plan time as advisory
+  reminders (never a hard gate).
 - **A live read-only dashboard** (`orchestrator-webapp/`) — a FastAPI + HTMX
-  dashboard that reads the same SQLite DB read-only; the orchestrator works correctly
-  even if the dashboard is down.
+  dashboard that reads the same SQLite DB read-only (plans, steps, revision
+  history, and the data panel: profile snapshots + the drift → decision trail).
 - **`dtype` / schema coverage as a visible metric** — every data contract gate is
   exactly as strong as dtype coverage, so the unknown share is surfaced as a number.
 
@@ -129,9 +228,10 @@ philosophy. This repository builds on that foundation.
 ## 4 · Strengths
 
 - **Battle-tested invariants** — circuit breakers, immutable `COMPLETED` steps, and
-  mandatory log capture, hardened against real incidents.
+  mandatory log capture, hardened against real incidents. Used internally by
+  15+ engineers across teams.
 - **Data as first-class citizens** — typed `data_var` nodes with `produces`/`consumes`
-  edges.
+  edges, runtime profiles, and drift-driven decision records.
 - **Cards, not traversals** — per-callable `consistency_card`s precomputed purely from
   edges, so the LLM does one retrieval instead of a graph walk.
 - **Report, don't auto-fix** — the reviewer detects breakage deterministically but
@@ -140,6 +240,17 @@ philosophy. This repository builds on that foundation.
   are added with no migration.
 - **Read-only observability** — the dashboard reads the same DB read-only; the
   orchestrator never depends on it.
+
+---
+
+## 👥 Who this is for
+
+**For:** data scientists and ML engineers who run coding agents against real
+pipelines, where "the script exited 0" does not mean "the numbers are right".
+
+**Not for:** general-purpose agent orchestration. If your agent never touches a
+dataset, a schema, or a train/test split, a lighter framework will serve you
+better.
 
 ---
 
@@ -152,14 +263,18 @@ prov_ledger/
 ├── commands/                  # /provledger-dashboard slash command
 ├── scripts/                   # bootstrap.sh, pl-python, smoke_install.sh
 ├── requirements.txt           # consolidated dependency set
+├── Makefile                   # `make demo` — the silent-class-drop walkthrough
+├── examples/
+│   └── silent-class-drop/     # offline, deterministic demo (see its README)
 ├── orchestrator-backend/      # Pillar A — SQLite plan/step state machine (stdlib only)
-│   ├── orchestrator/          # api.py, db.py, state_machine.py, circuit_breakers.py, telemetry.py
-│   ├── migrations/            # 001..011 SQL migrations
+│   ├── orchestrator/          # api.py, db.py, state_machine.py, circuit_breakers.py,
+│   │                          # profiler.py, drift.py, data_loop.py, telemetry.py
+│   ├── migrations/            # 001..013 SQL migrations
 │   └── tests/
 ├── orchestrator-webapp/       # Live read-only provLedger Dashboard (FastAPI + HTMX)
 │   └── app/                   # main.py, queries.py, templates/
 ├── orchestrator-cli.py        # CLI entry point
-├── docs/                      # full architecture / reference / guides / development docs
+├── docs/                      # media + full architecture / reference / guides docs
 └── skills/
     ├── writing-plans/             # ← evolved from Superpowers
     ├── executing-plans/           # ← evolved from Superpowers
@@ -185,7 +300,7 @@ under `docs/` breaks down every subsystem in depth:
 | Area | Path | Covers |
 |---|---|---|
 | **Architecture** | `docs/architecture/` | the two pillars, backbone × LLM layer, data flow, dashboard, skills layer |
-| **Reference** | `docs/reference/` | data model (migrations 001–011), state machine, API, CLI, graph schema, scripts |
+| **Reference** | `docs/reference/` | data model (migrations 001–013), state machine, API, CLI, graph schema, scripts |
 | **Guides** | `docs/guides/` | installation, end-to-end task lifecycle, dashboard, ledger |
 | **Development** | `docs/development/` | testing, verification flows, migrations, contributing |
 
@@ -251,6 +366,13 @@ orchestrator DB with the `ORCH_DB` environment variable (defaults to
 `~/skill-workspace/orchestrator.db`).
 
 ---
+
+## 🤝 Contributing
+
+Issues and PRs welcome. Good first contributions: run `make demo` and report
+anything that doesn't reproduce; add a drift kind to `orchestrator/drift.py`
+(with a test); extend the demo with a second silent-failure scenario; improve
+dtype coverage of an analyzer in `skills/project-state-graph/`.
 
 ## 📫 Contact
 
