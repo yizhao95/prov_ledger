@@ -36,6 +36,22 @@ def _seed_db(path: Path) -> dict:
         conn, deviation_detected=True, target_step_id=s2,
         justification="switch to rolling-window split to avoid temporal leakage",
         new_sub_steps=["use TimeSeriesSplit"])
+    # Phase 5.2: data panel rows — written through the backbone (odb), never by
+    # the dashboard. One profile snapshot + one drift decision.
+    odb.insert_data_profile(conn, [
+        {"plan_id": r["plan_id"], "step_id": s0, "dataset": "events",
+         "column_name": "label", "dtype": "str", "null_frac": 0.0,
+         "row_count": 100, "distinct_count": 1},
+        {"plan_id": r["plan_id"], "step_id": s0, "dataset": "events",
+         "column_name": "amount", "dtype": "float", "null_frac": 0.5,
+         "row_count": 100, "distinct_count": 87},
+    ])
+    odb.insert_llm_decision(
+        conn, decision="halt the run: label dtype flipped int->str upstream",
+        plan_id=r["plan_id"], step_id=s0, dataset="events", column="label",
+        observed_before="int", observed_after="str", drift_kind="dtype_changed",
+        rationale="downstream model would silently predict a constant class",
+        action="halt", outcome="halted", failure=True)
     conn.close()  # s2 stays IN_PROGRESS -> drives the "Running now" banner (UX2)
     return r
 
@@ -104,6 +120,83 @@ def test_relative_time_helper():
     assert queries.relative_time(past).endswith("ago")
     assert queries.relative_time(None) == "—"
     assert queries.relative_time("not-a-date") == "not-a-date"
+
+
+def test_data_panel_renders(client):
+    # Phase 5.2: profile snapshot + drift-decision trail are rendered read-only.
+    r = client.get("/api/dashboard")
+    assert r.status_code == 200
+    assert "📊 Data" in r.text
+    # profile table: dataset, columns, dtype
+    assert "events" in r.text
+    assert "label" in r.text and "amount" in r.text
+    # decision trail: drift kind + decision + failure surfaced above the fold
+    assert "dtype_changed" in r.text
+    assert "label dtype flipped int-&gt;str upstream" in r.text
+    assert "1 unresolved" in r.text  # halted counts as unresolved -> panel auto-opens
+
+
+def test_data_panel_shows_latest_snapshot_only(client, tmp_path):
+    # A re-profile (later observed_at) replaces the earlier snapshot per dataset.
+    conn = odb.open_db(client._db)
+    conn.execute(
+        "INSERT INTO data_profile (plan_id, step_id, dataset, column_name, dtype,"
+        " null_frac, row_count, distinct_count, observed_at)"
+        " VALUES (?, ?, 'events', 'label', 'int', 0.0, 100, 2,"
+        " strftime('%Y-%m-%d %H:%M:%S', 'now', '+1 hour'))",
+        (client._seeded["plan_id"], client._seeded["step_ids"][2]),
+    )
+    conn.commit()
+    conn.close()
+    from app import queries
+    ro = queries.open_db_readonly(client._db)
+    profiles = queries.get_data_profiles(ro, client._seeded["plan_id"])
+    ro.close()
+    assert len(profiles) == 1
+    p = profiles[0]
+    assert p["snapshot_count"] == 2
+    cols = {c["column_name"]: c for c in p["columns"]}
+    assert set(cols) == {"label"}          # 'amount' was dropped in the re-profile
+    assert cols["label"]["dtype"] == "int"  # latest snapshot wins
+
+
+def test_data_panel_degrades_on_old_db(tmp_path, monkeypatch):
+    # A DB predating migrations 012/013 renders fine with no data panel.
+    db = tmp_path / "old.db"
+    seeded = _seed_db(db)
+    conn = sqlite3.connect(db)
+    conn.execute("DROP TABLE data_profile")
+    conn.execute("DROP TABLE llm_decisions")
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("ORCH_DB", str(db))
+    from app import queries, main
+    importlib.reload(queries)
+    importlib.reload(main)
+    from fastapi.testclient import TestClient
+    c = TestClient(main.app)
+    r = c.get("/api/dashboard")
+    assert r.status_code == 200
+    assert "📊 Data" not in r.text
+    _ = seeded
+
+
+def test_etag_changes_on_new_decision(client):
+    # The 2s poll must not 304 through a freshly-recorded data decision.
+    from app import queries
+    ro = queries.open_db_readonly(client._db)
+    before = queries.compute_etag(ro)
+    ro.close()
+    conn = odb.open_db(client._db)
+    odb.insert_llm_decision(
+        conn, decision="adapt downstream cast", plan_id=client._seeded["plan_id"],
+        dataset="events", column="label", drift_kind="dtype_changed",
+        action="adapt_downstream", outcome="resolved")
+    conn.close()
+    ro = queries.open_db_readonly(client._db)
+    after = queries.compute_etag(ro)
+    ro.close()
+    assert before != after
 
 
 def test_db_is_opened_read_only(client):

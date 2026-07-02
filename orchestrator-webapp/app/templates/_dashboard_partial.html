@@ -149,6 +149,98 @@
   </details>
   {% endif %}
 
+  {# Phase 5.2: read-only data panel — runtime profile snapshots (data_profile,
+     migration 012) + the LLM drift-decision trail (llm_decisions, migration 013).
+     The dashboard only READS these; every row was written by the backbone flow.
+     Auto-open when any decision is unresolved/halted — data failures are never
+     hidden (same philosophy as DASH-UX3 for failed steps). #}
+  {% if data_profiles or data_decisions %}
+  {% set data_alert = data_decisions | selectattr('outcome', 'in', ['unresolved', 'halted']) | list %}
+  <details class="bg-white rounded-lg shadow border border-cyan-300 mb-4"
+           {% if data_alert %}open{% endif %}>
+    <summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-cyan-700 hover:bg-cyan-50 rounded-lg select-none">
+      📊 Data
+      <span class="text-xs text-brand-gray font-normal ml-2">
+        ({{ data_profiles|length }} dataset{{ '' if data_profiles|length == 1 else 's' }} profiled ·
+         {{ data_decisions|length }} decision{{ '' if data_decisions|length == 1 else 's' }})
+      </span>
+      {% if data_alert %}
+        <span class="text-xs font-bold text-white bg-brand-red rounded px-2 py-0.5 ml-2">
+          {{ data_alert|length }} unresolved
+        </span>
+      {% endif %}
+    </summary>
+    <div class="px-5 pb-4 space-y-4">
+
+      {% if data_decisions %}
+      <div>
+        <div class="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-2">
+          Drift → decision trail
+        </div>
+        <div class="space-y-2">
+          {% for d in data_decisions %}
+          {% set ob = outcome_badge(d.outcome) %}
+          <div class="text-sm border-l-2 {% if d.outcome in ('unresolved', 'halted') %}border-red-400{% else %}border-cyan-300{% endif %} pl-3">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-xs px-2 py-0.5 rounded {{ ob[1] }}">{{ ob[0] }} {{ d.outcome or '—' }}</span>
+              {% if d.drift_kind %}
+                <span class="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-mono">{{ d.drift_kind }}</span>
+              {% endif %}
+              <span class="font-mono text-xs text-gray-700">{{ d.dataset or '?' }}{% if d.column_name %}.{{ d.column_name }}{% endif %}</span>
+              {% if d.observed_before or d.observed_after %}
+                <span class="font-mono text-xs text-brand-gray">{{ d.observed_before or '∅' }} → {{ d.observed_after or '∅' }}</span>
+              {% endif %}
+              <span class="text-[11px] text-brand-gray ml-auto">{{ relative_time(d.created_at) }}</span>
+            </div>
+            <div class="text-gray-800 mt-1">{{ d.decision }}{% if d.action %} <span class="text-xs text-brand-gray">(action: {{ d.action }})</span>{% endif %}</div>
+            {% if d.rationale %}
+              <div class="text-xs text-brand-gray mt-0.5">{{ d.rationale }}</div>
+            {% endif %}
+            {% if d.human_feedback %}
+              <div class="text-xs text-gray-700 mt-0.5 bg-blue-50 rounded px-2 py-1">💬 {{ d.human_feedback }}</div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
+      {% for dp in data_profiles %}
+      <div>
+        <div class="flex items-center gap-2 text-xs mb-1">
+          <span class="font-mono font-semibold text-gray-800">{{ dp.dataset }}</span>
+          <span class="text-brand-gray">{{ dp.row_count }} rows · snapshot {{ dp.snapshot_count }}
+            {%- if dp.snapshot_count > 1 %} (re-profiled){% endif %} · {{ relative_time(dp.observed_at) }}</span>
+        </div>
+        <table class="w-full text-xs border border-gray-200 rounded">
+          <thead class="bg-gray-50 text-brand-gray">
+            <tr>
+              <th class="text-left px-2 py-1 font-medium">column</th>
+              <th class="text-left px-2 py-1 font-medium">dtype</th>
+              <th class="text-right px-2 py-1 font-medium">null %</th>
+              <th class="text-right px-2 py-1 font-medium">distinct</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in dp.columns %}
+            <tr class="border-t border-gray-100">
+              <td class="px-2 py-1 font-mono">{{ c.column_name }}</td>
+              <td class="px-2 py-1 font-mono">{{ c.dtype or '?' }}</td>
+              <td class="px-2 py-1 text-right {% if c.null_frac and c.null_frac > 0.3 %}text-brand-red font-semibold{% endif %}">
+                {{ '%.0f' % (100 * (c.null_frac or 0)) }}%</td>
+              <td class="px-2 py-1 text-right {% if c.distinct_count == 1 and dp.row_count and dp.row_count > 1 %}text-brand-red font-semibold{% endif %}">
+                {{ c.distinct_count if c.distinct_count is not none else '?' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endfor %}
+
+    </div>
+  </details>
+  {% endif %}
+
   <!-- Steps — each is an expandable <details> with full log + agent I/O -->
   <section class="space-y-2 mb-4">
     <!-- Column header strip (matches summary widths below) -->

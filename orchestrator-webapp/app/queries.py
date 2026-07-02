@@ -362,6 +362,16 @@ def compute_etag(conn: sqlite3.Connection) -> str:
         "SELECT activation_id, plan_id, skill_name, source, step_id, activated_at "
         "FROM SkillActivations ORDER BY activation_id"
     ).fetchall()
+    # Data panel signature (Phase 5.2): profile snapshots + decisions are
+    # appended mid-step, so max(id) per table is enough to invalidate. Older
+    # DBs without migrations 012/013 just contribute a constant.
+    try:
+        data_sig = conn.execute(
+            "SELECT (SELECT COALESCE(MAX(id), 0) FROM data_profile), "
+            "       (SELECT COALESCE(MAX(id), 0) FROM llm_decisions)"
+        ).fetchone()
+    except sqlite3.Error:
+        data_sig = (0, 0)
 
     h = hashlib.sha256()
     for r in plan_rows:
@@ -376,6 +386,9 @@ def compute_etag(conn: sqlite3.Connection) -> str:
         h.update(b"K|")
         h.update("|".join(str(v) for v in r).encode("utf-8"))
         h.update(b"\n")
+    h.update(b"D|")
+    h.update("|".join(str(v) for v in data_sig).encode("utf-8"))
+    h.update(b"\n")
     # Quoted per RFC 7232 §2.3
     return f'"{h.hexdigest()[:16]}"'
 
@@ -493,3 +506,84 @@ def get_deviations(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
         return [dict(r) for r in rows]
     except sqlite3.Error:
         return []
+
+
+def get_data_profiles(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
+    """Latest runtime profile snapshot per dataset for a plan (Phase 5.2).
+
+    Reads the data_profile table (orchestrator migration 012). A "snapshot" is
+    one profiling pass over a dataset; the latest one per dataset is the batch
+    sharing that dataset's MAX(observed_at). We also report how many snapshots
+    exist, so the reader can see a dataset was re-profiled after a fix.
+    Degrades to [] on an older DB.
+    """
+    try:
+        rows = conn.execute(
+            """SELECT p.dataset, p.step_id, p.observed_at, p.column_name,
+                      p.dtype, p.null_frac, p.row_count, p.distinct_count
+               FROM data_profile p
+               WHERE p.plan_id = ?
+                 AND p.observed_at = (
+                     SELECT MAX(q.observed_at) FROM data_profile q
+                     WHERE q.plan_id = p.plan_id AND q.dataset = p.dataset)
+               ORDER BY p.dataset, p.id""",
+            (plan_id,),
+        ).fetchall()
+        counts = dict(conn.execute(
+            "SELECT dataset, COUNT(DISTINCT observed_at) FROM data_profile "
+            "WHERE plan_id = ? GROUP BY dataset",
+            (plan_id,),
+        ).fetchall())
+    except sqlite3.Error:
+        return []
+
+    grouped: dict[str, dict] = {}
+    for r in rows:
+        g = grouped.setdefault(r["dataset"], {
+            "dataset": r["dataset"], "step_id": r["step_id"],
+            "observed_at": r["observed_at"], "row_count": r["row_count"],
+            "snapshot_count": counts.get(r["dataset"], 1), "columns": {},
+        })
+        # Same-second re-profile collides on observed_at; later id wins.
+        g["columns"][r["column_name"]] = {
+            "column_name": r["column_name"], "dtype": r["dtype"],
+            "null_frac": r["null_frac"], "distinct_count": r["distinct_count"],
+        }
+    out = []
+    for g in grouped.values():
+        g["columns"] = sorted(g["columns"].values(), key=lambda c: c["column_name"])
+        out.append(g)
+    return out
+
+
+def get_data_decisions(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
+    """LLM data decisions recorded for a plan (Phase 5.2).
+
+    Reads the llm_decisions table (orchestrator migration 013) — the drift →
+    decision → outcome trail written by the backbone. Degrades to [] on an
+    older DB. Strictly read-only: the dashboard never writes decisions.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT id, step_id, dataset, column_name, observed_before, "
+            "observed_after, drift_kind, decision, rationale, action, outcome, "
+            "human_feedback, created_at FROM llm_decisions "
+            "WHERE plan_id = ? ORDER BY id",
+            (plan_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.Error:
+        return []
+
+
+# Phase 5.2: outcome → (icon, tailwind classes) for the data-decision trail.
+OUTCOME_BADGES = {
+    "resolved":   ("✅", "bg-brand-green text-white"),
+    "unresolved": ("❌", "bg-brand-red text-white"),
+    "halted":     ("🛑", "bg-brand-red text-white"),
+    "noop":       ("➖", "bg-gray-200 text-gray-700"),
+}
+
+
+def outcome_badge(outcome: str | None) -> tuple[str, str]:
+    return OUTCOME_BADGES.get(outcome or "", ("•", "bg-gray-200 text-gray-700"))
