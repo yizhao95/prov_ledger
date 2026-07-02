@@ -20,20 +20,26 @@ alone and exits 0. Every step goes green. Only the purity has collapsed:
 | `upstream_drifted.json` | no  | 🔴 MISMATCH (`column_dropped:class`) | **0.31** (collapsed; 1/6 ≈ 0.17 floor) |
 | `upstream_fixed.json`   | yes | ✅ VERIFIED | **0.91** (meaningful) |
 
-The demo runs the whole arc against the real orchestrator backbone:
+The demo publishes and executes a realistic **5-step plan** against the real
+orchestrator backbone (every step runs for real, with its own log):
 
-1. **v1** — ingest the drifted feed, cluster: `6 clusters formed. exit_code=0`,
-   steps COMPLETED. The false success.
-2. **Catch** — the verify step compares the declared data **Intent**
-   (`box_id, xmin, xmax, ymin, ymax, class`) against the runtime **Actual**
-   profile → **MISMATCH**, `class` is missing. The verify step **FAILS** with
-   the verdict as its `failure_reason` — on the dashboard that's a red step
-   card with the reason banner, never hidden, even after the plan recovers.
-3. **Revise** — the decision loop records the LLM decision (and the
-   anti-pattern in the ledger, so it's never repeated), then revises the plan
-   through the backbone: a recorded deviation inserts sub-steps. Nothing ever
+1. **A · ANALYSIS — explore** the upstream feed: profile columns, dtypes,
+   null rates, cardinalities (the profile table lands in the step log).
+2. **B · DOCUMENTATION — write the data contract**: `declared_schema.json`,
+   the 6 required columns the clustering step depends on.
+3. **C · COMMAND — ingest** the feed and capture the runtime profile into
+   `data_profile`.
+4. **D · COMMAND — cluster**: `6 clusters formed. exit_code=0`, COMPLETED —
+   the false success (purity has silently collapsed to 0.31).
+5. **E · ANALYSIS — verify the contract**: declared **Intent** vs runtime
+   **Actual** → **MISMATCH**, `class` is missing. The step **FAILS** with the
+   verdict as its `failure_reason` — a red card with the reason banner on the
+   dashboard, never hidden, even after the plan recovers.
+   The decision loop records the LLM decision (and the anti-pattern in the
+   ledger, so it's never repeated), then revises the plan through the
+   backbone: a recorded deviation inserts recovery sub-steps that re-ingest
+   the fixed feed → contract **VERIFIED**, purity 0.31 → 0.91. Nothing ever
    edits state by hand.
-4. **v2** — re-ingest the fixed feed → contract **VERIFIED**, purity 0.31 → 0.91.
 
 ## Run it
 
@@ -81,8 +87,9 @@ real-world-derived. All numbers above are deterministic (seed 42, pinned deps).
 ## Regenerating the media
 
 `docs/media/silent-class-drop-dashboard.gif` — the README hero: the demo as
-the **live dashboard** sees it (green steps → verify step FAILS red with the
-MISMATCH reason → drift → decision trail → recovered, failure kept visible).
+the **live dashboard** sees it (opens on the freshly-published PENDING plan →
+steps execute live → verify FAILS red with the MISMATCH reason + log →
+drift → decision trail → recovered, failure kept visible).
 Needs playwright (`python -m playwright install chromium`) + ffmpeg:
 
 ```bash

@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """One-command demo: a silent upstream class-drop, caught by the data contract.
 
-The arc (all against the REAL orchestrator backbone, in a throwaway DB):
+A realistic 5-step plan, executed for real against the orchestrator backbone
+(every state change through the API — plan, steps, logs, profiles, decisions):
 
-  v1      ingest the drifted feed -> cluster: "6 clusters formed, exit_code=0",
-          every step COMPLETED (green) — but segment purity silently collapsed.
-  CATCH   the verify step compares the declared data Intent against the runtime
-          Actual profile -> MISMATCH: upstream silently dropped `class`.
-  REVISE  the decision loop records the LLM decision (and the anti-pattern in
-          the ledger, so it is never repeated), then revises the plan through
-          the backbone (deviation + sub-steps) — never by editing state.
-  v2      re-ingest the fixed feed -> contract VERIFIED, purity recovers.
+  A ANALYSIS       explore the upstream feed (profile columns/dtypes/nulls)
+  B DOCUMENTATION  write the data contract (declared_schema.json artifact)
+  C COMMAND        ingest the feed + capture the runtime profile
+  D COMMAND        cluster into 6 category segments, evaluate purity — exit 0
+  E ANALYSIS       verify the contract: Intent vs Actual -> FAILS
+                   (column_dropped: `class`) -> LLM decision recorded ->
+                   deviation sub-steps re-ingest the fixed feed -> VERIFIED
 
 Everything lands in ./demo-orchestrator.db (NEVER your real orchestrator DB),
 so the read-only dashboard can replay the whole story afterwards.
 
 Usage:  python run_demo.py           (or `make demo` from the repo root)
+DEMO_PACE=<seconds> stretches the acts so the dashboard's 2s poll can watch
+the run live (used for recording; defaults to 0 — tests/CI run at full speed).
 """
 from __future__ import annotations
 
@@ -38,15 +40,17 @@ PROJECT = "silent-class-drop"
 DATASET = "upstream_events"
 DB_PATH = HERE / "demo-orchestrator.db"
 TRUTH = HERE / "ground_truth.csv"
+CONTRACT_PATH = HERE / "declared_schema.json"
 
-# The cluster step's data Intent: what the downstream job REQUIRES of the feed.
+# The data Intent: what the downstream clustering step REQUIRES of the feed.
+# Step B writes this out as the contract artifact; step E verifies against it.
 DECLARED_SCHEMA = {
     "box_id": "int", "xmin": "float", "xmax": "float",
     "ymin": "float", "ymax": "float", "class": "str",
 }
 
-# DEMO_PACE (seconds, default 0) inserts a beat between the demo's acts —
-# used only when recording the GIF; tests and CI run with no pauses.
+# DEMO_PACE (seconds, default 0) inserts a beat between/inside the demo's acts —
+# used only when recording; tests and CI run with no pauses.
 _PACE = float(os.environ.get("DEMO_PACE", "0") or 0)
 def _beat(mult: float = 1.0) -> None:
     if _PACE:
@@ -66,10 +70,20 @@ def dim(s): return _c("2", s)
 
 
 def intent_rows() -> list[dict]:
-    """The declared Intent, shaped like profile rows so drift-detection can
-    compare it directly against the runtime Actual."""
+    """The declared Intent (from the contract artifact), shaped like profile
+    rows so drift-detection can compare it directly against the runtime Actual."""
+    declared = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
     return [{"dataset": DATASET, "column_name": col, "dtype": dtype,
-             "null_frac": 0.0} for col, dtype in DECLARED_SCHEMA.items()]
+             "null_frac": 0.0} for col, dtype in declared.items()]
+
+
+def profile_summary(rows: list[dict]) -> str:
+    """Human-readable table of a runtime profile — the explore step's log."""
+    lines = [f"{'column':<10} {'dtype':<8} {'null%':>6} {'distinct':>9}"]
+    for r in sorted(rows, key=lambda r: r["column_name"]):
+        lines.append(f"{r['column_name']:<10} {r['dtype'] or '?':<8} "
+                     f"{100 * (r['null_frac'] or 0):>5.0f}% {r['distinct_count']:>9}")
+    return "\n".join(lines)
 
 
 def run_cluster_job(source: Path) -> tuple[str, float]:
@@ -120,46 +134,78 @@ def main() -> int:
     plan = api.initialize_plan(
         conn,
         "Segment shelf detection events into 6 product-category groups",
-        [{"description": "Ingest upstream detection events",
-          "step_type": "COMMAND"},
-         {"description": "Cluster events into 6 category segments and evaluate purity",
-          "step_type": "COMMAND"},
-         {"description": "Verify the data contract (Intent vs Actual) and sign off",
-          "step_type": "ANALYSIS"}],
+        [{"description": "Explore the upstream feed: profile columns, dtypes, "
+                         "null rates, cardinalities", "step_type": "ANALYSIS"},
+         {"description": "Write the data contract: required columns + dtypes "
+                         "the clustering step depends on", "step_type": "DOCUMENTATION"},
+         {"description": "Ingest upstream detection events and capture the "
+                         "runtime data profile", "step_type": "COMMAND"},
+         {"description": "Cluster events into 6 category segments and evaluate "
+                         "purity", "step_type": "COMMAND"},
+         {"description": "Verify the data contract (Intent vs Actual) and sign "
+                         "off", "step_type": "ANALYSIS"}],
         user_query="Segment the shelf-monitor detection feed into 6 "
                    "product-category groups and report segment purity.",
     )
     plan_id = plan["plan_id"]
-    s_ingest, s_cluster, s_verify = plan["step_ids"]
+    s_explore, s_contract, s_ingest, s_cluster, s_verify = plan["step_ids"]
+    print(f"  plan published: {plan_id} — 5 steps {yellow('PENDING')}")
+    _beat(2.5)  # hold the freshly-published PENDING plan (recording opens here)
 
-    # ── v1: the false success ────────────────────────────────────────────────
-    print(bold("── v1 · run against the current upstream feed ──"))
-    api.start_step(conn, s_ingest)
+    # ── A · explore ──────────────────────────────────────────────────────────
+    api.start_step(conn, s_explore)
+    _beat(1.2)
     events_v1 = json.loads((HERE / "upstream_drifted.json").read_text())
+    explore_rows = profile_records(events_v1, dataset=DATASET)
+    api.append_log(conn, s_explore,
+                   f"profiled upstream_drifted.json: {len(events_v1)} events, "
+                   f"{len(explore_rows)} columns\n" + profile_summary(explore_rows))
+    api.complete_step(conn, s_explore)
+    print(f"  A explore   {green('COMPLETED')}  {len(events_v1)} events, "
+          f"{len(explore_rows)} columns profiled")
+
+    # ── B · contract ─────────────────────────────────────────────────────────
+    api.start_step(conn, s_contract)
+    _beat(1.0)
+    CONTRACT_PATH.write_text(json.dumps(DECLARED_SCHEMA, indent=1) + "\n",
+                             encoding="utf-8")
+    api.append_log(conn, s_contract,
+                   "declared_schema.json written: 6 required columns "
+                   f"({', '.join(DECLARED_SCHEMA)}). Downstream "
+                   "cluster_and_eval.build_features depends on the `class` "
+                   "enrichment for category segmentation.")
+    api.complete_step(conn, s_contract)
+    print(f"  B contract  {green('COMPLETED')}  declared_schema.json "
+          f"({len(DECLARED_SCHEMA)} required columns)")
+
+    # ── C · ingest (the false green begins) ──────────────────────────────────
+    api.start_step(conn, s_ingest)
+    _beat(1.0)
     actual_v1 = profile_records(events_v1, dataset=DATASET, project=PROJECT,
                                 plan_id=plan_id, step_id=s_ingest)
     odb.insert_data_profile(conn, actual_v1)
     api.append_log(conn, s_ingest,
                    f"ingested {len(events_v1)} events from upstream_drifted.json; "
-                   f"runtime profile captured ({len(actual_v1)} columns)")
+                   f"runtime profile captured ({len(actual_v1)} columns) into "
+                   "data_profile")
     api.complete_step(conn, s_ingest)
-    print(f"  step 1/3 ingest   {green('COMPLETED')}  "
-          f"({len(events_v1)} events)")
+    print(f"  C ingest    {green('COMPLETED')}  runtime profile captured")
 
+    # ── D · cluster (exit 0 — the false success) ─────────────────────────────
     api.start_step(conn, s_cluster)
+    _beat(0.8)
     out_v1, purity_v1 = run_cluster_job(HERE / "upstream_drifted.json")
     api.append_log(conn, s_cluster, out_v1)
     api.complete_step(conn, s_cluster)
-    print(f"  step 2/3 cluster  {green('COMPLETED')}  "
-          f"6 clusters formed. exit_code=0")
-    print(dim(f"           (eval harness: segment purity {purity_v1:.2f} "
+    print(f"  D cluster   {green('COMPLETED')}  6 clusters formed. exit_code=0")
+    print(dim(f"              (eval harness: segment purity {purity_v1:.2f} "
               f"— nobody is looking at this yet)"))
+    _beat(1.5)
 
-    _beat(2.0)
-
-    # ── the catch: Intent vs Actual ──────────────────────────────────────────
+    # ── E · verify: Intent vs Actual — the catch ─────────────────────────────
     print(bold("\n── verify · declared Intent vs runtime Actual ──"))
     api.start_step(conn, s_verify)
+    _beat(0.8)
     drifts_v1 = contract_panel(actual_v1)
     assert drifts_v1, "demo invariant: the drifted feed must MISMATCH"
     # The failure is FIRST-CLASS: the verify step FAILS with the contract
@@ -168,7 +214,7 @@ def main() -> int:
     api.fail_step(conn, s_verify,
                   reason="data contract MISMATCH (column_dropped: `class`) — "
                          "upstream feed is missing a required enrichment column")
-    print(f"  step 3/3 verify   {red('FAILED')}  (contract MISMATCH recorded)")
+    print(f"  E verify    {red('FAILED')}  (contract MISMATCH recorded)")
     _beat(3.0)
 
     # ── the decision loop: record -> revise through the backbone -> re-verify ─
@@ -203,6 +249,7 @@ def main() -> int:
               f"→ sub-steps {sub_ingest.split('-')[-1]}, {sub_cluster.split('-')[-1]}")
 
         api.start_step(conn, sub_ingest)
+        _beat(1.2)
         events_v2 = json.loads((HERE / "upstream_fixed.json").read_text())
         holder["actual_v2"] = profile_records(events_v2, dataset=DATASET,
                                               project=PROJECT, plan_id=plan_id,
@@ -213,6 +260,7 @@ def main() -> int:
         api.complete_step(conn, sub_ingest)
 
         api.start_step(conn, sub_cluster)
+        _beat(1.0)
         out_v2, holder["purity_v2"] = run_cluster_job(HERE / "upstream_fixed.json")
         api.append_log(conn, sub_cluster, out_v2)
         api.complete_step(conn, sub_cluster)
@@ -226,10 +274,9 @@ def main() -> int:
         reprofile=lambda: holder["actual_v2"],
     )
 
-    _beat(1.5)
-
     # ── v2: verified ─────────────────────────────────────────────────────────
     print(bold("\n── v2 · re-verify against the restored feed ──"))
+    _beat(1.5)
     drifts_v2 = contract_panel(holder["actual_v2"])
     # s_verify stays FAILED (terminal); its completed sub-steps are the
     # recovery, which is exactly how the plan-level rollup reads it.
@@ -265,6 +312,10 @@ def main() -> int:
     vrow = conn.execute("SELECT status, failure_reason FROM Steps WHERE step_id = ?",
                         (s_verify,)).fetchone()
     ok = ok and vrow[0] == "FAILED" and "MISMATCH" in (vrow[1] or "")
+    types = [r[0] for r in conn.execute(
+        "SELECT step_type FROM Steps WHERE plan_id = ? AND parent_step_id IS NULL "
+        "ORDER BY execution_order", (plan_id,))]
+    ok = ok and types == ["ANALYSIS", "DOCUMENTATION", "COMMAND", "COMMAND", "ANALYSIS"]
     conn.close()
     print(green("  SELF-CHECK OK") if ok else red("  SELF-CHECK FAILED"))
     return 0 if ok else 1
