@@ -10,8 +10,9 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-PACKAGE_ROOT = Path(__file__).resolve().parent.parent
-MIGRATIONS_DIR = PACKAGE_ROOT / "migrations"
+# Migrations ship INSIDE the package (orchestrator/migrations/) so a pip
+# wheel carries them — this resolves in both the repo layout and site-packages.
+MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 DEFAULT_DB_PATH = Path.home() / "skill-workspace" / "orchestrator.db"
 
 
