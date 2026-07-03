@@ -1,6 +1,6 @@
 # 🧾 provLedger
 
-![tests](https://img.shields.io/badge/tests-556%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-560%20passing-brightgreen)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -49,7 +49,10 @@ make demo
 
 This runs the full arc offline and deterministically (seed 42): v1 false
 success → **MISMATCH** → recorded decision → plan revision through the backbone
-→ v2 **VERIFIED**. Then replay it in the read-only dashboard:
+→ v2 **VERIFIED**. The demo needs only Python 3.10+ with `numpy` +
+`scikit-learn` — `make demo` installs them into a local venv (reusing the
+plugin venv when present; the fallback needs the `python3-venv` package).
+Then replay it in the read-only dashboard:
 
 ```bash
 ORCH_DB=$PWD/examples/silent-class-drop/demo-orchestrator.db \
@@ -57,7 +60,9 @@ ORCH_DB=$PWD/examples/silent-class-drop/demo-orchestrator.db \
 ```
 
 See [`examples/silent-class-drop/`](examples/silent-class-drop/) for how the
-demo works and how to regenerate the media.
+demo works and how to regenerate the media, and
+[the mini-benchmark writeup](docs/benchmark-silent-class-drop.md) for the full
+0.31 → 0.91 story.
 
 ---
 
