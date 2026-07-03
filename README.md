@@ -1,6 +1,7 @@
 # 🧾 provLedger
 
 ![tests](https://img.shields.io/badge/tests-560%20passing-brightgreen)
+[![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
@@ -346,10 +347,11 @@ sessions are a no-op. Launch the review dashboard any time with
 ### As a Python library
 
 The orchestrator core (plan/step state machine, runtime profiling, drift
-detection, decision ledger — stdlib-only) is pip-buildable as **`provledger`**:
+detection, decision ledger — stdlib-only) is on
+[PyPI](https://pypi.org/project/provledger/) as **`provledger`**:
 
 ```bash
-pip install ./orchestrator-backend      # from a clone; PyPI publication is planned
+pip install provledger                  # or, from a clone: pip install ./orchestrator-backend
 python -c "from provledger import api, db; print('ok')"
 ```
 
