@@ -154,7 +154,7 @@ import sqlite3, glob, pathlib
 db = pathlib.Path.home() / "skill-workspace" / "orchestrator.db"
 db.parent.mkdir(parents=True, exist_ok=True)
 conn = sqlite3.connect(db)
-for f in sorted(glob.glob("orchestrator-backend/migrations/*.sql")):
+for f in sorted(glob.glob("orchestrator-backend/orchestrator/migrations/*.sql")):
     conn.executescript(open(f).read())
 conn.commit()
 print("Initialized", db)

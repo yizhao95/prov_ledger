@@ -275,9 +275,10 @@ prov_ledger/
 ├── examples/
 │   └── silent-class-drop/     # offline, deterministic demo (see its README)
 ├── orchestrator-backend/      # Pillar A — SQLite plan/step state machine (stdlib only)
+│   │                          # also pip-buildable as the `provledger` library
 │   ├── orchestrator/          # api.py, db.py, state_machine.py, circuit_breakers.py,
-│   │                          # profiler.py, drift.py, data_loop.py, telemetry.py
-│   ├── migrations/            # 001..013 SQL migrations
+│   │   │                      # profiler.py, drift.py, data_loop.py, telemetry.py
+│   │   └── migrations/        # 001..013 SQL migrations (ship inside the wheel)
 │   └── tests/
 ├── orchestrator-webapp/       # Live read-only provLedger Dashboard (FastAPI + HTMX)
 │   └── app/                   # main.py, queries.py, templates/
@@ -341,6 +342,24 @@ sessions are a no-op. Launch the review dashboard any time with
 > `subagent-driven-development`) and treats superpowers as a **soft dependency**:
 > the byte-identical `verification-before-completion` skill is not bundled and is
 > provided by superpowers when present.
+
+### As a Python library
+
+The orchestrator core (plan/step state machine, runtime profiling, drift
+detection, decision ledger — stdlib-only) is pip-buildable as **`provledger`**:
+
+```bash
+pip install ./orchestrator-backend      # from a clone; PyPI publication is planned
+python -c "from provledger import api, db; print('ok')"
+```
+
+The wheel ships the SQL migrations inside the package, so
+`db.run_migrations()` works from a plain install. Verify the packaging
+end-to-end (build → fresh venv → install → smoke test) with:
+
+```bash
+bash scripts/test_packaging.sh          # needs uv
+```
 
 ### Manual / development install
 

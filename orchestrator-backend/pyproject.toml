@@ -1,19 +1,40 @@
 [project]
-name = "orchestrator"
+name = "provledger"
 version = "0.1.0"
-description = "Phase 1 orchestration harness — SQLite-backed plan/step state machine"
+description = "Data-contract + provenance layer for data-science coding agents: SQLite plan/step orchestrator, runtime data profiling, drift detection, and a never-repeat-a-mistake decision ledger"
 requires-python = ">=3.10"
-dependencies = []  # stdlib only
+dependencies = []  # stdlib only — pandas is optional (profiler.profile_dataframe imports it lazily)
+license = { text = "MIT" }
+authors = [{ name = "yizhao95", email = "yzhao950213@gmail.com" }]
+keywords = ["data-contracts", "provenance", "llm-agents", "data-quality", "drift-detection"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.urls]
+Homepage = "https://github.com/yizhao95/prov_ledger"
+Documentation = "https://github.com/yizhao95/prov_ledger#readme"
 
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-# Explicit so setuptools doesn't try (and fail) to auto-discover migrations/ + tests/
-# as Python packages — they're SQL data and test code respectively, not importable
-# packages. (Fix for issue #18 bootstrap failure.)
-packages = ["orchestrator"]
+# The wheel installs a single top-level `provledger` package, mapped from the
+# in-repo `orchestrator/` source dir (all internal imports are relative, so the
+# code is name-agnostic — no generic `orchestrator` name squatted in
+# site-packages). Repo-internal code, skills, and tests keep importing
+# `orchestrator` via pythonpath; only the built artifact uses `provledger`.
+# tests/ stays excluded from discovery (SQL data + test code, not packages).
+packages = ["provledger"]
+package-dir = { "provledger" = "orchestrator" }
+
+[tool.setuptools.package-data]
+# Migrations live inside the package so run_migrations works from a wheel.
+provledger = ["migrations/*.sql"]
 
 [dependency-groups]
 dev = ["pytest>=7"]
