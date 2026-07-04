@@ -377,17 +377,25 @@ PY=~/skill-workspace/.venv/bin/python
 
 # 3. Run the test suites to confirm a healthy install (run each separately —
 #    each suite has its own pyproject/pythonpath; one combined invocation breaks)
-$PY -m pytest orchestrator-backend -q
-$PY -m pytest orchestrator-webapp  -q
-$PY -m pytest skills/writing-plans/tests -q
-$PY -m pytest skills/executing-plans -q
-$PY -m pytest skills/project-state-graph/scripts/tests -q
-$PY -m pytest skills/update-project-state-graph/scripts/tests -q
+$PY -m pytest orchestrator-backend -q                             # 152 passed
+$PY -m pytest orchestrator-webapp  -q                             #  23 passed
+$PY -m pytest skills/writing-plans/tests -q                       #  46 passed, 2 skipped
+$PY -m pytest skills/executing-plans -q                           #  52 passed
+$PY -m pytest skills/project-state-graph/scripts/tests -q         # 232 passed, 1 skipped
+$PY -m pytest skills/update-project-state-graph/scripts/tests -q  #  55 passed
 
 # 4. Launch the dashboard
 PROVLEDGER_WEBAPP_DIR=orchestrator-webapp bash orchestrator-webapp/launch_dashboard.sh
 # → open http://127.0.0.1:8765
 ```
+
+### Verify the install (three levels)
+
+| Level | Command | Expect |
+|---|---|---|
+| Quickest — end-to-end demo | `make demo` | the MISMATCH → VERIFIED arc, purity 0.31 → 0.91, `SELF-CHECK OK`, exit 0 |
+| Full — all test suites | the six `pytest` commands above, **run separately** | **560 passed, 3 skipped** total |
+| Packaging — pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
 
 The dashboard reads the orchestrator database **read-only**. Point it at any
 orchestrator DB with the `ORCH_DB` environment variable (defaults to
