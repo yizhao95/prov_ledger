@@ -98,18 +98,50 @@ uv pip install pytest fastapi "uvicorn[standard]" jinja2 \
 
 ## 5 · Verify the install
 
-Run each test suite. A healthy install passes all of them:
+Run each test suite **separately** (each has its own pyproject/pythonpath —
+one combined invocation breaks). A healthy install passes all of them:
 
 ```bash
-python -m pytest orchestrator-backend                  -q   # 111 passed
-python -m pytest orchestrator-webapp                   -q   #  11 passed
-python -m pytest skills/writing-plans/tests            -q   #  44 passed
-python -m pytest skills/executing-plans                -q   #  50 passed
-python -m pytest skills/project-state-graph/scripts/tests     -q   # 198 passed, 1 skipped
-python -m pytest skills/update-project-state-graph/scripts/tests -q   #  50 passed
+python -m pytest orchestrator-backend                  -q   # 152 passed
+python -m pytest orchestrator-webapp                   -q   #  23 passed
+python -m pytest skills/writing-plans/tests            -q   #  46 passed, 2 skipped
+python -m pytest skills/executing-plans                -q   #  52 passed
+python -m pytest skills/project-state-graph/scripts/tests     -q   # 232 passed, 1 skipped
+python -m pytest skills/update-project-state-graph/scripts/tests -q   #  55 passed
 ```
 
-Total: **464 passed, 1 skipped**.
+Total: **560 passed, 3 skipped**.
+
+The quickest end-to-end check is the demo — one command, deterministic,
+self-verifying:
+
+```bash
+make demo    # v1 MISMATCH (purity 0.31) → revise → v2 VERIFIED (0.91)
+```
+
+---
+
+## 5b · Install as a Python library (PyPI)
+
+The orchestrator core (plan/step state machine, runtime profiling, drift
+detection, decision ledger — stdlib-only) is published on PyPI as
+[`provledger`](https://pypi.org/project/provledger/):
+
+```bash
+pip install provledger
+python -c "from provledger import api, db; print('ok')"
+```
+
+The wheel ships the SQL migrations inside the package, so
+`db.run_migrations()` works from a plain install — no clone needed.
+
+**Packaging/install test case** — build wheel + sdist, install each into a
+fresh venv, and run a smoke test (plan/steps, migrations-from-wheel,
+profile → drift → decision → ledger) from outside the repo:
+
+```bash
+bash scripts/test_packaging.sh   # needs uv; fails loudly on any packaging gap
+```
 
 ---
 
