@@ -304,18 +304,17 @@ prov_ledger/
 
 ## 📚 Documentation
 
-This README is the high-level entry point. A full, in-repo documentation tree
-under `docs/` breaks down every subsystem in depth:
+This README is the high-level entry point. What's in the repo today:
 
-| Area | Path | Covers |
-|---|---|---|
-| **Architecture** | `docs/architecture/` | the two pillars, backbone × LLM layer, data flow, dashboard, skills layer |
-| **Reference** | `docs/reference/` | data model (migrations 001–013), state machine, API, CLI, graph schema, scripts |
-| **Guides** | `docs/guides/` | installation, end-to-end task lifecycle, dashboard, ledger |
-| **Development** | `docs/development/` | testing, verification flows, migrations, contributing |
+| Doc | Covers |
+|---|---|
+| [`INSTALL.md`](INSTALL.md) | plugin install, manual install, per-suite test verification, PyPI library install + packaging test |
+| [`examples/silent-class-drop/`](examples/silent-class-drop/) | the demo: how it works, the 5-step plan, regenerating the GIF/screenshots |
+| [`docs/benchmark-silent-class-drop.md`](docs/benchmark-silent-class-drop.md) | the mini-benchmark writeup (0.31 → 0.91) |
+| Each skill's `SKILL.md` + `reference/` | the iron-law workflows (writing-plans, executing-plans, project-state-graph, update-project-state-graph) |
 
-Start at `docs/README.md` for the full index. Design, audit, and plan records
-from the build live under `docs/superpowers/`.
+A deeper architecture/reference documentation tree exists as maintainer
+working notes and will be published as it stabilizes.
 
 ---
 
