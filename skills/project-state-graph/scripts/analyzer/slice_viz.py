@@ -35,11 +35,11 @@ def _safe_json(data) -> str:
             .replace(" ", "\\u2028").replace(" ", "\\u2029"))
 
 # ── palette ────────────────────────────────────────────────────────────
-BRAND_BLUE = "#0053e2"
-SPARK = "#ffc220"
-GREEN = "#2a8703"
-ORANGE = "#ff8c00"
-GRAY = "#9aa3af"           # the "unknown dtype" sentinel color
+BRAND_BLUE = "#2a78d6"
+SPARK = "#fab219"
+GREEN = "#1baf7a"
+ORANGE = "#eb6834"
+GRAY = "#898781"           # the "unknown dtype" sentinel color (muted ink)
 
 UNKNOWN_DTYPES = {"", "unknown", "any", "object?"}
 
@@ -74,7 +74,7 @@ def build_dataflow(db_path: str) -> Dict:
     """Variable/column-granularity dataflow slice with dtype coverage.
 
     Returns ``{nodes, edges, dtype_coverage:{typed, unknown, pct}}``. Unknown
-    dtypes are gray (#9aa3af) with a trailing ``?`` in the label; typed nodes use
+    dtypes are gray (#898781) with a trailing ``?`` in the label; typed nodes use
     the brand palette. Flow edges carry a dtype ``label`` when known.
     """
     conn = _connect(db_path)
@@ -363,20 +363,20 @@ _SLICE_TEMPLATE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"
 <title>__TITLE__ — slices</title>
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
- *{box-sizing:border-box} body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#16191f}
- header{background:#0053e2;color:#fff;padding:10px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+ *{box-sizing:border-box} body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#0b0b0b}
+ header{background:#fcfcfb;color:#0b0b0b;border-bottom:1px solid #e1e0d9;padding:10px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
  header h1{font-size:16px;margin:0;font-weight:600}
- .badge{background:#ffc220;color:#16191f;font-size:12px;font-weight:600;padding:3px 8px;border-radius:10px}
- .tabs{display:flex;gap:4px;background:#f6f7f9;border-bottom:1px solid #e3e6ea;padding:6px 10px}
- .tab{font-size:13px;padding:6px 12px;border:1px solid #cdd2d9;background:#fff;border-radius:6px;cursor:pointer}
- .tab.active{background:#0053e2;color:#fff;border-color:#0053e2}
+ .badge{background:rgba(250,178,25,.18);color:#7a5200;font-size:12px;font-weight:600;padding:3px 8px;border-radius:10px}
+ .tabs{display:flex;gap:4px;background:#f9f9f7;border-bottom:1px solid #e1e0d9;padding:6px 10px}
+ .tab{font-size:13px;padding:6px 12px;border:1px solid #d6d4cc;background:#fff;border-radius:6px;cursor:pointer}
+ .tab.active{background:#2a78d6;color:#fff;border-color:#2a78d6}
  .panel{display:none;height:calc(100vh - 96px)} .panel.active{display:block}
  .net{width:100%;height:100%}
- .toolbar{padding:6px 10px;font-size:12px;color:#5a6573;display:flex;gap:10px;align-items:center}
- .toolbar input{padding:4px 8px;border:1px solid #cdd2d9;border-radius:6px}
- table{border-collapse:collapse;width:100%;font-size:13px} th,td{border:1px solid #e3e6ea;padding:6px 10px;text-align:left;vertical-align:top}
- th{background:#f6f7f9} code{background:#f0f2f5;padding:1px 5px;border-radius:4px;font-size:12px}
- .legend{font-size:12px;color:#5a6573;padding:4px 10px}
+ .toolbar{padding:6px 10px;font-size:12px;color:#52514e;display:flex;gap:10px;align-items:center}
+ .toolbar input{padding:4px 8px;border:1px solid #d6d4cc;border-radius:6px}
+ table{border-collapse:collapse;width:100%;font-size:13px} th,td{border:1px solid #e1e0d9;padding:6px 10px;text-align:left;vertical-align:top}
+ th{background:#f9f9f7} code{background:#f0efec;padding:1px 5px;border-radius:4px;font-size:12px}
+ .legend{font-size:12px;color:#52514e;padding:4px 10px}
  .sw{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:middle;margin-right:4px}
 </style></head><body>
 <header><h1>__TITLE__ · provLedger slices</h1>
@@ -388,15 +388,15 @@ _SLICE_TEMPLATE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"
  <button class="tab" data-p="api">④ API surface</button>
 </div>
 <div id="dataflow" class="panel active">
- <div class="legend"><span class="sw" style="background:#2a8703"></span>typed
-  <span class="sw" style="background:#9aa3af"></span>unknown dtype (?)
-  <span class="sw" style="background:#0053e2"></span>function</div>
+ <div class="legend"><span class="sw" style="background:#1baf7a"></span>typed
+  <span class="sw" style="background:#898781"></span>unknown dtype (?)
+  <span class="sw" style="background:#2a78d6"></span>function</div>
  <div class="net" id="net_dataflow"></div></div>
 <div id="callchain" class="panel">
  <div class="toolbar">Focus:&nbsp;<input id="focusInput" placeholder="qualified_name"><button id="focusBtn">Show</button>
-  <span class="legend"><span class="sw" style="background:#ffc220"></span>focus
-   <span class="sw" style="background:#0053e2"></span>caller
-   <span class="sw" style="background:#2a8703"></span>callee</span></div>
+  <span class="legend"><span class="sw" style="background:#fab219"></span>focus
+   <span class="sw" style="background:#2a78d6"></span>caller
+   <span class="sw" style="background:#1baf7a"></span>callee</span></div>
  <div class="net" id="net_callchain" style="height:calc(100% - 40px)"></div></div>
 <div id="pipeline" class="panel"><div class="net" id="net_pipeline"></div></div>
 <div id="api" class="panel" style="overflow:auto;padding:12px">
@@ -404,8 +404,8 @@ _SLICE_TEMPLATE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"
  <tbody id="apiBody"></tbody></table></div>
 <script>
 const DATA=__DATA__;
-function styleEdges(es){es.forEach(e=>{e.arrows=e.arrows||'to';e.color=e.color||{color:'#9aa3af',opacity:0.6};
- e.smooth=e.smooth||{type:'continuous'};if(e.label)e.font={size:10,color:'#5a6573'};});return es;}
+function styleEdges(es){es.forEach(e=>{e.arrows=e.arrows||'to';e.color=e.color||{color:'#c3c2b7',opacity:0.7};
+ e.smooth=e.smooth||{type:'continuous'};if(e.label)e.font={size:10,color:'#52514e'};});return es;}
 function mkNet(elId,nodes,edges,opts){return new vis.Network(document.getElementById(elId),
  {nodes:new vis.DataSet(nodes),edges:new vis.DataSet(styleEdges(edges))},
  Object.assign({nodes:{font:{size:12}},edges:{},interaction:{hover:true,tooltipDelay:120},
@@ -415,7 +415,7 @@ mkNet('net_dataflow',DATA.dataflow.nodes,DATA.dataflow.edges);
 // slice 3 pipeline (hierarchical)
 const pipeNodes=[],pipeEdges=[];
 DATA.pipeline.pipelines.forEach((p,pi)=>{p.steps.forEach(s=>{pipeNodes.push({id:'p'+pi+'_'+s.node_id+'_'+s.index,
- label:s.index+'. '+s.fn,color:'#0053e2',shape:'box',font:{color:'#fff',size:12}});});
+ label:s.index+'. '+s.fn,color:'#2a78d6',shape:'box',font:{color:'#fff',size:12}});});
  for(let i=0;i<p.steps.length-1;i++){pipeEdges.push({from:'p'+pi+'_'+p.steps[i].node_id+'_'+p.steps[i].index,
   to:'p'+pi+'_'+p.steps[i+1].node_id+'_'+p.steps[i+1].index});}});
 mkNet('net_pipeline',pipeNodes,pipeEdges,{layout:{hierarchical:{direction:'LR',sortMethod:'directed',levelSeparation:160}},physics:false});
@@ -423,7 +423,7 @@ mkNet('net_pipeline',pipeNodes,pipeEdges,{layout:{hierarchical:{direction:'LR',s
 const tb=document.getElementById('apiBody');
 DATA.api.forEach(r=>{const tr=document.createElement('tr');
  tr.innerHTML='<td><code>'+r.path+'</code></td><td>'+r.method+'</td><td>'+r.handler+'</td><td>'+(r.handler_file||'')+'</td><td>'+
-  (r.calls.length?r.calls.map(c=>'<code>'+c+'</code>').join(' '):'<span style="color:#9aa3af">—</span>')+'</td>';
+  (r.calls.length?r.calls.map(c=>'<code>'+c+'</code>').join(' '):'<span style="color:#898781">—</span>')+'</td>';
  tb.appendChild(tr);});
 // slice 2 call chain (interactive focus)
 let ccNet=null;
@@ -433,10 +433,10 @@ function renderCC(focus){const all=DATA.callchain_all;
  nodes.forEach(n=>{byName[n.qualified_name]=n.id;byName[n.label]=byName[n.label]||n.id;});
  let fid=byName[focus];
  const elId='net_callchain';
- if(fid==null){document.getElementById(elId).innerHTML='<p style="padding:12px;color:#9aa3af">No function named '+focus+'</p>';return;}
+ if(fid==null){document.getElementById(elId).innerHTML='<p style="padding:12px;color:#898781">No function named '+focus+'</p>';return;}
  const callers={},callees={};edges.forEach(e=>{(callees[e.from]=callees[e.from]||[]).push(e.to);(callers[e.to]=callers[e.to]||[]).push(e.from);});
  const dir={};dir[fid]='focus';[['caller',callers],['callee',callees]].forEach(([tag,adj])=>{(adj[fid]||[]).forEach(n=>{if(!(n in dir))dir[n]=tag;});});
- const col={focus:'#ffc220',caller:'#0053e2',callee:'#2a8703'};
+ const col={focus:'#fab219',caller:'#2a78d6',callee:'#1baf7a'};
  const vn=nodes.filter(n=>n.id in dir).map(n=>Object.assign({},n,{color:col[dir[n.id]],shape:dir[n.id]=='focus'?'star':'dot'}));
  const ids=new Set(vn.map(n=>n.id));const ve=edges.filter(e=>ids.has(e.from)&&ids.has(e.to)).map(e=>Object.assign({},e));
  document.getElementById(elId).innerHTML='';ccNet=mkNet(elId,vn,ve);}

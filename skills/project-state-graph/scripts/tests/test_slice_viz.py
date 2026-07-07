@@ -112,9 +112,9 @@ def test_dataflow_unknown_is_gray_with_question_mark(dataflow_db):
     out = slice_viz.build_dataflow(dataflow_db)
     unknown = next(n for n in out["nodes"] if "mystery" in n["label"])
     typed = next(n for n in out["nodes"] if "image" in n["label"])
-    assert unknown["color"] == "#9aa3af"          # gray sentinel
+    assert unknown["color"] == slice_viz.GRAY     # gray sentinel
     assert unknown["label"].endswith("?")          # visible '?' marker
-    assert typed["color"] != "#9aa3af"             # typed is non-gray
+    assert typed["color"] != slice_viz.GRAY        # typed is non-gray
     assert not typed["label"].endswith("?")
 
 
@@ -371,4 +371,4 @@ def test_write_slices_api_is_table(full_db, tmp_path):
 def test_write_slices_unknown_color_embedded(full_db, tmp_path):
     out = tmp_path / "s.html"
     slice_viz.write_slices(full_db, str(out), title="demo")
-    assert "#9aa3af" in out.read_text()  # gray unknown marker present in embedded JSON
+    assert slice_viz.GRAY in out.read_text()  # gray unknown marker present in embedded JSON
