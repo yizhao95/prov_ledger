@@ -1,16 +1,16 @@
 {% if error %}
-  <div class="bg-brand-red text-white p-4 rounded-lg shadow">
+  <div class="bg-brand-red/10 border border-brand-red/40 text-[#8a1f1f] p-4 rounded-xl">
     <strong>⚠️ Error:</strong> {{ error }}
   </div>
 {% elif not plan %}
-  <div class="bg-yellow-50 border border-yellow-300 text-yellow-900 p-4 rounded-lg">
+  <div class="bg-[#fab219]/10 border border-[#fab219]/40 text-[#7a5200] p-4 rounded-xl">
     No plans in the database yet. Run <code class="font-mono bg-white px-1 rounded">orchestrator-cli.py init-plan ...</code> to create one.
   </div>
 {% else %}
   {% set badge = status_badge(plan.status) %}
 
   <!-- Plan card -->
-  <section class="bg-white rounded-lg shadow p-5 mb-4 border border-gray-200">
+  <section class="bg-surface rounded-xl shadow-sm p-5 mb-4 border border-hairline">
     <div class="flex items-start justify-between mb-2">
       <div class="flex-1 min-w-0 pr-3">
         {# Card title is the SHORT title (first sentence of user_query, or plan_id fallback).
@@ -24,25 +24,38 @@
         {{ badge[0] }} {{ plan.status }}
       </span>
     </div>
-    <div class="text-xs text-brand-gray flex flex-wrap gap-x-4 gap-y-1 mt-3">
-      <span title="{{ plan.created_at }}">Started: {{ relative_time(plan.created_at) }}</span>
-      {% if plan.completed_at %}<span title="{{ plan.completed_at }}">Completed: {{ relative_time(plan.completed_at) }}</span>{% endif %}
-      <span>Revisions: {{ plan.revision_count }}/{{ plan.max_revisions }}</span>
-      <span>Steps: {{ completed }}/{{ total_steps }}</span>
-      {% if failed %}
-      <span class="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold">
-        ⚠️ {{ failed }} step{{ '' if failed == 1 else 's' }} failed
-      </span>
-      {% endif %}
+    {# Stat strip: the four numbers a reader scans for, as quiet tiles. #}
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-px bg-hairline rounded-lg overflow-hidden mt-4 border border-hairline">
+      <div class="bg-surface px-4 py-2.5">
+        <div class="text-lg font-semibold text-gray-900 tnum">{{ progress_pct }}%</div>
+        <div class="text-[11px] text-brand-muted">complete</div>
+      </div>
+      <div class="bg-surface px-4 py-2.5">
+        <div class="text-lg font-semibold text-gray-900 tnum">{{ completed }}<span class="text-brand-muted font-normal">/{{ total_steps }}</span></div>
+        <div class="text-[11px] text-brand-muted">steps done</div>
+      </div>
+      <div class="bg-surface px-4 py-2.5">
+        <div class="text-lg font-semibold tnum {{ 'text-brand-red' if failed else 'text-gray-900' }}">{{ failed }}</div>
+        <div class="text-[11px] {{ 'text-brand-red font-semibold' if failed else 'text-brand-muted' }}">failed{% if failed %} — never hidden{% endif %}</div>
+      </div>
+      <div class="bg-surface px-4 py-2.5">
+        <div class="text-lg font-semibold text-gray-900 tnum">{{ plan.revision_count }}<span class="text-brand-muted font-normal">/{{ plan.max_revisions }}</span></div>
+        <div class="text-[11px] text-brand-muted">revisions</div>
+      </div>
     </div>
-    {# DASH-UX3: the bar turns red the moment any step fails, so failure leads. #}
-    <div class="mt-3 h-2 bg-gray-200 rounded-full overflow-hidden" role="progressbar"
-         aria-valuenow="{{ progress_pct }}" aria-valuemin="0" aria-valuemax="100">
-      <div class="h-full {{ 'bg-red-500' if has_failure else 'bg-brand-green' }} transition-all duration-500"
-           style="width: {{ progress_pct }}%"></div>
+    {# Segmented progress: good for completed, critical for failed, hairline
+       for the remainder — 1px surface gaps between segments (DASH-UX3: the
+       failure segment is visible the moment any step fails). #}
+    {% set failed_pct = (100 * failed / total_steps) | int if total_steps else 0 %}
+    <div class="mt-3 h-1.5 bg-hairline rounded-full overflow-hidden flex gap-px" role="progressbar"
+         aria-valuenow="{{ progress_pct }}" aria-valuemin="0" aria-valuemax="100"
+         aria-label="{{ progress_pct }}% complete, {{ failed }} failed">
+      <div class="h-full bg-brand-green transition-all duration-500" style="width: {{ progress_pct }}%"></div>
+      {% if failed_pct %}<div class="h-full bg-brand-red transition-all duration-500" style="width: {{ failed_pct }}%"></div>{% endif %}
     </div>
-    <div class="text-xs {{ 'text-red-600 font-semibold' if has_failure else 'text-brand-gray' }} mt-1">
-      {{ progress_pct }}% complete{% if failed %} · {{ failed }} failed{% endif %}
+    <div class="text-[11px] text-brand-muted mt-1.5 flex flex-wrap gap-x-4">
+      <span title="{{ plan.created_at }}">started {{ relative_time(plan.created_at) }}</span>
+      {% if plan.completed_at %}<span title="{{ plan.completed_at }}">completed {{ relative_time(plan.completed_at) }}</span>{% endif %}
     </div>
   </section>
 
@@ -51,9 +64,9 @@
      - Recorded mid-flight via `record-skill` (executing-plans skill, Trigger 5).
      - Empty list (legacy plans / forgot to record) renders as a soft "(none recorded)"
        hint, NOT an error — the user explicitly wants legacy plans to show "null". #}
-  <section class="bg-white rounded-lg shadow p-5 mb-4 border border-gray-200">
+  <section class="bg-surface rounded-xl shadow-sm p-5 mb-4 border border-hairline">
     <div class="flex items-center justify-between mb-3">
-      <h3 class="text-sm font-bold text-gray-900 flex items-center gap-2">
+      <h3 class="text-sm font-semibold text-gray-900 flex items-center gap-2">
         🧠 Skills Activated
         <span class="text-xs font-normal text-brand-gray">(loaded for this plan)</span>
       </h3>
@@ -65,11 +78,11 @@
       <div class="flex flex-wrap gap-2">
         {% for sk in skills %}
           {% set src = source_badge(sk.source) %}
-          <div class="inline-flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1"
+          <div class="inline-flex items-center gap-2 bg-brand-bg border border-hairline rounded-lg px-2.5 py-1"
                title="{{ sk.reason or 'no reason recorded' }} — activated {{ sk.activated_at }}{% if sk.step_id %} under step {{ sk.step_id }}{% endif %}">
             <span class="text-sm font-mono text-gray-900">{{ sk.skill_name }}</span>
-            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border {{ src[2] }}">
-              {{ src[0] }} {{ src[1] }}
+            <span class="inline-flex items-center gap-1 text-[10px] text-brand-gray">
+              <span class="type-dot {{ src[2] }}"></span>{{ src[1] }}
             </span>
             {% if sk.step_id %}
               <a href="#step-{{ sk.step_id }}"
@@ -98,11 +111,11 @@
        this plan and probably wants the full context immediately.
      - Hidden entirely if user_query is NULL (legacy plans). #}
   {% if plan.user_query %}
-    <details class="bg-white rounded-lg shadow border border-brand-blue/30 mb-4"
+    <details class="bg-surface rounded-xl shadow-sm border border-hairline mb-4"
              {% if viewing_plan_id %}open{% endif %}>
-      <summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-brand-blue
-                      hover:bg-blue-50 rounded-lg select-none">
-        📝 Original Query <span class="text-xs text-brand-gray font-normal ml-2">(verbatim user prompt)</span>
+      <summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-gray-900
+                      hover:bg-brand-bg rounded-xl select-none">
+        📝 Original Query <span class="text-xs text-brand-muted font-normal ml-2">(verbatim user prompt)</span>
       </summary>
       <div class="px-5 pb-4 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{{ plan.user_query }}</div>
     </details>
@@ -111,11 +124,11 @@
   {# DASH-UX2: sticky "current activity" banner — the running step + its last 3 log
      lines are always visible without expanding anything. #}
   {% if current_step %}
-  <section class="bg-amber-50 border-2 border-amber-400 rounded-lg p-4 mb-4">
+  <section class="bg-surface border border-hairline border-l-4 border-l-brand-spark rounded-xl shadow-sm p-4 mb-4">
     <div class="flex items-center gap-2 mb-2">
-      <span class="animate-pulse">🔴</span>
-      <span class="text-sm font-bold text-gray-900">Running now</span>
-      <span class="text-[11px] text-brand-gray">started {{ relative_time(current_step.started_at) }}</span>
+      <span class="type-dot bg-brand-spark animate-pulse"></span>
+      <span class="text-sm font-semibold text-gray-900">Running now</span>
+      <span class="text-[11px] text-brand-muted">started {{ relative_time(current_step.started_at) }}</span>
       <a href="#step-{{ current_step.step_id }}" class="text-xs text-brand-blue hover:underline ml-auto">jump ↓</a>
     </div>
     <p class="text-sm text-gray-800 mb-2">{{ current_step.description }}</p>
@@ -129,17 +142,17 @@
   {# DASH-UX4: revision history — WHY the plan changed, from the Deviations table
      (orchestrator migration 010). Empty/old DBs simply don't render this. #}
   {% if deviations %}
-  <details class="bg-white rounded-lg shadow border border-amber-300 mb-4">
-    <summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-amber-700 hover:bg-amber-50 rounded-lg select-none">
+  <details class="bg-surface rounded-xl shadow-sm border border-hairline border-l-4 border-l-brand-spark mb-4">
+    <summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-gray-900 hover:bg-brand-bg rounded-xl select-none">
       🔀 Revision history
-      <span class="text-xs text-brand-gray font-normal ml-2">
+      <span class="text-xs text-brand-muted font-normal ml-2">
         ({{ deviations|length }} deviation{{ '' if deviations|length == 1 else 's' }} — why the plan changed)
       </span>
     </summary>
     <div class="px-5 pb-4 space-y-3">
       {% for d in deviations %}
-      <div class="text-sm border-l-2 border-amber-300 pl-3">
-        <div class="text-xs text-brand-gray">
+      <div class="text-sm border-l-2 border-hairline pl-3">
+        <div class="text-xs text-brand-muted tnum">
           rev {{ d.revision_count }} · {{ relative_time(d.created_at) }}{% if d.target_step_id %} · step {{ d.target_step_id.split('-')[-1] }}{% endif %}
         </div>
         <div class="text-gray-800">{{ d.justification }}</div>
@@ -156,16 +169,16 @@
      hidden (same philosophy as DASH-UX3 for failed steps). #}
   {% if data_profiles or data_decisions %}
   {% set data_alert = data_decisions | selectattr('outcome', 'in', ['unresolved', 'halted']) | list %}
-  <details class="bg-white rounded-lg shadow border border-cyan-300 mb-4"
+  <details class="bg-surface rounded-xl shadow-sm border border-hairline border-l-4 {{ 'border-l-brand-red' if data_alert else 'border-l-brand-blue' }} mb-4"
            {% if data_alert %}open{% endif %}>
-    <summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-cyan-700 hover:bg-cyan-50 rounded-lg select-none">
+    <summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-gray-900 hover:bg-brand-bg rounded-xl select-none">
       📊 Data
-      <span class="text-xs text-brand-gray font-normal ml-2">
+      <span class="text-xs text-brand-muted font-normal ml-2">
         ({{ data_profiles|length }} dataset{{ '' if data_profiles|length == 1 else 's' }} profiled ·
          {{ data_decisions|length }} decision{{ '' if data_decisions|length == 1 else 's' }})
       </span>
       {% if data_alert %}
-        <span class="text-xs font-bold text-white bg-brand-red rounded px-2 py-0.5 ml-2">
+        <span class="text-xs font-semibold text-white bg-brand-red rounded-full px-2 py-0.5 ml-2">
           {{ data_alert|length }} unresolved
         </span>
       {% endif %}
@@ -174,17 +187,17 @@
 
       {% if data_decisions %}
       <div>
-        <div class="text-xs font-semibold uppercase tracking-wide text-brand-gray mb-2">
+        <div class="text-xs font-semibold uppercase tracking-wide text-brand-muted mb-2">
           Drift → decision trail
         </div>
         <div class="space-y-2">
           {% for d in data_decisions %}
           {% set ob = outcome_badge(d.outcome) %}
-          <div class="text-sm border-l-2 {% if d.outcome in ('unresolved', 'halted') %}border-red-400{% else %}border-cyan-300{% endif %} pl-3">
+          <div class="text-sm border-l-2 {% if d.outcome in ('unresolved', 'halted') %}border-brand-red{% else %}border-hairline{% endif %} pl-3">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="text-xs px-2 py-0.5 rounded {{ ob[1] }}">{{ ob[0] }} {{ d.outcome or '—' }}</span>
               {% if d.drift_kind %}
-                <span class="text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-mono">{{ d.drift_kind }}</span>
+                <span class="text-xs px-2 py-0.5 rounded bg-[#fab219]/15 text-[#7a5200] font-mono">{{ d.drift_kind }}</span>
               {% endif %}
               <span class="font-mono text-xs text-gray-700">{{ d.dataset or '?' }}{% if d.column_name %}.{{ d.column_name }}{% endif %}</span>
               {% if d.observed_before or d.observed_after %}
@@ -197,7 +210,7 @@
               <div class="text-xs text-brand-gray mt-0.5">{{ d.rationale }}</div>
             {% endif %}
             {% if d.human_feedback %}
-              <div class="text-xs text-gray-700 mt-0.5 bg-blue-50 rounded px-2 py-1">💬 {{ d.human_feedback }}</div>
+              <div class="text-xs text-gray-700 mt-0.5 bg-brand-blue/10 rounded px-2 py-1">💬 {{ d.human_feedback }}</div>
             {% endif %}
           </div>
           {% endfor %}
@@ -209,11 +222,11 @@
       <div>
         <div class="flex items-center gap-2 text-xs mb-1">
           <span class="font-mono font-semibold text-gray-800">{{ dp.dataset }}</span>
-          <span class="text-brand-gray">{{ dp.row_count }} rows · snapshot {{ dp.snapshot_count }}
+          <span class="text-brand-muted tnum">{{ dp.row_count }} rows · snapshot {{ dp.snapshot_count }}
             {%- if dp.snapshot_count > 1 %} (re-profiled){% endif %} · {{ relative_time(dp.observed_at) }}</span>
         </div>
-        <table class="w-full text-xs border border-gray-200 rounded">
-          <thead class="bg-gray-50 text-brand-gray">
+        <table class="w-full text-xs border border-hairline rounded tnum">
+          <thead class="bg-brand-bg text-brand-muted">
             <tr>
               <th class="text-left px-2 py-1 font-medium">column</th>
               <th class="text-left px-2 py-1 font-medium">dtype</th>
@@ -223,9 +236,9 @@
           </thead>
           <tbody>
             {% for c in dp.columns %}
-            <tr class="border-t border-gray-100">
+            <tr class="border-t border-hairline/60">
               <td class="px-2 py-1 font-mono">{{ c.column_name }}</td>
-              <td class="px-2 py-1 font-mono">{{ c.dtype or '?' }}</td>
+              <td class="px-2 py-1 font-mono text-brand-gray">{{ c.dtype or '?' }}</td>
               <td class="px-2 py-1 text-right {% if c.null_frac and c.null_frac > 0.3 %}text-brand-red font-semibold{% endif %}">
                 {{ '%.0f' % (100 * (c.null_frac or 0)) }}%</td>
               <td class="px-2 py-1 text-right {% if c.distinct_count == 1 and dp.row_count and dp.row_count > 1 %}text-brand-red font-semibold{% endif %}">
@@ -244,7 +257,7 @@
   <!-- Steps — each is an expandable <details> with full log + agent I/O -->
   <section class="space-y-2 mb-4">
     <!-- Column header strip (matches summary widths below) -->
-    <div class="px-4 py-2 flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-brand-gray">
+    <div class="px-4 py-2 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-wide text-brand-muted">
       <span class="w-8">#</span>
       <span class="w-36">Type</span>
       <span class="flex-1">Description</span>
@@ -269,65 +282,64 @@
          of the dashboard) and any failed step (so failures are never hidden). #}
       <details id="step-{{ s.step_id }}"
                {% if s.status in ('IN_PROGRESS', 'FAILED') %}open{% endif %}
-               class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden
-                      {% if s.status == 'IN_PROGRESS' %}ring-2 ring-brand-spark{% elif s.status == 'FAILED' %}ring-2 ring-red-400{% endif %}">
-        <summary class="px-4 py-3 cursor-pointer hover:bg-gray-50 flex items-center gap-3 select-none">
-          <span class="font-mono text-xs text-brand-gray w-8">{{ s.step_id.split('-')[-1] }}</span>
+               class="bg-surface rounded-xl shadow-sm border overflow-hidden
+                      {% if s.status == 'IN_PROGRESS' %}border-brand-spark/60 border-l-4 border-l-brand-spark{% elif s.status == 'FAILED' %}border-brand-red/60 border-l-4 border-l-brand-red{% else %}border-hairline{% endif %}">
+        <summary class="px-4 py-3 cursor-pointer hover:bg-brand-bg flex items-center gap-3 select-none">
+          <span class="font-mono text-xs text-brand-muted w-8">{{ s.step_id.split('-')[-1] }}</span>
           <span class="w-36">
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold border {{ tb[2] }}"
-                  title="Type: {{ tb[1] }}">
-              {{ tb[0] }} {{ tb[1] }}
+            <span class="inline-flex items-center gap-1.5 text-xs text-gray-700" title="Type: {{ tb[1] }}">
+              <span class="type-dot {{ tb[2] }}"></span>{{ tb[1] }}
             </span>
           </span>
           <span class="flex-1 text-sm text-gray-800">
-            {% if s.depth_level > 0 %}<span class="text-brand-gray">{{ '↳ ' * s.depth_level }}</span>{% endif %}
+            {% if s.depth_level > 0 %}<span class="text-brand-muted">{{ '↳ ' * s.depth_level }}</span>{% endif %}
             {{ s.description }}
           </span>
           <span class="w-32 text-center">
-            <span class="inline-flex items-center px-2 py-1 rounded text-xs font-semibold {{ sb[1] }}">
+            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold {{ sb[1] }}">
               {{ sb[0] }} {{ s.status }}
             </span>
           </span>
-          <span class="text-xs text-brand-gray w-20 text-right">
+          <span class="text-xs text-brand-muted w-20 text-right tnum">
             {{ format_duration(s.started_at, s.completed_at) }}
           </span>
         </summary>
 
-        <div class="border-t border-gray-200 bg-gray-50 px-4 py-3 space-y-3">
+        <div class="border-t border-hairline bg-brand-bg px-4 py-3 space-y-3">
           {# BE-D3 surfaced: WHY the step failed, without digging through the log. #}
           {% if s.status == 'FAILED' and s.failure_reason %}
-            <div class="text-sm text-red-800 bg-red-50 border border-red-300 rounded px-3 py-2">
+            <div class="text-sm text-[#8a1f1f] bg-brand-red/10 border border-brand-red/40 rounded-lg px-3 py-2">
               ⚠️ {{ s.failure_reason }}
             </div>
           {% endif %}
-          <div class="text-xs text-brand-gray flex flex-wrap gap-x-4">
+          <div class="text-xs text-brand-muted flex flex-wrap gap-x-4">
             <span>step_id: <code class="font-mono">{{ s.step_id }}</code></span>
             {% if s.started_at %}<span>Started: {{ s.started_at }}</span>{% endif %}
             {% if s.completed_at %}<span>Completed: {{ s.completed_at }}</span>{% endif %}
             {% if s.parent_step_id %}<span>Parent: <code class="font-mono">{{ s.parent_step_id }}</code></span>{% endif %}
-            {% if s.parallel_group_id %}<span class="text-amber-700">⫲ ran in parallel with siblings (group {{ s.parallel_group_id }})</span>{% endif %}
+            {% if s.parallel_group_id %}<span class="text-brand-gray">⫲ ran in parallel with siblings (group {{ s.parallel_group_id }})</span>{% endif %}
           </div>
 
           {% if s.step_type == 'SUB_AGENT' %}
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <div class="text-xs font-semibold text-pink-800 mb-1">📥 Agent Input</div>
-                <pre class="bg-pink-50 border border-pink-200 rounded p-2 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto">{{ s.agent_input or '(not recorded)' }}</pre>
+                <div class="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1.5"><span class="type-dot bg-[#e87ba4]"></span>📥 Agent Input</div>
+                <pre class="bg-surface border border-hairline rounded-lg p-2 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto">{{ s.agent_input or '(not recorded)' }}</pre>
               </div>
               <div>
-                <div class="text-xs font-semibold text-pink-800 mb-1">📤 Agent Output</div>
-                <pre class="bg-pink-50 border border-pink-200 rounded p-2 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto">{{ s.agent_output or '(not recorded)' }}</pre>
+                <div class="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-1.5"><span class="type-dot bg-[#e87ba4]"></span>📤 Agent Output</div>
+                <pre class="bg-surface border border-hairline rounded-lg p-2 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto">{{ s.agent_output or '(not recorded)' }}</pre>
               </div>
             </div>
           {% endif %}
 
           {% if s.summary %}
             <div class="mb-3">
-              <div class="text-xs font-semibold text-emerald-800 mb-1 flex items-center gap-2">
+              <div class="text-xs font-semibold text-gray-700 mb-1 flex items-center gap-2">
                 <span>📌 Summary</span>
-                <span class="text-xs font-normal text-brand-gray">(human-curated)</span>
+                <span class="text-xs font-normal text-brand-muted">(human-curated)</span>
               </div>
-              <div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-900 whitespace-pre-wrap leading-relaxed">{{ s.summary }}</div>
+              <div class="bg-[#0ca30c]/5 border border-[#0ca30c]/25 rounded-lg p-3 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{{ s.summary }}</div>
             </div>
           {% endif %}
 
@@ -344,7 +356,7 @@
               {% endif %}
             </div>
             {% if s.log_context %}
-              <pre class="bg-white border border-gray-200 rounded p-2 text-xs font-mono whitespace-pre-wrap max-h-64 overflow-auto">{{ get_last_n_log_entries(s.log_context, 10) }}</pre>
+              <pre class="bg-surface border border-hairline rounded-lg p-2 text-xs font-mono whitespace-pre-wrap max-h-64 overflow-auto">{{ get_last_n_log_entries(s.log_context, 10) }}</pre>
             {% else %}
               <p class="text-xs text-brand-gray italic">(no raw output captured for this step)</p>
             {% endif %}
@@ -353,7 +365,7 @@
       </details>
       {# Recurse into children (sub-steps from deviations). #}
       {% if s.children %}
-        <div class="ml-6 mt-2 space-y-2 border-l-2 border-gray-200 pl-3">
+        <div class="ml-6 mt-2 space-y-2 border-l-2 border-hairline pl-3">
           {{ render_siblings(s.children) }}
         </div>
       {% endif %}
@@ -373,8 +385,8 @@
           {# flush previous run #}
           {% if ns.buffer %}
             {% if ns.buffer|length > 1 %}
-              <div class="border-l-4 border-dashed border-brand-spark pl-3 py-1 mb-2">
-                <div class="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-2">
+              <div class="border-l-4 border-dashed border-brand-spark/50 pl-3 py-1 mb-2">
+                <div class="text-xs font-semibold text-brand-gray mb-2 flex items-center gap-2">
                   <span>⫲ Parallel branch ({{ ns.buffer|length }} steps ran concurrently)</span>
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-2">
@@ -392,8 +404,8 @@
       {# flush trailing run #}
       {% if ns.buffer %}
         {% if ns.buffer|length > 1 %}
-          <div class="border-l-4 border-dashed border-brand-spark pl-3 py-1 mb-2">
-            <div class="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-2">
+          <div class="border-l-4 border-dashed border-brand-spark/50 pl-3 py-1 mb-2">
+            <div class="text-xs font-semibold text-brand-gray mb-2 flex items-center gap-2">
               <span>⫲ Parallel branch ({{ ns.buffer|length }} steps ran concurrently)</span>
             </div>
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-2">
@@ -409,7 +421,7 @@
     {{ render_siblings(steps) }}
   </section>
 
-  <div class="text-xs text-brand-gray mt-4 text-center">
+  <div class="text-xs text-brand-muted mt-4 text-center">
     {{ total_plans }} total plans in DB · {{ db_size_kb }} KB
     · click any step to expand its log (last 10 entries) + sub-agent I/O
   </div>

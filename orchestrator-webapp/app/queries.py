@@ -404,44 +404,50 @@ def compute_etag(conn: sqlite3.Connection) -> str:
 
 
 # ── Helpers for templating ───────────────────────────────────────────────
+# Status colors are RESERVED (good/warning/critical/serious) and always ship
+# icon + label. Soft tint chips for calm states; FAILED stays solid — failure
+# leads, never whispers.
 STATUS_BADGES = {
-    "PENDING":     ("⏳", "bg-gray-200 text-gray-700"),
-    "IN_PROGRESS": ("🚧", "bg-brand-spark text-gray-900 animate-pulse"),
-    "COMPLETED":   ("✅", "bg-brand-green text-white"),
-    "FAILED":      ("❌", "bg-brand-red text-white"),
+    "PENDING":      ("⏳", "bg-gray-500/10 text-gray-600"),
+    "IN_PROGRESS":  ("🚧", "bg-[#fab219]/15 text-[#7a5200]"),
+    "COMPLETED":    ("✅", "bg-[#0ca30c]/10 text-[#006300]"),
+    "FAILED":       ("✕",  "bg-brand-red text-white"),
+    "NEEDS_REVIEW": ("👀", "bg-[#ec835a]/15 text-[#8a3416]"),
 }
 
-# v2: step type → (icon, tailwind classes) for compact badge
+# Step type = IDENTITY -> categorical slots in fixed order (validated set,
+# worst adjacent CVD dE 47). Rendered as a colored dot beside ink text — the
+# text never wears the series color. Third element = the dot's bg class.
 TYPE_BADGES = {
-    "THINKING":      ("🧠", "bg-purple-100 text-purple-800 border-purple-300"),
-    "DOCUMENTATION": ("📝", "bg-blue-100 text-blue-800 border-blue-300"),
-    "CODE":          ("💻", "bg-emerald-100 text-emerald-800 border-emerald-300"),
-    "COMMAND":       ("⚡", "bg-amber-100 text-amber-800 border-amber-300"),
-    "SUB_AGENT":     ("🤖", "bg-pink-100 text-pink-800 border-pink-300"),
-    "ANALYSIS":      ("🔍", "bg-cyan-100 text-cyan-800 border-cyan-300"),
+    "ANALYSIS":      ("🔍", "bg-[#2a78d6]"),   # slot 1 blue
+    "CODE":          ("💻", "bg-[#1baf7a]"),   # slot 2 aqua
+    "COMMAND":       ("⚡", "bg-[#eda100]"),   # slot 3 yellow
+    "THINKING":      ("🧠", "bg-[#4a3aa7]"),   # slot 5 violet
+    "SUB_AGENT":     ("🤖", "bg-[#e87ba4]"),   # slot 7 magenta
+    "DOCUMENTATION": ("📝", "bg-[#eb6834]"),   # slot 8 orange
 }
 
 # v3: skill-activation source → (icon, label, tailwind classes) for the Skills Activated panel.
 # Sources are the four enum values from migration 005_skill_activations.sql.
 SOURCE_BADGES = {
-    "iron-law":         ("⚖️",  "iron-law",         "bg-red-100 text-red-800 border-red-300"),
-    "auto-search":      ("🔍", "auto-search",      "bg-cyan-100 text-cyan-800 border-cyan-300"),
-    "explicit-mention": ("💬", "explicit-mention", "bg-violet-100 text-violet-800 border-violet-300"),
-    "deferred-load":    ("⏳", "deferred-load",    "bg-amber-100 text-amber-800 border-amber-300"),
+    "iron-law":         ("⚖️",  "iron-law",         "bg-[#4a3aa7]"),
+    "auto-search":      ("🔍", "auto-search",      "bg-[#2a78d6]"),
+    "explicit-mention": ("💬", "explicit-mention", "bg-[#e87ba4]"),
+    "deferred-load":    ("⏳", "deferred-load",    "bg-[#eda100]"),
 }
 
 
 def status_badge(status: str) -> tuple[str, str]:
     """Return (emoji, tailwind classes) for a status."""
-    return STATUS_BADGES.get(status, ("•", "bg-gray-100 text-gray-500"))
+    return STATUS_BADGES.get(status, ("•", "bg-gray-500/10 text-gray-500"))
 
 
 def type_badge(step_type: str | None) -> tuple[str, str, str]:
-    """Return (icon, label, tailwind classes) for a step type. Falls back to '—' if NULL."""
+    """Return (icon, label, dot-color class) for a step type. '—' if NULL."""
     if not step_type:
-        return ("—", "untyped", "bg-gray-50 text-gray-400 border-gray-200")
-    icon, classes = TYPE_BADGES.get(step_type, ("•", "bg-gray-100 text-gray-600 border-gray-300"))
-    return (icon, step_type.title().replace("_", " "), classes)
+        return ("—", "untyped", "bg-gray-300")
+    icon, dot = TYPE_BADGES.get(step_type, ("•", "bg-gray-400"))
+    return (icon, step_type.title().replace("_", " "), dot)
 
 
 def source_badge(source: str | None) -> tuple[str, str, str]:
@@ -451,8 +457,8 @@ def source_badge(source: str | None) -> tuple[str, str, str]:
     (defensive — the DB CHECK constraint should already prevent unknown values).
     """
     if not source:
-        return ("—", "unknown", "bg-gray-50 text-gray-400 border-gray-200")
-    return SOURCE_BADGES.get(source, ("•", source, "bg-gray-100 text-gray-600 border-gray-300"))
+        return ("—", "unknown", "bg-gray-300")
+    return SOURCE_BADGES.get(source, ("•", source, "bg-gray-400"))
 
 
 def format_duration(started_at: str | None, completed_at: str | None) -> str:
@@ -588,12 +594,12 @@ def get_data_decisions(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
 
 # Phase 5.2: outcome → (icon, tailwind classes) for the data-decision trail.
 OUTCOME_BADGES = {
-    "resolved":   ("✅", "bg-brand-green text-white"),
-    "unresolved": ("❌", "bg-brand-red text-white"),
+    "resolved":   ("✅", "bg-[#0ca30c]/10 text-[#006300]"),
+    "unresolved": ("✕",  "bg-brand-red text-white"),
     "halted":     ("🛑", "bg-brand-red text-white"),
-    "noop":       ("➖", "bg-gray-200 text-gray-700"),
+    "noop":       ("➖", "bg-gray-500/10 text-gray-600"),
 }
 
 
 def outcome_badge(outcome: str | None) -> tuple[str, str]:
-    return OUTCOME_BADGES.get(outcome or "", ("•", "bg-gray-200 text-gray-700"))
+    return OUTCOME_BADGES.get(outcome or "", ("•", "bg-gray-500/10 text-gray-600"))

@@ -10,22 +10,22 @@
       <div class="flex items-center gap-2">
         <a href="/"
            class="inline-flex items-center gap-2 px-4 py-2 bg-brand-blue text-white rounded-lg
-                  shadow hover:bg-blue-700 active:bg-blue-800 text-sm font-semibold transition">
+                  shadow-sm hover:bg-[#256abf] active:bg-[#1c5cab] text-sm font-semibold transition">
           🏠 Back to Home
         </a>
         <a href="/history"
-           class="inline-flex items-center gap-2 px-4 py-2 bg-white border border-brand-blue text-brand-blue
-                  rounded-lg shadow-sm hover:bg-blue-50 active:bg-blue-100 text-sm font-semibold transition">
+           class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue
+                  rounded-lg shadow-sm hover:bg-brand-bg active:bg-hairline text-sm font-semibold transition">
           ← Back to History
         </a>
       </div>
-      <span class="text-xs text-brand-gray italic">📜 Viewing historical plan</span>
+      <span class="text-xs text-brand-muted italic">📜 Viewing historical plan</span>
     {% else %}
       {# Default: latest plan — show Show History button #}
       <span class="text-sm font-semibold text-brand-gray">📍 Latest Plan</span>
       <a href="/history"
-         class="inline-flex items-center gap-2 px-4 py-2 bg-white border border-brand-blue text-brand-blue
-                rounded-lg shadow-sm hover:bg-blue-50 active:bg-blue-100 text-sm font-semibold transition">
+         class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue
+                rounded-lg shadow-sm hover:bg-brand-bg active:bg-hairline text-sm font-semibold transition">
         📚 Show History →
       </a>
     {% endif %}
