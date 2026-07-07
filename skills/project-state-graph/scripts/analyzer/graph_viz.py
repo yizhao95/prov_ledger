@@ -28,20 +28,20 @@ import sqlite3
 from typing import Dict, List, Tuple
 
 # ── palette ────────────────────────────────────────────────────────────────
-BRAND_BLUE = "#0053e2"
-SPARK = "#ffc220"
-RED = "#ea1100"
-GREEN = "#2a8703"
+BRAND_BLUE = "#2a78d6"
+SPARK = "#fab219"
+RED = "#e34948"
+GREEN = "#1baf7a"
 
 _NODE_COLORS = {
-    "file": "#0053e2", "function": "#2a8703", "method": "#76c043",
-    "class": "#ffc220", "module": "#888888", "pipeline": "#ea1100",
-    "route": "#a020f0", "sql_table": "#ff8c00", "bq_dataset": "#d2691e",
-    "css_selector": "#00b0b9", "data_var": "#555555",
+    "file": "#2a78d6", "function": "#1baf7a", "method": "#199e70",
+    "class": "#fab219", "module": "#898781", "pipeline": "#e34948",
+    "route": "#4a3aa7", "sql_table": "#eb6834", "bq_dataset": "#d95926",
+    "css_selector": "#e87ba4", "data_var": "#52514e",
 }
 # one hue per subsystem (assigned deterministically by sort order)
-_SUB_PALETTE = ["#0053e2", "#2a8703", "#a020f0", "#ff8c00", "#00b0b9",
-                "#ea1100", "#76c043", "#d2691e", "#5a6573", "#c01865"]
+_SUB_PALETTE = ["#2a78d6", "#1baf7a", "#4a3aa7", "#eb6834", "#e87ba4",
+                "#e34948", "#199e70", "#d95926", "#52514e", "#d55181"]
 
 APP_FUNC_TYPES = ("function", "method", "route")
 FLOW_EDGES = ("calls", "downstream_data_feed", "produces", "consumes", "feeds")
@@ -131,7 +131,7 @@ def build_subsystems(db_path: str) -> Dict:
     vis_edges = [{
         "from": ss, "to": ds, "value": w, "width": 1 + 7 * (w / max_w),
         "title": f"{ss} \u2192 {ds}: {w} refs", "arrows": "to",
-        "color": {"color": "#9aa3af", "opacity": 0.6},
+        "color": {"color": "#c3c2b7", "opacity": 0.7},
         "smooth": {"type": "curvedCW", "roundness": 0.15},
     } for (ss, ds), w in dep.items()]
 
@@ -220,7 +220,7 @@ WHERE t.name IN ({ph}) AND NOT {_TEST_PRED}""",
             node["unconsumed"] = unconsumed
             if unconsumed:
                 # dim + dashed border so terminal data reads as a dead-end
-                node["color"] = {"background": "#fff3cc", "border": "#bbbbbb"}
+                node["color"] = {"background": "#fdeecd", "border": "#c98500"}
                 node["shapeProperties"] = {"borderDashes": [4, 4]}
         nodes.append(node)
 
@@ -264,7 +264,7 @@ def build_full(db_path: str) -> Dict:
             "qualified_name": qname, "file_path": fpath,
             "profiles": profs,
             "title": "\n".join(title),
-            "color": _NODE_COLORS.get(ntype, "#999999"),
+            "color": _NODE_COLORS.get(ntype, "#898781"),
         })
     edges = [{
         "from": s, "to": d, "edge_type": t,
@@ -283,18 +283,18 @@ _TEMPLATE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <title>__TITLE__ — __LEVEL__</title>
 <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
- *{box-sizing:border-box} body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#16191f}
- header{background:#0053e2;color:#fff;padding:10px 16px;display:flex;gap:16px;align-items:center}
+ *{box-sizing:border-box} body{margin:0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#0b0b0b}
+ header{background:#fcfcfb;color:#0b0b0b;border-bottom:1px solid #e1e0d9;padding:10px 16px;display:flex;gap:16px;align-items:center}
  header h1{font-size:16px;margin:0;font-weight:600} header .stats{font-size:12px;opacity:.9}
  #wrap{display:flex;height:calc(100vh - 44px)}
- #panel{width:240px;overflow:auto;border-right:1px solid #e3e6ea;padding:12px}
+ #panel{width:240px;overflow:auto;border-right:1px solid #e1e0d9;padding:12px}
  #net{flex:1}
- .group{margin-bottom:16px} .group h2{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#5a6573;margin:0 0 8px}
+ .group{margin-bottom:16px} .group h2{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#52514e;margin:0 0 8px}
  label{display:flex;align-items:center;gap:8px;font-size:13px;padding:3px 0;cursor:pointer}
  .sw{width:12px;height:12px;border-radius:3px;display:inline-block}
- .count{color:#8a93a0;font-size:11px;margin-left:auto}
- #search{width:100%;padding:6px 8px;margin-bottom:10px;border:1px solid #cdd2d9;border-radius:6px}
- button{font-size:12px;padding:4px 8px;border:1px solid #cdd2d9;background:#f6f7f9;border-radius:6px;cursor:pointer}
+ .count{color:#898781;font-size:11px;margin-left:auto}
+ #search{width:100%;padding:6px 8px;margin-bottom:10px;border:1px solid #d6d4cc;border-radius:6px}
+ button{font-size:12px;padding:4px 8px;border:1px solid #d6d4cc;background:#f9f9f7;border-radius:6px;cursor:pointer}
  .btn-row{display:flex;gap:6px;margin-bottom:8px}
 </style></head><body>
 <header><h1>__TITLE__ · __LEVEL__ map</h1><span class="stats" id="stats"></span></header>
@@ -303,7 +303,7 @@ _TEMPLATE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
   <div class="btn-row"><button id="fit">Fit</button><button id="physics">Physics</button><button id="clearFocus">Clear focus</button></div>
   <div class="group" id="subflowGroup"><h2>Sub-flow lens</h2>
     <select id="subflow"><option value="">(full graph)</option></select>
-    <div id="focusNote" style="font-size:11px;color:#5a6573;margin-top:6px">Click a node to focus its end-to-end subgraph.</div>
+    <div id="focusNote" style="font-size:11px;color:#52514e;margin-top:6px">Click a node to focus its end-to-end subgraph.</div>
   </div>
   <div class="group" id="legendGroup"><h2>Subsystems</h2><div id="legend"></div></div>
   <div class="group" id="nodeGroup"><h2>Node types</h2><div id="nodeF"></div></div>
@@ -312,11 +312,11 @@ _TEMPLATE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <script>
 const GRAPH_DATA=__GRAPH_DATA__, G=GRAPH_DATA, LEVEL="__LEVEL__";
 const allNodes=G.nodes, allEdges=G.edges.map((e,i)=>Object.assign({id:i},e));
-const EDGE_STYLE={calls:{color:'#9aa3af',dashes:false},
- downstream_data_feed:{color:'#0053e2',dashes:false},
- feeds:{color:'#0053e2',dashes:false},
- produces:{color:'#2a8703',dashes:true}, consumes:{color:'#ff8c00',dashes:true}};
-allEdges.forEach(e=>{if(e.edge_type){const s=EDGE_STYLE[e.edge_type]||{color:'#bbb'};
+const EDGE_STYLE={calls:{color:'#c3c2b7',dashes:false},
+ downstream_data_feed:{color:'#2a78d6',dashes:false},
+ feeds:{color:'#2a78d6',dashes:false},
+ produces:{color:'#1baf7a',dashes:true}, consumes:{color:'#eb6834',dashes:true}};
+allEdges.forEach(e=>{if(e.edge_type){const s=EDGE_STYLE[e.edge_type]||{color:'#c3c2b7'};
  e.color={color:s.color,opacity:0.55}; e.dashes=s.dashes; e.arrows=e.arrows||'to';
  e.smooth=e.smooth||{type:'continuous'};}});
 const hasTypes=(G.node_types&&G.node_types.length)>0;
@@ -340,7 +340,7 @@ if(hasTypes){
   nf.insertAdjacentHTML('beforeend','<label><input type="checkbox" id="'+id+'" checked>'+t+'<span class="count">'+(nc[t]||0)+'</span></label>');
   nf.querySelector('#'+CSS.escape(id)).onchange=e=>{e.target.checked?onN.add(t):onN.delete(t);render();};});
  const ef=document.getElementById('edgeF');
- G.edge_types.forEach(t=>{const id='et_'+t; const sw=(EDGE_STYLE[t]||{}).color||'#bbb';
+ G.edge_types.forEach(t=>{const id='et_'+t; const sw=(EDGE_STYLE[t]||{}).color||'#c3c2b7';
   ef.insertAdjacentHTML('beforeend','<label><input type="checkbox" id="'+id+'" checked><span class="sw" style="background:'+sw+'"></span>'+t+'<span class="count">'+(ec[t]||0)+'</span></label>');
   ef.querySelector('#'+CSS.escape(id)).onchange=e=>{e.target.checked?onE.add(t):onE.delete(t);render();};});
 }else{document.getElementById('nodeGroup').style.display='none';document.getElementById('edgeGroup').style.display='none';}
