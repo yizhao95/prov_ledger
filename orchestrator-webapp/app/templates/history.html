@@ -7,19 +7,19 @@
   <div class="mb-4 flex items-center justify-between">
     <a href="/"
        class="inline-flex items-center gap-2 px-4 py-2 bg-brand-blue text-white rounded-lg
-              shadow hover:bg-blue-700 active:bg-blue-800 text-sm font-semibold transition">
+              shadow-sm hover:bg-[#256abf] active:bg-[#1c5cab] text-sm font-semibold transition">
       ← Back to Home
     </a>
-    <h2 class="text-lg font-bold text-brand-blue">📚 Plan History</h2>
+    <h2 class="text-lg font-semibold text-gray-900">📚 Plan History</h2>
     <span class="text-sm text-brand-gray">{{ plans|length }} total plans</span>
   </div>
 
   {% if error %}
-    <div class="bg-brand-red text-white p-4 rounded-lg shadow">
+    <div class="bg-brand-red/10 border border-brand-red/40 text-[#8a1f1f] p-4 rounded-xl">
       <strong>⚠️ Error:</strong> {{ error }}
     </div>
   {% elif not plans %}
-    <div class="bg-yellow-50 border border-yellow-300 text-yellow-900 p-4 rounded-lg">
+    <div class="bg-[#fab219]/10 border border-[#fab219]/40 text-[#7a5200] p-4 rounded-xl">
       No plans yet. Run <code class="font-mono bg-white px-1 rounded">orchestrator-cli.py init-plan ...</code> to create one.
     </div>
   {% else %}
@@ -29,8 +29,8 @@
         {% set pct = (100 * p.completed_steps / p.total_steps) | int if p.total_steps else 0 %}
         <li>
           <a href="/plan/{{ p.plan_id }}"
-             class="block bg-white rounded-lg shadow border border-gray-200 hover:border-brand-blue
-                    hover:shadow-md transition p-4 group">
+             class="block bg-surface rounded-xl shadow-sm border border-hairline hover:border-brand-blue/50
+                    hover:shadow transition p-4 group">
             <div class="flex items-start justify-between gap-3 mb-2">
               <div class="flex-1 min-w-0">
                 {# Card title is the SHORT title (first sentence of user_query, truncated to ~70ch).
@@ -57,7 +57,7 @@
             </div>
 
             <!-- Mini progress bar -->
-            <div class="mt-2 h-1 bg-gray-200 rounded-full overflow-hidden">
+            <div class="mt-2 h-1 bg-hairline rounded-full overflow-hidden">
               <div class="h-full bg-brand-green transition-all duration-500" style="width: {{ pct }}%"></div>
             </div>
           </a>
@@ -66,7 +66,7 @@
     </ul>
   {% endif %}
 
-  <div class="text-xs text-brand-gray mt-6 text-center">
+  <div class="text-xs text-brand-muted mt-6 text-center">
     Click any plan to view its full step-by-step execution.
   </div>
 {% endblock %}

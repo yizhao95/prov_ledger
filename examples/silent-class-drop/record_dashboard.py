@@ -98,9 +98,9 @@ def main() -> int:
             # center the red card (auto-expanded, survives every HTMX swap).
             # Instant scrolls: smooth scrolling bloats the GIF with full-frame
             # deltas.
-            page.wait_for_selector('.ring-red-400', timeout=30000)
+            page.wait_for_selector('details.border-l-brand-red', timeout=30000)
             page.evaluate("""
-              document.querySelector('.ring-red-400')
+              document.querySelector('details.border-l-brand-red')
                 ?.scrollIntoView({behavior: 'instant', block: 'center'});
             """)
             page.wait_for_timeout(4000)
@@ -108,10 +108,10 @@ def main() -> int:
             # 2s HTMX swap re-renders them closed, so re-open on an interval.
             page.evaluate("""
               window.__keepOpen = setInterval(() => {
-                document.querySelectorAll('details.border-cyan-300, details.border-amber-300')
+                document.querySelectorAll('details.border-l-brand-blue, details.border-l-brand-spark, details.border-l-brand-red')
                   .forEach(d => d.open = true);
               }, 400);
-              document.querySelector('details.border-cyan-300')
+              document.querySelector('details.border-l-brand-blue, details.border-l-brand-red')
                 ?.scrollIntoView({behavior: 'instant', block: 'start'});
             """)
             page.wait_for_timeout(6000)   # act 4: sub-steps recover
