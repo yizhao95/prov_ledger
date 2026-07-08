@@ -7,6 +7,8 @@
 #   cd $(mktemp -d) && vhs <repo>/scripts/install-tutorial.tape
 #
 # NOTE: run from a scratch directory — the tape clones the repo fresh.
+# PRIVACY: keep every printed line free of user-specific paths (no expanded
+# $HOME/usernames on screen — variables are typed unexpanded on purpose).
 # Output paths are relative (VHS's parser rejects some absolute paths).
 
 Output install-tutorial.gif
@@ -30,7 +32,7 @@ Wait@120s
 Type "bash scripts/bootstrap.sh"
 Enter
 Wait@600s
-Type `python3 -c "import sys; print('python', sys.version.split()[0])" && PY=$HOME/skill-workspace/.venv/bin/python && echo venv: $PY`
+Type "PY=$HOME/skill-workspace/.venv/bin/python && $PY --version"
 Enter
 Wait@30s
 
@@ -38,8 +40,11 @@ Type `rm -rf /tmp/pl-lib && uv venv -q /tmp/pl-lib --python 3.13 && uv pip insta
 Enter
 Wait@180s
 
-Type "# ── 2 · test (six suites, run separately) ────────────────"
+Type "# ── 2 · test (seven suites, run separately) ──────────────"
 Enter
+Type "$PY -m pytest scripts/tests -q | tail -1"
+Enter
+Wait@120s
 Type "$PY -m pytest orchestrator-backend -q | tail -1"
 Enter
 Wait@300s

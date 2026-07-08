@@ -1,6 +1,6 @@
 # 🧾 provLedger
 
-![tests](https://img.shields.io/badge/tests-560%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-563%20passing-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -377,6 +377,7 @@ PY=~/skill-workspace/.venv/bin/python
 
 # 3. Run the test suites to confirm a healthy install (run each separately —
 #    each suite has its own pyproject/pythonpath; one combined invocation breaks)
+$PY -m pytest scripts/tests -q                                    #   3 passed
 $PY -m pytest orchestrator-backend -q                             # 152 passed
 $PY -m pytest orchestrator-webapp  -q                             #  23 passed
 $PY -m pytest skills/writing-plans/tests -q                       #  46 passed, 2 skipped
@@ -394,7 +395,7 @@ PROVLEDGER_WEBAPP_DIR=orchestrator-webapp bash orchestrator-webapp/launch_dashbo
 | Level | Command | Expect |
 |---|---|---|
 | Quickest — end-to-end demo | `make demo` | the MISMATCH → VERIFIED arc, purity 0.31 → 0.91, `SELF-CHECK OK`, exit 0 |
-| Full — all test suites | the six `pytest` commands above, **run separately** | **560 passed, 3 skipped** total |
+| Full — all test suites | the seven `pytest` commands above, **run separately** | **563 passed, 3 skipped** total |
 | Packaging — pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
 
 The dashboard reads the orchestrator database **read-only**. Point it at any
@@ -425,12 +426,12 @@ MIT — see [LICENSE](LICENSE).
 The complete walkthrough below was recorded live in a real terminal
 (~5 minutes, unedited): **① install** — fresh `git clone`, idempotent
 `bootstrap.sh`, and the PyPI library path (`pip install provledger`,
-version printed from the installed wheel) → **② test** — all six suites run
-separately, `152 / 23 / 46 / 52 / 232 / 55` passing → **③ acceptance** —
+version printed from the installed wheel) → **② test** — all seven suites run
+separately, `3 / 152 / 23 / 46 / 52 / 232 / 55` passing → **③ acceptance** —
 `make demo` catches the silently dropped column (MISMATCH → revise →
 VERIFIED, purity 0.31 → 0.91) and ends on `SELF-CHECK OK`.
 
-![Live terminal walkthrough: git clone, bootstrap, pip install provledger from PyPI, six test suites passing, then make demo ending in SELF-CHECK OK](docs/media/install-tutorial.gif)
+![Live terminal walkthrough: git clone, bootstrap, pip install provledger from PyPI, seven test suites passing, then make demo ending in SELF-CHECK OK](docs/media/install-tutorial.gif)
 
 Reproduce the recording itself with
 [`scripts/install-tutorial.tape`](scripts/install-tutorial.tape) (VHS).

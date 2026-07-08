@@ -102,6 +102,7 @@ Run each test suite **separately** (each has its own pyproject/pythonpath —
 one combined invocation breaks). A healthy install passes all of them:
 
 ```bash
+python -m pytest scripts/tests                         -q   #   3 passed
 python -m pytest orchestrator-backend                  -q   # 152 passed
 python -m pytest orchestrator-webapp                   -q   #  23 passed
 python -m pytest skills/writing-plans/tests            -q   #  46 passed, 2 skipped
@@ -110,7 +111,7 @@ python -m pytest skills/project-state-graph/scripts/tests     -q   # 232 passed,
 python -m pytest skills/update-project-state-graph/scripts/tests -q   #  55 passed
 ```
 
-Total: **560 passed, 3 skipped**.
+Total: **563 passed, 3 skipped**.
 
 The quickest end-to-end check is the demo — one command, deterministic,
 self-verifying:
