@@ -417,3 +417,20 @@ Maintainer: **yzhao950213@gmail.com**
 ## 📄 License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+## 📼 Appendix: install → test → acceptance, end to end
+
+The complete walkthrough below was recorded live in a real terminal
+(~5 minutes, unedited): **① install** — fresh `git clone`, idempotent
+`bootstrap.sh`, and the PyPI library path (`pip install provledger`,
+version printed from the installed wheel) → **② test** — all six suites run
+separately, `152 / 23 / 46 / 52 / 232 / 55` passing → **③ acceptance** —
+`make demo` catches the silently dropped column (MISMATCH → revise →
+VERIFIED, purity 0.31 → 0.91) and ends on `SELF-CHECK OK`.
+
+![Live terminal walkthrough: git clone, bootstrap, pip install provledger from PyPI, six test suites passing, then make demo ending in SELF-CHECK OK](docs/media/install-tutorial.gif)
+
+Reproduce the recording itself with
+[`scripts/install-tutorial.tape`](scripts/install-tutorial.tape) (VHS).
