@@ -21,6 +21,7 @@ want="$(sha256sum "${REQS}" | awk '{print $1}')"
 
 # Warm path: marker matches -> nothing to do.
 if [[ -f "${MARKER}" ]] && [[ "$(cat "${MARKER}" 2>/dev/null)" == "${want}" ]]; then
+    echo "✅ provLedger bootstrap: dependencies up to date (warm no-op)"
     exit 0
 fi
 
@@ -33,7 +34,9 @@ if [[ -n "${PROVLEDGER_BOOTSTRAP_INSTALLER:-}" ]]; then
 else
     {
         if command -v uv >/dev/null 2>&1; then
-            uv venv "${VENV}" && \
+            # uv >= 0.5 refuses to overwrite an existing venv (--clear would
+            # wipe it) — reuse it and just sync the requirements instead.
+            { [[ -x "${VENV}/bin/python" ]] || uv venv "${VENV}"; } && \
             VIRTUAL_ENV="${VENV}" uv pip install -r "${REQS}"
         else
             python3 -m venv "${VENV}" && \
@@ -50,4 +53,5 @@ if [[ ${rc} -ne 0 ]]; then
 fi
 
 echo "${want}" > "${MARKER}"
+echo "✅ provLedger bootstrap: venv ready at ${VENV}"
 exit 0
