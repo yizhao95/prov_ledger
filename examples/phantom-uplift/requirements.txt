@@ -1,0 +1,3 @@
+# The demo itself is stdlib-only; pytest runs the rollup's own unit tests
+# (the "green lights" beat in step D).
+pytest>=7
