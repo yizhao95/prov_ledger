@@ -38,9 +38,11 @@ orchestrator backbone (every step runs for real, with its own log):
    green, `+23.2% vs last week` — the false good news, COMPLETED.
 5. **E · ANALYSIS — verify the contract**: declared **Intent** vs runtime
    **Actual** → **MISMATCH**, `promo_discount` is missing. The step **FAILS**
-   with the verdict as its `failure_reason` ("the +23.2% uplift is phantom.
-   Do NOT ship this number.") — a red card with the reason banner on the
-   dashboard, never hidden, even after the plan recovers.
+   with the observation as its `failure_reason` ("every order fell back to
+   the $0 default; the +23.2% WoW uplift equals the imputed discount total")
+   — a red card with the reason banner on the dashboard, never hidden, even
+   after the plan recovers. The gate reports **where the misalignment is and
+   what it does to the number**; deciding what happens next is a human call.
    The decision loop records the LLM decision (and the anti-pattern in the
    ledger, so it's never repeated), then revises the plan through the
    backbone: a recorded deviation inserts recovery sub-steps that re-ingest

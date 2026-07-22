@@ -238,11 +238,14 @@ def main() -> int:
     # The failure is FIRST-CLASS: the verify step FAILS with the contract
     # verdict as its reason (red on the dashboard, never hidden). Recovery
     # happens through sub-steps under it — the state machine's designed path.
+    # The gate REPORTS the misalignment — where, what, and the observed effect.
+    # It never prescribes the next move; that call belongs to a human.
     api.fail_step(conn, s_verify,
                   reason="data contract MISMATCH (column_dropped: "
-                         "`promo_discount`) — discounts are being imputed to "
-                         f"$0, so the {delta_v1:+.1f}% revenue uplift is "
-                         "phantom. Do NOT ship this number.")
+                         "`promo_discount`) — the feed no longer carries the "
+                         "column, so every order fell back to the $0 default; "
+                         f"the {delta_v1:+.1f}% WoW uplift equals the imputed "
+                         "discount total")
     print(f"  E verify    {red('FAILED')}  (contract MISMATCH recorded)")
     _beat(3.0)
 
@@ -256,7 +259,7 @@ def main() -> int:
             "action": "coerce_upstream",
             "decision": f"Checkout-service v2 silently dropped `{d['column']}` "
                         "— restore the field upstream, then re-ingest and "
-                        "re-run the rollup before any number ships.",
+                        "re-run the rollup.",
             "rationale": "revenue_rollup imputes promo_discount to $0 via "
                          ".get(col, 0.0); the job exits 0 and its tests pass, "
                          "but net revenue inflates by exactly the discount "
@@ -270,7 +273,7 @@ def main() -> int:
             conn, deviation_detected=True, target_step_id=s_verify,
             justification=f"data contract MISMATCH ({d['kind']}: `{d['column']}`): "
                           "checkout v2 dropped the promo field; restoring it "
-                          "and re-running before the number ships.",
+                          "and re-running the rollup.",
             new_sub_steps=[{"description": "Re-ingest orders from the restored "
                                            "checkout feed", "step_type": "COMMAND"},
                            {"description": "Re-run the revenue rollup on the "

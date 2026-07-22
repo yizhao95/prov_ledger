@@ -6,7 +6,7 @@ Storyboard (~32s, lightly fast-forwarded): opens on the freshly-published plan
 with every step PENDING → the steps run for real (explore, contract, ingest,
 rollup with its green pytest line; amber "Running now", green COMPLETED) → the
 verify step flips FAILED, red, auto-expanded, with the contract-MISMATCH
-reason ("the +23% uplift is phantom") + its log → the 📊 Data panel opens on
+observation as its reason + its log → the 📊 Data panel opens on
 the drift → decision trail → the deviation sub-steps recover → the plan closes
 COMPLETED with the failure still visible, never hidden.
 
