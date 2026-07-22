@@ -19,7 +19,8 @@ import os
 import sqlite3
 from typing import Dict, List, Optional
 
-from . import store
+from . import _resolve, store
+from .py_ast import _module_name
 
 _SPLIT_FUNCS = {"train_test_split"}
 _FIT_METHODS = {"fit", "train"}
@@ -38,6 +39,8 @@ def analyze(
     splits_into_e = store.get_or_create_edge_type(conn, "splits_into")
     trains_e = store.get_or_create_edge_type(conn, "trains")
     tunes_e = store.get_or_create_edge_type(conn, "tunes")
+    produces_e = store.get_or_create_edge_type(conn, "produces")
+    idx = _resolve.build_index(conn)
     repo_root = os.path.abspath(repo_root)
 
     for rel_path in file_map:
@@ -49,16 +52,19 @@ def analyze(
                 tree = ast.parse(fh.read())
         except (SyntaxError, UnicodeDecodeError):
             continue
+        module = _module_name(rel_path)
         for fn in ast.walk(tree):
             if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 _scan_function(
                     conn, fn, rel_path, split_t, model_t, hp_t,
                     splits_into_e, trains_e, tunes_e,
+                    produces_e=produces_e, idx=idx, module=module,
                 )
 
 
 def _scan_function(conn, fn, rel_path, split_t, model_t, hp_t,
-                   splits_into_e, trains_e, tunes_e) -> None:
+                   splits_into_e, trains_e, tunes_e,
+                   produces_e=None, idx=None, module=None) -> None:
     split_ids: List[int] = []
     model_id: Optional[int] = None
     hp_ids: List[int] = []
@@ -116,6 +122,19 @@ def _scan_function(conn, fn, rel_path, split_t, model_t, hp_t,
             store.add_edge(conn, trains_e, sid, model_id)
         for hid in hp_ids:
             store.add_edge(conn, tunes_e, hid, model_id)
+
+    # Anchor the overlay to the code graph: the enclosing function produces
+    # its split/model nodes. Without this the ML nodes are an island — a
+    # second train_test_split downstream would be invisible in any connected
+    # view (the double-split story). Conservative: only when the function
+    # resolves to a single node.
+    if produces_e is not None and idx is not None and (split_ids or model_id):
+        fn_node = idx.resolve_one(fn.name, module=module)
+        if fn_node is not None:
+            for sid in split_ids:
+                store.add_edge(conn, produces_e, fn_node, sid)
+            if model_id is not None:
+                store.add_edge(conn, produces_e, fn_node, model_id)
 
 
 def _is_split_call(node) -> bool:

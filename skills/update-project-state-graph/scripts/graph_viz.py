@@ -38,6 +38,7 @@ _NODE_COLORS = {
     "class": "#fab219", "module": "#898781", "pipeline": "#e34948",
     "route": "#4a3aa7", "sql_table": "#eb6834", "bq_dataset": "#d95926",
     "css_selector": "#e87ba4", "data_var": "#52514e",
+    "split": "#d55181", "model": "#4a3aa7", "hyperparameter": "#898781",
 }
 # one hue per subsystem (assigned deterministically by sort order)
 _SUB_PALETTE = ["#2a78d6", "#1baf7a", "#4a3aa7", "#eb6834", "#e87ba4",

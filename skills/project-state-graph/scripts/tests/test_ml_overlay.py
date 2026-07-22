@@ -94,3 +94,19 @@ def test_param_grid_creates_hyperparameters_and_tunes(tmp_path):
     metas = {n: json.loads(m or "{}") for _, n, m in _nodes(conn, "hyperparameter")}
     assert metas["max_depth"].get("options") == [3, 5]
     assert _edges(conn, "tunes"), "expected tunes edges hyperparameter->model"
+
+
+def test_function_produces_its_split_and_model_nodes(tmp_path):
+    # The ML overlay must anchor to the code graph: without a
+    # function->split produces edge, a SECOND train_test_split downstream
+    # is an invisible island in any connected view (the double-split story).
+    src = (
+        "def train():\n"
+        "    X_train, X_test = train_test_split(data)\n"
+        "    model.fit(X_train)\n"
+    )
+    conn = _analyze(tmp_path, src)
+    produced = {(s, d) for s, d, _ in _edges(conn, "produces")}
+    assert ("train", "train:train") in produced
+    assert ("train", "train:test") in produced
+    assert ("train", "train:model") in produced
