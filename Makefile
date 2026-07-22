@@ -1,13 +1,14 @@
 # provLedger convenience targets.
 
-DEMO_DIR := examples/silent-class-drop
+DEMO_DIR := examples/phantom-uplift
 DEMO_VENV := $(DEMO_DIR)/.venv
 PLUGIN_VENV := $(HOME)/skill-workspace/.venv
 
 .PHONY: demo demo-clean
 
-# One command, fresh clone -> the full silent-class-drop arc:
-# v1 (green but MISMATCH, purity 0.31) -> revise -> v2 (VERIFIED, purity 0.91).
+# One command, fresh clone -> the full phantom-uplift arc: false good news
+# (green, pytest green, "+23.2% vs last week") -> contract MISMATCH
+# (column_dropped: promo_discount) -> revise -> VERIFIED, real number +3.5%.
 # Reuses the plugin's unified venv (created by scripts/bootstrap.sh) when it
 # exists; otherwise creates a local one (needs the python3-venv package).
 demo:
@@ -26,5 +27,5 @@ demo:
 
 demo-clean:
 	rm -rf $(DEMO_VENV) $(DEMO_DIR)/demo-orchestrator.db \
-	       $(DEMO_DIR)/upstream_fixed.json $(DEMO_DIR)/upstream_drifted.json \
-	       $(DEMO_DIR)/ground_truth.csv
+	       $(DEMO_DIR)/orders_fixed.json $(DEMO_DIR)/orders_drifted.json \
+	       $(DEMO_DIR)/last_week_metrics.json $(DEMO_DIR)/declared_schema.json

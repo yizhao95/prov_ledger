@@ -23,7 +23,7 @@ def db_path_display() -> str:
     """The DB path the dashboard is actually reading (footer), ~-abbreviated.
 
     Was a hardcoded string before, which lied whenever ORCH_DB pointed
-    somewhere else (e.g. the silent-class-drop demo DB)."""
+    somewhere else (e.g. the phantom-uplift demo DB)."""
     p = str(DEFAULT_DB_PATH)
     home = str(Path.home())
     return "~" + p[len(home):] if p.startswith(home) else p

@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""Record docs/media/silent-class-drop-dashboard.gif — the demo as the DASHBOARD
+"""Record docs/media/phantom-uplift-dashboard.gif — the demo as the DASHBOARD
 sees it, live.
 
 Storyboard (~32s, lightly fast-forwarded): opens on the freshly-published plan
 with every step PENDING → the steps run for real (explore, contract, ingest,
-cluster; amber "Running now", green COMPLETED) → the verify step flips FAILED,
-red, auto-expanded, with the contract-MISMATCH reason + its log → the 📊 Data
-panel opens on the drift → decision trail → the deviation sub-steps recover →
-the plan closes COMPLETED with the failure still visible, never hidden.
+rollup with its green pytest line; amber "Running now", green COMPLETED) → the
+verify step flips FAILED, red, auto-expanded, with the contract-MISMATCH
+observation as its reason + its log → the 📊 Data panel opens on
+the drift → decision trail → the deviation sub-steps recover → the plan closes
+COMPLETED with the failure still visible, never hidden.
 
 Needs: playwright (chromium installed) + ffmpeg on PATH. The dashboard is
 started read-only against the demo's throwaway DB; run_demo.py runs alongside
 with DEMO_PACE so the 2s poll catches each state.
 
 Usage, from the repo root:
-    python examples/silent-class-drop/record_dashboard.py
+    python examples/phantom-uplift/record_dashboard.py
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 PORT = 8322
-OUT_GIF = REPO / "docs" / "media" / "silent-class-drop-dashboard.gif"
+OUT_GIF = REPO / "docs" / "media" / "phantom-uplift-dashboard.gif"
 SPEEDUP = 1.6   # gentle fast-forward so the ~45s session reads as ~28s
 
 
