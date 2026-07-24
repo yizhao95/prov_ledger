@@ -45,3 +45,6 @@ node_modules/
 
 # Logs
 *.log
+
+# Internal working docs (plans/specs/flowcharts) stay local-only — never published.
+docs/superpowers/
