@@ -90,3 +90,24 @@ def test_unreachable_url_fails(scripts_dir: Path):
     msg = (result.stdout + result.stderr).lower()
     assert "dashboard" in msg
     assert str(dead_port) in msg or "unreachable" in msg or "fail" in msg
+
+
+def test_default_launcher_is_the_bundled_webapp(scripts_dir: Path):
+    """FL-012: the default LAUNCH_CMD used to point at
+    ~/skill-workspace/orchestrator-webapp/launch_dashboard.sh, which does not
+    exist in a plugin install. It must resolve to the bundled webapp launcher
+    (relative to the plugin root, or $CLAUDE_PLUGIN_ROOT when set)."""
+    result = _run_ensure(scripts_dir, {"ENSURE_DASHBOARD_PRINT_ONLY": "1"})
+    assert result.returncode == 0, result.stderr
+    line = next(l for l in result.stdout.splitlines() if l.startswith("LAUNCH_CMD="))
+    launcher = Path(line.split("LAUNCH_CMD=bash ", 1)[1].strip())
+    assert launcher.name == "launch_dashboard.sh" and launcher.is_file(), launcher
+    assert launcher.parent.name == "orchestrator-webapp"
+
+
+def test_plugin_root_env_overrides_launcher_location(scripts_dir: Path, tmp_path: Path):
+    root = tmp_path / "plugin"
+    (root / "orchestrator-webapp").mkdir(parents=True)
+    result = _run_ensure(scripts_dir, {"ENSURE_DASHBOARD_PRINT_ONLY": "1",
+                                       "CLAUDE_PLUGIN_ROOT": str(root)})
+    assert f"LAUNCH_CMD=bash {root}/orchestrator-webapp/launch_dashboard.sh" in result.stdout

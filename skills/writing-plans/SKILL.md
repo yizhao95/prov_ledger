@@ -21,7 +21,7 @@ Otherwise: announce "trivial — no plan needed" and proceed directly. (Trivial 
 
 2. **Ensure the dashboard is up.** Run the idempotent script — never read the underlying webapp launcher:
    ```bash
-   bash ~/.code_puppy/skills/writing-plans/scripts/ensure-dashboard.sh
+   bash ${CLAUDE_PLUGIN_ROOT}/skills/writing-plans/scripts/ensure-dashboard.sh
    ```
 
 3. **Draft `plan-input.json`** (or `.yaml`). Schema: `plan-input.schema.json`. Worked example: `plan-input.example.json`. Required fields: `goal`, `prefix`, `steps[]`. Strongly recommended: `user_query` (verbatim), `skills[]` (every iron-law + topic skill activated).
@@ -35,7 +35,7 @@ Otherwise: announce "trivial — no plan needed" and proceed directly. (Trivial 
 
 5. **Publish to SQLite** — this skill's only side effect on the database:
    ```bash
-   bash ~/.code_puppy/skills/writing-plans/scripts/publish-plan.sh path/to/plan-input.json
+   bash ${CLAUDE_PLUGIN_ROOT}/skills/writing-plans/scripts/publish-plan.sh path/to/plan-input.json
    ```
    The script returns `{plan_id, step_ids, review_step_id, skills_recorded}` as JSON.
    `review_step_id` is the auto-appended `<plan>-REVIEW` step (migration 006). It
@@ -134,7 +134,7 @@ If you find yourself wanting to "update the plan I just wrote", stop. The next c
 
 ```bash
 ~/skill-workspace/orchestrator/.venv/bin/python -m pytest \
-  ~/.code_puppy/skills/writing-plans/tests/ -v
+  ${CLAUDE_PLUGIN_ROOT}/skills/writing-plans/tests/ -v
 ```
 
 10 tests cover both scripts (publish-plan: 7, ensure-dashboard: 3).
