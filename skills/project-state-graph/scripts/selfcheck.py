@@ -196,12 +196,56 @@ def _check_dtype_present(conn) -> Dict[str, Any]:
             "detail": f"{len(bad)} untyped data node(s): {sample}{more}"}
 
 
+_TYPING_ALIASES = {"Tuple": "tuple", "List": "list", "Dict": "dict", "Set": "set",
+                   "FrozenSet": "frozenset", "Type": "type"}
+
+
+def _norm_dtype(t: str):
+    """-> (outer, params|None). Strips Optional[...] / `| None` / `typing.` and
+    maps typing aliases to builtins. `tuple[2]` (a shape signature from
+    dataflow_types._infer_return_type) keeps params '[2]'."""
+    import re
+    t = t.strip().strip("'\"")  # forward-reference strings keep their quotes after ast.unparse
+    t = re.sub(r"^(?:typing\.)?Optional\[(.*)\]$", r"\1", t)
+    t = re.sub(r"\s*\|\s*None\b", "", t)
+    t = re.sub(r"\bNone\s*\|\s*", "", t)
+    t = re.sub(r"^typing\.", "", t)
+    m = re.match(r"^([A-Za-z_][\w.]*)\s*(\[.*\])?$", t)
+    if not m:
+        return t, None
+    outer = _TYPING_ALIASES.get(m.group(1), m.group(1))
+    return outer, m.group(2)
+
+
+def _dtype_compatible(have: str, want: str) -> bool:
+    """FL-013 compatibility rules (all deterministic, all conservative):
+    - Optional[X] / X | None on either side is compared as X.
+    - An unparameterised generic accepts any refinement (list vs list[dict]).
+    - A shape-only signature (tuple[2]) is compatible with any tuple.
+    Everything else must match exactly."""
+    ho, hp = _norm_dtype(have)
+    wo, wp = _norm_dtype(want)
+    if ho != wo:
+        return False
+    if hp is None or wp is None:
+        return True
+    import re
+    if re.fullmatch(r"\[\d+\]", hp) or re.fullmatch(r"\[\d+\]", wp):
+        return True
+    return hp == wp
+
+
 def _check_dtype_consistency_e2e(conn) -> Dict[str, Any]:
     """ERROR: a produced data_var's dtype must agree with what each consumer
     expects. We compare the producer's output type against the CONSUMER's declared
     param type (consumes.metadata.expected_type, PSG-C4) — falling back to the
     legacy `type` field when a consumer's expected type wasn't resolved. A mismatch
-    of two known concrete types is an end-to-end dtype break."""
+    of two known concrete types is an end-to-end dtype break.
+
+    FL-013: only `high`-confidence edges are asserted (an `inferred` edge is a
+    guess about WHICH callee, or an indirect flow through a subscript/attribute —
+    not evidence); `unpacked` edges carry an element, not the value, and are
+    skipped; and type comparison goes through _dtype_compatible."""
     import json
     produced_type: Dict[int, str] = {}
     for _src, dv, meta in conn.execute(
@@ -215,14 +259,17 @@ def _check_dtype_consistency_e2e(conn) -> Dict[str, Any]:
     for dv, _cons, meta in conn.execute(
         """SELECT e.src_node_id, e.dst_node_id, e.metadata_json
            FROM edge e JOIN edge_type t ON e.edge_type_id=t.id
-           WHERE t.name='consumes'"""
+           WHERE t.name='consumes'
+             AND (e.confidence IS NULL OR e.confidence = 'high')"""
     ).fetchall():
         info = json.loads(meta) if meta else {}
+        if info.get("unpacked"):
+            continue
         # PSG-C4: prefer the consumer's declared param type; fall back to legacy.
         want = info.get("expected_type") or info.get("type", "unknown")
         have = produced_type.get(int(dv), "unknown")
         if want not in (None, "unknown") and have not in (None, "unknown") \
-                and want != have:
+                and not _dtype_compatible(have, want):
             nm = conn.execute("SELECT name FROM node WHERE id=?", (dv,)).fetchone()
             mismatches.append(f"{nm[0] if nm else dv}: produced {have} != consumed {want}")
     if not mismatches:
