@@ -19,3 +19,4 @@
 | FL-012 | phase1 | DEFERRED | dogfood：`ensure-dashboard.sh` 指向 `~/skill-workspace/orchestrator-webapp/launch_dashboard.sh`（不存在）；SKILL.md 调用路径仍为 `~/.code_puppy/skills/...` | 阶段 2 前 |
 | FL-013 | phase1 | DEFERRED | dogfood：`selfcheck dtype_consistency_e2e` 在 prov_ledger 自身报 130 处误报（`_free_port:return: produced int != consumed dict | None`），`init_project.sh` exit 1 但注册已写入 | 阶段 2 |
 | FL-014 | phase1 | DEFERRED | dogfood：NEEDS_REVIEW 触发只看 goal/step 文本的项目名 token 匹配，忽略 plan-input 的 `project` 字段；不含项目名的 project-scoped plan 会静默跳过 review | 阶段 2 前 |
+| FL-015 | phase1 | DEFERRED | dogfood：分支 push 后 `review_diff.resolve_range` 选 remote 模式 `@{u}..HEAD`，upstream 就是本分支 → 空 diff、changed_symbols=[]，review 实际什么都没查；应对比注册 sha 或 merge-base | 阶段 2 前 |
