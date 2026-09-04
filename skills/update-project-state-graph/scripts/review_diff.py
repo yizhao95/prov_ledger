@@ -3,9 +3,10 @@
 Part of the update-project-state-graph skill. Given a project's git repo and its
 project-state-graph deep sqlite graph, this module:
 
-  1. resolve_range(repo, registered_sha) -> (base, head, mode)
-     Auto-selects the diff range: remote (upstream/PR) if the current branch has
-     an upstream, else local (registered_sha..HEAD).
+  1. resolve_range(repo, registered_sha) -> (base, head, mode)  # registered|remote|local
+     Base = the registered (graph-build) sha when it is an ancestor of HEAD;
+     else merge-base with the upstream; else the raw sha. Never '@{u}..HEAD'
+     (empty right after a push — FL-015).
 
   2. changed_symbols(repo, base, head) -> [{file, kind, old_name, new_name}]
      Parses `git diff` for removed/renamed top-level def/class symbols.
@@ -33,18 +34,38 @@ def _git(repo: str, *args: str) -> str:
     ).stdout
 
 
-def resolve_range(repo: str, registered_sha: str) -> tuple[str, str, str]:
-    """Return (base, head, mode). mode is 'remote' if an upstream exists else 'local'.
+def _git_ok(repo: str, *args: str) -> bool:
+    return subprocess.run(["git", *args], cwd=repo,
+                          capture_output=True, text=True).returncode == 0
 
-    remote: base='@{u}', head='HEAD'  (changes destined for a PR)
-    local:  base=registered_sha, head='HEAD'  (locally committed changes)
+
+def resolve_range(repo: str, registered_sha: str) -> tuple[str, str, str]:
+    """Return (base, head, mode). head is always 'HEAD'.
+
+    registered: base = registered_sha — the commit the graph was built from —
+                whenever it is a real ancestor of HEAD. This is the semantically
+                right range ("what changed since the graph was last true").
+    remote:     registered sha unknown/unrelated but an upstream exists →
+                base = merge-base(@{u}, HEAD) (unpushed work), else the merge-base
+                with the remote default branch.
+    local:      neither → base = registered_sha as given (visible degradation).
+
+    FL-015: never '@{u}..HEAD'. Right after `git push` the upstream IS HEAD, so
+    that range is empty and a review over it inspects nothing while reporting
+    changed_symbols=[] — "didn't look" masquerading as "nothing changed".
     """
-    upstream = subprocess.run(
-        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-        cwd=repo, capture_output=True, text=True,
-    )
-    if upstream.returncode == 0 and upstream.stdout.strip():
-        return ("@{u}", "HEAD", "remote")
+    head = _git(repo, "rev-parse", "HEAD").strip()
+    if registered_sha and _git_ok(repo, "cat-file", "-e", f"{registered_sha}^{{commit}}") \
+            and _git_ok(repo, "merge-base", "--is-ancestor", registered_sha, "HEAD"):
+        return (registered_sha, "HEAD", "registered")
+    if _git_ok(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"):
+        candidates = ["@{u}", "origin/HEAD", "origin/main", "origin/master"]
+        for ref in candidates:
+            if not _git_ok(repo, "rev-parse", "--verify", "-q", ref):
+                continue
+            mb = _git(repo, "merge-base", ref, "HEAD").strip()
+            if mb and mb != head:
+                return (mb, "HEAD", "remote")
     return (registered_sha, "HEAD", "local")
 
 

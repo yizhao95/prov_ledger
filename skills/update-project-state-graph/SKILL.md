@@ -40,7 +40,8 @@ refresh the graph + re-run tests, then close COMPLETED.
 
 ```
 1. Resolve the diff range          review_diff.resolve_range(repo, registered_sha)
-      remote (origin/upstream) if an upstream exists, else local sha..HEAD
+      registered sha..HEAD when that sha is an ancestor of HEAD (the normal case,
+      pushed or not); else merge-base(upstream, HEAD)..HEAD; else sha..HEAD (local)
 2. Parse changed symbols           review_diff.changed_symbols(repo, base, head)
       removed / renamed top-level def/class
 3. Check the deep graph            review_diff.report(db_path, changed)
@@ -116,7 +117,7 @@ philosophy as the rest of the reviewer: **report and FAIL, never auto-fix**.
 
 | Need | Call |
 |---|---|
-| Pick diff range (auto remote/local) | `review_diff.resolve_range(repo, sha)` |
+| Pick diff range (registered / remote / local) | `review_diff.resolve_range(repo, sha)` |
 | Find renamed/removed symbols | `review_diff.changed_symbols(repo, base, head)` |
 | Find stale callers in the graph | `review_diff.stale_references(db_path, names)` |
 | Full verdict | `review_diff.report(db_path, changed)` |
