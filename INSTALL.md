@@ -102,13 +102,13 @@ Run each test suite **separately** (each has its own pyproject/pythonpath —
 one combined invocation breaks). A healthy install passes all of them:
 
 ```bash
-python -m pytest scripts/tests                         -q   #   3 passed
-python -m pytest orchestrator-backend                  -q   # 152 passed
-python -m pytest orchestrator-webapp                   -q   #  23 passed
-python -m pytest skills/writing-plans/tests            -q   #  46 passed, 2 skipped
-python -m pytest skills/executing-plans                -q   #  52 passed
-python -m pytest skills/project-state-graph/scripts/tests     -q   # 232 passed, 1 skipped
-python -m pytest skills/update-project-state-graph/scripts/tests -q   #  55 passed
+python3 -m pytest scripts/tests                         -q   #   3 passed
+python3 -m pytest orchestrator-backend                  -q   # 152 passed
+python3 -m pytest orchestrator-webapp                   -q   #  23 passed
+python3 -m pytest skills/writing-plans/tests            -q   #  46 passed, 2 skipped
+python3 -m pytest skills/executing-plans                -q   #  52 passed
+python3 -m pytest skills/project-state-graph/scripts/tests     -q   # 232 passed, 1 skipped
+python3 -m pytest skills/update-project-state-graph/scripts/tests -q   #  55 passed
 ```
 
 Total: **563 passed, 3 skipped**.
@@ -130,7 +130,7 @@ detection, decision ledger — stdlib-only) is published on PyPI as
 
 ```bash
 pip install provledger
-python -c "from provledger import api, db; print('ok')"
+python3 -c "from provledger import api, db; print('ok')"
 ```
 
 The wheel ships the SQL migrations inside the package, so
@@ -153,7 +153,7 @@ The dashboard is a **read-only** view over an orchestrator SQLite database.
 ```bash
 cd orchestrator-webapp
 ORCH_DB=~/skill-workspace/orchestrator.db \
-    python -m uvicorn app.main:app --host 127.0.0.1 --port 8765
+    python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8765
 ```
 
 Then open <http://127.0.0.1:8765>.
@@ -168,7 +168,7 @@ Then open <http://127.0.0.1:8765>.
 
 ```bash
 cd orchestrator-webapp
-nohup python -m uvicorn app.main:app --host 127.0.0.1 --port 8765 \
+nohup python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8765 \
     > /tmp/provledger-dashboard.log 2>&1 &
 # tail the log:
 tail -f /tmp/provledger-dashboard.log
@@ -182,7 +182,7 @@ The database is created/migrated automatically the first time you publish a plan
 through the `writing-plans` skill. To create one manually from the migrations:
 
 ```bash
-python - <<'PY'
+python3 - <<'PY'
 import sqlite3, glob, pathlib
 db = pathlib.Path.home() / "skill-workspace" / "orchestrator.db"
 db.parent.mkdir(parents=True, exist_ok=True)
