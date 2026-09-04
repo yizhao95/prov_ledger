@@ -10,6 +10,7 @@ expect.toml：
 - `[generated]` / `[variants]`：名字 → { identity = preserved|broken|ambiguous,
   semantic_diff = none|callers|expected, broken = [...], added = [...], via = qualname|struct_sig|dataflow_sig,
   symbols = [...]（可选，覆盖本变体参与身份的符号） }。
+`via` 对该变体 symbols 集合里的**每个**符号生效，所以只有限定名变化的符号才应留在集合里（用 `symbols = [...]` 收窄）。
 内建 must_not：preserved ⇒ 无 node_removed / identity_ambiguous；none ⇒ 无 node_changed。
 预期失败用例（swap_two_similar → ambiguous）必须存在：锁定已知边界。
 

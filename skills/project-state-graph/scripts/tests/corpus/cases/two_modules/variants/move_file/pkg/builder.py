@@ -1,0 +1,11 @@
+"""Report builder moved out of report.py."""
+import pandas as pd
+
+from pkg.sources import read_orders, read_customers
+
+
+def build_report(orders_path: str, customers_path: str) -> pd.DataFrame:
+    orders = read_orders(orders_path)
+    customers = read_customers(customers_path)
+    df = orders.merge(customers, on="customer_id")
+    return df.groupby("region").amount.sum().reset_index()
