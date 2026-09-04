@@ -54,3 +54,104 @@ def test_via_is_enforced_when_declared():
     a, b = _obs("m.f"), _obs("n.f", path="pkg/n.py")
     res = _res([Pair(a, b, "qualname", ())])
     assert check(["m.f"], [a], [b], res, {"identity": "preserved", "semantic_diff": "none", "via": "struct_sig"}) != []
+
+
+# ── case loading + run_case ──────────────────────────────────────────────────
+import pytest
+import tomllib
+from pathlib import Path
+from tests.corpus.harness import load_case, run_case
+
+
+def _oracle(repo: Path):
+    d = tomllib.loads((repo / "oracle.toml").read_text())
+    return [NodeObs(n.get("type", "function"), n["qn"], n.get("path", "m.py"), n.get("sig", "s"),
+                    n.get("df", "d"), n.get("trivial", False)) for n in d.get("node", [])]
+
+
+def _qn_matcher(prev, cur):
+    pc = {o.qualified_name: o for o in cur}
+    pairs, removed = [], []
+    for o in prev:
+        if o.qualified_name in pc:
+            c = pc.pop(o.qualified_name)
+            pairs.append(Pair(o, c, "qualname", tuple(f for f in ("struct_sig", "file_path") if getattr(o, f) != getattr(c, f))))
+        else:
+            removed.append(o)
+    return MatchResult(pairs, removed, list(pc.values()))
+
+
+def _case(tmp_path, variants: dict, expect_variants: str, base='[[node]]\nqn="m.f"\n'):
+    c = tmp_path / "cases" / "demo"
+    (c / "base").mkdir(parents=True)
+    (c / "base" / "oracle.toml").write_text(base)
+    for name, body in variants.items():
+        if isinstance(body, dict):  # before/after
+            for k, v in body.items():
+                (c / "variants" / name / k).mkdir(parents=True)
+                (c / "variants" / name / k / "oracle.toml").write_text(v)
+        else:
+            (c / "variants" / name).mkdir(parents=True)
+            (c / "variants" / name / "oracle.toml").write_text(body)
+    (c / "expect.toml").write_text(f'[case]\nname="demo"\nsymbols=["m.f"]\n[generated]\n[variants]\n{expect_variants}\n')
+    return c
+
+
+def test_run_case_ok(tmp_path):
+    c = _case(tmp_path, {
+        "same": '[[node]]\nqn="m.f"\n',
+        "changed": '[[node]]\nqn="m.f"\nsig="s2"\n',
+        "gone": '[[node]]\nqn="m.g"\n',
+    }, 'same={identity="preserved", semantic_diff="none"}\n'
+       'changed={identity="preserved", semantic_diff="expected"}\n'
+       'gone={identity="broken", broken=["m.f"]}')
+    assert run_case(load_case(c), _oracle, _qn_matcher) == []
+
+
+def test_run_case_before_after(tmp_path):
+    c = _case(tmp_path, {"ba": {"before": '[[node]]\nqn="m.f"\nsig="x"\n', "after": '[[node]]\nqn="m.f"\nsig="x"\n'}},
+              'ba={identity="preserved", semantic_diff="none"}')
+    assert run_case(load_case(c), _oracle, _qn_matcher) == []
+
+
+def test_run_case_variant_symbols_override(tmp_path):
+    """A variant may widen the symbol set (swap_two_similar needs the extra pair)."""
+    c = _case(tmp_path, {"ba": {"before": '[[node]]\nqn="m.f"\n[[node]]\nqn="m.h"\n',
+                                "after": '[[node]]\nqn="m.f"\n'}},
+              'ba={identity="broken", broken=["m.h"], symbols=["m.f", "m.h"]}')
+    assert run_case(load_case(c), _oracle, _qn_matcher) == []
+
+
+def test_run_case_reports_mismatch(tmp_path):
+    c = _case(tmp_path, {"gone": '[[node]]\nqn="m.g"\n'}, 'gone={identity="preserved", semantic_diff="none"}')
+    fails = run_case(load_case(c), _oracle, _qn_matcher)
+    assert fails and "gone" in fails[0]
+
+
+def test_run_case_flags_nondeterministic_extractor(tmp_path):
+    c = _case(tmp_path, {}, "")
+    n = {"i": 0}
+
+    def flaky(repo):
+        n["i"] += 1
+        return [NodeObs("function", f"m.f{n['i']}", "m.py", "s", "d", False)]
+    assert any("determinism" in f for f in run_case(load_case(c), flaky, _qn_matcher))
+
+
+def test_run_case_generated_uses_registered_mutator(tmp_path):
+    c = tmp_path / "cases" / "gen"
+    (c / "base").mkdir(parents=True)
+    (c / "base" / "oracle.toml").write_text('[[node]]\nqn="m.f"\n')
+    (c / "expect.toml").write_text('[case]\nname="gen"\nsymbols=["m.f"]\n'
+                                   '[generated]\nresig={identity="preserved", semantic_diff="expected"}\n[variants]\n')
+
+    def resig(src: Path, dst: Path):
+        (dst / "oracle.toml").write_text('[[node]]\nqn="m.f"\nsig="s2"\n')
+    assert run_case(load_case(c), _oracle, _qn_matcher, generated={"resig": resig}) == []
+    assert any("no mutator registered" in f for f in run_case(load_case(c), _oracle, _qn_matcher))
+
+
+def test_load_case_rejects_undeclared_variant_dir(tmp_path):
+    c = _case(tmp_path, {"x": '[[node]]\nqn="m.f"\n'}, "")
+    with pytest.raises(ValueError):
+        load_case(c)

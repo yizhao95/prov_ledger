@@ -2,6 +2,9 @@
 is a Matcher over NodeObs lists; extraction is injected."""
 from __future__ import annotations
 
+import shutil
+import tempfile
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -91,4 +94,74 @@ def check(symbols, base, variant, result: MatchResult, expect: dict) -> list[str
             fails.append("expected identity_ambiguous, none produced")
         if removed & set(symbols):
             fails.append(f"ambiguous case must not silently remove {sorted(removed)}")
+    return fails
+
+
+# ── cases on disk ─────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class Case:
+    name: str
+    dir: Path
+    base: Path
+    expect: dict
+    variants: dict[str, Path]
+
+
+def load_case(case_dir: Path) -> Case:
+    """Load `<case_dir>/expect.toml`; every `variants/<m>/` dir must be declared."""
+    expect = tomllib.loads((case_dir / "expect.toml").read_text())
+    vdir = case_dir / "variants"
+    dirs = {p.name: p for p in sorted(vdir.iterdir()) if p.is_dir()} if vdir.exists() else {}
+    declared = set(expect.get("variants", {}))
+    if set(dirs) != declared:
+        raise ValueError(f"{case_dir.name}: variants dirs {sorted(dirs)} != expect {sorted(declared)}")
+    return Case(expect["case"]["name"], case_dir, case_dir / "base", expect, dirs)
+
+
+def iter_cases(root: Path) -> list[Case]:
+    return [load_case(p) for p in sorted(root.iterdir()) if (p / "expect.toml").exists()]
+
+
+Mutator = Callable[[Path, Path], None]
+
+
+def run_case(case: Case, extractor: Extractor, matcher: Matcher,
+             generated: dict[str, Mutator] | None = None) -> list[str]:
+    """Run every generated + hand-written variant of `case`; return failures.
+
+    The base is extracted twice and must compare equal (extractor determinism).
+    Generated variants copy the base to a temp dir and apply the registered
+    mutator; hand-written variants with `before/` use it as their own base.
+    A variant spec may override `symbols`.
+    """
+    fails: list[str] = []
+    symbols = case.expect["case"]["symbols"]
+    b1, b2 = extractor(case.base), extractor(case.base)
+    if sorted(b1) != sorted(b2):
+        return ["determinism: two extractions of base differ"]
+    have = {o.qualified_name for o in b1}
+    missing = [s for s in symbols if s not in have]
+    if missing:
+        fails.append(f"base symbols not extracted: {missing}")
+    for name, spec in case.expect.get("generated", {}).items():
+        if not generated or name not in generated:
+            fails.append(f"generated:{name}: no mutator registered")
+            continue
+        with tempfile.TemporaryDirectory() as td:
+            dst = Path(td) / "repo"
+            shutil.copytree(case.base, dst)
+            generated[name](case.base, dst)
+            v = extractor(dst)
+            syms = spec.get("symbols", symbols)
+            fails += [f"generated:{name}: {f}" for f in check(syms, b1, v, matcher(b1, v), spec)]
+    for name, spec in case.expect.get("variants", {}).items():
+        vdir = case.variants[name]
+        if (vdir / "before").exists():
+            base_obs = extractor(vdir / "before")
+            v = extractor(vdir / "after")
+        else:
+            base_obs, v = b1, extractor(vdir)
+        syms = spec.get("symbols", symbols)
+        fails += [f"{name}: {f}" for f in check(syms, base_obs, v, matcher(base_obs, v), spec)]
     return fails
