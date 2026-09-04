@@ -19,9 +19,24 @@ fi
 
 want="$(sha256sum "${REQS}" | awk '{print $1}')"
 
+# Same-named skill notice: provledger ships local variants of six superpowers
+# skills (writing-plans, executing-plans, ...). When both plugins are enabled,
+# tell the user how to let provLedger's variants win in this project.
+_same_named_skill_notice() {
+    local _settings="${HOME}/.claude/settings.json"
+    if [[ -f "${_settings}" ]] \
+       && grep -q '"superpowers@claude-plugins-official": *true' "${_settings}" \
+       && grep -q '"provledger@provledger": *true' "${_settings}"; then
+        echo "ℹ️  provLedger: superpowers is also enabled — both provide same-named skills" \
+             "(writing-plans, executing-plans, …). To let provLedger's variants win in this project:" \
+             "  claude plugin disable superpowers@claude-plugins-official --scope local"
+    fi
+}
+
 # Warm path: marker matches -> nothing to do.
 if [[ -f "${MARKER}" ]] && [[ "$(cat "${MARKER}" 2>/dev/null)" == "${want}" ]]; then
     echo "✅ provLedger bootstrap: dependencies up to date (warm no-op)"
+    _same_named_skill_notice
     exit 0
 fi
 
@@ -54,4 +69,5 @@ fi
 
 echo "${want}" > "${MARKER}"
 echo "✅ provLedger bootstrap: venv ready at ${VENV}"
+_same_named_skill_notice
 exit 0

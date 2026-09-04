@@ -76,3 +76,18 @@ def test_warm_marker_is_a_noop(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert calls == [], calls
     assert "up to date" in proc.stdout
+
+
+def test_bootstrap_warns_when_superpowers_and_provledger_both_enabled(tmp_path, monkeypatch):
+    """provledger bundles local variants of six superpowers skills; when both
+    plugins are enabled the user must be told how to let ours win per project."""
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text(
+        '{"enabledPlugins": {"superpowers@claude-plugins-official": true, '
+        '"provledger@provledger": true}}')
+    monkeypatch.setenv("HOME", str(home))
+    proc, _ = _run_bootstrap(tmp_path, venv_exists=True, marker_ok=True)
+    assert proc.returncode == 0, proc.stderr
+    assert "same-named skills" in proc.stdout, proc.stdout
+    assert "claude plugin disable superpowers@claude-plugins-official --scope local" in proc.stdout
