@@ -100,6 +100,8 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
         # run, assign node_keys and append events.
         history.snapshot_run(conn, repo_path, run_id)
         history.resolve(conn, run_id)
+        if build_cards:
+            cards.attach_history(conn)  # symbol_card gains node_key + recent history
         store.stamp_run(conn, run_id)  # PSG-D2: tag this rebuild's rows
     finally:
         store.finish_run(conn, run_id)
