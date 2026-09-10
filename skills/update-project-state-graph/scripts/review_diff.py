@@ -278,10 +278,15 @@ def full_verdict(
     dtype_changes: list[dict] | None = None,
     removed_datasets: list[str] | None = None,
     dataframe_deltas: list[dict] | None = None,
+    registered_sha: str | None = None,
 ) -> dict:
     """The Phase A combined review verdict — the AND of all active gates.
 
     Gates:
+      - range_nonempty    (E6-4: HEAD moved since the graph was built but the
+                           range has no changed files -> we did not look; FAIL.
+                           Only active when `registered_sha` is given — read
+                           and locked BEFORE any refresh, see SKILL.md step 0)
       - stale_references  (code-symbol: removed/renamed callees still referenced)
       - data_drift        (basic data: removed col/dataset, dtype disagreement)
       - signature         (A-1: changed Python signatures vs callers/consumers)
@@ -297,6 +302,9 @@ def full_verdict(
     """
     changed = changed or []
     files = set(contract_diff.changed_files(repo, base, head))
+    # E6-4: "didn't look" must never read as "nothing changed".
+    head_sha = _git(repo, "rev-parse", "HEAD").strip()
+    range_nonempty = not (registered_sha and head_sha != registered_sha and not files)
 
     stale = report(db_path, changed)
     drift = data_drift(db_path, removed_columns=removed_columns,
@@ -316,6 +324,7 @@ def full_verdict(
     df_gaps = [g for r in df_reports for g in r["gaps"]]
 
     gates = {
+        "range_nonempty": range_nonempty,
         "stale_references": stale["ok"],
         "data_drift": drift["ok"],
         "signature": sig["ok"],
@@ -325,6 +334,8 @@ def full_verdict(
     ok = all(gates.values())
 
     gaps = {
+        "range_nonempty": ([] if range_nonempty else
+                           [f"empty range {base}..{head} while HEAD {head_sha[:7]} != registered {registered_sha[:7]}"]),
         "stale_references": stale["gaps"],
         "data_drift": drift["gaps"],
         "signature": sig["gaps"],
@@ -335,6 +346,10 @@ def full_verdict(
     lines = [f"Combined review verdict: {'PASS' if ok else 'FAIL'}"]
     for name, passed in gates.items():
         lines.append(f"  [{'ok' if passed else 'FAIL'}] {name}")
+    if not range_nonempty:
+        lines.append(f"  [FAIL] range_nonempty: empty range {base}..{head} while HEAD {head_sha[:7]} "
+                     f"!= registered {registered_sha[:7]} — the review looked at nothing; "
+                     "lock registered_sha before refreshing (SKILL.md step 0)")
     for name, rep_obj in (("stale_references", stale), ("data_drift", drift),
                           ("signature", sig), ("sql_contract", sql)):
         if not rep_obj["ok"]:

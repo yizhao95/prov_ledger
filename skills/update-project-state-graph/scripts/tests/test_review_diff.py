@@ -360,3 +360,36 @@ def test_full_verdict_ands_all_gates(tmp_path):
     # the result reports per-gate booleans
     assert set(rep["gates"]) >= {"stale_references", "data_drift", "signature", "sql_contract"}
     assert all(rep["gates"].values())
+
+
+# ── P2-B / E6-4: an empty range while HEAD moved is "didn't look", never PASS ──
+
+def test_e6_4_empty_range_fails_review_when_head_moved(repo, tmp_path):
+    sha0 = _git(repo, "rev-parse", "HEAD")
+    (repo / "pipeline.py").write_text("def run():\n    return 2\n\ndef old_name():\n    return 1\n")
+    _git(repo, "commit", "-aqm", "c2")
+    db = tmp_path / "g.db"
+    _build_graph(db)
+    v = review_diff.full_verdict(str(db), str(repo), "HEAD", "HEAD", registered_sha=sha0)   # empty range
+    assert v["ok"] is False and v["gates"]["range_nonempty"] is False
+    assert "empty range" in v["text"] and sha0[:7] in v["text"]
+
+
+def test_range_gate_passes_when_nothing_changed(repo, tmp_path):
+    sha0 = _git(repo, "rev-parse", "HEAD")
+    db = tmp_path / "g.db"
+    _build_graph(db)
+    v = review_diff.full_verdict(str(db), str(repo), sha0, "HEAD", registered_sha=sha0)
+    assert v["gates"]["range_nonempty"] is True
+
+
+def test_range_gate_passes_when_range_has_files(repo, tmp_path):
+    sha0 = _git(repo, "rev-parse", "HEAD")
+    (repo / "pipeline.py").write_text("def run():\n    return 2\n\ndef old_name():\n    return 1\n")
+    _git(repo, "commit", "-aqm", "c2")
+    db = tmp_path / "g.db"
+    _build_graph(db)
+    v = review_diff.full_verdict(str(db), str(repo), sha0, "HEAD", registered_sha=sha0)
+    assert v["gates"]["range_nonempty"] is True
+    # without registered_sha the gate cannot fire (legacy callers unchanged)
+    assert review_diff.full_verdict(str(db), str(repo), "HEAD", "HEAD")["gates"]["range_nonempty"] is True

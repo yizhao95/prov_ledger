@@ -39,6 +39,11 @@ refresh the graph + re-run tests, then close COMPLETED.
 ## The Flow
 
 ```
+0. LOCK the registered sha         registered_sha = registry["commit_sha"]  (read it FIRST,
+      write it into the review step's log, and only then do anything else —
+      a refresh moves the registry to HEAD and would make the range empty;
+      pass it to full_verdict(..., registered_sha=registered_sha): an empty
+      range while HEAD != registered_sha FAILS the review — E6-4)
 1. Resolve the diff range          review_diff.resolve_range(repo, registered_sha)
       registered sha..HEAD when that sha is an ancestor of HEAD (the normal case,
       pushed or not); else merge-base(upstream, HEAD)..HEAD; else sha..HEAD (local)
