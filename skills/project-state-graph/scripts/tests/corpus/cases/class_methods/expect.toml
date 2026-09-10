@@ -1,6 +1,6 @@
 [case]
 name = "class_methods"
-symbols = ["pkg.trainer.Trainer", "pkg.trainer.Trainer.fit", "pkg.trainer.Trainer.predict", "pkg.trainer.main"]
+symbols = ["pkg.trainer.Trainer", "pkg.trainer.Trainer.fit", "pkg.trainer.Trainer.predict", "pkg.trainer.main", "pkg.trainer.entry"]
 
 [generated]
 rename_variable = { identity = "preserved", semantic_diff = "none" }

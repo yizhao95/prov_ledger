@@ -25,3 +25,7 @@ def main():
     df = load("data/sales.parquet")
     df = clean(df)
     return split(df)
+
+
+def entry():
+    return main()

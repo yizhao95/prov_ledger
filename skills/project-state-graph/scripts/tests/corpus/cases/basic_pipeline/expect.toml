@@ -1,6 +1,6 @@
 [case]
 name = "basic_pipeline"
-symbols = ["pkg.pipeline.load", "pkg.pipeline.clean", "pkg.pipeline.main"]
+symbols = ["pkg.pipeline.load", "pkg.pipeline.clean", "pkg.pipeline.main", "pkg.pipeline.entry"]
 
 [generated]
 rename_variable = { identity = "preserved", semantic_diff = "none" }

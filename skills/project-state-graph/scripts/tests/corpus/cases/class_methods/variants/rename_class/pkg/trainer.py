@@ -21,3 +21,7 @@ def main(df: pd.DataFrame):
     y_train = df["label"]
     trainer = Estimator().fit(X_train, y_train)
     return trainer.predict(X_train)
+
+
+def entry(df: pd.DataFrame):
+    return main(df)

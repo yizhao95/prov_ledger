@@ -27,9 +27,9 @@ def _py_files(root: Path) -> list[Path]:
     return sorted(root.rglob("*.py"))
 
 
-def _qualnames(repo: Path) -> set[str]:
-    """Module-relative qualified names of every def/class/method in `repo`."""
-    out: set[str] = set()
+def _defs(repo: Path) -> dict[str, ast.AST]:
+    """Module-relative qualified name -> AST node of every def/class/method in `repo`."""
+    out: dict[str, ast.AST] = {}
     for py in _py_files(repo):
         mod = ".".join(py.relative_to(repo).with_suffix("").parts)
         if mod.endswith(".__init__"):
@@ -37,13 +37,17 @@ def _qualnames(repo: Path) -> set[str]:
         tree = ast.parse(py.read_text())
         for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                out.add(f"{mod}.{node.name}")
+                out[f"{mod}.{node.name}"] = node
             elif isinstance(node, ast.ClassDef):
-                out.add(f"{mod}.{node.name}")
+                out[f"{mod}.{node.name}"] = node
                 for item in node.body:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        out.add(f"{mod}.{node.name}.{item.name}")
+                        out[f"{mod}.{node.name}.{item.name}"] = item
     return out
+
+
+def _qualnames(repo: Path) -> set[str]:
+    return set(_defs(repo))
 
 
 def _variant_sides(case, name: str) -> tuple[Path, Path]:
@@ -147,3 +151,26 @@ def test_noop_mutator_is_rejected():
         _assert_mutator_changes_code(ALL_CASES[0], "noop", noop)
     with pytest.raises(AssertionError, match="no source text"):
         _assert_mutator_changes_code(ALL_CASES[0], "reformat", noop)
+
+
+# ── review #35 A-4: semantic_diff="callers" must be exercised, not a no-op ──
+
+@pytest.mark.parametrize("case", ALL_CASES, ids=IDS)
+def test_rename_function_changes_a_caller(case):
+    """Phase 1 has no real matcher, so the evidence is the AST: after
+    rename_function some declared symbol outside `renamed` must have a
+    different body (its call site was rewritten)."""
+    spec = case.expect.get("generated", {}).get("rename_function")
+    assert spec, f"{case.name}: no generated.rename_function"
+    renamed = set(spec.get("renamed", []))
+    symbols = set(spec.get("symbols", case.expect["case"]["symbols"]))
+    before = _defs(case.base)
+    with tempfile.TemporaryDirectory() as td:
+        dst = Path(td) / "repo"
+        shutil.copytree(case.base, dst)
+        mutate.GENERATED["rename_function"](case.base, dst)
+        after = _defs(dst)
+    callers = sorted(s for s in symbols - renamed
+                     if s in before and s in after and ast.dump(before[s]) != ast.dump(after[s]))
+    assert callers, (f"{case.name}: rename_function changed no caller among "
+                     f"{sorted(symbols - renamed)} — semantic_diff=callers would be a no-op")

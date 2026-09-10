@@ -12,3 +12,7 @@ def build_report(orders_path: str, customers_path: str) -> pd.DataFrame:
 def main():
     df = build_report("data/orders.csv", "data/customers.parquet")
     return df
+
+
+def entry():
+    return main()

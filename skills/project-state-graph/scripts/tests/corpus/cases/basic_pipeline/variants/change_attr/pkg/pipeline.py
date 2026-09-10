@@ -22,3 +22,7 @@ def main():
     df = clean(df)
     X_train, X_test = train_test_split(df, test_size=0.3)
     return X_train, X_test
+
+
+def entry():
+    return main()

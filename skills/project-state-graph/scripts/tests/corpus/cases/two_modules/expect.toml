@@ -1,6 +1,6 @@
 [case]
 name = "two_modules"
-symbols = ["pkg.sources.read_orders", "pkg.sources.read_customers", "pkg.report.build_report", "pkg.report.main"]
+symbols = ["pkg.sources.read_orders", "pkg.sources.read_customers", "pkg.report.build_report", "pkg.report.main", "pkg.report.entry"]
 
 [generated]
 rename_variable = { identity = "preserved", semantic_diff = "none" }

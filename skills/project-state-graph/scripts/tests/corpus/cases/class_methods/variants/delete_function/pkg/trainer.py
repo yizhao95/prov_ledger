@@ -14,3 +14,7 @@ class Trainer:
 
     def predict(self, X: pd.DataFrame) -> pd.Series:
         return pd.Series(self.model.predict(X), index=X.index)
+
+
+def entry(df: pd.DataFrame):
+    return main(df)
