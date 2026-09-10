@@ -149,7 +149,7 @@ def run_case(case: Case, extractor: Extractor, matcher: Matcher,
     fails: list[str] = []
     symbols = case.expect["case"]["symbols"]
     b1, b2 = extractor(case.base), extractor(case.base)
-    if sorted(b1) != sorted(b2):
+    if b1 != b2:  # byte-identical, order included (spec §5)
         return ["determinism: two extractions of base differ"]
     have = {o.qualified_name for o in b1}
     missing = [s for s in symbols if s not in have]

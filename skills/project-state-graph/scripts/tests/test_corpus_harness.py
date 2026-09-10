@@ -181,3 +181,15 @@ def test_broken_requires_non_broken_symbols_to_be_paired():
     res = _res(removed=[a])  # m.g vanished without a pair, a removal or an ambiguity
     fails = check(["m.f", "m.g"], [a, b], [], res, {"identity": "broken", "broken": ["m.f"]})
     assert fails and any("m.g" in f for f in fails), fails
+
+
+def test_run_case_determinism_is_order_sensitive(tmp_path):
+    """Spec: two extractions must be byte-identical, order included."""
+    c = _case(tmp_path, {}, "", base='[[node]]\nqn="m.f"\n[[node]]\nqn="m.g"\n')
+    n = {"i": 0}
+
+    def reordering(repo):
+        n["i"] += 1
+        obs = _oracle(repo)
+        return obs if n["i"] == 1 else obs[::-1]
+    assert any("determinism" in f for f in run_case(load_case(c), reordering, _qn_matcher))

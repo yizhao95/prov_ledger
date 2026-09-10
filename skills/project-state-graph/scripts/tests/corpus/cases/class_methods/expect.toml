@@ -12,8 +12,9 @@ reformat        = { identity = "preserved", semantic_diff = "none" }
 [variants]
 # Trainer -> Estimator: class and both method qualified names change, bodies intact.
 rename_class                   = { identity = "preserved", semantic_diff = "none", via = "struct_sig", symbols = ["pkg.trainer.Trainer", "pkg.trainer.Trainer.fit", "pkg.trainer.Trainer.predict"] }
-# predict becomes a module-level function: node_type changes (method -> function),
-# which the identity rules treat as a break. Locks the boundary on purpose.
+# predict becomes a module-level function taking `model` instead of `self`: its
+# body changes (self.model -> model), so neither the qualname nor the structural
+# layer can pair it — a break. Locks the boundary on purpose.
 move_method_to_module_function = { identity = "broken", broken = ["pkg.trainer.Trainer.predict"] }
 delete_function                = { identity = "broken", broken = ["pkg.trainer.main"] }
 swap_two_similar               = { identity = "ambiguous", symbols = ["pkg.trainer.Trainer.score_a", "pkg.trainer.Trainer.score_b"] }
