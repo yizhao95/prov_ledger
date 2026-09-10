@@ -20,13 +20,10 @@ fi
 
 DIR="$(cd "$(dirname "$DB")" && pwd)"
 
-# Read the recorded commit sha (best-effort); fall back to a timestamp.
-SHA=""
-if command -v sqlite3 >/dev/null 2>&1; then
-    SHA="$(sqlite3 "$DB" \
-        "SELECT commit_sha FROM analysis_run ORDER BY id DESC LIMIT 1;" \
-        2>/dev/null || echo "")"
-fi
+# Read the recorded commit sha (best-effort, read-only, no sqlite3 CLI needed —
+# phase-1 dogfood: without the CLI every archive was named unknown-<ts>);
+# fall back to a timestamp.
+SHA="$(python3 -c "import sqlite3,sys; c=sqlite3.connect('file:'+sys.argv[1]+'?mode=ro',uri=True); r=c.execute('SELECT commit_sha FROM analysis_run ORDER BY id DESC LIMIT 1').fetchone(); print(r[0] if r and r[0] else '')" "$DB" 2>/dev/null || echo "")"
 if [[ -z "$SHA" || "$SHA" == "NULL" ]]; then
     SHA="unknown-$(date +%Y%m%d%H%M%S)"
 fi

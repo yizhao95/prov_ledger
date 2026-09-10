@@ -73,19 +73,23 @@ mkdir -p "$OUT_DIR"
 cd "$SCRIPT_DIR"
 
 # 2. Deep layer — build the state-graph DB.
-# Remove any prior DB first: store.init_db uses CREATE TABLE IF NOT EXISTS and
-# never drops, so a stale/partial DB (e.g. from an interrupted run) would be
-# appended to rather than rebuilt. Start clean for a deterministic graph.
+# store.reset_graph (PSG-C1) makes the rebuild idempotent; the history tables
+# (node_snapshot / node_event) must survive — NEVER delete the DB file here.
+# (Phase-1 dogfood: an `rm -f "$DB_PATH"` used to wipe the history on every refresh.)
 echo "==> [1/5] building deep layer (analyzer) -> ${DB_PATH}"
-# Phase C-1: cold-snapshot the prior graph before it is wiped (non-fatal).
+# Phase C-1: cold-snapshot the prior graph before it is rebuilt (non-fatal).
 # A clean archive at provledger.<old_sha>.db preserves raw material for future
 # version-over-version provenance; it cannot be captured retroactively.
 if [[ -f "$DB_PATH" ]]; then
     bash "${SCRIPT_DIR}/archive_db.sh" "$DB_PATH" \
         || echo "    WARNING: cold archive failed (non-fatal)" >&2
 fi
-rm -f "$DB_PATH"
-uv run python -m analyzer "$REPO" --project "$NAME" --db-path "$DB_PATH"
+# Run attribution (spec §2.5): the orchestrator step that caused this refresh,
+# passed through the environment by update-project-state-graph.
+uv run python -m analyzer "$REPO" --project "$NAME" --db-path "$DB_PATH" \
+    ${PROVLEDGER_PLAN_ID:+--plan-id "$PROVLEDGER_PLAN_ID"} \
+    ${PROVLEDGER_STEP_ID:+--step-id "$PROVLEDGER_STEP_ID"} \
+    --trigger "${PROVLEDGER_TRIGGER:-manual}"
 
 # Capture the commit sha that was analyzed (best-effort).
 COMMIT_SHA="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo "")"

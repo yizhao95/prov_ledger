@@ -59,6 +59,20 @@ refresh the graph + re-run tests, then close COMPLETED.
                                  (plan auto-COMPLETES)
 ```
 
+**Before the refresh in 4b** export the run attribution so the rebuilt graph's
+`analysis_run` row (and every history event it appends) points back at this
+review step (spec §2.5):
+
+```bash
+export PROVLEDGER_PLAN_ID=<plan_id> PROVLEDGER_STEP_ID=<plan_id>-REVIEW.1 PROVLEDGER_TRIGGER=review
+bash skills/project-state-graph/scripts/init_project.sh --name <project> --repo <repo>
+```
+
+`init_project.sh` no longer deletes the DB before rebuilding: `node_snapshot` /
+`node_event` accumulate across refreshes and `python3 -m analyzer history <db>
+<qualified_name>` (run from `skills/project-state-graph/scripts`) shows a
+node's event stream with the plan/step that caused each change.
+
 ## Two close-time graph gates (deterministic, run before finalizing)
 
 The refresh in 4b calls `init_project.sh`, whose step [4/4] runs `selfcheck.py`

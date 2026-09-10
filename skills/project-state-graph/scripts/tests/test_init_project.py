@@ -73,3 +73,27 @@ def test_init_project_end_to_end(tmp_path):
 
     # Self-check passed (orchestrator runs it; confirm reflected in stdout).
     assert "Self-check: PASS" in result.stdout
+
+
+def test_init_project_keeps_history_across_refresh(tmp_path):
+    """Phase-1 dogfood finding: init_project.sh used to rm the DB before every
+    rebuild, wiping node_snapshot/node_event. A refresh must keep them."""
+    import sqlite3
+    repo = _make_repo(tmp_path)
+    out_dir = tmp_path / "out"
+    env = dict(os.environ, PSG_REGISTRY_ROOT=str(tmp_path / "registry"),
+               PROVLEDGER_PLAN_ID="plan-x", PROVLEDGER_STEP_ID="plan-x-REVIEW.1", PROVLEDGER_TRIGGER="review")
+    for _ in range(2):
+        result = subprocess.run(["bash", str(INIT_SH), "--name", "demo", "--repo", str(repo), "--out-dir", str(out_dir)],
+                                capture_output=True, text=True, env=env)
+        assert result.returncode == 0, result.stdout + result.stderr
+    conn = sqlite3.connect(str(out_dir / "demo-state-graph.db"))
+    runs = [r for r in conn.execute("SELECT id, plan_id, step_id, trigger FROM analysis_run ORDER BY id")]
+    assert len(runs) == 2 and runs[1][1:] == ("plan-x", "plan-x-REVIEW.1", "review")
+    assert {r[0] for r in conn.execute("SELECT DISTINCT run_id FROM node_snapshot")} == {runs[0][0], runs[1][0]}
+    assert conn.execute("SELECT COUNT(*) FROM node_event WHERE event_type='node_matched' AND run_id=?",
+                        (runs[1][0],)).fetchone()[0] > 0
+    conn.close()
+    # the cold archive of the first build is still taken, named by the real sha
+    sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    assert (out_dir / f"provledger.{sha}.db").exists(), sorted(p.name for p in out_dir.iterdir())
