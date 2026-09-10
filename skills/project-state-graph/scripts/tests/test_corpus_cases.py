@@ -1,8 +1,9 @@
 """Structural validation of the refactor-mutation corpus (no matcher needed).
 
 Guards the corpus itself: every case parses, every expectation is legal, both
-boundary anchors exist, every generated mutator is registered and keeps the
-base parseable, and every symbol named in expect.toml really exists on the
+boundary anchors exist, every generated mutator is registered and really
+changes the code (AST, or source text for comment/format-only mutators) while
+keeping it parseable, and every symbol named in expect.toml really exists on the
 variant's base side (typos in expect.toml would otherwise pass silently).
 """
 from __future__ import annotations
@@ -81,17 +82,10 @@ def test_boundary_anchors_declared(case):
 
 
 @pytest.mark.parametrize("case", ALL_CASES, ids=IDS)
-def test_generated_mutators_registered_and_keep_base_parseable(case):
+def test_generated_mutators_registered(case):
     gen = case.expect.get("generated", {})
     assert gen, f"{case.name}: no generated variants"
     assert set(gen) <= set(mutate.GENERATED), f"{case.name}: unregistered mutator(s) {set(gen) - set(mutate.GENERATED)}"
-    for name in gen:
-        with tempfile.TemporaryDirectory() as td:
-            dst = Path(td) / "repo"
-            shutil.copytree(case.base, dst)
-            mutate.GENERATED[name](case.base, dst)
-            for py in _py_files(dst):
-                ast.parse(py.read_text(), filename=f"{case.name}/generated:{name}/{py.name}")
 
 
 @pytest.mark.parametrize("case", ALL_CASES, ids=IDS)
@@ -111,3 +105,45 @@ def test_declared_symbols_exist_on_base_side(case):
             assert s not in _qualnames(before), f"{case.name}/{name}: added {s} already on base side"
         for s in spec.get("renamed", []):
             assert s in syms, f"{case.name}/{name}: renamed {s} not in symbols"
+
+
+# ── review #35 A-5: a GENERATED mutation must actually change the code ──────
+
+# These three only touch comments / docstrings / layout: the AST may legitimately
+# survive, so the evidence of mutation is the source text.
+TEXT_ONLY_MUTATORS = {"add_comments", "strip_comments", "reformat"}
+
+
+def _assert_mutator_changes_code(case, name: str, mutator) -> None:
+    """Apply `mutator` to a copy of the base: every file must still parse, and the
+    mutation must be visible — a differing ast.dump for semantic mutators, a
+    differing source text for TEXT_ONLY_MUTATORS. A no-op mutation fails."""
+    with tempfile.TemporaryDirectory() as td:
+        dst = Path(td) / "repo"
+        shutil.copytree(case.base, dst)
+        mutator(case.base, dst)
+        text_changed = ast_changed = False
+        for py in _py_files(dst):
+            after = py.read_text()
+            before = (case.base / py.relative_to(dst)).read_text()
+            tree = ast.parse(after, filename=f"{case.name}/generated:{name}/{py.name}")
+            text_changed |= after != before
+            ast_changed |= ast.dump(tree) != ast.dump(ast.parse(before))
+    if name in TEXT_ONLY_MUTATORS:
+        assert text_changed, f"{case.name}/generated:{name}: no source text changed"
+    else:
+        assert ast_changed, f"{case.name}/generated:{name}: no AST changed (no-op mutation)"
+
+@pytest.mark.parametrize("case", ALL_CASES, ids=IDS)
+def test_generated_mutators_change_the_code(case):
+    for name in case.expect.get("generated", {}):
+        _assert_mutator_changes_code(case, name, mutate.GENERATED[name])
+
+
+def test_noop_mutator_is_rejected():
+    def noop(_src: Path, _dst: Path) -> None:
+        pass
+    with pytest.raises(AssertionError, match="no-op"):
+        _assert_mutator_changes_code(ALL_CASES[0], "noop", noop)
+    with pytest.raises(AssertionError, match="no source text"):
+        _assert_mutator_changes_code(ALL_CASES[0], "reformat", noop)
