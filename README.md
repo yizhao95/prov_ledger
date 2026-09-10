@@ -351,7 +351,7 @@ detection, decision ledger — stdlib-only) is on
 
 ```bash
 pip install provledger                  # or, from a clone: pip install ./orchestrator-backend
-python -c "from provledger import api, db; print('ok')"
+python3 -c "from provledger import api, db; print('ok')"
 ```
 
 The wheel ships the SQL migrations inside the package, so

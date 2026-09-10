@@ -149,6 +149,22 @@ class TestDeviate:
             assert r_[2] == 1   # depth = parent depth (0) + 1
         conn.close()
 
+    def test_rejected_on_completed_step_exits_nonzero(self, seeded_plan, tmp_db, scripts_dir, run_script_fn):
+        """FL-011: the immutability breaker returns accepted:false — the script
+        must NOT print the ok marker / exit 0 (it used to, silently)."""
+        done = seeded_plan["step_ids"][0]
+        run_script_fn("start-step", {"step_id": done}, tmp_db)
+        run_script_fn("complete-step", {"step_id": done}, tmp_db)
+        r = run_script_fn("deviate", {
+            "parent_step_id": done,
+            "justification": "redo the work",
+            "sub_steps": ["retry"],
+        }, tmp_db)
+        assert r.returncode == 4, (r.returncode, r.stdout, r.stderr)
+        assert '"ok": true' not in r.stdout and '"ok":true' not in r.stdout
+        assert '"accepted": false' in r.stdout
+        assert "rejected" in r.stderr.lower() and "immutab" in r.stderr.lower()
+
     def test_max_revisions_circuit_breaker(self, seeded_plan, tmp_db, scripts_dir, run_script_fn):
         """Hitting max_revisions triggers the breaker — script exits non-zero."""
         plan_id = seeded_plan["plan_id"]

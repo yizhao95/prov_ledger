@@ -285,10 +285,18 @@ def _trace_consumes(conn, fn, idx, module, var_of, consumes_e,
     # producer_fn_id is the function that produced the value (for self-consume
     # guarding); None when the value is one of THIS function's own parameters.
     tainted: Dict[str, tuple] = {}
+    # FL-013: names bound by DESTRUCTURING (`a, b = f()`, `for it in data`)
+    # hold an ELEMENT of the value, not the value itself. Their edges still
+    # record the flow but must not claim the whole value's type.
+    unpacked: set = set()
 
-    def _bind(target, info):
+    def _bind(target, info, element: bool = False):
         for var in _target_names(target):
             tainted[var] = info
+            if element:
+                unpacked.add(var)
+            else:
+                unpacked.discard(var)
 
     # Seed: this function's own parameters are tainted data (their data_var is
     # the param node itself), so a param flowing into a call reads as data flow.
@@ -307,7 +315,8 @@ def _trace_consumes(conn, fn, idx, module, var_of, consumes_e,
                 continue
             dv_id, type_str, _ = var_of[pid]
             for target in stmt.targets:
-                _bind(target, (dv_id, type_str, pid))
+                _bind(target, (dv_id, type_str, pid),
+                      element=isinstance(target, (ast.Tuple, ast.List)))
 
     # Pass B: propagate taint to comprehension targets that iterate a tainted
     # var, so `[transform(it) for it in data]` traces data -> transform.
@@ -316,7 +325,7 @@ def _trace_consumes(conn, fn, idx, module, var_of, consumes_e,
                              ast.GeneratorExp)):
             for gen in comp.generators:
                 if isinstance(gen.iter, ast.Name) and gen.iter.id in tainted:
-                    _bind(gen.target, tainted[gen.iter.id])
+                    _bind(gen.target, tainted[gen.iter.id], element=True)
 
     seen = set()
     for sub in ast.walk(fn):
@@ -352,6 +361,10 @@ def _trace_consumes(conn, fn, idx, module, var_of, consumes_e,
                 seen.add(key)
                 conf = cconf if is_direct else "inferred"
                 meta = {"type": type_str, "confidence": conf, "var": var_name}
+                if var_name in unpacked:
+                    # element of the produced value: its own type is unknown here
+                    meta["type"] = "unknown"
+                    meta["unpacked"] = True
                 # PSG-C4: the CONSUMER's declared param type so the e2e dtype gate
                 # compares producer-output vs consumer-expected (not a tautology).
                 expected = _expected_param_type(cparams, slot)

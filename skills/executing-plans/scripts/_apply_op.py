@@ -273,7 +273,7 @@ def _op_deviate(conn, data: dict) -> dict:
     if not isinstance(sub_steps, list) or len(sub_steps) == 0:
         _die("'sub_steps' must be a non-empty array")
     try:
-        return api.evaluate_and_update_plan(
+        result = api.evaluate_and_update_plan(
             conn,
             deviation_detected=True,
             target_step_id=data["parent_step_id"],
@@ -282,7 +282,18 @@ def _op_deviate(conn, data: dict) -> dict:
         )
     except Exception as e:
         _die(f"deviate failed: {e}")
-    return {}  # unreachable
+    if result.get("accepted") is False:
+        # FL-011: a soft circuit breaker (immutability / loop / depth) is a
+        # REJECTION. Surface the api payload, then exit 4 so `tail -1 | jq .ok`
+        # never reads true and the agent cannot mistake it for a write.
+        print(json.dumps(result, indent=2, default=str))
+        _die(
+            f"deviate rejected: {result.get('reason')} (breaker={result.get('breaker', 'n/a')}). "
+            "A COMPLETED step is immutable — attach the retry sub-step to the next "
+            "non-terminal step (or the plan's review step) instead.",
+            code=4,
+        )
+    return result
 
 
 def _op_record_skill(conn, data: dict) -> dict:
