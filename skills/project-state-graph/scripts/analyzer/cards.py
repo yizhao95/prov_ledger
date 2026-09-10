@@ -10,7 +10,9 @@ LLM does ONE lookup instead of a graph traversal:
     pipeline_membership  - pipelines I'm a step in (contains_step: pipe -> me)
 
 symbol_card: one self-contained record per function/class (metadata + the
-consistency sets above), for direct retrieval by an LLM.
+consistency sets above), for direct retrieval by an LLM. attach_history adds
+the node's stable node_key and its last 10 history events (spec §2.5) in the
+same build — no table change, still one lookup.
 
 Cards are ALWAYS rebuilt from edges in one pass; never hand-edited. This keeps
 a single source of truth (the graph) and prevents drift.
@@ -226,3 +228,28 @@ def build_symbol_cards(conn: sqlite3.Connection) -> Dict[int, dict]:
         )
     conn.commit()
     return out
+
+
+# ── history projection (spec §2.5) ──────────────────────────────────────────
+
+HISTORY_LIMIT = 10
+_HISTORY_FIELDS = ("run_id", "seq", "event_type", "tier", "plan_id", "step_id",
+                   "trigger", "commit_sha", "created_at", "payload")
+
+
+def attach_history(conn: sqlite3.Connection, limit: int = HISTORY_LIMIT) -> int:
+    """Add `node_key` + `history` (the node's last `limit` events, oldest first)
+    to every symbol_card's card_json. Runs after history.resolve in the same
+    build; a node without a key gets node_key None and an empty history."""
+    from . import history  # local import: history depends on store/signatures only
+    rows = conn.execute(
+        "SELECT sc.symbol_id, n.node_key, sc.card_json FROM symbol_card sc JOIN node n ON n.id=sc.symbol_id"
+    ).fetchall()
+    for sid, key, card_json in rows:
+        card = json.loads(card_json)
+        card["node_key"] = key
+        events = history.events_of(conn, key)[-limit:] if key else []
+        card["history"] = [{f: e[f] for f in _HISTORY_FIELDS} for e in events]
+        conn.execute("UPDATE symbol_card SET card_json=? WHERE symbol_id=?", (json.dumps(card), sid))
+    conn.commit()
+    return len(rows)

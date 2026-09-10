@@ -174,3 +174,17 @@ def test_rename_function_changes_a_caller(case):
                      if s in before and s in after and ast.dump(before[s]) != ast.dump(after[s]))
     assert callers, (f"{case.name}: rename_function changed no caller among "
                      f"{sorted(symbols - renamed)} — semantic_diff=callers would be a no-op")
+
+
+# ── Task 12: the corpus against the real signatures + matcher ────────────────
+
+from tests.corpus.harness import analyzer_extractor, analyzer_matcher, run_case  # noqa: E402
+
+
+@pytest.mark.parametrize("case", ALL_CASES, ids=IDS)
+def test_case_against_analyzer(case):
+    """Every generated and hand-written variant of every case must meet its
+    expect.toml against analyzer.signatures + analyzer.history.match. Code is
+    fixed to the corpus, never the other way round."""
+    fails = run_case(case, analyzer_extractor, analyzer_matcher, generated=mutate.GENERATED)
+    assert fails == [], "\n".join(fails)

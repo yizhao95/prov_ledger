@@ -39,6 +39,11 @@ refresh the graph + re-run tests, then close COMPLETED.
 ## The Flow
 
 ```
+0. LOCK the registered sha         registered_sha = registry["commit_sha"]  (read it FIRST,
+      write it into the review step's log, and only then do anything else —
+      a refresh moves the registry to HEAD and would make the range empty;
+      pass it to full_verdict(..., registered_sha=registered_sha): an empty
+      range while HEAD != registered_sha FAILS the review — E6-4)
 1. Resolve the diff range          review_diff.resolve_range(repo, registered_sha)
       registered sha..HEAD when that sha is an ancestor of HEAD (the normal case,
       pushed or not); else merge-base(upstream, HEAD)..HEAD; else sha..HEAD (local)
@@ -58,6 +63,20 @@ refresh the graph + re-run tests, then close COMPLETED.
                               - complete-step.sh the child <plan>-REVIEW.1
                                  (plan auto-COMPLETES)
 ```
+
+**Before the refresh in 4b** export the run attribution so the rebuilt graph's
+`analysis_run` row (and every history event it appends) points back at this
+review step (spec §2.5):
+
+```bash
+export PROVLEDGER_PLAN_ID=<plan_id> PROVLEDGER_STEP_ID=<plan_id>-REVIEW.1 PROVLEDGER_TRIGGER=review
+bash skills/project-state-graph/scripts/init_project.sh --name <project> --repo <repo>
+```
+
+`init_project.sh` no longer deletes the DB before rebuilding: `node_snapshot` /
+`node_event` accumulate across refreshes and `python3 -m analyzer history <db>
+<qualified_name>` (run from `skills/project-state-graph/scripts`) shows a
+node's event stream with the plan/step that caused each change.
 
 ## Two close-time graph gates (deterministic, run before finalizing)
 

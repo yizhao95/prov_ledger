@@ -6,7 +6,14 @@ Schema (generic graph):
                   line_start, line_end, metadata_json)
     edge_type    (id, name UNIQUE, description)
     edge         (id, edge_type_id, src_node_id, dst_node_id, metadata_json)
-    analysis_run (id, project_name, commit_sha, started_at, finished_at, tool_version)
+    analysis_run (id, project_name, commit_sha, started_at, finished_at, tool_version,
+                  plan_id, step_id, trigger)
+
+Node history (spec §2.1, append-only — never deleted, never reset):
+    node_snapshot (id, run_id, node_key, node_type, qualified_name, file_path,
+                   line_start, line_end, struct_sig, dataflow_sig, dataflow_trivial, attrs_json)
+    node_event    (id, run_id, seq, event_type, node_key, tier, payload_json, created_at)
+    node.node_key is the stable identity backfilled per run by analyzer.history.
 """
 from __future__ import annotations
 
@@ -78,6 +85,49 @@ CREATE INDEX IF NOT EXISTS idx_node_dtype          ON node(dtype);
 CREATE INDEX IF NOT EXISTS idx_edge_confidence     ON edge(confidence);
 """
 
+# History layer (spec §2.1). Snapshots are one compact projection per run and
+# events are the append-only ledger; both survive reset_graph and are protected
+# by triggers (events: no UPDATE/DELETE; snapshots: no DELETE — node_key is
+# assigned once from the '' placeholder, which is a first write, not a rewrite).
+_HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS node_snapshot (
+    id               INTEGER PRIMARY KEY,
+    run_id           INTEGER NOT NULL REFERENCES analysis_run(id),
+    node_key         TEXT NOT NULL,
+    node_type        TEXT NOT NULL,
+    qualified_name   TEXT NOT NULL,
+    file_path        TEXT,
+    line_start       INTEGER,
+    line_end         INTEGER,
+    struct_sig       TEXT,
+    dataflow_sig     TEXT,
+    dataflow_trivial INTEGER NOT NULL DEFAULT 1,
+    attrs_json       TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS node_event (
+    id           INTEGER PRIMARY KEY,
+    run_id       INTEGER NOT NULL REFERENCES analysis_run(id),
+    seq          INTEGER NOT NULL,
+    event_type   TEXT NOT NULL,
+    node_key     TEXT,
+    tier         TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_snapshot_run_key ON node_snapshot(run_id, node_key)
+    WHERE node_key <> '';
+CREATE INDEX IF NOT EXISTS idx_node_snapshot_run_qn ON node_snapshot(run_id, node_type, qualified_name);
+CREATE INDEX IF NOT EXISTS idx_node_event_key ON node_event(node_key, run_id);
+CREATE TRIGGER IF NOT EXISTS trg_node_event_no_update BEFORE UPDATE ON node_event
+    BEGIN SELECT RAISE(ABORT, 'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS trg_node_event_no_delete BEFORE DELETE ON node_event
+    BEGIN SELECT RAISE(ABORT, 'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS trg_node_snapshot_no_delete BEFORE DELETE ON node_snapshot
+    BEGIN SELECT RAISE(ABORT, 'append-only'); END;
+"""
+
+EVENT_TIERS = ("observed", "asserted")
+
 
 def init_db(path: str) -> sqlite3.Connection:
     """Create (if needed) and return a connection to the state-graph DB."""
@@ -91,7 +141,12 @@ def init_db(path: str) -> sqlite3.Connection:
         "run_id": "INTEGER", "dtype": "TEXT", "dtype_provenance": "TEXT",
         "data_class": "TEXT", "nullable": "INTEGER"})
     _ensure_columns(conn, "edge", {"run_id": "INTEGER", "confidence": "TEXT"})
+    # History layer (spec §2.1): node_key identity + run attribution, then the
+    # append-only tables and their triggers.
+    _ensure_columns(conn, "node", {"node_key": "TEXT"})
+    _ensure_columns(conn, "analysis_run", {"plan_id": "TEXT", "step_id": "TEXT", "trigger": "TEXT"})
     conn.executescript(_INDEXES)
+    conn.executescript(_HISTORY_SCHEMA)
     conn.commit()
     return conn
 
@@ -108,8 +163,10 @@ def reset_graph(conn: sqlite3.Connection) -> None:
 
     Re-running the analyzer over an existing DB previously DOUBLED the whole graph
     (add_node/add_edge are unconditional INSERTs). Wiping the graph and card tables
-    first makes a rebuild idempotent. analysis_run history is intentionally kept.
-    Order respects the node(id) foreign keys: cards + edge before node.
+    first makes a rebuild idempotent. analysis_run history is intentionally kept,
+    and so are node_snapshot / node_event (the history layer is append-only and
+    never part of a rebuild). Order respects the node(id) foreign keys:
+    cards + edge before node.
     """
     for table in ("consistency_card", "symbol_card", "edge", "node"):
         try:
@@ -201,17 +258,26 @@ def add_edge(
     return int(cur.lastrowid)
 
 
+def _now() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).isoformat()
+
+
 def start_run(
     conn: sqlite3.Connection,
     *,
     project_name: str,
     commit_sha: Optional[str] = None,
+    plan_id: Optional[str] = None,
+    step_id: Optional[str] = None,
+    trigger: str = "manual",
 ) -> int:
+    """Open an analysis run. plan_id/step_id/trigger attribute the run to the
+    orchestrator step that caused it (spec §2.5); trigger defaults to manual."""
     cur = conn.execute(
         """INSERT INTO analysis_run
-           (project_name, commit_sha, started_at, tool_version)
-           VALUES (?, ?, ?, ?)""",
-        (project_name, commit_sha, _dt.datetime.now(_dt.timezone.utc).isoformat(), TOOL_VERSION),
+           (project_name, commit_sha, started_at, tool_version, plan_id, step_id, trigger)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (project_name, commit_sha, _now(), TOOL_VERSION, plan_id, step_id, trigger),
     )
     conn.commit()
     return int(cur.lastrowid)
@@ -220,6 +286,89 @@ def start_run(
 def finish_run(conn: sqlite3.Connection, run_id: int) -> None:
     conn.execute(
         "UPDATE analysis_run SET finished_at=? WHERE id=?",
-        (_dt.datetime.now(_dt.timezone.utc).isoformat(), run_id),
+        (_now(), run_id),
     )
     conn.commit()
+
+
+# ── history layer (spec §2.1) ────────────────────────────────────────────────
+
+def add_node_snapshot(
+    conn: sqlite3.Connection,
+    run_id: int,
+    *,
+    node_type: str,
+    qualified_name: str,
+    file_path: Optional[str],
+    line_start: Optional[int],
+    line_end: Optional[int],
+    struct_sig: Optional[str],
+    dataflow_sig: Optional[str],
+    dataflow_trivial: bool,
+    attrs: dict,
+) -> int:
+    """Insert this run's projection of one node with the '' node_key placeholder;
+    the key is assigned exactly once later by set_snapshot_key."""
+    cur = conn.execute(
+        """INSERT INTO node_snapshot
+           (run_id, node_key, node_type, qualified_name, file_path, line_start, line_end,
+            struct_sig, dataflow_sig, dataflow_trivial, attrs_json)
+           VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (run_id, node_type, qualified_name, file_path, line_start, line_end,
+         struct_sig, dataflow_sig, 1 if dataflow_trivial else 0, json.dumps(attrs, sort_keys=True)),
+    )
+    return int(cur.lastrowid)
+
+
+def set_snapshot_key(conn: sqlite3.Connection, snapshot_id: int, node_key: str) -> None:
+    """First (and only) assignment of a snapshot's node_key: only the ''
+    placeholder may be written. Re-assignment raises — history is not rewritten."""
+    if not node_key:
+        raise ValueError("node_key must be non-empty")
+    cur = conn.execute(
+        "UPDATE node_snapshot SET node_key=? WHERE id=? AND node_key=''",
+        (node_key, snapshot_id),
+    )
+    if cur.rowcount != 1:
+        raise ValueError(f"snapshot {snapshot_id}: node_key already assigned or row missing")
+
+
+def add_node_event(
+    conn: sqlite3.Connection,
+    run_id: int,
+    event_type: str,
+    node_key: Optional[str],
+    payload: dict,
+    tier: str = "observed",
+) -> int:
+    """Append one event; seq is per-run and monotonic. tier ∈ EVENT_TIERS."""
+    if tier not in EVENT_TIERS:
+        raise ValueError(f"tier must be one of {EVENT_TIERS}, got {tier!r}")
+    seq = conn.execute(
+        "SELECT COALESCE(MAX(seq), 0) + 1 FROM node_event WHERE run_id=?", (run_id,)
+    ).fetchone()[0]
+    cur = conn.execute(
+        """INSERT INTO node_event (run_id, seq, event_type, node_key, tier, payload_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (run_id, seq, event_type, node_key, tier, json.dumps(payload, sort_keys=True), _now()),
+    )
+    return int(cur.lastrowid)
+
+
+def latest_run_id(conn: sqlite3.Connection) -> Optional[int]:
+    row = conn.execute("SELECT MAX(id) FROM analysis_run").fetchone()
+    return int(row[0]) if row and row[0] is not None else None
+
+
+def previous_run_id(conn: sqlite3.Connection, run_id: int) -> Optional[int]:
+    """The most recent earlier run of the same project whose snapshots were
+    keyed (resolved). Runs that never snapshotted (pre-history) or crashed
+    between snapshot_run and resolve (only '' placeholders — append-only rows
+    that cannot be removed) are skipped: they are not a usable predecessor."""
+    row = conn.execute(
+        """SELECT MAX(a.id) FROM analysis_run a
+           WHERE a.id < ? AND a.project_name = (SELECT project_name FROM analysis_run WHERE id=?)
+             AND EXISTS (SELECT 1 FROM node_snapshot s WHERE s.run_id = a.id AND s.node_key <> '')""",
+        (run_id, run_id),
+    ).fetchone()
+    return int(row[0]) if row and row[0] is not None else None

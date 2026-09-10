@@ -385,6 +385,74 @@ def _check_no_data_leakage(conn) -> Dict[str, Any]:
             "detail": f"{len(details)} data-leakage finding(s): {sample}{more}"}
 
 
+# ── history layer (spec §2.7) ────────────────────────────────────────────────
+_HISTORY_TRIGGERS = ("trg_node_event_no_update", "trg_node_event_no_delete", "trg_node_snapshot_no_delete")
+_IDENTITY_TYPES = ("function", "method", "class", "sql_table", "bq_dataset", "api_source",
+                   "dataset", "dataframe", "column")
+
+
+def _latest_resolved_run(conn):
+    if not _table_exists(conn, "node_snapshot"):
+        return None
+    row = conn.execute("SELECT MAX(run_id) FROM node_snapshot WHERE node_key <> ''").fetchone()
+    return row[0] if row else None
+
+
+def _check_history_append_only(conn) -> Dict[str, Any]:
+    have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+    missing = [t for t in _HISTORY_TRIGGERS if t not in have]
+    return {"name": "history_append_only", "ok": not missing, "severity": "error",
+            "detail": ("all 3 append-only triggers present" if not missing
+                       else f"missing trigger(s): {', '.join(missing)}")}
+
+
+def _check_history_key_coverage(conn) -> Dict[str, Any]:
+    """Every identity-bearing node of the latest build carries a node_key."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(node)")}
+    if "node_key" not in cols:
+        return {"name": "history_key_coverage", "ok": False, "severity": "error",
+                "detail": "node.node_key column missing (graph built before the history layer; rebuild)"}
+    run = conn.execute("SELECT MAX(id) FROM analysis_run").fetchone()[0]
+    if run is None:
+        return {"name": "history_key_coverage", "ok": True, "severity": "error", "detail": "no runs"}
+    # hand-built / older graphs may lack node.run_id: then every node is "this run"
+    run_filter = "n.run_id=? AND " if "run_id" in cols else ""
+    params = ((run,) if "run_id" in cols else ()) + _IDENTITY_TYPES
+    where = f"""{run_filter}t.name IN ({','.join('?' * len(_IDENTITY_TYPES))})
+              AND (n.node_key IS NULL OR n.node_key='')"""
+    rows = conn.execute(
+        f"""SELECT COALESCE(n.qualified_name, n.name) FROM node n JOIN node_type t ON n.node_type_id=t.id
+            WHERE {where} ORDER BY 1 LIMIT 5""", params).fetchall()
+    total = conn.execute(
+        f"""SELECT COUNT(*) FROM node n JOIN node_type t ON n.node_type_id=t.id WHERE {where}""",
+        params).fetchone()[0]
+    return {"name": "history_key_coverage", "ok": total == 0, "severity": "error",
+            "detail": (f"every identity-bearing node of run {run} has a node_key" if total == 0
+                       else f"{total} node(s) of run {run} without node_key, e.g. {', '.join(r[0] for r in rows)}")}
+
+
+def _check_history_ambiguous(conn) -> Dict[str, Any]:
+    run = _latest_resolved_run(conn)
+    if run is None:
+        return {"name": "history_ambiguous", "ok": True, "severity": "warning", "detail": "no resolved history run"}
+    n = conn.execute("SELECT COUNT(*) FROM node_event WHERE run_id=? AND event_type='identity_ambiguous'", (run,)).fetchone()[0]
+    return {"name": "history_ambiguous", "ok": n == 0, "severity": "warning",
+            "detail": f"{n} identity_ambiguous in run {run}" + ("" if n == 0 else " (arbitrate or accept the break)")}
+
+
+def _check_history_broken_ratio(conn) -> Dict[str, Any]:
+    run = _latest_resolved_run(conn)
+    if run is None:
+        return {"name": "history_broken_ratio", "ok": True, "severity": "warning", "detail": "no resolved history run"}
+    removed = conn.execute("SELECT COUNT(*) FROM node_event WHERE run_id=? AND event_type='node_removed'", (run,)).fetchone()[0]
+    prev = conn.execute(
+        "SELECT MAX(run_id) FROM node_snapshot WHERE node_key <> '' AND run_id < ?", (run,)).fetchone()[0]
+    prev_n = conn.execute("SELECT COUNT(*) FROM node_snapshot WHERE run_id=? AND node_key <> ''", (prev,)).fetchone()[0] if prev else 0
+    pct = (100.0 * removed / prev_n) if prev_n else 0.0
+    return {"name": "history_broken_ratio", "ok": removed == 0, "severity": "warning",
+            "detail": f"{removed}/{prev_n} previous nodes removed in run {run} ({pct:.1f}%)"}
+
+
 _CHECKS = [
     _check_node_types_nonempty,
     _check_no_dangling_edges,
@@ -400,6 +468,10 @@ _CHECKS = [
     _check_resolution_coverage,
     _check_unguarded_model_inputs,
     _check_no_data_leakage,
+    _check_history_append_only,
+    _check_history_key_coverage,
+    _check_history_ambiguous,
+    _check_history_broken_ratio,
 ]
 
 

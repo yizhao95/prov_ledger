@@ -186,3 +186,62 @@ def test_no_cards_flag_skips_cards(tmp_path):
     conn.close()
     assert "consistency_card" not in tables
     assert "symbol_card" not in tables
+
+
+# ── phase 2 Task 9: history wired into the run; attribution; history subcommand ──
+
+HIST_FIXTURE = "def f(x):\n    return x + 1\n\ndef g(y):\n    return f(y)\n"
+
+
+def _hist_repo(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "__init__.py").write_text("")
+    (repo / "pkg" / "m.py").write_text(HIST_FIXTURE)
+    return repo
+
+
+def test_run_attribution_flags_land_in_analysis_run(tmp_path):
+    repo = _hist_repo(tmp_path)
+    db = tmp_path / "demo-state-graph.db"
+    r = _run_cli(repo, "--project", "demo", "--db-path", str(db),
+                 "--plan-id", "P", "--step-id", "S", "--trigger", "update")
+    assert r.returncode == 0, r.stderr
+    conn = sqlite3.connect(str(db))
+    assert conn.execute("SELECT plan_id, step_id, trigger FROM analysis_run").fetchone() == ("P", "S", "update")
+    conn.close()
+
+
+def test_second_run_records_node_matched_and_keys(tmp_path):
+    repo = _hist_repo(tmp_path)
+    db = tmp_path / "demo-state-graph.db"
+    assert _run_cli(repo, "--project", "demo", "--db-path", str(db)).returncode == 0
+    assert _run_cli(repo, "--project", "demo", "--db-path", str(db)).returncode == 0
+    conn = sqlite3.connect(str(db))
+    assert conn.execute("SELECT trigger FROM analysis_run").fetchone() == ("manual",)
+    runs = [r[0] for r in conn.execute("SELECT DISTINCT run_id FROM node_snapshot ORDER BY run_id")]
+    assert len(runs) == 2
+    kinds = {r[0] for r in conn.execute("SELECT event_type FROM node_event WHERE run_id=?", (runs[1],))}
+    assert kinds == {"node_matched"}
+    # node.node_key backfilled and stable across the rebuild
+    k = conn.execute("SELECT node_key FROM node WHERE qualified_name='pkg.m.f'").fetchone()[0]
+    assert k and k == conn.execute(
+        "SELECT node_key FROM node_snapshot WHERE run_id=? AND qualified_name='pkg.m.f'", (runs[0],)).fetchone()[0]
+    conn.close()
+
+
+def test_history_subcommand_prints_events_and_tokens(tmp_path):
+    repo = _hist_repo(tmp_path)
+    db = tmp_path / "demo-state-graph.db"
+    assert _run_cli(repo, "--project", "demo", "--db-path", str(db), "--plan-id", "P1").returncode == 0
+    (repo / "pkg" / "m.py").write_text(HIST_FIXTURE.replace("x + 1", "x + 2"))
+    assert _run_cli(repo, "--project", "demo", "--db-path", str(db), "--plan-id", "P2").returncode == 0
+    env = dict(os.environ); root = os.path.dirname(os.path.dirname(os.path.abspath(__file__))); env["PYTHONPATH"] = root
+    r = subprocess.run([sys.executable, "-m", "analyzer", "history", str(db), "pkg.m.f"],
+                       capture_output=True, text=True, cwd=root, env=env)
+    assert r.returncode == 0, r.stderr
+    assert "node_added" in r.stdout and "node_changed" in r.stdout and "P2" in r.stdout
+    assert "approx_tokens=" in r.stdout
+    r2 = subprocess.run([sys.executable, "-m", "analyzer", "history", str(db), "pkg.m.nope"],
+                        capture_output=True, text=True, cwd=root, env=env)
+    assert r2.returncode == 1 and "no history" in r2.stdout + r2.stderr
