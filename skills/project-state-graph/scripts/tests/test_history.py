@@ -282,3 +282,18 @@ def test_match_owner_layer_is_pure():
     assert {(p.prev.qualified_name, p.cur.qualified_name, p.via) for p in out.pairs} == {
         ("m.f", "m.g", "struct_sig"), ("m.f:df", "m.g:df", "owner"), ("m.f:df.amount", "m.g:df.amount", "owner")}
     assert [r.qualified_name for r in out.added] == ["m.g:df.qty"] and out.removed == [] and out.ambiguous == []
+
+
+def test_rebound_dataframe_gets_distinct_names_and_keys(conn, tmp_path):
+    """df = read(); df = df.dropna() -> two dataframe nodes bound to `df` in one
+    function. Their snapshots must not collide on qualified_name / node_key
+    (found by the first real refresh of prov_ledger's own graph)."""
+    src = {"pkg/__init__.py": "",
+           "pkg/m.py": 'import pandas as pd\n\ndef f():\n    df = pd.read_csv("a.csv")\n    df = df.dropna()\n    df["x"] = 1\n    return df\n'}
+    r1 = _full_run(conn, tmp_path / "r1", src)
+    rows = conn.execute("SELECT qualified_name, node_key FROM node_snapshot WHERE run_id=? AND node_type='dataframe' "
+                        "ORDER BY id", (r1,)).fetchall()
+    assert [q for q, _ in rows] == ["pkg.m.f:df", "pkg.m.f:df#2"]
+    assert len({k for _, k in rows}) == 2
+    r2 = _full_run(conn, tmp_path / "r2", src)
+    assert {e[0] for e in _events(conn, r2)} == {"node_matched"}

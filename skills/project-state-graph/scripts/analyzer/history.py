@@ -134,10 +134,18 @@ def snapshot_run(conn, repo_root: str, run_id: int) -> int:
            WHERE t.name='has_column'""")}
     node_qn: dict[int, str] = {}   # node id -> snapshot qualified_name (owners resolve through this)
     trees: dict[str, list[ast.AST]] = {}
+    seen: dict[tuple[str, str], int] = {}
     n = 0
 
     def emit(nid, ntype, qn, path, ls, le, struct, df_sig, trivial, attrs):
         nonlocal n
+        # The graph may hold several nodes with one (type, qualified_name) — e.g.
+        # `df = read(); df = df.dropna()` binds two dataframe nodes to `df` in one
+        # function. Suffix repeats (#2, #3 ...) in the deterministic emit order so
+        # every snapshot row has its own name and its own minted key.
+        seen[(ntype, qn)] = seen.get((ntype, qn), 0) + 1
+        if seen[(ntype, qn)] > 1:
+            qn = f"{qn}#{seen[(ntype, qn)]}"
         node_qn[nid] = qn
         store.add_node_snapshot(conn, run_id, node_type=ntype, qualified_name=qn, file_path=path,
                                 line_start=ls, line_end=le, struct_sig=struct, dataflow_sig=df_sig,
