@@ -92,6 +92,12 @@ def check(symbols, base, variant, result: MatchResult, expect: dict) -> list[str
     else:  # ambiguous
         if not result.ambiguous:
             fails.append("expected identity_ambiguous, none produced")
+        else:
+            # An ambiguity elsewhere in the repo must not satisfy the
+            # expectation: every declared symbol has to sit on the prev side.
+            unbound = [s for s in symbols if s not in amb_prev]
+            if unbound:
+                fails.append(f"ambiguous: {unbound} not on the prev side of any ambiguity")
         if removed & set(symbols):
             fails.append(f"ambiguous case must not silently remove {sorted(removed)}")
     return fails

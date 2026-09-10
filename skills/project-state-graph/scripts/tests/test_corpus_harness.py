@@ -155,3 +155,13 @@ def test_load_case_rejects_undeclared_variant_dir(tmp_path):
     c = _case(tmp_path, {"x": '[[node]]\nqn="m.f"\n'}, "")
     with pytest.raises(ValueError):
         load_case(c)
+
+
+# ── review #35 A-group: ambiguous / broken bind to the declared symbols ──────
+
+def test_ambiguous_requires_declared_symbols_on_prev_side():
+    """An ambiguity elsewhere in the repo must not satisfy the expectation."""
+    a, b = _obs("m.f"), _obs("m.g")
+    unrelated = _res(ambiguous=[([_obs("m.x"), _obs("m.y")], [_obs("m.x2"), _obs("m.y2")])])
+    fails = check(["m.f", "m.g"], [a, b], [], unrelated, {"identity": "ambiguous"})
+    assert fails and any("m.f" in f for f in fails), fails
