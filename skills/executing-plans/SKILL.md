@@ -9,7 +9,7 @@ The 9 deterministic write-flows (1 from writing-plans + 8 here) are **the only w
 
 ## 🔌 Boundary with `writing-plans`
 
-`writing-plans` does ONE thing: composes a `plan-input.{json,yaml}` file and runs `~/.code_puppy/skills/writing-plans/scripts/publish-plan.sh` to insert the new plan. After that, **every** subsequent operation on that plan (start, log, complete, fail, deviate, record deferred-load skills, finish) is owned by THIS skill via the 7 scripts in `scripts/`.
+`writing-plans` does ONE thing: composes a `plan-input.{json,yaml}` file and runs `${CLAUDE_PLUGIN_ROOT}/skills/writing-plans/scripts/publish-plan.sh` to insert the new plan. After that, **every** subsequent operation on that plan (start, log, complete, fail, deviate, record deferred-load skills, finish) is owned by THIS skill via the 7 scripts in `scripts/`.
 
 If you find yourself wanting to "update the plan" — you ARE the update mechanism. You do not go back to writing-plans.
 
@@ -139,7 +139,7 @@ cat > /tmp/in.json <<'EOF'
 EOF
 
 # 2. run script
-bash ~/.code_puppy/skills/executing-plans/scripts/start-step.sh /tmp/in.json
+bash ${CLAUDE_PLUGIN_ROOT}/skills/executing-plans/scripts/start-step.sh /tmp/in.json
 ```
 
 The script:
@@ -180,7 +180,7 @@ A non-trivial step with `log_context = ""` is a puppy failure — the dashboard'
 |---|---|
 | Use ONLY the 7 scripts for writes — never call `orchestrator-cli.py <verb>` directly | Eliminates flag-typo class of bugs (we hit `complete-plan --reason` last week) |
 | `summary` is ONE human-curated sentence; `text` (in append-log) is raw machine output | Telemetry vs. curation are distinct fields |
-| Once a step is COMPLETED, it is IMMUTABLE — to redo work, deviate + add a retry sub-step | Audit trail |
+| Once a step is COMPLETED, it is IMMUTABLE — `deviate.sh` on it is REJECTED (exit 4, `accepted:false`, breaker `soft`). To redo work, deviate on the **next non-terminal step** (or the plan's review step) and put the retry sub-step there | Audit trail |
 | `revision_count` ≤ `max_revisions` (default 5) — circuit breaker | Prevents thrash |
 | `depth_level` ≤ 3 — circuit breaker | Keeps plans auditable |
 | For `SUB_AGENT` steps: capture both `agent_input` (in start-step) and `agent_output` (in complete-step) | The dashboard renders these in dedicated panels |
@@ -213,7 +213,7 @@ The dashboard at http://localhost:8765 is the visual equivalent.
 
 ```bash
 ~/skill-workspace/orchestrator/.venv/bin/python -m pytest \
-  ~/.code_puppy/skills/executing-plans/tests/ -v
+  ${CLAUDE_PLUGIN_ROOT}/skills/executing-plans/tests/ -v
 ```
 
 17 tests: 16 per-op (happy + validation + state-machine + circuit breakers) + 1 full lifecycle smoke that walks the entire publish→finish cycle through the documented scripts.

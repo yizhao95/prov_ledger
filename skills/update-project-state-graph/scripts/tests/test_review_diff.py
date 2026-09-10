@@ -39,21 +39,24 @@ def repo(tmp_path: Path) -> Path:
 
 # ── resolve_range ───────────────────────────────────────────────────────────────
 
-def test_resolve_range_local_when_no_upstream(repo):
+def test_resolve_range_registered_sha_when_ancestor(repo):
+    """The graph was built at `registered_sha`; that is the base whenever it is a
+    real ancestor of HEAD — with or without an upstream."""
     base_sha = _git(repo, "rev-parse", "HEAD")
-    # make a new commit so HEAD != base
     (repo / "pipeline.py").write_text(
         "def run():\n    return old_name()\n\ndef renamed():\n    return 1\n"
     )
     _git(repo, "commit", "-aqm", "rename")
     base, head, mode = review_diff.resolve_range(str(repo), base_sha)
-    assert mode == "local"
-    assert head == "HEAD"
-    assert base == base_sha
+    assert (base, head, mode) == (base_sha, "HEAD", "registered")
 
 
-def test_resolve_range_remote_when_upstream(tmp_path):
-    # bare 'remote' + clone with upstream tracking
+def test_resolve_range_local_fallback_when_sha_unknown_and_no_upstream(repo):
+    base, head, mode = review_diff.resolve_range(str(repo), "deadbeef")
+    assert (base, head, mode) == ("deadbeef", "HEAD", "local")
+
+
+def _cloned_pushed_repo(tmp_path):
     bare = tmp_path / "bare.git"
     subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
     work = tmp_path / "work"
@@ -65,10 +68,33 @@ def test_resolve_range_remote_when_upstream(tmp_path):
     _git(work, "commit", "-qm", "c1")
     _git(work, "push", "-q", "origin", "HEAD:main")
     _git(work, "branch", "--set-upstream-to=origin/main")
+    return work
+
+
+def test_resolve_range_remote_uses_merge_base_with_upstream(tmp_path):
+    work = _cloned_pushed_repo(tmp_path)
+    pushed = _git(work, "rev-parse", "HEAD")
+    (work / "f.py").write_text("def a():\n    return 2\n")
+    _git(work, "commit", "-aqm", "c2")  # unpushed
     base, head, mode = review_diff.resolve_range(str(work), "deadbeef")
-    assert mode == "remote"
-    assert head == "HEAD"
-    assert "@{u}" in base or "origin" in base
+    assert (base, head, mode) == (pushed, "HEAD", "remote")
+
+
+def test_resolve_range_after_push_is_never_empty(tmp_path):
+    """FL-015: after `git push` the upstream IS HEAD, so '@{u}..HEAD' is empty and
+    the review inspected nothing. A known registered sha must win; an unknown one
+    must fall back to 'local' (visible degradation), never to an empty range."""
+    work = _cloned_pushed_repo(tmp_path)
+    first = _git(work, "rev-parse", "HEAD")
+    (work / "f.py").write_text("def a():\n    return 2\n")
+    _git(work, "commit", "-aqm", "c2")
+    _git(work, "push", "-q", "origin", "HEAD:main")
+    assert _git(work, "rev-parse", "@{u}") == _git(work, "rev-parse", "HEAD")
+    base, head, mode = review_diff.resolve_range(str(work), first)
+    assert (base, head, mode) == (first, "HEAD", "registered")
+    assert _git(work, "diff", "--name-only", base, head) == "f.py"
+    base2, _, mode2 = review_diff.resolve_range(str(work), "deadbeef")
+    assert mode2 == "local" and base2 == "deadbeef"
 
 
 # ── changed_symbols ─────────────────────────────────────────────────────────────

@@ -61,7 +61,7 @@ Or manually (the demo is stdlib-only; `pytest` is used for the green-lights
 beat in step D):
 
 ```bash
-python examples/phantom-uplift/run_demo.py
+python3 examples/phantom-uplift/run_demo.py
 ```
 
 Everything lands in `examples/phantom-uplift/demo-orchestrator.db` — a
@@ -108,10 +108,10 @@ demo reports whatever the generated data actually computes to.
 the **live dashboard** sees it (opens on the freshly-published PENDING plan →
 steps execute live → verify FAILS red with the MISMATCH reason + log →
 drift → decision trail → recovered, failure kept visible).
-Needs playwright (`python -m playwright install chromium`) + ffmpeg:
+Needs playwright (`python3 -m playwright install chromium`) + ffmpeg:
 
 ```bash
-python examples/phantom-uplift/record_dashboard.py   # from the repo root
+python3 examples/phantom-uplift/record_dashboard.py   # from the repo root
 ```
 
 `docs/media/phantom-uplift.gif` — the same arc as a terminal recording
@@ -132,8 +132,8 @@ business files and render the dataflow slice:
 mkdir -p /tmp/pu-pipeline
 cp examples/phantom-uplift/{gen_upstream.py,revenue_rollup.py} /tmp/pu-pipeline/
 cd skills/project-state-graph/scripts
-python -m analyzer /tmp/pu-pipeline --project phantom-uplift --db-path /tmp/pu.db
-python viz_slices.py /tmp/pu.db /tmp/pu-slices.html --title "phantom-uplift · ingest → rollup"
+python3 -m analyzer /tmp/pu-pipeline --project phantom-uplift --db-path /tmp/pu.db
+python3 viz_slices.py /tmp/pu.db /tmp/pu-slices.html --title "phantom-uplift · ingest → rollup"
 # open /tmp/pu-slices.html, ① Dataflow + datatype tab, screenshot
 ```
 The image is labeled "dashboard view WIP" because the dataflow view is rendered

@@ -54,7 +54,7 @@ integrity (error).
 `init_project.sh` performs all five deterministically:
 
 ```bash
-bash ~/.code_puppy/skills/project-state-graph/scripts/init_project.sh \
+bash ${CLAUDE_PLUGIN_ROOT}/skills/project-state-graph/scripts/init_project.sh \
   --name <project-name> --repo <repo-path> [--out-dir <dir>]
 ```
 
