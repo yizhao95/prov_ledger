@@ -361,12 +361,14 @@ def latest_run_id(conn: sqlite3.Connection) -> Optional[int]:
 
 
 def previous_run_id(conn: sqlite3.Connection, run_id: int) -> Optional[int]:
-    """The most recent earlier run of the same project that has snapshot rows
-    (runs that never snapshotted — interrupted, or pre-history — are skipped)."""
+    """The most recent earlier run of the same project whose snapshots were
+    keyed (resolved). Runs that never snapshotted (pre-history) or crashed
+    between snapshot_run and resolve (only '' placeholders — append-only rows
+    that cannot be removed) are skipped: they are not a usable predecessor."""
     row = conn.execute(
         """SELECT MAX(a.id) FROM analysis_run a
            WHERE a.id < ? AND a.project_name = (SELECT project_name FROM analysis_run WHERE id=?)
-             AND EXISTS (SELECT 1 FROM node_snapshot s WHERE s.run_id = a.id)""",
+             AND EXISTS (SELECT 1 FROM node_snapshot s WHERE s.run_id = a.id AND s.node_key <> '')""",
         (run_id, run_id),
     ).fetchone()
     return int(row[0]) if row and row[0] is not None else None

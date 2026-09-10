@@ -297,3 +297,19 @@ def test_rebound_dataframe_gets_distinct_names_and_keys(conn, tmp_path):
     assert len({k for _, k in rows}) == 2
     r2 = _full_run(conn, tmp_path / "r2", src)
     assert {e[0] for e in _events(conn, r2)} == {"node_matched"}
+
+
+def test_interrupted_run_is_not_a_predecessor(conn, tmp_path):
+    """snapshot_run without resolve (a crash in between) must not poison the
+    next run: it matches against the last resolved run, nothing inherits ''."""
+    r1 = _full_run(conn, tmp_path / "r1", BASE)
+    r_crashed = store.start_run(conn, project_name="demo")
+    store.reset_graph(conn)
+    fm = walker.walk(conn, str(tmp_path / "r1")); py_ast.analyze(conn, str(tmp_path / "r1"), fm)
+    history.snapshot_run(conn, str(tmp_path / "r1"), r_crashed)
+    store.stamp_run(conn, r_crashed); store.finish_run(conn, r_crashed)
+    r3 = _full_run(conn, tmp_path / "r3", BASE)
+    ev = _events(conn, r3)
+    assert {e[0] for e in ev} == {"node_matched"}
+    assert all(e[2]["prev_run_id"] == r1 for e in ev)
+    assert _key(conn, r3, "pkg.m.load") == _key(conn, r1, "pkg.m.load")

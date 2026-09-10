@@ -116,13 +116,25 @@ def test_reset_graph_keeps_history(db):
 
 def test_latest_and_previous_run_id(db):
     r1 = store.start_run(db, project_name="demo")
-    _snap(db, r1)
+    store.set_snapshot_key(db, _snap(db, r1), "nk_1")       # resolved run
     r_other = store.start_run(db, project_name="other")
-    _snap(db, r_other)
+    store.set_snapshot_key(db, _snap(db, r_other), "nk_o")  # other project: never a predecessor
     r2 = store.start_run(db, project_name="demo")          # no snapshots: skipped as a predecessor
     r3 = store.start_run(db, project_name="demo")
-    _snap(db, r3)
+    _snap(db, r3)                                          # current run, keys not assigned yet
     assert store.latest_run_id(db) == r3
     assert store.previous_run_id(db, r3) == r1
     assert store.previous_run_id(db, r1) is None
     assert store.previous_run_id(db, r2) == r1
+
+
+def test_previous_run_id_skips_unresolved_runs(db):
+    """A run that crashed between snapshot_run and resolve leaves '' keys behind
+    (append-only rows cannot be removed); it must never be the predecessor."""
+    r1 = store.start_run(db, project_name="demo")
+    store.set_snapshot_key(db, _snap(db, r1), "nk_1")
+    r_crashed = store.start_run(db, project_name="demo")
+    _snap(db, r_crashed)                      # placeholder key only
+    r3 = store.start_run(db, project_name="demo")
+    _snap(db, r3)
+    assert store.previous_run_id(db, r3) == r1

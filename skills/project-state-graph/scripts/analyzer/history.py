@@ -185,12 +185,15 @@ def snapshot_run(conn, repo_root: str, run_id: int) -> int:
     return n
 
 
-def _rows(conn, run_id: int) -> list[Row]:
+def _rows(conn, run_id: int, *, keyed_only: bool = False) -> list[Row]:
+    """Snapshot rows of one run. keyed_only drops '' placeholders — a previous
+    run that crashed before resolve must never hand out empty keys."""
     out = []
     for r in conn.execute(
-            """SELECT id, node_key, node_type, qualified_name, file_path, line_start, line_end,
-                      struct_sig, dataflow_sig, dataflow_trivial, attrs_json
-               FROM node_snapshot WHERE run_id=? ORDER BY node_type, qualified_name, id""", (run_id,)):
+            f"""SELECT id, node_key, node_type, qualified_name, file_path, line_start, line_end,
+                       struct_sig, dataflow_sig, dataflow_trivial, attrs_json
+                FROM node_snapshot WHERE run_id=? {"AND node_key <> ''" if keyed_only else ""}
+                ORDER BY node_type, qualified_name, id""", (run_id,)):
         attrs = json.loads(r[10]) if r[10] else {}
         out.append(Row(r[0], attrs.get("node_id"), r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], bool(r[9]),
                        owner_qn=attrs.get("owner_qn"), name=attrs.get("name")))
@@ -282,7 +285,7 @@ def resolve(conn, run_id: int, arbitrate: Arbitrate | None = None) -> dict:
     (inherited or new), backfill node.node_key, append events in EVENT_ORDER.
     Returns per-event-type counts."""
     prev_run = store.previous_run_id(conn, run_id)
-    prev = _rows(conn, prev_run) if prev_run is not None else []
+    prev = _rows(conn, prev_run, keyed_only=True) if prev_run is not None else []
     cur = _rows(conn, run_id)
     out = match(prev, cur)
     counts = {k: 0 for k in EVENT_ORDER}
