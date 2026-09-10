@@ -17,6 +17,9 @@ from . import signatures, store
 
 SYMBOL_TYPES = ("function", "method", "class")
 NAME_ONLY_TYPES = ("sql_table", "bq_dataset", "api_source", "dataset")
+# Owned nodes (spec §2.2, E0/D1): identity = owner identity + local name.
+# dataframe qualified_name = "<fn_qn>:<var>", column = "<owner_qn>.<column>".
+OWNED_TYPES = ("dataframe", "column")
 EVENT_ORDER = ("node_matched", "node_renamed", "node_moved", "node_changed",
                "node_added", "node_removed", "identity_ambiguous", "identity_asserted")
 
@@ -35,6 +38,8 @@ class Row:
     struct_sig: str | None
     dataflow_sig: str | None
     dataflow_trivial: bool
+    owner_qn: str | None = None   # OWNED_TYPES only: the owner's qualified_name
+    name: str | None = None       # OWNED_TYPES only: the local name (var / column)
 
 
 @dataclass(frozen=True)
@@ -93,36 +98,81 @@ def _find_def(defs: list[ast.AST], line_start: int | None, name: str | None):
     return None
 
 
+def _owner_fn(fn_spans: list[tuple[int, int | None, str]], line: int | None) -> str | None:
+    """Innermost function/method (by start line) whose span contains `line`."""
+    if line is None:
+        return None
+    best = None
+    for ls, le, qn in fn_spans:
+        if ls <= line and (le is None or line <= le) and (best is None or ls > best[0]):
+            best = (ls, qn)
+    return best[1] if best else None
+
+
 def snapshot_run(conn, repo_root: str, run_id: int) -> int:
     """Write this run's node_snapshot rows (node_key '' placeholder). Must run
-    BEFORE store.stamp_run: it selects the rebuild's rows by run_id IS NULL."""
+    BEFORE store.stamp_run: it selects the rebuild's rows by run_id IS NULL.
+
+    Symbols get struct_sig (source AST) + dataflow_sig (edges); name-only data
+    nodes carry their qualified_name; dataframes are keyed to the function that
+    binds them and columns to their has_column owner (spec §2.2)."""
+    types = SYMBOL_TYPES + NAME_ONLY_TYPES + OWNED_TYPES
     rows = conn.execute(
-        f"""SELECT n.id, t.name, n.qualified_name, n.name, n.file_path, n.line_start, n.line_end
+        f"""SELECT n.id, t.name, n.qualified_name, n.name, n.file_path, n.line_start, n.line_end, n.dtype
             FROM node n JOIN node_type t ON n.node_type_id=t.id
-            WHERE t.name IN ({','.join('?' * (len(SYMBOL_TYPES) + len(NAME_ONLY_TYPES)))})
-              AND n.run_id IS NULL""",
-        SYMBOL_TYPES + NAME_ONLY_TYPES).fetchall()
+            WHERE t.name IN ({','.join('?' * len(types))}) AND n.run_id IS NULL""", types).fetchall()
+    by_type: dict[str, list] = {}
+    for r in rows:
+        by_type.setdefault(r[1], []).append(r)
+    fn_spans: dict[str, list[tuple[int, int | None, str]]] = {}
+    for ntype in ("function", "method"):
+        for nid, _t, qn, name, path, ls, le, _d in by_type.get(ntype, []):
+            if path and ls:
+                fn_spans.setdefault(path, []).append((ls, le, qn or name))
+    owner_of_col = {dst: src for src, dst in conn.execute(
+        """SELECT e.src_node_id, e.dst_node_id FROM edge e JOIN edge_type t ON e.edge_type_id=t.id
+           WHERE t.name='has_column'""")}
+    node_qn: dict[int, str] = {}   # node id -> snapshot qualified_name (owners resolve through this)
     trees: dict[str, list[ast.AST]] = {}
     n = 0
-    for nid, ntype, qn, name, path, ls, le in sorted(rows, key=lambda r: (r[1], r[2] or r[3], r[0])):
-        struct = df_sig = None
-        trivial, attrs = True, {}
-        if ntype in SYMBOL_TYPES and path:
-            if path not in trees:
-                try:
-                    src = open(os.path.join(repo_root, path), encoding="utf-8").read()
-                    trees[path] = _defs_of(ast.parse(src))
-                except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
-                    trees[path] = []
-            node = _find_def(trees[path], ls, name)
-            if node is not None:
-                struct = signatures.struct_sig(node)
-            df_sig, trivial, attrs = signatures.dataflow_sig(conn, nid)
-        store.add_node_snapshot(conn, run_id, node_type=ntype, qualified_name=qn or name,
-                                file_path=path, line_start=ls, line_end=le, struct_sig=struct,
-                                dataflow_sig=df_sig, dataflow_trivial=trivial,
-                                attrs={"node_id": nid, **attrs})
+
+    def emit(nid, ntype, qn, path, ls, le, struct, df_sig, trivial, attrs):
+        nonlocal n
+        node_qn[nid] = qn
+        store.add_node_snapshot(conn, run_id, node_type=ntype, qualified_name=qn, file_path=path,
+                                line_start=ls, line_end=le, struct_sig=struct, dataflow_sig=df_sig,
+                                dataflow_trivial=trivial, attrs={"node_id": nid, **attrs})
         n += 1
+
+    for ntype in SYMBOL_TYPES + NAME_ONLY_TYPES:
+        for nid, _t, qn, name, path, ls, le, _d in sorted(by_type.get(ntype, []), key=lambda r: (r[2] or r[3], r[0])):
+            struct = df_sig = None
+            trivial, attrs = True, {}
+            if ntype in SYMBOL_TYPES and path:
+                if path not in trees:
+                    try:
+                        src = open(os.path.join(repo_root, path), encoding="utf-8").read()
+                        trees[path] = _defs_of(ast.parse(src))
+                    except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
+                        trees[path] = []
+                node = _find_def(trees[path], ls, name)
+                if node is not None:
+                    struct = signatures.struct_sig(node)
+                df_sig, trivial, attrs = signatures.dataflow_sig(conn, nid)
+            emit(nid, ntype, qn or name, path, ls, le, struct, df_sig, trivial, attrs)
+    for nid, _t, _qn, name, path, ls, le, _d in sorted(by_type.get("dataframe", []), key=lambda r: (r[4] or "", r[5] or 0, r[0])):
+        owner = _owner_fn(fn_spans.get(path, []), ls) or (path or "?")
+        emit(nid, "dataframe", f"{owner}:{name}", path, ls, le, None, None, True,
+             {"owner_qn": owner, "name": name})
+    for nid, _t, _qn, name, path, ls, le, dtype in sorted(by_type.get("column", []), key=lambda r: (r[0],)):
+        oid = owner_of_col.get(nid)
+        owner = node_qn.get(oid) if oid is not None else None
+        if owner is None and oid is not None:
+            row = conn.execute("SELECT qualified_name, name FROM node WHERE id=?", (oid,)).fetchone()
+            owner = (row[0] or row[1]) if row else None
+        owner = owner or (path or "?")
+        emit(nid, "column", f"{owner}.{name}", path, ls, le, None, None, True,
+             {"owner_qn": owner, "name": name, "dtype": dtype or "unknown"})
     conn.commit()
     return n
 
@@ -134,7 +184,8 @@ def _rows(conn, run_id: int) -> list[Row]:
                       struct_sig, dataflow_sig, dataflow_trivial, attrs_json
                FROM node_snapshot WHERE run_id=? ORDER BY node_type, qualified_name, id""", (run_id,)):
         attrs = json.loads(r[10]) if r[10] else {}
-        out.append(Row(r[0], attrs.get("node_id"), r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], bool(r[9])))
+        out.append(Row(r[0], attrs.get("node_id"), r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], bool(r[9]),
+                       owner_qn=attrs.get("owner_qn"), name=attrs.get("name")))
     return out
 
 
@@ -162,9 +213,11 @@ _LAYERS = (
 
 def match(prev: list[Row], cur: list[Row]) -> MatchOutcome:
     """Layer 1 exact (node_type, qualified_name); layer 2 struct_sig groups that
-    are exactly 1:1; layer 3 non-trivial dataflow_sig groups 1:1. Any group
-    larger than 1:1 is an Ambiguity — recorded, never linked. Pure: inputs are
-    not mutated."""
+    are exactly 1:1; layer 3 non-trivial dataflow_sig groups 1:1; then the owner
+    layer for OWNED_TYPES (same local name, owners paired in this match — to a
+    fixpoint, so function -> dataframe -> column chains resolve). Any signature
+    group larger than 1:1 is an Ambiguity — recorded, never linked. Pure:
+    inputs are not mutated."""
     pairs: list[Pair] = []
     ambiguous: list[Ambiguity] = []
     cur_by_qn = {(r.node_type, r.qualified_name): r for r in cur}
@@ -190,6 +243,24 @@ def match(prev: list[Row], cur: list[Row]) -> MatchOutcome:
                 rest_prev.remove(r)
             for r in cs:
                 rest_cur.remove(r)
+    # owner inheritance (E0): a dataframe/column follows its owner's identity.
+    cur_of_prev_qn = {p.prev.qualified_name: p.cur.qualified_name for p in pairs}
+    progress = True
+    while progress:
+        progress = False
+        cur_by_owner = {(r.node_type, r.owner_qn, r.name): r for r in rest_cur if r.owner_qn}
+        for p in list(rest_prev):
+            if not p.owner_qn:
+                continue
+            cur_owner = cur_of_prev_qn.get(p.owner_qn)
+            c = cur_by_owner.get((p.node_type, cur_owner, p.name)) if cur_owner else None
+            if c is None:
+                continue
+            pairs.append(Pair(p, c, "owner", _changed(p, c)))
+            rest_prev.remove(p)
+            rest_cur.remove(c)
+            cur_of_prev_qn[p.qualified_name] = c.qualified_name
+            progress = True
     return MatchOutcome(pairs, rest_prev, rest_cur, ambiguous)
 
 

@@ -208,3 +208,77 @@ def test_match_is_pure_over_rows():
     assert history.match(p2, c2).pairs[0].via == "dataflow_sig"
     # trivial dataflow never pairs
     assert history.match([row(1, "m.a", "s1", df="d1", key="nk_a")], [row(2, "m.z", "s7", df="d1")]).pairs == []
+
+
+# ── P2-A: column / dataframe identity via owner inheritance (E0, D1) ─────────
+
+COL1 = {"pkg/__init__.py": "",
+        "pkg/m.py": 'import pandas as pd\n\ndef load():\n    df = pd.read_csv("a.csv")\n    df["amount"] = df["qty"] * 2\n    return df\n'}
+COL2 = {"pkg/__init__.py": "", "pkg/m.py": COL1["pkg/m.py"].replace("def load()", "def load_orders()")}
+
+
+def _col_key(conn, run_id, suffix):
+    row = conn.execute("SELECT node_key, qualified_name FROM node_snapshot WHERE run_id=? AND node_type='column' "
+                       "AND qualified_name LIKE ?", (run_id, f"%.{suffix}")).fetchone()
+    return row
+
+
+def test_e0_1_column_identity_survives_owner_rename(conn, tmp_path):
+    r1 = _full_run(conn, tmp_path / "r1", COL1)
+    r2 = _full_run(conn, tmp_path / "r2", COL2)
+    k1, qn1 = _col_key(conn, r1, "amount")
+    k2, qn2 = _col_key(conn, r2, "amount")
+    assert qn1 == "pkg.m.load:df.amount" and qn2 == "pkg.m.load_orders:df.amount"
+    assert k1 == k2
+    via = [json.loads(p)["via"] for (p,) in conn.execute(
+        "SELECT payload_json FROM node_event WHERE run_id=? AND event_type='node_matched' AND node_key=?", (r2, k1))]
+    assert via == ["owner"]
+    assert not [e for e in _events(conn, r2) if e[0] in ("node_removed", "node_added")]
+
+
+def test_e0_2_history_of_column_is_one_query(conn, tmp_path):
+    _full_run(conn, tmp_path / "r1", COL1, plan_id="P1")
+    _full_run(conn, tmp_path / "r2", COL2, plan_id="P2")
+    ev = history.events_of(conn, "pkg.m.load_orders:df.amount")
+    # the column's composite qualified name follows its owner's rename, so its
+    # own history records the rename too — one query, every event
+    assert [e["event_type"] for e in ev] == ["node_added", "node_matched", "node_renamed"]
+    assert [e["plan_id"] for e in ev] == ["P1", "P2", "P2"]
+    assert ev[2]["payload"] == {"from": "pkg.m.load:df.amount", "to": "pkg.m.load_orders:df.amount"}
+    assert history.events_of(conn, ev[0]["payload"] and conn.execute(
+        "SELECT node_key FROM node_event WHERE id=?", (ev[0]["event_id"],)).fetchone()[0]) == ev
+
+
+def test_dataframe_identity_survives_owner_rename(conn, tmp_path):
+    r1 = _full_run(conn, tmp_path / "r1", COL1)
+    r2 = _full_run(conn, tmp_path / "r2", COL2)
+    assert _key(conn, r1, "pkg.m.load:df") == _key(conn, r2, "pkg.m.load_orders:df")
+    ev = {(e[0], e[1]): e[2] for e in _events(conn, r2)}
+    assert ev[("node_matched", _key(conn, r1, "pkg.m.load:df"))]["via"] == "owner"
+    assert ev[("node_renamed", _key(conn, r1, "pkg.m.load:df"))]["to"] == "pkg.m.load_orders:df"
+
+
+def test_column_removed_when_owner_removed(conn, tmp_path):
+    r1 = _full_run(conn, tmp_path / "r1", COL1)
+    r2 = _full_run(conn, tmp_path / "r2", {"pkg/__init__.py": "", "pkg/m.py": "def other():\n    return 1\n"})
+    k1, _ = _col_key(conn, r1, "amount")
+    ev = {(e[0], e[1]): e[2] for e in _events(conn, r2)}
+    assert ev[("node_removed", k1)]["qualified_name"] == "pkg.m.load:df.amount"
+    assert ("node_removed", _key(conn, r1, "pkg.m.load:df")) in ev
+    assert ("node_removed", _key(conn, r1, "pkg.m.load")) in ev
+
+
+def test_match_owner_layer_is_pure():
+    def row(i, qn, ntype, key="", sig=None, owner=None, name=None):
+        return history.Row(i, None, key, ntype, qn, "m.py", 1, 2, sig, None, True, owner_qn=owner, name=name)
+    prev = [row(1, "m.f", "function", key="nk_f", sig="s1"),
+            row(2, "m.f:df", "dataframe", key="nk_df", owner="m.f", name="df"),
+            row(3, "m.f:df.amount", "column", key="nk_c", owner="m.f:df", name="amount")]
+    cur = [row(11, "m.g", "function", sig="s1"),
+           row(12, "m.g:df", "dataframe", owner="m.g", name="df"),
+           row(13, "m.g:df.amount", "column", owner="m.g:df", name="amount"),
+           row(14, "m.g:df.qty", "column", owner="m.g:df", name="qty")]
+    out = history.match(prev, cur)
+    assert {(p.prev.qualified_name, p.cur.qualified_name, p.via) for p in out.pairs} == {
+        ("m.f", "m.g", "struct_sig"), ("m.f:df", "m.g:df", "owner"), ("m.f:df.amount", "m.g:df.amount", "owner")}
+    assert [r.qualified_name for r in out.added] == ["m.g:df.qty"] and out.removed == [] and out.ambiguous == []
