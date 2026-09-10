@@ -313,3 +313,30 @@ def test_interrupted_run_is_not_a_predecessor(conn, tmp_path):
     assert {e[0] for e in ev} == {"node_matched"}
     assert all(e[2]["prev_run_id"] == r1 for e in ev)
     assert _key(conn, r3, "pkg.m.load") == _key(conn, r1, "pkg.m.load")
+
+
+def test_failed_resolve_leaves_no_partial_keys(conn, tmp_path, monkeypatch):
+    """cli.run's finally block commits (finish_run); a resolve that raised
+    midway must not have committed half of its keys/events."""
+    repo = tmp_path / "r1"
+    for rel, src in BASE.items():
+        (repo / rel).parent.mkdir(parents=True, exist_ok=True); (repo / rel).write_text(src)
+    run_id = store.start_run(conn, project_name="demo")
+    fm = walker.walk(conn, str(repo)); py_ast.analyze(conn, str(repo), fm)
+    history.snapshot_run(conn, str(repo), run_id)
+    calls = {"n": 0}
+    real = store.add_node_event
+
+    def boom(*a, **kw):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("disk full")
+        return real(*a, **kw)
+    monkeypatch.setattr(store, "add_node_event", boom)
+    with pytest.raises(RuntimeError):
+        history.resolve(conn, run_id)
+    store.finish_run(conn, run_id)          # commits, like cli.run's finally
+    assert conn.execute("SELECT COUNT(*) FROM node_snapshot WHERE run_id=? AND node_key<>''", (run_id,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM node_event WHERE run_id=?", (run_id,)).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM node WHERE node_key IS NOT NULL").fetchone()[0] == 0
+    assert store.previous_run_id(conn, run_id + 1) is None

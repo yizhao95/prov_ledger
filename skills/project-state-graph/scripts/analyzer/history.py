@@ -337,17 +337,24 @@ def resolve(conn, run_id: int, arbitrate: Arbitrate | None = None) -> dict:
             asserted.append(("identity_asserted", s.chosen_prev_key,
                              {"cur": s.cur_qualified_name, "evidence": s.evidence, "arbiter": s.arbiter}))
 
-    for sid, key in keyed.items():
-        store.set_snapshot_key(conn, sid, key)
-    for r in cur:
-        if r.node_id is not None:
-            conn.execute("UPDATE node SET node_key=? WHERE id=?", (keyed[r.snapshot_id], r.node_id))
-    for et, key, payload in sorted(events, key=lambda e: EVENT_ORDER.index(e[0])):
-        store.add_node_event(conn, run_id, et, key, payload, tier="observed")
-        counts[et] += 1
-    for et, key, payload in asserted:
-        store.add_node_event(conn, run_id, et, key, payload, tier="asserted")
-        counts[et] += 1
+    # Atomic: a resolve that fails midway must leave no partial keys/events
+    # behind (the caller's finally-commit would otherwise persist them and the
+    # half-keyed run would become a predecessor).
+    try:
+        for sid, key in keyed.items():
+            store.set_snapshot_key(conn, sid, key)
+        for r in cur:
+            if r.node_id is not None:
+                conn.execute("UPDATE node SET node_key=? WHERE id=?", (keyed[r.snapshot_id], r.node_id))
+        for et, key, payload in sorted(events, key=lambda e: EVENT_ORDER.index(e[0])):
+            store.add_node_event(conn, run_id, et, key, payload, tier="observed")
+            counts[et] += 1
+        for et, key, payload in asserted:
+            store.add_node_event(conn, run_id, et, key, payload, tier="asserted")
+            counts[et] += 1
+    except Exception:
+        conn.rollback()
+        raise
     conn.commit()
     return counts
 
