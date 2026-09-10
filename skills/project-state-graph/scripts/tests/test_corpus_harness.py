@@ -165,3 +165,19 @@ def test_ambiguous_requires_declared_symbols_on_prev_side():
     unrelated = _res(ambiguous=[([_obs("m.x"), _obs("m.y")], [_obs("m.x2"), _obs("m.y2")])])
     fails = check(["m.f", "m.g"], [a, b], [], unrelated, {"identity": "ambiguous"})
     assert fails and any("m.f" in f for f in fails), fails
+
+
+def test_broken_rejects_extra_removal_outside_symbols():
+    """`removed` must equal expect.broken exactly — a stray non-symbol removal fails."""
+    a, b, z = _obs("m.f"), _obs("m.g"), _obs("m.z")
+    res = _res([Pair(b, b, "qualname", ())], removed=[a, z])
+    fails = check(["m.f", "m.g"], [a, b, z], [b], res, {"identity": "broken", "broken": ["m.f"]})
+    assert fails and any("m.z" in f for f in fails), fails
+
+
+def test_broken_requires_non_broken_symbols_to_be_paired():
+    """A symbol outside `broken` that is neither paired nor removed is a silent loss."""
+    a, b = _obs("m.f"), _obs("m.g")
+    res = _res(removed=[a])  # m.g vanished without a pair, a removal or an ambiguity
+    fails = check(["m.f", "m.g"], [a, b], [], res, {"identity": "broken", "broken": ["m.f"]})
+    assert fails and any("m.g" in f for f in fails), fails

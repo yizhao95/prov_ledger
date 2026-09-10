@@ -86,9 +86,14 @@ def check(symbols, base, variant, result: MatchResult, expect: dict) -> list[str
             if extra not in added:
                 fails.append(f"expected node_added {extra}")
     elif identity == "broken":
+        # Exact set: nothing outside `broken` may be removed, and every other
+        # declared symbol must still be paired (neither removed nor ambiguous).
         want = set(expect.get("broken", []))
-        if want != removed & set(symbols):
-            fails.append(f"broken: expected {sorted(want)}, got removed {sorted(removed)}")
+        if removed != want:
+            fails.append(f"broken: expected removed == {sorted(want)}, got {sorted(removed)}")
+        unpaired = [s for s in symbols if s not in want and s not in by_prev]
+        if unpaired:
+            fails.append(f"broken: non-broken symbol(s) {unpaired} not paired")
     else:  # ambiguous
         if not result.ambiguous:
             fails.append("expected identity_ambiguous, none produced")
