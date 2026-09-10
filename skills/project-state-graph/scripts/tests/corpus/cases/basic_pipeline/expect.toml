@@ -1,0 +1,21 @@
+[case]
+name = "basic_pipeline"
+symbols = ["pkg.pipeline.load", "pkg.pipeline.clean", "pkg.pipeline.main", "pkg.pipeline.entry"]
+
+[generated]
+rename_variable = { identity = "preserved", semantic_diff = "none" }
+rename_function = { identity = "preserved", semantic_diff = "callers", renamed = ["pkg.pipeline.main"] }
+strip_comments  = { identity = "preserved", semantic_diff = "none" }
+add_comments    = { identity = "preserved", semantic_diff = "none" }
+reformat        = { identity = "preserved", semantic_diff = "none" }
+
+[variants]
+# load/clean move to pkg/io_utils.py: qualified names change, pairing must come
+# from the structural layer. main stays put, so the symbol set is narrowed.
+move_file        = { identity = "preserved", semantic_diff = "none", via = "struct_sig", symbols = ["pkg.pipeline.load", "pkg.pipeline.clean"] }
+extract_function = { identity = "preserved", semantic_diff = "expected", added = ["pkg.pipeline.split"] }
+change_attr      = { identity = "preserved", semantic_diff = "expected" }
+delete_function  = { identity = "broken", broken = ["pkg.pipeline.clean"] }
+# Two body-identical helpers renamed at once: qualname layer misses, structural
+# layer is 2:2 — the matcher MUST report ambiguity instead of guessing.
+swap_two_similar = { identity = "ambiguous", symbols = ["pkg.pipeline.norm_a", "pkg.pipeline.norm_b"] }

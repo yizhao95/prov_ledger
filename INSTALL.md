@@ -24,6 +24,19 @@ skill is not bundled and comes from superpowers when present; the other shared
 skills are bundled with local adaptations. Everything still works without
 superpowers, just with fewer supporting process skills.
 
+**Same-named skills:** provLedger bundles local variants of six superpowers
+skills (`brainstorming`, `writing-plans`, `executing-plans`,
+`subagent-driven-development`, `test-driven-development`,
+`systematic-debugging`). With both plugins enabled, `bootstrap.sh` prints a
+notice on every SessionStart. To let provLedger's variants win in one project:
+
+```bash
+claude plugin disable superpowers@claude-plugins-official --scope local
+```
+
+`--scope local` writes the override to `.claude/settings.local.json` in that
+project only — your user-level superpowers install stays enabled elsewhere.
+
 The rest of this guide is the **manual / development** install.
 
 ---

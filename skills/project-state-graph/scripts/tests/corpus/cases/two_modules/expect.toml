@@ -1,0 +1,22 @@
+[case]
+name = "two_modules"
+symbols = ["pkg.sources.read_orders", "pkg.sources.read_customers", "pkg.report.build_report", "pkg.report.main", "pkg.report.entry"]
+
+[generated]
+rename_variable = { identity = "preserved", semantic_diff = "none" }
+rename_function = { identity = "preserved", semantic_diff = "callers", renamed = ["pkg.report.main"] }
+strip_comments  = { identity = "preserved", semantic_diff = "none" }
+add_comments    = { identity = "preserved", semantic_diff = "none" }
+reformat        = { identity = "preserved", semantic_diff = "none" }
+
+[variants]
+# build_report moves to pkg/builder.py; report.py re-imports it.
+move_file        = { identity = "preserved", semantic_diff = "none", via = "struct_sig", symbols = ["pkg.report.build_report"] }
+# the merge line of build_report is extracted into join_customers.
+extract_function = { identity = "preserved", semantic_diff = "expected", added = ["pkg.report.join_customers"] }
+# groupby key changes inside build_report's body.
+change_attr      = { identity = "preserved", semantic_diff = "expected" }
+delete_function  = { identity = "broken", broken = ["pkg.sources.read_customers"] }
+# sources.py -> inputs.py: both readers change qualified name, bodies intact.
+rename_module    = { identity = "preserved", semantic_diff = "none", via = "struct_sig", symbols = ["pkg.sources.read_orders", "pkg.sources.read_customers"] }
+swap_two_similar = { identity = "ambiguous", symbols = ["pkg.sources.parse_a", "pkg.sources.parse_b"] }

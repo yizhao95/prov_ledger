@@ -20,8 +20,13 @@ BOOTSTRAP = REPO / "scripts" / "bootstrap.sh"
 REQS = REPO / "requirements.txt"
 
 
-def _run_bootstrap(tmp: Path, *, venv_exists: bool, marker_ok: bool = False):
-    """Run bootstrap.sh with a fake uv on PATH; return (proc, uv_calls)."""
+def _run_bootstrap(tmp: Path, *, venv_exists: bool, marker_ok: bool = False,
+                   project: Path | None = None):
+    """Run bootstrap.sh with a fake uv on PATH; return (proc, uv_calls).
+
+    The script runs with `project` (default: an empty dir under tmp) as its
+    working directory, so the repo's own .claude/settings.local.json is never
+    read by accident."""
     fake_bin = tmp / "bin"
     fake_bin.mkdir(parents=True, exist_ok=True)
     call_log = tmp / "uv-calls.log"
@@ -47,7 +52,10 @@ def _run_bootstrap(tmp: Path, *, venv_exists: bool, marker_ok: bool = False):
         PROVLEDGER_BOOTSTRAP_LOG=str(tmp / "bootstrap.log"),
     )
     env.pop("PROVLEDGER_BOOTSTRAP_INSTALLER", None)
-    proc = subprocess.run(["bash", str(BOOTSTRAP)],
+    if project is None:
+        project = tmp / "project"
+    project.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(["bash", str(BOOTSTRAP)], cwd=str(project),
                           capture_output=True, text=True, env=env)
     calls = call_log.read_text().splitlines() if call_log.exists() else []
     return proc, calls
@@ -76,3 +84,37 @@ def test_warm_marker_is_a_noop(tmp_path):
     assert proc.returncode == 0, proc.stderr
     assert calls == [], calls
     assert "up to date" in proc.stdout
+
+
+def test_bootstrap_warns_when_superpowers_and_provledger_both_enabled(tmp_path, monkeypatch):
+    """provledger bundles local variants of six superpowers skills; when both
+    plugins are enabled the user must be told how to let ours win per project."""
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text(
+        '{"enabledPlugins": {"superpowers@claude-plugins-official": true, '
+        '"provledger@provledger": true}}')
+    monkeypatch.setenv("HOME", str(home))
+    proc, _ = _run_bootstrap(tmp_path, venv_exists=True, marker_ok=True)
+    assert proc.returncode == 0, proc.stderr
+    assert "same-named skills" in proc.stdout, proc.stdout
+    assert "claude plugin disable superpowers@claude-plugins-official --scope local" in proc.stdout
+
+
+def test_bootstrap_silent_when_project_disables_superpowers(tmp_path, monkeypatch):
+    """Once the user follows the notice (`claude plugin disable ... --scope local`)
+    the project's .claude/settings.local.json turns superpowers off there, and
+    the notice must stop firing on every SessionStart."""
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude" / "settings.json").write_text(
+        '{"enabledPlugins": {"superpowers@claude-plugins-official": true, '
+        '"provledger@provledger": true}}')
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    (project / ".claude" / "settings.local.json").write_text(
+        '{"enabledPlugins": {"superpowers@claude-plugins-official": false}}')
+    monkeypatch.setenv("HOME", str(home))
+    proc, _ = _run_bootstrap(tmp_path, venv_exists=True, marker_ok=True, project=project)
+    assert proc.returncode == 0, proc.stderr
+    assert "same-named skills" not in proc.stdout, proc.stdout
