@@ -205,7 +205,7 @@ def main() -> None:
         graph_db = _resolve_project_db(project)
         impact_context = impact_preflight.compute_impact_context(
             graph_db, data.get("user_query") or "", declared_targets,
-            project=project)
+            project=project, orch_conn=conn)
         _ensure_impact_column(conn)
         if impact_context.get("degraded"):
             # FL-020: never silent — the plan publishes, the reader is told.

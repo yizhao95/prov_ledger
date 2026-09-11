@@ -17,7 +17,17 @@ The flow (union + per-symbol graph verification):
                          decisions/anti-patterns surfaced as reminders.
   5. compute_impact_context — assemble + a capability_boundary note.
 
-Stdlib only (sqlite3 + json + re); imports nothing from the orchestrator package.
+Stdlib only (sqlite3 + json + re); imports nothing from the orchestrator package
+(the optional `orch_conn` is a plain sqlite3 connection to the orchestrator DB,
+used only to read node_reason and the constraint ledger via ledger_store).
+
+Phase 3 (spec §2.8/§2.9, E2-1): one lookup per target now also carries its
+stable node_key, its recent history (node_event + run attribution), the
+reasons recorded for it (node_reason) and the constraints anchored to it
+(LedgerEntries.kind='constraint', matched by node_key — never lexically;
+restricted rationale never leaves the ledger). Each surfaced constraint is
+counted as a hit (record_hit) — reading is the only evidence the anchoring
+works — and the plan row keeps `constraint_ids` for the close-time bypass check.
 
 Capability boundary: strongest for MODIFYING EXISTING code. For a brand-new
 module it degrades to "here is what the existing functions you intend to call
@@ -32,8 +42,11 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
+import ledger_store  # sibling, stdlib-only: constraints_for / record_hit
+
 CALLABLE_TYPES = ("function", "method", "route")
 SQL_SOURCE_TYPES = ("sql_table", "api_source")
+HISTORY_LIMIT = 10
 
 # Small stopword set — keep deterministic + dependency-free. Tokens shorter than
 # 3 chars are dropped regardless.
@@ -126,28 +139,123 @@ def collect_targets(user_query: str, declared_targets: Optional[List[str]],
 
 # ── 2 · per-symbol graph verification ────────────────────────────────────────────
 
+def _has_column(conn, table: str, column: str) -> bool:
+    try:
+        return column in {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    except sqlite3.OperationalError:
+        return False
+
+
 def _resolve_node(conn, name: str):
-    return conn.execute(
-        """SELECT n.id, n.name, n.qualified_name, n.file_path
+    """A callable/class node by qualified or bare name; else (phase 2) a
+    column/dataframe by its snapshot qualified_name ("owner.column",
+    "fn:df.column"). Returns a dict {id, name, qualified_name, file_path,
+    kind, node_key} or None."""
+    row = conn.execute(
+        """SELECT n.id, n.name, n.qualified_name, n.file_path, t.name AS kind
            FROM node n JOIN node_type t ON n.node_type_id=t.id
            WHERE t.name IN ('function','method','route','class')
              AND (n.qualified_name = ? OR n.name = ?)
            LIMIT 1""", (name, name)).fetchone()
+    if row is not None:
+        d = dict(row)
+        d["node_key"] = None
+        if _has_column(conn, "node", "node_key"):
+            k = conn.execute("SELECT node_key FROM node WHERE id=?", (d["id"],)).fetchone()
+            d["node_key"] = k[0] if k and k[0] else None
+        if d["node_key"] is None:
+            d["node_key"] = _snapshot_key(conn, d["qualified_name"] or d["name"])
+        return d
+    snap = _snapshot_row(conn, name)
+    if snap is None:
+        return None
+    return {"id": None, "name": name, "qualified_name": snap["qualified_name"], "file_path": snap["file_path"],
+            "kind": snap["node_type"], "node_key": snap["node_key"]}
 
 
-def verify_symbol(conn, name: str) -> Dict:
-    """Verify one candidate against the graph.
+def _snapshot_row(conn, qualified_name: str):
+    try:
+        return conn.execute(
+            "SELECT node_key, node_type, qualified_name, file_path FROM node_snapshot "
+            "WHERE qualified_name = ? AND node_key <> '' ORDER BY run_id DESC, id DESC LIMIT 1",
+            (qualified_name,)).fetchone()
+    except sqlite3.OperationalError:      # graph built before the history layer
+        return None
 
-    Existing -> {status:'existing', callers, output_consumers, dtype_map,
-    lineage_downstream}. Missing -> {status:'new', empty lists} (a declared
-    symbol the graph can't find is itself a useful signal: new, or misremembered).
+
+def _snapshot_key(conn, qualified_name: str) -> Optional[str]:
+    row = _snapshot_row(conn, qualified_name) if qualified_name else None
+    return row["node_key"] if row else None
+
+
+def _history(conn, node_key: Optional[str], limit: int) -> List[Dict]:
+    """The node's most recent `limit` events with run attribution (oldest first)."""
+    if not node_key:
+        return []
+    try:
+        rows = conn.execute(
+            """SELECT e.event_type, e.run_id, e.seq, e.payload_json, e.created_at,
+                      a.plan_id, a.step_id, a.commit_sha
+               FROM node_event e JOIN analysis_run a ON a.id = e.run_id
+               WHERE e.node_key = ? ORDER BY e.run_id DESC, e.seq DESC LIMIT ?""", (node_key, limit)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out = []
+    for r in reversed(rows):
+        out.append({"event_type": r["event_type"], "run_id": r["run_id"], "plan_id": r["plan_id"],
+                    "step_id": r["step_id"], "commit_sha": r["commit_sha"], "created_at": r["created_at"],
+                    "payload": _meta(r["payload_json"])})
+    return out
+
+
+def _reasons(orch_conn, node_key: Optional[str]) -> List[Dict]:
+    if orch_conn is None or not node_key:
+        return []
+    try:
+        rows = orch_conn.execute(
+            "SELECT node_key, plan_id, step_id, kind, text, source, tier, created_at FROM node_reason "
+            "WHERE node_key = ? ORDER BY id", (node_key,)).fetchall()
+    except sqlite3.OperationalError:      # orchestrator DB predates migration 014
+        return []
+    cols = ("node_key", "plan_id", "step_id", "kind", "text", "source", "tier", "created_at")
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def _constraints(orch_conn, project: str, node_key: Optional[str]) -> List[Dict]:
+    if orch_conn is None or not node_key or not project:
+        return []
+    try:
+        return ledger_store.constraints_for(orch_conn, project, [node_key])
+    except sqlite3.OperationalError:      # orchestrator DB predates migration 015
+        return []
+
+
+def verify_symbol(conn, name: str, *, orch_conn=None, project: str = "",
+                  history_limit: int = HISTORY_LIMIT) -> Dict:
+    """Verify one candidate against the graph — one lookup, everything a
+    change author needs about this data point.
+
+    Existing -> {status:'existing', kind, node_key, callers, output_consumers,
+    dtype_map, lineage_downstream, history, reasons, constraints}. Missing ->
+    {status:'new', empty lists} (a declared symbol the graph can't find is
+    itself a useful signal: new, or misremembered). history/reasons/constraints
+    are [] without a node_key or without `orch_conn`.
     """
     node = _resolve_node(conn, name)
     if node is None:
-        return {"name": name, "status": "new", "callers": [],
-                "output_consumers": [], "dtype_map": {}, "lineage_downstream": []}
+        return {"name": name, "status": "new", "kind": None, "node_key": None, "callers": [],
+                "output_consumers": [], "dtype_map": {}, "lineage_downstream": [],
+                "history": [], "reasons": [], "constraints": []}
 
+    key = node["node_key"]
+    extras = {"kind": node["kind"], "node_key": key,
+              "history": _history(conn, key, history_limit),
+              "reasons": _reasons(orch_conn, key),
+              "constraints": _constraints(orch_conn, project, key)}
     nid = node["id"]
+    if nid is None:                       # column / dataframe: identity + history only
+        return {"name": node["qualified_name"], "status": "existing", "callers": [],
+                "output_consumers": [], "dtype_map": {}, "lineage_downstream": [], **extras}
     # callers: incoming calls edges
     callers = sorted({r["q"] for r in conn.execute(
         """SELECT COALESCE(s.qualified_name, s.name) AS q
@@ -206,7 +314,7 @@ def verify_symbol(conn, name: str) -> Dict:
 
     return {"name": node["qualified_name"] or node["name"], "status": "existing",
             "callers": callers, "output_consumers": sorted(output_consumers),
-            "dtype_map": dtype_map, "lineage_downstream": lineage_names}
+            "dtype_map": dtype_map, "lineage_downstream": lineage_names, **extras}
 
 
 # ── 3 · upstream-data assumptions (the un-gatable external boundary) ──────────────
@@ -342,6 +450,7 @@ def ledger_matches(db_or_conn, project, user_query, declared_targets, top_n=5):
         if score <= 0:
             continue
         scored.append({
+            "id": d["id"],
             "kind": d["kind"],
             "statement": d["statement"],
             "rationale": d.get("rationale") or "",
@@ -368,25 +477,27 @@ _BOUNDARY_NEW = (
 
 def compute_impact_context(db_path: str, user_query: str,
                            declared_targets: Optional[List[str]],
-                           project: str = "") -> Dict:
+                           project: str = "", orch_conn=None) -> Dict:
     """Assemble the full impact_context for a plan (steps 1-5 + boundary note).
 
-    The graph and the decision-memory ledger (Phase E) share the same project DB
-    file, so ledger_reminders are pulled from the same db_path. When the DB has
-    no LedgerEntries table or no project is given, ledger_reminders degrades to []
-    without raising.
+    `orch_conn` (the orchestrator DB, where node_reason and the ledger live)
+    adds per-target reasons + constraints and the lexical ledger_reminders;
+    every constraint surfaced — by node_key or lexically — is recorded as a
+    hit. Without it (legacy callers) those parts degrade to [] and the ledger
+    is looked up on db_path as before. The result carries `constraint_ids`
+    (for the close-time bypass check) and `approx_tokens` (len(json)//4).
     """
     try:
         collected = collect_targets(user_query, declared_targets, db_path)
         target_names = [t["name"] for t in collected["targets"]]
         conn = _connect(db_path)
         try:
-            symbols = [verify_symbol(conn, t) for t in target_names]
+            symbols = [verify_symbol(conn, t, orch_conn=orch_conn, project=project) for t in target_names]
             upstream = upstream_assumptions(conn, target_names)
         finally:
             conn.close()
-        reminders = ledger_matches(db_path, project, user_query, declared_targets) \
-            if project else []
+        reminders = ledger_matches(orch_conn if orch_conn is not None else db_path,
+                                   project, user_query, declared_targets) if project else []
     except sqlite3.OperationalError as exc:
         if not _is_busy(exc):
             raise
@@ -409,11 +520,30 @@ def compute_impact_context(db_path: str, user_query: str,
     any_new = any(s["status"] == "new" for s in symbols)
     boundary = _BOUNDARY_MODIFY + (_BOUNDARY_NEW if any_new else "")
 
-    return {
+    # E4-1: every constraint that reached the author counts as read.
+    constraint_ids: List[int] = []
+    for sym in symbols:
+        for c in sym.get("constraints", []):
+            if c["id"] not in constraint_ids:
+                constraint_ids.append(c["id"])
+    for m in reminders:
+        if m.get("id") is not None and m.get("kind") == "constraint" and m["id"] not in constraint_ids:
+            constraint_ids.append(m["id"])
+    if orch_conn is not None:
+        for cid in constraint_ids:
+            ledger_store.record_hit(orch_conn, cid)
+        for m in reminders:
+            if m.get("id") is not None and m.get("kind") != "constraint":
+                ledger_store.record_hit(orch_conn, m["id"])
+
+    ctx = {
         "targets": collected["targets"],
         "symbols": symbols,
         "upstream_assumptions": upstream,
         "ledger_reminders": reminders,
+        "constraint_ids": constraint_ids,
         "capability_boundary": boundary,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+    ctx["approx_tokens"] = len(json.dumps(ctx, default=str)) // 4   # E2-3: the cost is reported, always
+    return ctx
