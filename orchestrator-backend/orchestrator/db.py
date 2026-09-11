@@ -474,7 +474,8 @@ def update_step_status(
         conn.commit()
 
 
-def set_failure_reason(conn: sqlite3.Connection, step_id: str, reason: str) -> None:
+def set_failure_reason(conn: sqlite3.Connection, step_id: str, reason: str,
+                       commit: bool = True) -> None:
     """Persist a step's failure reason as a first-class column (BE-D3).
 
     Survives log_context truncation; the dashboard reads this directly.
@@ -483,7 +484,8 @@ def set_failure_reason(conn: sqlite3.Connection, step_id: str, reason: str) -> N
         "UPDATE Steps SET failure_reason = ?, updated_at = ? WHERE step_id = ?",
         (reason, _now(), step_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def update_step_log(conn: sqlite3.Connection, step_id: str, log_context: str) -> None:

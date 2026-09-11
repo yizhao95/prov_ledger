@@ -146,8 +146,15 @@ def _op_complete_step(conn, data: dict) -> dict:
     summary = data.get("summary")
     agent_output = data.get("agent_output")
     log_context = data.get("log_context")
+    # FL-017: status + inline log are ONE transaction — a step is never marked
+    # COMPLETED with its evidence lost (the old code committed the status, then
+    # crashed in append_log on e.g. invalid UTF-8).
     try:
-        result = api.complete_step(conn, step_id)
+        with db.transaction(conn):
+            result = api.complete_step(conn, step_id, commit=False)
+            if log_context:
+                api.append_log(conn, step_id, log_context, commit=False)
+                result["log_chars_appended"] = len(log_context)
     except Exception as e:
         _die(f"complete_step failed: {e}")
     if summary:
@@ -156,13 +163,6 @@ def _op_complete_step(conn, data: dict) -> dict:
     if agent_output:
         db.set_agent_output(conn, step_id, agent_output)
         result["agent_output_recorded"] = True
-    # Inline log capture (Bug 2 fix): no need for a separate append-log call.
-    # Goes through the same api.append_log used by append-log.sh, so the same
-    # `--- ts ---\n<chunk>\n` delimiter format applies and count_log_entries()
-    # in the dashboard keeps counting correctly.
-    if log_context:
-        api.append_log(conn, step_id, log_context)
-        result["log_chars_appended"] = len(log_context)
     # Deterministic auto-promotion (migration 006): if this was the last
     # non-review step in the plan, review_and_complete will flip BOTH the
     # review step AND the plan to COMPLETED — NO LLM call needed.
@@ -174,15 +174,16 @@ def _op_fail_step(conn, data: dict) -> dict:
     _require(data, "step_id")
     reason = data.get("reason", "")
     log_context = data.get("log_context")
+    # Inline log on failure is especially valuable — captures the error output
+    # that explains WHY the step failed. Same transaction as the status (FL-017).
     try:
-        result = api.fail_step(conn, data["step_id"], reason)
+        with db.transaction(conn):
+            result = api.fail_step(conn, data["step_id"], reason, commit=False)
+            if log_context:
+                api.append_log(conn, data["step_id"], log_context, commit=False)
+                result["log_chars_appended"] = len(log_context)
     except Exception as e:
         _die(f"fail_step failed: {e}")
-    # Inline log on failure is especially valuable — captures the error output
-    # that explains WHY the step failed, so the dashboard panel isn't empty.
-    if log_context:
-        api.append_log(conn, data["step_id"], log_context)
-        result["log_chars_appended"] = len(log_context)
     # Auto-trigger: if this failure leaves no PENDING/IN_PROGRESS steps,
     # review_and_complete propagates FAILED to the plan.
     _maybe_auto_review(conn, result)

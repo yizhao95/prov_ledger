@@ -253,3 +253,49 @@ class TestInputValidation:
                 capture_output=True, text=True, env=env, timeout=10,
             )
             assert r.returncode != 0, f"{name} should reject invalid JSON"
+
+
+# ── 3.5-B: status + log atomic; non-UTF-8 output never crashes (FL-017 / E6-5) ──
+import os
+import subprocess
+import sys
+
+
+class TestAtomicComplete:
+    def test_complete_with_unwritable_log_leaves_step_in_progress(self, seeded_plan, tmp_db, scripts_dir, run_script_fn):
+        """Force the log append to fail (a trigger refuses log_context writes on
+        this step): the status must NOT have been committed either."""
+        sid = seeded_plan["step_ids"][0]
+        run_script_fn("start-step", {"step_id": sid, "type": "CODE"}, tmp_db)
+        c = sqlite3.connect(str(tmp_db))
+        c.execute("CREATE TRIGGER no_log BEFORE UPDATE OF log_context ON Steps WHEN NEW.log_context LIKE '%boom%' "
+                  "BEGIN SELECT RAISE(ABORT, 'log refused'); END")
+        c.commit(); c.close()
+        r = run_script_fn("complete-step", {"step_id": sid, "log_context": "boom output"}, tmp_db)
+        assert r.returncode != 0
+        row = sqlite3.connect(str(tmp_db)).execute("SELECT status, log_context FROM Steps WHERE step_id=?", (sid,)).fetchone()
+        assert row[0] == "IN_PROGRESS" and "boom" not in (row[1] or "")
+
+    def test_fail_step_atomic(self, seeded_plan, tmp_db, scripts_dir, run_script_fn):
+        sid = seeded_plan["step_ids"][0]
+        run_script_fn("start-step", {"step_id": sid, "type": "CODE"}, tmp_db)
+        c = sqlite3.connect(str(tmp_db))
+        c.execute("CREATE TRIGGER no_log BEFORE UPDATE OF log_context ON Steps WHEN NEW.log_context LIKE '%boom%' "
+                  "BEGIN SELECT RAISE(ABORT, 'log refused'); END")
+        c.commit(); c.close()
+        r = run_script_fn("fail-step", {"step_id": sid, "reason": "x", "log_context": "boom"}, tmp_db)
+        assert r.returncode != 0
+        row = sqlite3.connect(str(tmp_db)).execute("SELECT status, failure_reason FROM Steps WHERE step_id=?", (sid,)).fetchone()
+        assert row[0] == "IN_PROGRESS" and row[1] is None
+
+
+def test_e6_5_invalid_utf8_output_completes_with_replacement(seeded_plan, tmp_db, scripts_dir):
+    sid = seeded_plan["step_ids"][1]
+    inp = tmp_db.parent / "rs.json"
+    inp.write_text(json.dumps({"step_id": sid, "type": "COMMAND", "command": "printf '\\xff\\xfe ok\\n'; echo done"}))
+    env = dict(os.environ, ORCH_DB=str(tmp_db))
+    r = subprocess.run(["bash", str(scripts_dir / "run-step.sh"), str(inp)], capture_output=True, env=env, timeout=30)
+    assert r.returncode == 0, r.stderr.decode("utf-8", "replace")
+    row = sqlite3.connect(str(tmp_db)).execute("SELECT status, log_context FROM Steps WHERE step_id=?", (sid,)).fetchone()
+    assert row[0] == "COMPLETED"
+    assert "�" in row[1] and "ok" in row[1] and "done" in row[1] and "--- exit_code=0" in row[1]

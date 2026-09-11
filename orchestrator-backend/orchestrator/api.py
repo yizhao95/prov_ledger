@@ -200,37 +200,39 @@ def start_step(conn: sqlite3.Connection, step_id: str) -> dict:
     return db.get_step(conn, step_id)
 
 
-def complete_step(conn: sqlite3.Connection, step_id: str) -> dict:
-    """IN_PROGRESS → COMPLETED, sets completed_at."""
+def complete_step(conn: sqlite3.Connection, step_id: str, commit: bool = True) -> dict:
+    """IN_PROGRESS → COMPLETED, sets completed_at. commit=False joins an
+    enclosing db.transaction (FL-017: status + log land together)."""
     step = db.get_step(conn, step_id)
     if not step:
         raise ValueError(f"step_id not found: {step_id}")
     circuit_breakers.check_immutability(step["status"])  # no double-completing
     state_machine.validate_transition(step["status"], "COMPLETED")
-    db.update_step_status(conn, step_id, "COMPLETED", set_completed=True)
+    db.update_step_status(conn, step_id, "COMPLETED", set_completed=True, commit=commit)
     return db.get_step(conn, step_id)
 
 
-def fail_step(conn: sqlite3.Connection, step_id: str, reason: str = "") -> dict:
+def fail_step(conn: sqlite3.Connection, step_id: str, reason: str = "", commit: bool = True) -> dict:
     """Fail a started step (STARTING/IN_PROGRESS/NEEDS_REVIEW → FAILED).
 
     PENDING steps cannot be failed — the state machine rejects PENDING → FAILED
-    (start the step first). Persists the reason to Steps.failure_reason and the log.
+    (start the step first). Persists the reason to Steps.failure_reason and the
+    log; commit=False joins an enclosing db.transaction.
     """
     step = db.get_step(conn, step_id)
     if not step:
         raise ValueError(f"step_id not found: {step_id}")
     state_machine.validate_transition(step["status"], "FAILED")
-    db.update_step_status(conn, step_id, "FAILED", set_completed=True)
+    db.update_step_status(conn, step_id, "FAILED", set_completed=True, commit=commit)
     if reason:
-        db.set_failure_reason(conn, step_id, reason)
-        telemetry.append_step_log(conn, step_id, f"[FAILED] {reason}")
+        db.set_failure_reason(conn, step_id, reason, commit=commit)
+        telemetry.append_step_log(conn, step_id, f"[FAILED] {reason}", commit=commit)
     return db.get_step(conn, step_id)
 
 
-def append_log(conn: sqlite3.Connection, step_id: str, raw_chunk: str) -> str:
+def append_log(conn: sqlite3.Connection, step_id: str, raw_chunk: str, commit: bool = True) -> str:
     """Append telemetry to step's log_context (with truncation)."""
-    return telemetry.append_step_log(conn, step_id, raw_chunk)
+    return telemetry.append_step_log(conn, step_id, raw_chunk, commit=commit)
 
 
 def complete_plan(conn: sqlite3.Connection, plan_id: str) -> dict:
