@@ -400,6 +400,49 @@ def _matches_token_run(words: list[str], target: str) -> bool:
     return False
 
 
+def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str, child,
+                    registry_path, reopened: bool = False) -> dict:
+    """Finalize a reviewed plan as COMPLETED — the close-time capture of spec
+    §2.8/§2.9 (unstated backstop, rejected paths, constraint bypasses) and the
+    terminal writes in ONE transaction; nothing here can block the close.
+    `reopened` (FL-019): the review had FAILED and its child recovered."""
+    project = detect_registered_project(conn, plan_id, registry_path)
+    psg_db = _usable_graph(project, registry_path)
+    with db.transaction(conn):
+        n_unstated = reasons.backstop_unstated(
+            conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
+        n_rejected = reasons.rejected_paths(
+            conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
+        n_bypassed = constraints.bypassed_at_close(
+            conn, project=project, plan_id=plan_id, psg_db_path=psg_db,
+            review_step_id=review_step_id, commit=False) if psg_db else 0
+        db.update_step_status(conn, review_step_id, "COMPLETED", set_completed=True, commit=False)
+        db.update_plan_status(conn, plan_id, "COMPLETED", commit=False)
+        db.set_review_state(conn, plan_id, "reviewed", commit=False)  # BE-D4
+        if reopened:
+            telemetry.append_step_log(
+                conn, review_step_id,
+                f"[REVIEW REOPENED] child {child['step_id']} FAILED but its deviation sub-tree recovered; "
+                "closing COMPLETED (FL-019)", commit=False)
+    if project and psg_db is None:
+        telemetry.append_step_log(
+            conn, review_step_id,
+            f"[REASONS] state graph unavailable for project {project!r} — no reason slots generated")
+    return {
+        "ready": True,
+        "plan_status": "COMPLETED",
+        "review_step_id": review_step_id,
+        "review_status": "COMPLETED",
+        "review_child_step_id": child["step_id"],
+        "reason": ("agent review child step recovered after FAILED; finalizing plan COMPLETED" if reopened
+                   else "agent review child step COMPLETED; finalizing plan COMPLETED"),
+        "reopened": reopened,
+        "unstated_backstopped": n_unstated,
+        "rejected_paths": n_rejected,
+        "constraints_bypassed": n_bypassed,
+    }
+
+
 def _usable_graph(project: str | None, registry_path) -> str | None:
     """db_path of the project's state graph when it is registered AND present
     on disk; None otherwise (callers log 'state graph unavailable')."""
@@ -497,8 +540,14 @@ def review_and_complete(
     review_step_id = review_row["step_id"]
     review_status = review_row["status"]
 
-    # Idempotency: if review step already finalized, return current state
+    # Idempotency: if review step already finalized, return current state —
+    # EXCEPT (FL-019) a FAILED review whose child REVIEW.1 has since been
+    # recovered through a deviation sub-tree: that is a re-open, not a no-op.
     if review_status in TERMINAL_STEP_STATES:
+        if review_status == "FAILED":
+            child = next(iter(db.get_children(conn, review_step_id)), None)
+            if child is not None and child["status"] == "FAILED" and _is_step_recovered(conn, child["step_id"]):
+                return _close_reviewed(conn, plan_id, review_step_id, child, registry_path, reopened=True)
         plan_row = db.get_plan(conn, plan_id)
         return {
             "ready": True,
@@ -530,39 +579,11 @@ def review_and_complete(
                 "reason": "review awaiting agent; child review step (re)created",
             }
         if child["status"] == "COMPLETED":
-            # Close-time capture (spec §2.8): the nodes this plan changed get a
-            # reason row each — whatever the review agent did not fill is
-            # backstopped as an explicit NULL (unstated), deviation
-            # justifications become rejected_path rows. One transaction with
-            # the terminal writes; nothing here can block the close.
-            project = detect_registered_project(conn, plan_id, registry_path)
-            psg_db = _usable_graph(project, registry_path)
-            with db.transaction(conn):
-                n_unstated = reasons.backstop_unstated(
-                    conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
-                n_rejected = reasons.rejected_paths(
-                    conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
-                n_bypassed = constraints.bypassed_at_close(
-                    conn, project=project, plan_id=plan_id, psg_db_path=psg_db,
-                    review_step_id=review_step_id, commit=False) if psg_db else 0
-                db.update_step_status(conn, review_step_id, "COMPLETED", set_completed=True, commit=False)
-                db.update_plan_status(conn, plan_id, "COMPLETED", commit=False)
-                db.set_review_state(conn, plan_id, "reviewed", commit=False)  # BE-D4
-            if project and psg_db is None:
-                telemetry.append_step_log(
-                    conn, review_step_id,
-                    f"[REASONS] state graph unavailable for project {project!r} — no reason slots generated")
-            return {
-                "ready": True,
-                "plan_status": "COMPLETED",
-                "review_step_id": review_step_id,
-                "review_status": "COMPLETED",
-                "review_child_step_id": child["step_id"],
-                "reason": "agent review child step COMPLETED; finalizing plan COMPLETED",
-                "unstated_backstopped": n_unstated,
-                "rejected_paths": n_rejected,
-                "constraints_bypassed": n_bypassed,
-            }
+            return _close_reviewed(conn, plan_id, review_step_id, child, registry_path)
+        if child["status"] == "FAILED" and _is_step_recovered(conn, child["step_id"]):
+            # FL-019: the review child failed, the agent recovered it through a
+            # deviation sub-tree (judged + fixed) — close as reviewed.
+            return _close_reviewed(conn, plan_id, review_step_id, child, registry_path, reopened=True)
         if child["status"] == "FAILED":
             db.update_step_status(conn, review_step_id, "FAILED", set_completed=True)
             db.update_plan_status(conn, plan_id, "FAILED")

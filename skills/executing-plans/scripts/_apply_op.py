@@ -225,7 +225,20 @@ def _op_agent_review_close(conn, data: dict) -> dict:
     if review_row is None:
         _die(f"no review step found for plan {plan_id}")
     review_step_id = review_row["step_id"]
-    if review_row["status"] != "NEEDS_REVIEW":
+    recovered = False
+    if review_row["status"] == "FAILED" and outcome == "pass":
+        # FL-019: a FAILED review whose child REVIEW.1 was recovered through a
+        # completed deviation sub-tree may be closed as a PASS after all.
+        children = db.get_children(conn, review_step_id)
+        recovered = bool(children) and all(
+            c["status"] == "COMPLETED" or (c["status"] == "FAILED" and api._is_step_recovered(conn, c["step_id"]))
+            for c in children)
+        if not recovered:
+            _die(
+                f"review step {review_step_id} is FAILED and its child review step has not been recovered "
+                "(deviate under <plan>-REVIEW.1 and complete the sub-step first); nothing to close"
+            )
+    elif review_row["status"] != "NEEDS_REVIEW":
         _die(
             f"review step {review_step_id} is {review_row['status']!r}, expected "
             f"NEEDS_REVIEW; nothing to close"
@@ -236,8 +249,8 @@ def _op_agent_review_close(conn, data: dict) -> dict:
     detail = summary or ""
     if log_context:
         detail = f"{detail}\n{log_context}" if detail else log_context
-    if detail:
-        api.append_log(conn, review_step_id, f"[AGENT-REVIEW {outcome.upper()}] {detail}")
+    tag = f"[AGENT-REVIEW {outcome.upper()}{' after recovery' if recovered else ''}]"
+    api.append_log(conn, review_step_id, f"{tag} {detail}".rstrip())
     if summary:
         db.set_step_summary(conn, review_step_id, summary)
 
@@ -249,9 +262,16 @@ def _op_agent_review_close(conn, data: dict) -> dict:
             db.update_step_status(conn, child["step_id"], child_terminal, set_completed=True)
 
     try:
-        if outcome == "pass":
+        if outcome == "pass" and recovered:
+            # the review step is FAILED (terminal): re-open it deterministically
+            db.update_step_status(conn, review_step_id, "COMPLETED", set_completed=True)
+            db.update_plan_status(conn, plan_id, "COMPLETED")
+            db.set_review_state(conn, plan_id, "reviewed")
+            new_status = "COMPLETED"
+        elif outcome == "pass":
             api.complete_step(conn, review_step_id)
             db.update_plan_status(conn, plan_id, "COMPLETED")
+            db.set_review_state(conn, plan_id, "reviewed")
             new_status = "COMPLETED"
         else:
             api.fail_step(conn, review_step_id, reason=summary or "agent review found gaps")
