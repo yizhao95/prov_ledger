@@ -146,6 +146,16 @@ def _op_complete_step(conn, data: dict) -> dict:
     summary = data.get("summary")
     agent_output = data.get("agent_output")
     log_context = data.get("log_context")
+    # S2 / E6-2: a COMMAND step is only ever completed by run-step.sh — the
+    # exit-code footer is the evidence. Hand-completing a shell step is how a
+    # command that never ran got marked COMPLETED (phase-1 dogfood).
+    step = db.get_step(conn, step_id)
+    if step and step.get("step_type") == "COMMAND":
+        evidence = (log_context or "") + "\n" + (step.get("log_context") or "")
+        if "--- exit_code=" not in evidence:
+            _die("COMMAND steps complete only through run-step.sh (exit-code evidence missing). "
+                 "Re-run the command via scripts/run-step.sh, or set type to CODE/ANALYSIS if this is not a shell step.",
+                 code=5)
     # FL-017: status + inline log are ONE transaction — a step is never marked
     # COMPLETED with its evidence lost (the old code committed the status, then
     # crashed in append_log on e.g. invalid UTF-8).

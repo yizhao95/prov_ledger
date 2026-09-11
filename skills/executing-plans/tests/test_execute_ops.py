@@ -299,3 +299,36 @@ def test_e6_5_invalid_utf8_output_completes_with_replacement(seeded_plan, tmp_db
     row = sqlite3.connect(str(tmp_db)).execute("SELECT status, log_context FROM Steps WHERE step_id=?", (sid,)).fetchone()
     assert row[0] == "COMPLETED"
     assert "�" in row[1] and "ok" in row[1] and "done" in row[1] and "--- exit_code=0" in row[1]
+
+
+# ── 3.5-C: COMMAND steps complete only through run-step.sh (S2 / E6-2) ──────
+class TestCommandGate:
+    def test_e6_2_manual_complete_of_command_step_is_refused(self, seeded_plan, tmp_db, scripts_dir, run_script_fn):
+        sid = seeded_plan["step_ids"][1]
+        run_script_fn("start-step", {"step_id": sid, "type": "COMMAND"}, tmp_db)
+        r = run_script_fn("complete-step", {"step_id": sid, "summary": "ran it by hand"}, tmp_db)
+        assert r.returncode == 5 and "run-step.sh" in r.stderr
+        assert sqlite3.connect(str(tmp_db)).execute("SELECT status FROM Steps WHERE step_id=?", (sid,)).fetchone()[0] == "IN_PROGRESS"
+
+    def test_run_step_footer_passes_the_gate(self, seeded_plan, tmp_db, scripts_dir):
+        sid = seeded_plan["step_ids"][1]
+        inp = tmp_db.parent / "rs-gate.json"
+        inp.write_text(json.dumps({"step_id": sid, "type": "COMMAND", "command": "echo hi"}))
+        env = dict(os.environ, ORCH_DB=str(tmp_db))
+        r = subprocess.run(["bash", str(scripts_dir / "run-step.sh"), str(inp)], capture_output=True, text=True, env=env, timeout=30)
+        assert r.returncode == 0, r.stderr
+        assert sqlite3.connect(str(tmp_db)).execute("SELECT status FROM Steps WHERE step_id=?", (sid,)).fetchone()[0] == "COMPLETED"
+
+    def test_stored_footer_evidence_passes(self, seeded_plan, tmp_db, scripts_dir, run_script_fn):
+        """A run-step transcript appended earlier counts as evidence too."""
+        sid = seeded_plan["step_ids"][1]
+        run_script_fn("start-step", {"step_id": sid, "type": "COMMAND"}, tmp_db)
+        run_script_fn("append-log", {"step_id": sid, "text": "pytest -q\n3 passed\n--- exit_code=0, runtime=2s ---"}, tmp_db)
+        r = run_script_fn("complete-step", {"step_id": sid, "summary": "ok"}, tmp_db)
+        assert r.returncode == 0, r.stderr
+
+    def test_non_command_steps_unaffected(self, seeded_plan, tmp_db, scripts_dir, run_script_fn):
+        sid = seeded_plan["step_ids"][0]
+        run_script_fn("start-step", {"step_id": sid, "type": "CODE"}, tmp_db)
+        r = run_script_fn("complete-step", {"step_id": sid, "summary": "edited by hand"}, tmp_db)
+        assert r.returncode == 0, r.stderr

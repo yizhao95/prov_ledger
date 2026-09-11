@@ -19,7 +19,7 @@ If you find yourself wanting to "update the plan" — you ARE the update mechani
 |---|---|---|---|
 | `scripts/run-step.sh` ⭐  | **Preferred for COMMAND/CODE/TEST** — bundles start+exec+complete with auto-captured log_context (migration 006 + Aug 2026) | `step_id`, `type`, `command` | `summary`, `allow_nonzero` |
 | `scripts/start-step.sh`    | Manual start — use for THINKING/DOCUMENTATION/ANALYSIS or when you need to inspect intermediate output | `step_id` | `type`, `agent_input`, `log_context` |
-| `scripts/complete-step.sh` | Manual complete after non-shell work, OR after a `start-step` you split from exec | `step_id` | `summary`, `agent_output`, `log_context` |
+| `scripts/complete-step.sh` | Manual complete after non-shell work, OR after a `start-step` you split from exec. **Not for `type=COMMAND`** (exit 5 without run-step's `--- exit_code=` footer) — shell work always goes through `run-step.sh` (S2/E6-2) | `step_id` | `summary`, `agent_output`, `log_context` |
 | `scripts/fail-step.sh`     | Work failed and you can't recover in this step | `step_id` | `reason`, `log_context` |
 | `scripts/append-log.sh`    | Captured raw shell/tool output worth keeping AFTER the fact | `step_id`, `text` | — |
 | `scripts/deviate.sh`       | Realized the plan needs new sub-steps         | `parent_step_id`, `justification`, `sub_steps[]` | — |
