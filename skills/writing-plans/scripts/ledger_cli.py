@@ -65,7 +65,9 @@ def cmd_add(args) -> int:
                 statement=args.statement, rationale=args.rationale or "",
                 subjects=_split_csv(args.subjects),
                 keywords=_split_csv(args.keywords),
-                source=args.source or "manual")
+                source=args.source or "manual",
+                plan_id=args.plan_id, why_ref=args.why_ref,
+                why_visibility=args.why_visibility)
         except ValueError as e:
             print(f"❌ {e}", file=sys.stderr)
             return 1
@@ -107,9 +109,16 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--kind", required=True, choices=list(ledger_store.VALID_KINDS))
     a.add_argument("--statement", required=True)
     a.add_argument("--rationale", default="")
-    a.add_argument("--subjects", default="", help="comma-separated symbols/tables")
+    a.add_argument("--subjects", default="",
+                   help="comma-separated symbols/tables; may include node_keys (nk_...) or owner.column "
+                        "— constraints are matched on these exactly")
     a.add_argument("--keywords", default="", help="comma-separated match terms")
     a.add_argument("--source", default="manual")
+    a.add_argument("--plan-id", default=None, help="provenance plan that produced this entry")
+    a.add_argument("--why-ref", default=None,
+                   help="reference to the source of the WHY (decision doc, meeting notes)")
+    a.add_argument("--why-visibility", default="shared", choices=list(ledger_store.VALID_VISIBILITY),
+                   help="restricted: the rationale never leaves the ledger, only --why-ref does")
     a.set_defaults(func=cmd_add)
 
     l = sub.add_parser("list", help="list entries for a project")

@@ -71,3 +71,17 @@ def test_invalid_kind_nonzero(orch_db_path):
     res = _run(["add", "--project", "proj", "--kind", "bogus",
                 "--statement", "s", "--rationale", "r"], orch_db_path)
     assert res.returncode != 0
+
+
+def test_add_constraint_with_why_ref_and_visibility(orch_db_path):
+    r = _run(["add", "--project", "proj", "--kind", "constraint",
+              "--statement", "exclude region X", "--rationale", "legal hold",
+              "--subjects", "nk_abc,orders.region", "--why-ref", "https://wiki/decisions/42",
+              "--why-visibility", "restricted", "--plan-id", "plan-9"], orch_db_path)
+    assert r.returncode == 0, r.stderr
+    c = sqlite3.connect(str(orch_db_path))
+    row = c.execute("SELECT kind, why_ref, why_visibility, plan_id, subjects FROM LedgerEntries").fetchone()
+    assert row == ("constraint", "https://wiki/decisions/42", "restricted", "plan-9", '["nk_abc", "orders.region"]')
+    r2 = _run(["add", "--project", "proj", "--kind", "constraint", "--statement", "s",
+               "--why-visibility", "secret"], orch_db_path)
+    assert r2.returncode != 0

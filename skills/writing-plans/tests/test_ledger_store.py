@@ -110,3 +110,66 @@ def test_other_project_isolated(conn):
     ledger_store.add_entry(conn, project="p1", kind="decision",
                            statement="s", rationale="r")
     assert ledger_store.get_entries(conn, "p2") == []
+
+
+# ── 3.1-B: constraints anchored to node keys (E4-1 … E4-4) ───────────────────
+
+def _constraint(conn, subjects, **kw):
+    base = dict(project="proj", kind="constraint", statement="exclude region X from the rollup",
+                rationale="legal hold on region X since 2024-Q3", subjects=subjects,
+                why_ref="https://wiki/decisions/42")
+    base.update(kw)
+    return ledger_store.add_entry(conn, **base)
+
+
+def test_add_constraint_and_lookup_by_node_key(conn):
+    cid = _constraint(conn, ["nk_abc", "orders.region"])
+    got = ledger_store.constraints_for(conn, "proj", ["nk_abc"])
+    assert [c["id"] for c in got] == [cid]
+    c = got[0]
+    assert c["statement"].startswith("exclude region") and c["rationale"].startswith("legal hold")
+    assert c["why_ref"] == "https://wiki/decisions/42" and c["why_visibility"] == "shared"
+    assert c["subjects"] == ["nk_abc", "orders.region"] and c["hit_count"] == 0
+    assert ledger_store.constraints_for(conn, "proj", ["nk_zzz"]) == []
+    assert ledger_store.constraints_for(conn, "proj", []) == []
+    assert ledger_store.constraints_for(conn, "other", ["nk_abc"]) == []
+
+
+def test_restricted_hides_rationale_keeps_why_ref(conn):
+    _constraint(conn, ["nk_abc"], why_visibility="restricted")
+    c = ledger_store.constraints_for(conn, "proj", ["nk_abc"])[0]
+    assert c["rationale"] is None and c["why_ref"] == "https://wiki/decisions/42"
+    assert c["why_visibility"] == "restricted"
+    # the row itself still holds the rationale — only the lookup hides it
+    assert conn.execute("SELECT rationale FROM LedgerEntries").fetchone()[0].startswith("legal hold")
+
+
+def test_constraints_for_ignores_lexical_overlap(conn):
+    """statement/keywords mention the target; subjects do not carry its key -> no hit."""
+    _constraint(conn, ["nk_other"], statement="nk_abc must keep the region filter", keywords=["nk_abc", "region"])
+    assert ledger_store.constraints_for(conn, "proj", ["nk_abc"]) == []
+    # decisions / superseded constraints are not constraints_for hits either
+    ledger_store.add_entry(conn, project="proj", kind="decision", statement="s", subjects=["nk_abc"])
+    sid = _constraint(conn, ["nk_abc"])
+    ledger_store.supersede_entry(conn, sid)
+    assert ledger_store.constraints_for(conn, "proj", ["nk_abc"]) == []
+
+
+def test_add_entry_rejects_bad_kind_or_visibility(conn):
+    with pytest.raises(ValueError):
+        ledger_store.add_entry(conn, project="proj", kind="rule", statement="s")
+    with pytest.raises(ValueError):
+        ledger_store.add_entry(conn, project="proj", kind="constraint", statement="s", why_visibility="secret")
+
+
+def test_e4_4_no_hardcoded_taxonomy():
+    """No category taxonomy ships in the package: besides VALID_KINDS and
+    VALID_VISIBILITY there is no other upper-case tuple/list constant, and no
+    CATEGOR*/TAXONOMY identifier, in ledger_store or ledger_cli."""
+    import inspect, re
+    import ledger_cli
+    for mod in (ledger_store, ledger_cli):
+        src = inspect.getsource(mod)
+        assert not re.search(r"CATEGOR|TAXONOM", src), mod.__name__
+        consts = re.findall(r"^([A-Z][A-Z_]+)\s*=\s*[\(\[]", src, re.M)
+        assert set(consts) <= {"VALID_KINDS", "VALID_VISIBILITY"}, (mod.__name__, consts)
