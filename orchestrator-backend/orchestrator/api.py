@@ -12,7 +12,7 @@ import sqlite3
 import string
 from datetime import datetime, timezone
 
-from . import circuit_breakers, constraints, db, psg_bridge, reasons, state_machine, telemetry
+from . import circuit_breakers, constraints, db, outcomes, psg_bridge, reasons, state_machine, telemetry
 from .circuit_breakers import HardStop, SoftStop  # noqa: F401  re-export
 from .state_machine import InvalidTransitionError, StepStatus  # noqa: F401
 
@@ -428,6 +428,18 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         telemetry.append_step_log(
             conn, review_step_id,
             f"[REASONS] state graph unavailable for project {project!r} — no reason slots generated")
+    # Spec §3.5 (path C): the close of a registered-project plan backfills the
+    # OTHER plans' pending expectations — observed / survival / none_available.
+    # Its own transaction; a failure here is logged, never a blocked close.
+    backfilled: dict = {}
+    if project:
+        try:
+            backfilled = outcomes.backfill(conn, project, psg_db, plan_id)
+            if any(backfilled.get(k) for k in ("observed", "survival", "none_available")):
+                telemetry.append_step_log(conn, review_step_id, f"[OUTCOMES] backfilled {backfilled}")
+        except Exception as exc:  # pragma: no cover - defensive
+            telemetry.append_step_log(conn, review_step_id, f"[OUTCOMES] backfill failed: {exc}")
+            backfilled = {"error": str(exc)}
     return {
         "ready": True,
         "plan_status": "COMPLETED",
@@ -440,6 +452,7 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         "unstated_backstopped": n_unstated,
         "rejected_paths": n_rejected,
         "constraints_bypassed": n_bypassed,
+        "outcomes_backfilled": backfilled,
     }
 
 

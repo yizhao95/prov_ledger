@@ -332,3 +332,52 @@ def test_fl020_publish_succeeds_while_graph_locked(tmp_path, tmp_db, scripts_dir
     assert "graph busy" in (res.stdout + res.stderr)
     ctx = _impact_context(tmp_db)
     assert ctx.get("degraded") == "graph busy"
+
+
+# ── Task 14: expectations captured at publish ────────────────────────────────
+
+def _project_plan(tmp_path, tmp_db, scripts_dir, expectations, with_project=True):
+    gdb = tmp_path / "proj.db"
+    if not gdb.exists():
+        _seed_project_graph(gdb)
+    reg = _registry(tmp_path, "demoproj", gdb)
+    plan = _valid_input_dict()
+    if with_project:
+        plan["project"] = "demoproj"; plan["declared_targets"] = ["pipeline.process"]
+    plan["expectations"] = expectations
+    p = tmp_path / "in.json"; p.write_text(_json.dumps(plan))
+    return _run_publish_env(scripts_dir, p, tmp_db, reg)
+
+
+def test_expectations_are_recorded_at_publish(tmp_path, tmp_db, scripts_dir):
+    res = _project_plan(tmp_path, tmp_db, scripts_dir, [
+        {"target": "pipeline.process", "target_kind": "node", "claim": "process keeps its output shape", "channel": "graph"},
+        {"target": "orders", "target_kind": "dataset", "claim": "promo_discount stays present", "channel": "profile_drift"}])
+    assert res.returncode == 0, res.stderr
+    c = _sqlite.connect(str(tmp_db))
+    rows = c.execute("SELECT plan_id, project, target, target_kind, channel FROM expectations ORDER BY id").fetchall()
+    assert len(rows) == 2 and rows[0][1] == "demoproj" and rows[0][2:] == ("pipeline.process", "node", "graph")
+    assert rows[1][2:] == ("orders", "dataset", "profile_drift")
+    assert rows[0][0] == c.execute("SELECT plan_id FROM Plans ORDER BY rowid DESC LIMIT 1").fetchone()[0]
+    assert '"expectations_recorded": 2' in res.stdout
+
+
+def test_no_expectations_no_rows(tmp_path, tmp_db, scripts_dir):
+    res = _project_plan(tmp_path, tmp_db, scripts_dir, [])
+    assert res.returncode == 0, res.stderr
+    assert _sqlite.connect(str(tmp_db)).execute("SELECT COUNT(*) FROM expectations").fetchone()[0] == 0
+
+
+def test_invalid_expectation_is_rejected(tmp_path, tmp_db, scripts_dir):
+    for bad in ({"target": "x", "target_kind": "node", "claim": "c", "channel": "telepathy"},
+                {"target": "x", "target_kind": "table", "claim": "c", "channel": "none"},
+                {"target": "x", "target_kind": "node", "channel": "graph"}):
+        res = _project_plan(tmp_path, tmp_db, scripts_dir, [bad])
+        assert res.returncode != 0 and "expectations" in (res.stderr + res.stdout)
+    assert _sqlite.connect(str(tmp_db)).execute("SELECT COUNT(*) FROM Plans").fetchone()[0] == 0
+
+
+def test_expectations_require_a_project(tmp_path, tmp_db, scripts_dir):
+    res = _project_plan(tmp_path, tmp_db, scripts_dir,
+                        [{"target": "x", "target_kind": "node", "claim": "c", "channel": "graph"}], with_project=False)
+    assert res.returncode != 0 and "project" in (res.stderr + res.stdout)

@@ -128,3 +128,17 @@ def latest_run_id(psg_db_path: str | None, plan_id: str | None = None) -> int | 
     else:
         rows = _query(psg_db_path, "SELECT MAX(id) AS m FROM analysis_run WHERE plan_id = ?", (plan_id,))
     return int(rows[0]["m"]) if rows and rows[0]["m"] is not None else None
+
+
+def output_consumers(psg_db_path: str | None, qualified_name: str) -> list[str]:
+    """The consistency card's output_consumers of a symbol (who eats its return
+    value) — the input survival needs to tell untouched_consumed from untouched."""
+    rows = _query(psg_db_path, """
+        SELECT cc.card_json FROM consistency_card cc JOIN node n ON n.id = cc.symbol_id
+        WHERE n.qualified_name = ? ORDER BY n.id DESC LIMIT 1""", (qualified_name,))
+    if not rows or not rows[0]["card_json"]:
+        return []
+    try:
+        return list(json.loads(rows[0]["card_json"]).get("output_consumers", []))
+    except ValueError:
+        return []

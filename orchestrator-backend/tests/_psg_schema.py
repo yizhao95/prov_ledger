@@ -84,6 +84,6 @@ def add_snapshot(c, run_id, key, qn, ntype="function", struct_sig="s1"):
               (run_id, key, ntype, qn, struct_sig))
 
 
-def add_event(c, run_id, seq, event_type, key, payload="{}", tier="observed"):
+def add_event(c, run_id, seq, event_type, key, payload="{}", tier="observed", created_at="2026-09-11T00:00:01+00:00"):
     c.execute("INSERT INTO node_event (run_id, seq, event_type, node_key, tier, payload_json, created_at) "
-              "VALUES (?, ?, ?, ?, ?, ?, '2026-09-11T00:00:01+00:00')", (run_id, seq, event_type, key, tier, payload))
+              "VALUES (?, ?, ?, ?, ?, ?, ?)", (run_id, seq, event_type, key, tier, payload, created_at))

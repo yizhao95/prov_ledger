@@ -172,6 +172,14 @@ def main() -> int:
     )
     plan_id = plan["plan_id"]
     s_explore, s_contract, s_ingest, s_rollup, s_verify = plan["step_ids"]
+    # Spec §3.2 / §3.6: the plan states what it expects of the data it touches.
+    # The next plan's close backfills this into an observed outcome
+    # (profile_drift on the checkout-orders dataset -> column_dropped when
+    # promo_discount vanishes upstream). Recorded, never invented.
+    odb.insert_expectation(conn, plan_id=plan_id, step_id=s_ingest, project="phantom-uplift",
+                           target=DATASET, target_kind="dataset",
+                           claim="promo_discount stays present in the checkout-orders feed",
+                           channel="profile_drift")
     print(f"  plan published: {plan_id} — 5 steps {yellow('PENDING')}")
     _beat(2.5)  # hold the freshly-published PENDING plan (recording opens here)
 
