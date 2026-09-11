@@ -24,8 +24,8 @@
         {{ badge[0] }} {{ plan.status }}
       </span>
     </div>
-    {# Stat strip: the four numbers a reader scans for, as quiet tiles. #}
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-px bg-hairline rounded-lg overflow-hidden mt-4 border border-hairline">
+    {# Stat strip: the five numbers a reader scans for, as quiet tiles. #}
+    <div class="grid grid-cols-2 sm:grid-cols-5 gap-px bg-hairline rounded-lg overflow-hidden mt-4 border border-hairline">
       <div class="bg-surface px-4 py-2.5">
         <div class="text-lg font-semibold text-gray-900 tnum">{{ progress_pct }}%</div>
         <div class="text-[11px] text-brand-muted">complete</div>
@@ -41,6 +41,11 @@
       <div class="bg-surface px-4 py-2.5">
         <div class="text-lg font-semibold text-gray-900 tnum">{{ plan.revision_count }}<span class="text-brand-muted font-normal">/{{ plan.max_revisions }}</span></div>
         <div class="text-[11px] text-brand-muted">revisions</div>
+      </div>
+      {# Phase 3: the reasons gap — how many changed data points stayed unstated at close. #}
+      <div class="bg-surface px-4 py-2.5" data-tile="unstated">
+        <div class="text-lg font-semibold tnum {{ 'text-brand-red' if unstated.unstated else 'text-gray-900' }}">{{ unstated.unstated }}<span class="text-brand-muted font-normal">/{{ unstated.slots }}</span></div>
+        <div class="text-[11px] {{ 'text-brand-red font-semibold' if unstated.unstated else 'text-brand-muted' }}">unstated{% if unstated.slots %} — {{ unstated.pct }}%{% endif %}</div>
       </div>
     </div>
     {# Segmented progress: good for completed, critical for failed, hairline
@@ -167,6 +172,31 @@
      The dashboard only READS these; every row was written by the backbone flow.
      Auto-open when any decision is unresolved/halted — data failures are never
      hidden (same philosophy as DASH-UX3 for failed steps). #}
+  {# Phase 3: 🧭 Reasons — why each changed data point changed, per node_key.
+     Tier is a LABEL (data-tier + text), never colour alone (E3-1). #}
+  {% if node_reasons %}
+  <details class="bg-surface rounded-xl shadow-sm border border-hairline border-l-4 {{ 'border-l-brand-red' if unstated.unstated else 'border-l-brand-blue' }} mb-4"
+           {% if unstated.unstated %}open{% endif %}>
+    <summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-gray-900 hover:bg-brand-bg rounded-xl select-none">
+      🧭 Reasons
+      <span class="text-xs text-brand-muted font-normal ml-2">
+        ({{ node_reasons|length }} row{{ '' if node_reasons|length == 1 else 's' }} · {{ unstated.unstated }}/{{ unstated.slots }} unstated — stated by the agent, backstopped by the system, never invented)
+      </span>
+    </summary>
+    <div class="px-5 pb-4 space-y-1.5">
+      {% for r in node_reasons %}
+      {% set tb = tier_badge(r.display_tier) %}
+      <div class="text-sm flex flex-wrap items-baseline gap-x-2 border-l-2 border-hairline pl-3">
+        <span data-tier="{{ r.display_tier }}" class="text-xs px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
+        <span class="text-[11px] text-brand-muted">{{ r.kind }} · {{ r.source }}</span>
+        <span class="font-mono text-xs">{{ r.node_key or '—' }}</span>
+        <span class="text-sm text-gray-800">{{ r.text if r.text is not none else '— unstated —' }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
   {% if data_profiles or data_decisions %}
   {% set data_alert = data_decisions | selectattr('outcome', 'in', ['unresolved', 'halted']) | list %}
   <details class="bg-surface rounded-xl shadow-sm border border-hairline border-l-4 {{ 'border-l-brand-red' if data_alert else 'border-l-brand-blue' }} mb-4"

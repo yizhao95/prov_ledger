@@ -32,6 +32,7 @@ TEMPLATES.env.globals["short_title"] = queries.short_title
 TEMPLATES.env.globals["relative_time"] = queries.relative_time
 TEMPLATES.env.globals["outcome_badge"] = queries.outcome_badge
 TEMPLATES.env.globals["db_path_display"] = queries.db_path_display
+TEMPLATES.env.globals["tier_badge"] = queries.tier_badge
 
 app = FastAPI(title="provLedger Dashboard", version="0.1.0")
 
@@ -49,6 +50,7 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
             "skills": [], "completed": 0, "failed": 0, "total_steps": 0,
             "progress_pct": 0, "has_failure": False, "current_step": None,
             "deviations": [], "data_profiles": [], "data_decisions": [],
+            "node_reasons": [], "unstated": {"slots": 0, "unstated": 0, "pct": 0},
             "total_plans": 0, "db_size_kb": 0, "viewing_plan_id": plan_id,
         }
 
@@ -83,6 +85,9 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         # Phase 5.2: read-only data panel — profile snapshots + LLM decision trail.
         data_profiles = queries.get_data_profiles(conn, plan["plan_id"]) if plan else []
         data_decisions = queries.get_data_decisions(conn, plan["plan_id"]) if plan else []
+        # Phase 3: close-time reasons (read-only) + the unstated gap.
+        node_reasons = queries.get_node_reasons(conn, plan["plan_id"]) if plan else []
+        unstated = queries.get_unstated(conn, plan["plan_id"]) if plan else {"slots": 0, "unstated": 0, "pct": 0}
         total_plans = queries.count_total_plans(conn)
         db_size_kb = queries.get_db_size_kb()
     except sqlite3.Error as e:
@@ -104,6 +109,8 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         "deviations": deviations,
         "data_profiles": data_profiles,
         "data_decisions": data_decisions,
+        "node_reasons": node_reasons,
+        "unstated": unstated,
         "total_steps": len(steps),
         "progress_pct": int(100 * completed / len(steps)) if steps else 0,
         "total_plans": total_plans,

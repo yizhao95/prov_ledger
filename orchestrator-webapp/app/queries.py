@@ -399,6 +399,18 @@ def compute_etag(conn: sqlite3.Connection) -> str:
     h.update(b"D|")
     h.update("|".join(str(v) for v in data_sig).encode("utf-8"))
     h.update(b"\n")
+    # Phase 3: reasons (node_reason) and outcomes are appended at close time —
+    # max(id) per table invalidates the etag; older DBs contribute a constant.
+    try:
+        reason_sig = conn.execute(
+            "SELECT (SELECT COALESCE(MAX(id), 0) FROM node_reason), "
+            "       (SELECT COALESCE(MAX(id), 0) FROM outcomes)"
+        ).fetchone()
+    except sqlite3.Error:
+        reason_sig = (0, 0)
+    h.update(b"R|")
+    h.update("|".join(str(v) for v in reason_sig).encode("utf-8"))
+    h.update(b"\n")
     # Quoted per RFC 7232 §2.3
     return f'"{h.hexdigest()[:16]}"'
 
@@ -603,3 +615,49 @@ OUTCOME_BADGES = {
 
 def outcome_badge(outcome: str | None) -> tuple[str, str]:
     return OUTCOME_BADGES.get(outcome or "", ("•", "bg-gray-500/10 text-gray-600"))
+
+
+# ── Phase 3: tier badges + reasons (read-only) ──────────────────────────────
+# The LABEL is the differentiator (E3-1): every tier reads as its own word, the
+# tint only reinforces it. `unstated` is the display tier of a reason row whose
+# text is NULL — an explicit gap, shown as such, never blended into the rest.
+TIER_BADGES = {
+    "observed": ("observed", "bg-brand-green/10 text-brand-green"),
+    "derived":  ("derived",  "bg-brand-blue/10 text-brand-blue"),
+    "asserted": ("asserted", "bg-brand-spark/15 text-[#7a5200]"),
+    "stated":   ("stated",   "bg-brand-gray/10 text-brand-gray"),
+    "unstated": ("unstated", "bg-brand-red/10 text-brand-red"),
+}
+
+
+def tier_badge(tier: str | None) -> tuple[str, str]:
+    return TIER_BADGES.get(tier or "unstated", TIER_BADGES["unstated"])
+
+
+def get_node_reasons(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
+    """node_reason rows of a plan (migration 014) + display_tier ('unstated'
+    when text is NULL). Degrades to [] on an older DB. Read-only."""
+    try:
+        rows = conn.execute(
+            "SELECT id, node_key, run_id, step_id, kind, text, source, tier, created_at "
+            "FROM node_reason WHERE plan_id = ? ORDER BY id", (plan_id,)).fetchall()
+    except sqlite3.Error:
+        return []
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["display_tier"] = "unstated" if d["text"] is None else d["tier"]
+        out.append(d)
+    return out
+
+
+def get_unstated(conn: sqlite3.Connection, plan_id: str) -> dict:
+    """{slots, unstated, pct}: reason slots of the plan and how many stayed unstated."""
+    stated: dict[str, bool] = {}
+    for r in get_node_reasons(conn, plan_id):
+        if r["kind"] != "reason" or not r["node_key"]:
+            continue
+        stated[r["node_key"]] = stated.get(r["node_key"], False) or (r["text"] is not None)
+    slots = len(stated)
+    unstated = sum(1 for v in stated.values() if not v)
+    return {"slots": slots, "unstated": unstated, "pct": int(100 * unstated / slots) if slots else 0}
