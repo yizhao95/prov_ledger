@@ -12,7 +12,7 @@ import sqlite3
 import string
 from datetime import datetime, timezone
 
-from . import circuit_breakers, db, psg_bridge, reasons, state_machine, telemetry
+from . import circuit_breakers, constraints, db, psg_bridge, reasons, state_machine, telemetry
 from .circuit_breakers import HardStop, SoftStop  # noqa: F401  re-export
 from .state_machine import InvalidTransitionError, StepStatus  # noqa: F401
 
@@ -525,7 +525,9 @@ def review_and_complete(
                     conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
                 n_rejected = reasons.rejected_paths(
                     conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
-                n_bypassed = 0  # Task 3.4-B: constraints.bypassed_at_close
+                n_bypassed = constraints.bypassed_at_close(
+                    conn, project=project, plan_id=plan_id, psg_db_path=psg_db,
+                    review_step_id=review_step_id, commit=False) if psg_db else 0
                 db.update_step_status(conn, review_step_id, "COMPLETED", set_completed=True, commit=False)
                 db.update_plan_status(conn, plan_id, "COMPLETED", commit=False)
                 db.set_review_state(conn, plan_id, "reviewed", commit=False)  # BE-D4
