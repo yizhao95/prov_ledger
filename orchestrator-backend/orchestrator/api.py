@@ -303,6 +303,9 @@ def _normalize_project_token(s: str) -> str:
     return re.sub(r"[-_\s]+", "", s.lower())
 
 
+NO_PROJECT_MENTIONED = "no registered project mentioned in goal/steps (FL-014: token match)"
+
+
 def detect_registered_project(
     conn: sqlite3.Connection,
     plan_id: str,
@@ -317,19 +320,31 @@ def detect_registered_project(
     registry is empty/absent).
 
     Deterministic — no LLM. Used by review_and_complete to decide whether plan
-    completion needs an LLM sub-agent review.
+    completion needs an LLM sub-agent review. See _detect_with_reason for the
+    WHY when the answer is None (S1: a skipped review is never silent).
     """
+    return _detect_with_reason(conn, plan_id, registry_path)[0]
+
+
+def _detect_with_reason(
+    conn: sqlite3.Connection,
+    plan_id: str,
+    registry_path=_REGISTRY_DEFAULT,
+) -> tuple[str | None, str]:
+    """(project, why): the registered project the plan mentions, or None plus
+    the reason — 'registry not found at …', 'registry unreadable …',
+    'registry has no projects', or NO_PROJECT_MENTIONED."""
     registry_path = _resolve_registry_path(registry_path)
     if not registry_path or not os.path.exists(registry_path):
-        return None
+        return None, f"registry not found at {registry_path}"
     try:
         with open(registry_path) as f:
             registry = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
+    except (json.JSONDecodeError, OSError) as e:
+        return None, f"registry unreadable at {registry_path}: {e}"
     projects = registry.get("projects", []) if isinstance(registry, dict) else []
     if not projects:
-        return None
+        return None, "registry has no projects"
 
     # Build {normalized_name: canonical_name}, preserving registry order.
     normalized = []
@@ -338,7 +353,7 @@ def detect_registered_project(
         if name:
             normalized.append((_normalize_project_token(name), name))
     if not normalized:
-        return None
+        return None, "registry has no projects"
 
     # Gather plan text: goal + non-review step descriptions.
     plan = db.get_plan(conn, plan_id)
@@ -360,8 +375,8 @@ def detect_registered_project(
     hay_words = [w for w in re.split(r"[-_\s]+", " ".join(texts).lower()) if w]
     for norm_name, canonical in normalized:
         if norm_name and _matches_token_run(hay_words, norm_name):
-            return canonical
-    return None
+            return canonical, "mentioned"
+    return None, NO_PROJECT_MENTIONED
 
 
 def _matches_token_run(words: list[str], target: str) -> bool:
@@ -659,8 +674,11 @@ def review_and_complete(
     # LLM-review routing: when the plan WOULD close COMPLETED and it mentions a
     # registered project, defer the close to an agent review instead. The FAILED
     # path is never intercepted — unrecovered failures propagate immediately.
+    # S1 (spec §2.10): when we do NOT review, the reason is written down.
+    review_skipped: str | None = None
     if new_plan_status == "COMPLETED":
-        project = detect_registered_project(conn, plan_id, registry_path)
+        project, why = _detect_with_reason(conn, plan_id, registry_path)
+        review_skipped = why if project is None else None
         if project is not None:
             child_id = _open_agent_review(conn, plan_id, review_step_id)
             return {
@@ -678,15 +696,23 @@ def review_and_complete(
                 ),
             }
 
-    # Apply writes: review step status first, then plan status.
-    # Use db.update_step_status with set_completed=True so completed_at gets set.
-    db.update_step_status(conn, review_step_id, new_review_status, set_completed=True)
-    db.update_plan_status(conn, plan_id, new_plan_status)
+    # Apply writes: review step status first, then plan status — plus the
+    # skip reason (column + log line) in the SAME transaction, so a plan can
+    # never end up COMPLETED without saying why it was not reviewed.
+    with db.transaction(conn):
+        db.update_step_status(conn, review_step_id, new_review_status, set_completed=True, commit=False)
+        db.update_plan_status(conn, plan_id, new_plan_status, commit=False)
+        if review_skipped:
+            db.set_review_skip_reason(conn, plan_id, review_skipped, commit=False)
+            telemetry.append_step_log(conn, review_step_id, f"[REVIEW SKIPPED] {review_skipped}", commit=False)
 
-    return {
+    out = {
         "ready": True,
         "plan_status": new_plan_status,
         "review_step_id": review_step_id,
         "review_status": new_review_status,
         "reason": reason,
     }
+    if review_skipped:
+        out["review_skipped"] = review_skipped
+    return out
