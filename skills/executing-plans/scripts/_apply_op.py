@@ -12,7 +12,7 @@ user's input file. This module:
     with a friendly stderr message naming the offending field
 
 Op enum: start-step, complete-step, fail-step, append-log, deviate,
-         record-skill, finish-plan
+         record-skill, finish-plan, agent-review-close, reason-slots, reason-fill
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ _DEV_ORCH = Path.home() / "skill-workspace" / "orchestrator"
 ORCH_ROOT = _BUNDLED_ORCH if (_BUNDLED_ORCH / "orchestrator" / "__init__.py").exists() else _DEV_ORCH
 sys.path.insert(0, str(ORCH_ROOT))
 
-from orchestrator import api, db  # noqa: E402
+from orchestrator import api, db, psg_bridge, reasons  # noqa: E402
 
 VALID_SKILL_SOURCES = {"iron-law", "auto-search", "explicit-mention", "deferred-load"}
 VALID_STEP_TYPES = {"THINKING", "ANALYSIS", "CODE", "COMMAND", "DOCUMENTATION", "SUB_AGENT"}
@@ -351,6 +351,38 @@ def _op_finish_plan(conn, data: dict) -> dict:
     return plan_row
 
 
+def _op_reason_slots(conn, data: dict) -> dict:
+    """The closed-form checklist for a plan under review (spec §2.8): the nodes
+    its runs changed that have no reason yet. Exit 6 when the project has no
+    usable state graph — the agent must know it cannot fill anything."""
+    _require(data, "plan_id", "project")
+    psg_db = psg_bridge.db_path_for(data["project"])
+    if not psg_db or not os.path.exists(psg_db):
+        _die(f"no state graph registered (or built) for project {data['project']!r}", code=6)
+    slots = reasons.slots_for_plan(conn, data["project"], data["plan_id"], psg_db)
+    return {"plan_id": data["plan_id"], "project": data["project"], "slots": slots,
+            "checklist": reasons.checklist_text(slots)}
+
+
+def _op_reason_fill(conn, data: dict) -> dict:
+    """Record one answer per changed node: [{node_key, text}] — 'unstated' or
+    empty is stored as NULL. Keys outside the plan's change set are refused
+    (exit 6, nothing written)."""
+    _require(data, "plan_id", "project", "run_id", "reasons")
+    if not isinstance(data["reasons"], list) or not all(isinstance(r, dict) and r.get("node_key") for r in data["reasons"]):
+        _die("'reasons' must be a non-empty list of {node_key, text}")
+    psg_db = psg_bridge.db_path_for(data["project"])
+    if not psg_db or not os.path.exists(psg_db):
+        _die(f"no state graph registered (or built) for project {data['project']!r}", code=6)
+    r = reasons.fill(conn, project=data["project"], plan_id=data["plan_id"], run_id=int(data["run_id"]),
+                     reasons=data["reasons"], source=data.get("source", "agent"),
+                     step_id=data.get("step_id"), psg_db_path=psg_db)
+    if r["unknown_keys"]:
+        print(json.dumps(r, indent=2))
+        _die(f"unknown node_key(s) for this plan: {r['unknown_keys']} — only the checklist's keys are accepted", code=6)
+    return r
+
+
 OPS = {
     "start-step":   _op_start_step,
     "complete-step": _op_complete_step,
@@ -360,6 +392,8 @@ OPS = {
     "record-skill": _op_record_skill,
     "finish-plan":  _op_finish_plan,
     "agent-review-close": _op_agent_review_close,
+    "reason-slots": _op_reason_slots,
+    "reason-fill":  _op_reason_fill,
 }
 
 

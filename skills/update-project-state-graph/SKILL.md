@@ -73,6 +73,20 @@ export PROVLEDGER_PLAN_ID=<plan_id> PROVLEDGER_STEP_ID=<plan_id>-REVIEW.1 PROVLE
 bash skills/project-state-graph/scripts/init_project.sh --name <project> --repo <repo>
 ```
 
+**4c. Reasons (after the refresh, before completing the child step)** — spec §2.8:
+
+```bash
+bash skills/executing-plans/scripts/reason-slots.sh <in.json>   # {plan_id, project}
+#   -> prints a CLOSED checklist: the N data points this plan's runs changed
+#      (function / class / column node_keys). Answer each in one sentence;
+#      write "unstated" when you do not know — never invent.
+bash skills/executing-plans/scripts/reason-fill.sh <in.json>    # {plan_id, project, run_id, reasons: [{node_key, text}]}
+bash skills/executing-plans/scripts/complete-step.sh <in.json>  # the child <plan>-REVIEW.1
+#   -> at close the system backstops every unanswered key as unstated (NULL,
+#      source=system) and turns deviation justifications into rejected_path
+#      rows. Missing reasons never block the close; they stay visible.
+```
+
 `init_project.sh` no longer deletes the DB before rebuilding: `node_snapshot` /
 `node_event` accumulate across refreshes and `python3 -m analyzer history <db>
 <qualified_name>` (run from `skills/project-state-graph/scripts`) shows a

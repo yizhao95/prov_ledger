@@ -12,7 +12,7 @@ import sqlite3
 import string
 from datetime import datetime, timezone
 
-from . import circuit_breakers, db, state_machine, telemetry
+from . import circuit_breakers, db, psg_bridge, reasons, state_machine, telemetry
 from .circuit_breakers import HardStop, SoftStop  # noqa: F401  re-export
 from .state_machine import InvalidTransitionError, StepStatus  # noqa: F401
 
@@ -383,6 +383,15 @@ def _matches_token_run(words: list[str], target: str) -> bool:
     return False
 
 
+def _usable_graph(project: str | None, registry_path) -> str | None:
+    """db_path of the project's state graph when it is registered AND present
+    on disk; None otherwise (callers log 'state graph unavailable')."""
+    if not project:
+        return None
+    path = psg_bridge.db_path_for(project, _resolve_registry_path(registry_path))
+    return path if path and os.path.exists(path) else None
+
+
 def _open_agent_review(conn: sqlite3.Connection, plan_id: str, review_step_id: str) -> str:
     """Enter the tracked agent-review phase for a registered-project plan.
 
@@ -504,9 +513,26 @@ def review_and_complete(
                 "reason": "review awaiting agent; child review step (re)created",
             }
         if child["status"] == "COMPLETED":
-            db.update_step_status(conn, review_step_id, "COMPLETED", set_completed=True)
-            db.update_plan_status(conn, plan_id, "COMPLETED")
-            db.set_review_state(conn, plan_id, "reviewed")  # BE-D4
+            # Close-time capture (spec §2.8): the nodes this plan changed get a
+            # reason row each — whatever the review agent did not fill is
+            # backstopped as an explicit NULL (unstated), deviation
+            # justifications become rejected_path rows. One transaction with
+            # the terminal writes; nothing here can block the close.
+            project = detect_registered_project(conn, plan_id, registry_path)
+            psg_db = _usable_graph(project, registry_path)
+            with db.transaction(conn):
+                n_unstated = reasons.backstop_unstated(
+                    conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
+                n_rejected = reasons.rejected_paths(
+                    conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
+                n_bypassed = 0  # Task 3.4-B: constraints.bypassed_at_close
+                db.update_step_status(conn, review_step_id, "COMPLETED", set_completed=True, commit=False)
+                db.update_plan_status(conn, plan_id, "COMPLETED", commit=False)
+                db.set_review_state(conn, plan_id, "reviewed", commit=False)  # BE-D4
+            if project and psg_db is None:
+                telemetry.append_step_log(
+                    conn, review_step_id,
+                    f"[REASONS] state graph unavailable for project {project!r} — no reason slots generated")
             return {
                 "ready": True,
                 "plan_status": "COMPLETED",
@@ -514,6 +540,9 @@ def review_and_complete(
                 "review_status": "COMPLETED",
                 "review_child_step_id": child["step_id"],
                 "reason": "agent review child step COMPLETED; finalizing plan COMPLETED",
+                "unstated_backstopped": n_unstated,
+                "rejected_paths": n_rejected,
+                "constraints_bypassed": n_bypassed,
             }
         if child["status"] == "FAILED":
             db.update_step_status(conn, review_step_id, "FAILED", set_completed=True)
