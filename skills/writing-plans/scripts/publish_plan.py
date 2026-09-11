@@ -41,6 +41,11 @@ import impact_preflight  # noqa: E402
 VALID_SKILL_SOURCES = {"iron-law", "auto-search", "explicit-mention", "deferred-load"}
 
 REQUIRED_FIELDS = ("goal", "prefix", "steps")
+# Spec §3.2: optional `expectations` — what the author claims a target will do
+# after the change, and through which channel it could be observed. Recorded
+# verbatim (db.insert_expectation); never invented. Requires `project`.
+VALID_TARGET_KINDS = {"node", "column", "dataset", "metric"}
+VALID_CHANNELS = {"graph", "profile_drift", "none"}   # plus "metric:<name>"
 
 # Registry of built project state-graphs (env-overridable for tests).
 _REGISTRY_PATH = os.environ.get(
@@ -147,6 +152,19 @@ def _validate(data: dict) -> None:
     mr = data.get("max_revisions", 5)
     if not isinstance(mr, int) or mr < 1:
         _die("'max_revisions' must be a positive integer (default: 5)")
+    exps = data.get("expectations") or []
+    if not isinstance(exps, list):
+        _die("'expectations' must be an array (or omitted)")
+    if exps and not data.get("project"):
+        _die("'expectations' need a tracked 'project' (they are recorded against it)")
+    for i, e in enumerate(exps):
+        if not isinstance(e, dict) or not all(e.get(k) for k in ("target", "target_kind", "claim", "channel")):
+            _die(f"expectations[{i}] must be an object with target, target_kind, claim, channel")
+        if e["target_kind"] not in VALID_TARGET_KINDS:
+            _die(f"expectations[{i}].target_kind = {e['target_kind']!r} is invalid; valid: {sorted(VALID_TARGET_KINDS)}")
+        ch = e["channel"]
+        if ch not in VALID_CHANNELS and not (ch.startswith("metric:") and len(ch) > 7):
+            _die(f"expectations[{i}].channel = {ch!r} is invalid; valid: {sorted(VALID_CHANNELS)} or metric:<name>")
 
 
 def _normalize_steps(steps: list) -> list:
@@ -205,8 +223,12 @@ def main() -> None:
         graph_db = _resolve_project_db(project)
         impact_context = impact_preflight.compute_impact_context(
             graph_db, data.get("user_query") or "", declared_targets,
-            project=project)
+            project=project, orch_conn=conn)
         _ensure_impact_column(conn)
+        if impact_context.get("degraded"):
+            # FL-020: never silent — the plan publishes, the reader is told.
+            print(f"⚠️  publish-plan: impact analysis degraded ({impact_context['degraded']}): "
+                  f"{impact_context['capability_boundary']}", file=sys.stderr)
 
     skills_activated_input = data.get("skills") or None
     # Translate the user-facing 'name' key to the api's 'skill_name' key.
@@ -238,6 +260,7 @@ def main() -> None:
         db.set_plan_impact_context(
             conn, result["plan_id"], json.dumps(impact_context, default=str))
         result["impact_context"] = {
+            **({"degraded": impact_context["degraded"]} if impact_context.get("degraded") else {}),
             "targets": [t["name"] for t in impact_context["targets"]],
             "symbols": [{"name": s["name"], "status": s["status"]}
                         for s in impact_context["symbols"]],
@@ -246,6 +269,16 @@ def main() -> None:
         }
     if skills_activated_input:
         result["skills_recorded"] = [s["name"] for s in skills_activated_input]
+    exps = data.get("expectations") or []
+    if exps:
+        step_ids = result.get("step_ids") or []
+        for e in exps:
+            step_ref = e.get("step")
+            step_id = step_ids[step_ref] if isinstance(step_ref, int) and 0 <= step_ref < len(step_ids) else None
+            db.insert_expectation(conn, plan_id=result["plan_id"], step_id=step_id, project=project,
+                                  target=e["target"], target_kind=e["target_kind"], claim=e["claim"],
+                                  channel=e["channel"])
+        result["expectations_recorded"] = len(exps)
     print(json.dumps(result, indent=2, default=str))
 
 

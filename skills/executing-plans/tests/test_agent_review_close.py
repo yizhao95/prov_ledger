@@ -129,3 +129,64 @@ def test_invalid_outcome_rejected(tmp_db, tmp_path, run_script_fn):
     assert proc.returncode != 0
     # no mutation: review stays NEEDS_REVIEW
     assert _status(tmp_db, plan_id, rid) == ("IN_PROGRESS", "NEEDS_REVIEW")
+
+
+# ── FL-019: agent-review-close accepts a FAILED review whose child recovered ──
+
+def _park_and_fail(seeded_plan, tmp_db, run_script_fn, tmp_path):
+    """Registered-project plan parked in NEEDS_REVIEW, child REVIEW.1 failed → plan FAILED."""
+    reg = tmp_path / "projects.json"
+    reg.write_text(json.dumps({"projects": [{"name": "seed", "repo": "/x", "db_path": str(tmp_path / "absent.db"), "commit_sha": "c"}]}))
+    env = {"PSG_REGISTRY_PATH": str(reg)}
+    pid = seeded_plan["plan_id"]
+    for sid in seeded_plan["step_ids"]:
+        run_script_fn("start-step", {"step_id": sid, "type": "CODE"}, tmp_db, env_extra=env)
+        run_script_fn("complete-step", {"step_id": sid}, tmp_db, env_extra=env)
+    child = f"{pid}-REVIEW.1"
+    run_script_fn("start-step", {"step_id": child, "type": "SUB_AGENT"}, tmp_db, env_extra=env)
+    r = run_script_fn("fail-step", {"step_id": child, "reason": "gate false positive"}, tmp_db, env_extra=env)
+    assert r.returncode == 0, r.stderr
+    c = sqlite3.connect(str(tmp_db))
+    assert c.execute("SELECT status FROM Plans WHERE plan_id=?", (pid,)).fetchone()[0] == "FAILED"
+    return pid, child, env
+
+
+def test_fl019_auto_reopen_when_substep_completes_via_scripts(seeded_plan, tmp_db, run_script_fn, tmp_path):
+    """complete-step on the recovery sub-step fires review_and_complete, which
+    re-opens the FAILED review and closes the plan COMPLETED by itself."""
+    pid, child, env = _park_and_fail(seeded_plan, tmp_db, run_script_fn, tmp_path)
+    r = run_script_fn("deviate", {"parent_step_id": child, "justification": "additive kwargs; suite green",
+                                  "sub_steps": ["manual verdict + refresh"]}, tmp_db, env_extra=env)
+    assert r.returncode == 0, r.stderr
+    run_script_fn("start-step", {"step_id": f"{child}.1", "type": "COMMAND"}, tmp_db, env_extra=env)
+    r = run_script_fn("complete-step", {"step_id": f"{child}.1", "log_context": "refresh ok\n--- exit_code=0, runtime=1s ---"}, tmp_db, env_extra=env)
+    assert r.returncode == 0, r.stderr
+    c = sqlite3.connect(str(tmp_db))
+    assert c.execute("SELECT status, review_state FROM Plans WHERE plan_id=?", (pid,)).fetchone() == ("COMPLETED", "reviewed")
+    assert c.execute("SELECT status FROM Steps WHERE step_id=?", (f"{pid}-REVIEW",)).fetchone()[0] == "COMPLETED"
+    assert "[REVIEW REOPENED]" in c.execute("SELECT log_context FROM Steps WHERE step_id=?", (f"{pid}-REVIEW",)).fetchone()[0]
+
+
+def test_fl019_close_pass_after_recovery(seeded_plan, tmp_db, run_script_fn, tmp_path):
+    """The explicit close path: the sub-step was recovered outside the scripts
+    (no auto-review fired), then agent-review-close pass finalizes it."""
+    pid, child, env = _park_and_fail(seeded_plan, tmp_db, run_script_fn, tmp_path)
+    r = run_script_fn("deviate", {"parent_step_id": child, "justification": "additive kwargs; suite green",
+                                  "sub_steps": ["manual verdict + refresh"]}, tmp_db, env_extra=env)
+    assert r.returncode == 0, r.stderr
+    c = sqlite3.connect(str(tmp_db))
+    c.execute("UPDATE Steps SET status='COMPLETED', completed_at='2026-09-11 00:00:00' WHERE step_id=?", (f"{child}.1",))
+    c.commit(); c.close()
+    r = run_script_fn("agent-review-close", {"plan_id": pid, "outcome": "pass", "summary": "recovered"}, tmp_db, env_extra=env)
+    assert r.returncode == 0, r.stderr
+    c = sqlite3.connect(str(tmp_db))
+    assert c.execute("SELECT status, review_state FROM Plans WHERE plan_id=?", (pid,)).fetchone() == ("COMPLETED", "reviewed")
+    assert c.execute("SELECT status FROM Steps WHERE step_id=?", (f"{pid}-REVIEW",)).fetchone()[0] == "COMPLETED"
+    assert "[AGENT-REVIEW PASS after recovery]" in c.execute("SELECT log_context FROM Steps WHERE step_id=?", (f"{pid}-REVIEW",)).fetchone()[0]
+
+
+def test_fl019_close_pass_refused_without_recovery(seeded_plan, tmp_db, run_script_fn, tmp_path):
+    pid, child, env = _park_and_fail(seeded_plan, tmp_db, run_script_fn, tmp_path)
+    r = run_script_fn("agent-review-close", {"plan_id": pid, "outcome": "pass"}, tmp_db, env_extra=env)
+    assert r.returncode != 0 and "recover" in (r.stderr + r.stdout).lower()
+    assert sqlite3.connect(str(tmp_db)).execute("SELECT status FROM Plans WHERE plan_id=?", (pid,)).fetchone()[0] == "FAILED"

@@ -342,3 +342,186 @@ def test_compute_impact_context_empty_ledger_ok(graph_db):
     ic = impact_preflight.compute_impact_context(
         graph_db, "refactor process", ["pipeline.process"], project="proj")
     assert ic["ledger_reminders"] == []
+
+
+# ── FL-020: a busy graph (review refresh holds the write lock) must degrade ──
+
+def test_fl020_busy_graph_degrades_instead_of_crashing(graph_db, monkeypatch):
+    monkeypatch.setattr(impact_preflight, "BUSY_TIMEOUT_MS", 100)
+    holder = sqlite3.connect(graph_db)
+    holder.execute("BEGIN EXCLUSIVE")           # what init_project.sh's rebuild looks like from outside
+    try:
+        ctx = impact_preflight.compute_impact_context(graph_db, "tweak process", ["pipeline.process"], project="proj")
+    finally:
+        holder.rollback(); holder.close()
+    assert ctx["degraded"] == "graph busy"
+    assert ctx["symbols"] == [] and ctx["upstream_assumptions"] == [] and ctx["ledger_reminders"] == []
+    assert [t["name"] for t in ctx["targets"]] == ["pipeline.process"]     # declared targets kept verbatim
+    assert "graph busy" in ctx["capability_boundary"]
+    # once the lock is gone the same call is a normal, non-degraded context
+    ctx2 = impact_preflight.compute_impact_context(graph_db, "tweak process", ["pipeline.process"], project="proj")
+    assert "degraded" not in ctx2 and ctx2["symbols"][0]["status"] == "existing"
+
+
+def test_connect_is_read_only(graph_db):
+    conn = impact_preflight._connect(graph_db)
+    with pytest.raises(sqlite3.OperationalError):
+        conn.execute("INSERT INTO node_type (name) VALUES ('x')")
+    conn.close()
+
+
+# ── 3.4-A: one-lookup impact — history + reasons + constraints (E2-1 … E2-3, E4-1/E4-2) ──
+
+STORE_PY = Path(__file__).resolve().parents[2] / "project-state-graph" / "scripts" / "analyzer" / "store.py"
+# VERBATIM copy of analyzer/store.py::_HISTORY_SCHEMA (test_history_schema_matches_analyzer guards drift)
+HISTORY_SCHEMA = """
+CREATE TABLE IF NOT EXISTS node_snapshot (
+    id               INTEGER PRIMARY KEY,
+    run_id           INTEGER NOT NULL REFERENCES analysis_run(id),
+    node_key         TEXT NOT NULL,
+    node_type        TEXT NOT NULL,
+    qualified_name   TEXT NOT NULL,
+    file_path        TEXT,
+    line_start       INTEGER,
+    line_end         INTEGER,
+    struct_sig       TEXT,
+    dataflow_sig     TEXT,
+    dataflow_trivial INTEGER NOT NULL DEFAULT 1,
+    attrs_json       TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS node_event (
+    id           INTEGER PRIMARY KEY,
+    run_id       INTEGER NOT NULL REFERENCES analysis_run(id),
+    seq          INTEGER NOT NULL,
+    event_type   TEXT NOT NULL,
+    node_key     TEXT,
+    tier         TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_node_snapshot_run_key ON node_snapshot(run_id, node_key)
+    WHERE node_key <> '';
+CREATE INDEX IF NOT EXISTS idx_node_snapshot_run_qn ON node_snapshot(run_id, node_type, qualified_name);
+CREATE INDEX IF NOT EXISTS idx_node_event_key ON node_event(node_key, run_id);
+CREATE TRIGGER IF NOT EXISTS trg_node_event_no_update BEFORE UPDATE ON node_event
+    BEGIN SELECT RAISE(ABORT, 'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS trg_node_event_no_delete BEFORE DELETE ON node_event
+    BEGIN SELECT RAISE(ABORT, 'append-only'); END;
+CREATE TRIGGER IF NOT EXISTS trg_node_snapshot_no_delete BEFORE DELETE ON node_snapshot
+    BEGIN SELECT RAISE(ABORT, 'append-only'); END;
+"""
+
+
+def test_history_schema_matches_analyzer():
+    assert HISTORY_SCHEMA in STORE_PY.read_text()
+
+
+@pytest.fixture
+def graph_db_with_history(graph_db):
+    """graph_db + analysis_run / node_snapshot / node_event + node.node_key:
+    pipeline.process is nk_a and was node_changed by plan P0; a column of it is nk_c."""
+    c = sqlite3.connect(graph_db)
+    c.executescript("""
+        ALTER TABLE node ADD COLUMN node_key TEXT;
+        CREATE TABLE analysis_run (id INTEGER PRIMARY KEY, project_name TEXT NOT NULL, commit_sha TEXT,
+            started_at TEXT NOT NULL, finished_at TEXT, tool_version TEXT, plan_id TEXT, step_id TEXT, trigger TEXT);
+        INSERT INTO analysis_run VALUES (1, 'proj', 'c0ffee', '2026-09-11T00:00:00+00:00', NULL, '0.1', 'P0', 'P0-REVIEW.1', 'review');
+        INSERT INTO analysis_run VALUES (2, 'proj', 'd0d0', '2026-09-11T01:00:00+00:00', NULL, '0.1', 'P0b', 'P0b-A', 'update');
+    """ + HISTORY_SCHEMA + """
+        UPDATE node SET node_key='nk_a' WHERE qualified_name='pipeline.process';
+        INSERT INTO node_snapshot (run_id, node_key, node_type, qualified_name, file_path, struct_sig, dataflow_sig, dataflow_trivial, attrs_json)
+            VALUES (1, 'nk_a', 'function', 'pipeline.process', 'pipeline.py', 's1', NULL, 1, '{}'),
+                   (1, 'nk_c', 'column', 'pipeline.process:df.amount', 'pipeline.py', NULL, NULL, 1, '{}'),
+                   (2, 'nk_a', 'function', 'pipeline.process', 'pipeline.py', 's2', NULL, 1, '{}');
+        INSERT INTO node_event (run_id, seq, event_type, node_key, tier, payload_json, created_at)
+            VALUES (1, 1, 'node_added', 'nk_a', 'observed', '{}', '2026-09-11T00:00:01+00:00'),
+                   (1, 2, 'node_added', 'nk_c', 'observed', '{}', '2026-09-11T00:00:01+00:00'),
+                   (2, 1, 'node_matched', 'nk_a', 'observed', '{"via": "qualname"}', '2026-09-11T01:00:01+00:00'),
+                   (2, 2, 'node_changed', 'nk_a', 'observed', '{"changed": ["struct_sig"]}', '2026-09-11T01:00:01+00:00');
+    """)
+    c.commit(); c.close()
+    return graph_db
+
+
+def _orch(tmp_path, visibility="shared"):
+    from orchestrator import db as orch_db
+    import ledger_store
+    c = orch_db.open_db(tmp_path / "orch.db")
+    orch_db.run_migrations(c)
+    orch_db.insert_node_reason(c, node_key="nk_a", project="proj", run_id=2, plan_id="P0b", kind="reason",
+                               text="fiscal weeks", source="agent", tier="stated")
+    ledger_store.add_entry(c, project="proj", kind="constraint", statement="exclude region X from the rollup",
+                           rationale="legal hold on region X", subjects=["nk_a"], keywords=["zzz"],
+                           why_ref="https://wiki/decisions/42", why_visibility=visibility)
+    return c
+
+
+@pytest.fixture
+def orch_db(tmp_path):
+    return _orch(tmp_path)
+
+
+@pytest.fixture
+def orch_db_restricted(tmp_path):
+    return _orch(tmp_path, visibility="restricted")
+
+
+def test_e2_1_impact_context_joins_history_reasons_constraints(graph_db_with_history, orch_db):
+    ctx = impact_preflight.compute_impact_context(graph_db_with_history, "tweak process", ["pipeline.process"],
+                                                  project="proj", orch_conn=orch_db)
+    sym = next(s for s in ctx["symbols"] if s["name"] == "pipeline.process")
+    assert sym["status"] == "existing" and sym["node_key"] == "nk_a"
+    assert [h["event_type"] for h in sym["history"]] == ["node_added", "node_matched", "node_changed"]
+    assert sym["history"][-1]["plan_id"] == "P0b" and sym["history"][-1]["step_id"] == "P0b-A"
+    assert sym["history"][-1]["payload"] == {"changed": ["struct_sig"]}
+    assert sym["reasons"][0]["text"] == "fiscal weeks" and sym["reasons"][0]["plan_id"] == "P0b"
+    c = sym["constraints"][0]
+    assert c["statement"].startswith("exclude region") and c["rationale"].startswith("legal hold")
+    assert ctx["constraint_ids"] == [c["id"]]
+    assert isinstance(ctx["approx_tokens"], int) and ctx["approx_tokens"] > 0
+
+
+def test_e2_2_constraint_hit_by_node_key_not_lexical(graph_db_with_history, orch_db):
+    # zero token overlap between the constraint (statement/keywords) and query/targets: still surfaced, hit recorded
+    ctx = impact_preflight.compute_impact_context(graph_db_with_history, "tweak process", ["pipeline.process"],
+                                                  project="proj", orch_conn=orch_db)
+    assert ctx["ledger_reminders"] == []                                   # lexical route found nothing
+    assert len(ctx["symbols"][0]["constraints"]) == 1                      # node_key route did
+    assert orch_db.execute("SELECT hit_count FROM LedgerEntries").fetchone()[0] == 1
+    impact_preflight.compute_impact_context(graph_db_with_history, "tweak process", ["pipeline.process"],
+                                            project="proj", orch_conn=orch_db)
+    assert orch_db.execute("SELECT hit_count FROM LedgerEntries").fetchone()[0] == 2
+    # a symbol without a key gets no constraints; the plan-less call gets nothing from the ledger
+    sym = next(s for s in impact_preflight.compute_impact_context(graph_db_with_history, "", ["mod.alpha"],
+                                                                  project="proj", orch_conn=orch_db)["symbols"])
+    assert sym["node_key"] is None and sym["constraints"] == [] and sym["reasons"] == []
+
+
+def test_e4_2_restricted_why_gives_ref_only(graph_db_with_history, orch_db_restricted):
+    c = impact_preflight.compute_impact_context(graph_db_with_history, "tweak process", ["pipeline.process"],
+                                                project="proj", orch_conn=orch_db_restricted)["symbols"][0]["constraints"][0]
+    assert c["rationale"] is None and c["why_ref"] == "https://wiki/decisions/42" and c["why_visibility"] == "restricted"
+
+
+def test_e2_3_token_budget_reported_and_bounded(graph_db_with_history, orch_db):
+    ctx = impact_preflight.compute_impact_context(graph_db_with_history, "tweak process",
+                                                  ["pipeline.process", "mod.alpha"], project="proj", orch_conn=orch_db)
+    assert ctx["approx_tokens"] == len(json.dumps({k: v for k, v in ctx.items() if k != "approx_tokens"}, default=str)) // 4
+    assert ctx["approx_tokens"] <= 1500 * len(ctx["symbols"]) + 500
+    assert all(len(s["history"]) <= 10 for s in ctx["symbols"])
+
+
+def test_column_target_resolves_via_snapshot(graph_db_with_history):
+    conn = sqlite3.connect(graph_db_with_history); conn.row_factory = sqlite3.Row
+    sym = impact_preflight.verify_symbol(conn, "pipeline.process:df.amount")
+    assert sym["status"] == "existing" and sym["node_key"] == "nk_c" and sym["kind"] == "column"
+    assert [h["event_type"] for h in sym["history"]] == ["node_added"]
+    assert sym["reasons"] == [] and sym["constraints"] == []                # no orch_conn
+    conn.close()
+
+
+def test_verify_symbol_without_history_tables_still_works(graph_db):
+    conn = sqlite3.connect(graph_db); conn.row_factory = sqlite3.Row
+    sym = impact_preflight.verify_symbol(conn, "pipeline.process")
+    assert sym["status"] == "existing" and sym["node_key"] is None and sym["history"] == []
+    conn.close()

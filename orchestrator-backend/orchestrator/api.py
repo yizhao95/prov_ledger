@@ -12,7 +12,7 @@ import sqlite3
 import string
 from datetime import datetime, timezone
 
-from . import circuit_breakers, db, state_machine, telemetry
+from . import circuit_breakers, constraints, db, outcomes, psg_bridge, reasons, state_machine, telemetry
 from .circuit_breakers import HardStop, SoftStop  # noqa: F401  re-export
 from .state_machine import InvalidTransitionError, StepStatus  # noqa: F401
 
@@ -200,37 +200,39 @@ def start_step(conn: sqlite3.Connection, step_id: str) -> dict:
     return db.get_step(conn, step_id)
 
 
-def complete_step(conn: sqlite3.Connection, step_id: str) -> dict:
-    """IN_PROGRESS → COMPLETED, sets completed_at."""
+def complete_step(conn: sqlite3.Connection, step_id: str, commit: bool = True) -> dict:
+    """IN_PROGRESS → COMPLETED, sets completed_at. commit=False joins an
+    enclosing db.transaction (FL-017: status + log land together)."""
     step = db.get_step(conn, step_id)
     if not step:
         raise ValueError(f"step_id not found: {step_id}")
     circuit_breakers.check_immutability(step["status"])  # no double-completing
     state_machine.validate_transition(step["status"], "COMPLETED")
-    db.update_step_status(conn, step_id, "COMPLETED", set_completed=True)
+    db.update_step_status(conn, step_id, "COMPLETED", set_completed=True, commit=commit)
     return db.get_step(conn, step_id)
 
 
-def fail_step(conn: sqlite3.Connection, step_id: str, reason: str = "") -> dict:
+def fail_step(conn: sqlite3.Connection, step_id: str, reason: str = "", commit: bool = True) -> dict:
     """Fail a started step (STARTING/IN_PROGRESS/NEEDS_REVIEW → FAILED).
 
     PENDING steps cannot be failed — the state machine rejects PENDING → FAILED
-    (start the step first). Persists the reason to Steps.failure_reason and the log.
+    (start the step first). Persists the reason to Steps.failure_reason and the
+    log; commit=False joins an enclosing db.transaction.
     """
     step = db.get_step(conn, step_id)
     if not step:
         raise ValueError(f"step_id not found: {step_id}")
     state_machine.validate_transition(step["status"], "FAILED")
-    db.update_step_status(conn, step_id, "FAILED", set_completed=True)
+    db.update_step_status(conn, step_id, "FAILED", set_completed=True, commit=commit)
     if reason:
-        db.set_failure_reason(conn, step_id, reason)
-        telemetry.append_step_log(conn, step_id, f"[FAILED] {reason}")
+        db.set_failure_reason(conn, step_id, reason, commit=commit)
+        telemetry.append_step_log(conn, step_id, f"[FAILED] {reason}", commit=commit)
     return db.get_step(conn, step_id)
 
 
-def append_log(conn: sqlite3.Connection, step_id: str, raw_chunk: str) -> str:
+def append_log(conn: sqlite3.Connection, step_id: str, raw_chunk: str, commit: bool = True) -> str:
     """Append telemetry to step's log_context (with truncation)."""
-    return telemetry.append_step_log(conn, step_id, raw_chunk)
+    return telemetry.append_step_log(conn, step_id, raw_chunk, commit=commit)
 
 
 def complete_plan(conn: sqlite3.Connection, plan_id: str) -> dict:
@@ -303,6 +305,9 @@ def _normalize_project_token(s: str) -> str:
     return re.sub(r"[-_\s]+", "", s.lower())
 
 
+NO_PROJECT_MENTIONED = "no registered project mentioned in goal/steps (FL-014: token match)"
+
+
 def detect_registered_project(
     conn: sqlite3.Connection,
     plan_id: str,
@@ -317,19 +322,31 @@ def detect_registered_project(
     registry is empty/absent).
 
     Deterministic — no LLM. Used by review_and_complete to decide whether plan
-    completion needs an LLM sub-agent review.
+    completion needs an LLM sub-agent review. See _detect_with_reason for the
+    WHY when the answer is None (S1: a skipped review is never silent).
     """
+    return _detect_with_reason(conn, plan_id, registry_path)[0]
+
+
+def _detect_with_reason(
+    conn: sqlite3.Connection,
+    plan_id: str,
+    registry_path=_REGISTRY_DEFAULT,
+) -> tuple[str | None, str]:
+    """(project, why): the registered project the plan mentions, or None plus
+    the reason — 'registry not found at …', 'registry unreadable …',
+    'registry has no projects', or NO_PROJECT_MENTIONED."""
     registry_path = _resolve_registry_path(registry_path)
     if not registry_path or not os.path.exists(registry_path):
-        return None
+        return None, f"registry not found at {registry_path}"
     try:
         with open(registry_path) as f:
             registry = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
+    except (json.JSONDecodeError, OSError) as e:
+        return None, f"registry unreadable at {registry_path}: {e}"
     projects = registry.get("projects", []) if isinstance(registry, dict) else []
     if not projects:
-        return None
+        return None, "registry has no projects"
 
     # Build {normalized_name: canonical_name}, preserving registry order.
     normalized = []
@@ -338,7 +355,7 @@ def detect_registered_project(
         if name:
             normalized.append((_normalize_project_token(name), name))
     if not normalized:
-        return None
+        return None, "registry has no projects"
 
     # Gather plan text: goal + non-review step descriptions.
     plan = db.get_plan(conn, plan_id)
@@ -360,8 +377,8 @@ def detect_registered_project(
     hay_words = [w for w in re.split(r"[-_\s]+", " ".join(texts).lower()) if w]
     for norm_name, canonical in normalized:
         if norm_name and _matches_token_run(hay_words, norm_name):
-            return canonical
-    return None
+            return canonical, "mentioned"
+    return None, NO_PROJECT_MENTIONED
 
 
 def _matches_token_run(words: list[str], target: str) -> bool:
@@ -381,6 +398,71 @@ def _matches_token_run(words: list[str], target: str) -> bool:
             if acc == target:
                 return True
     return False
+
+
+def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str, child,
+                    registry_path, reopened: bool = False) -> dict:
+    """Finalize a reviewed plan as COMPLETED — the close-time capture of spec
+    §2.8/§2.9 (unstated backstop, rejected paths, constraint bypasses) and the
+    terminal writes in ONE transaction; nothing here can block the close.
+    `reopened` (FL-019): the review had FAILED and its child recovered."""
+    project = detect_registered_project(conn, plan_id, registry_path)
+    psg_db = _usable_graph(project, registry_path)
+    with db.transaction(conn):
+        n_unstated = reasons.backstop_unstated(
+            conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
+        n_rejected = reasons.rejected_paths(
+            conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
+        n_bypassed = constraints.bypassed_at_close(
+            conn, project=project, plan_id=plan_id, psg_db_path=psg_db,
+            review_step_id=review_step_id, commit=False) if psg_db else 0
+        db.update_step_status(conn, review_step_id, "COMPLETED", set_completed=True, commit=False)
+        db.update_plan_status(conn, plan_id, "COMPLETED", commit=False)
+        db.set_review_state(conn, plan_id, "reviewed", commit=False)  # BE-D4
+        if reopened:
+            telemetry.append_step_log(
+                conn, review_step_id,
+                f"[REVIEW REOPENED] child {child['step_id']} FAILED but its deviation sub-tree recovered; "
+                "closing COMPLETED (FL-019)", commit=False)
+    if project and psg_db is None:
+        telemetry.append_step_log(
+            conn, review_step_id,
+            f"[REASONS] state graph unavailable for project {project!r} — no reason slots generated")
+    # Spec §3.5 (path C): the close of a registered-project plan backfills the
+    # OTHER plans' pending expectations — observed / survival / none_available.
+    # Its own transaction; a failure here is logged, never a blocked close.
+    backfilled: dict = {}
+    if project:
+        try:
+            backfilled = outcomes.backfill(conn, project, psg_db, plan_id)
+            if any(backfilled.get(k) for k in ("observed", "survival", "none_available")):
+                telemetry.append_step_log(conn, review_step_id, f"[OUTCOMES] backfilled {backfilled}")
+        except Exception as exc:  # pragma: no cover - defensive
+            telemetry.append_step_log(conn, review_step_id, f"[OUTCOMES] backfill failed: {exc}")
+            backfilled = {"error": str(exc)}
+    return {
+        "ready": True,
+        "plan_status": "COMPLETED",
+        "review_step_id": review_step_id,
+        "review_status": "COMPLETED",
+        "review_child_step_id": child["step_id"],
+        "reason": ("agent review child step recovered after FAILED; finalizing plan COMPLETED" if reopened
+                   else "agent review child step COMPLETED; finalizing plan COMPLETED"),
+        "reopened": reopened,
+        "unstated_backstopped": n_unstated,
+        "rejected_paths": n_rejected,
+        "constraints_bypassed": n_bypassed,
+        "outcomes_backfilled": backfilled,
+    }
+
+
+def _usable_graph(project: str | None, registry_path) -> str | None:
+    """db_path of the project's state graph when it is registered AND present
+    on disk; None otherwise (callers log 'state graph unavailable')."""
+    if not project:
+        return None
+    path = psg_bridge.db_path_for(project, _resolve_registry_path(registry_path))
+    return path if path and os.path.exists(path) else None
 
 
 def _open_agent_review(conn: sqlite3.Connection, plan_id: str, review_step_id: str) -> str:
@@ -471,8 +553,14 @@ def review_and_complete(
     review_step_id = review_row["step_id"]
     review_status = review_row["status"]
 
-    # Idempotency: if review step already finalized, return current state
+    # Idempotency: if review step already finalized, return current state —
+    # EXCEPT (FL-019) a FAILED review whose child REVIEW.1 has since been
+    # recovered through a deviation sub-tree: that is a re-open, not a no-op.
     if review_status in TERMINAL_STEP_STATES:
+        if review_status == "FAILED":
+            child = next(iter(db.get_children(conn, review_step_id)), None)
+            if child is not None and child["status"] == "FAILED" and _is_step_recovered(conn, child["step_id"]):
+                return _close_reviewed(conn, plan_id, review_step_id, child, registry_path, reopened=True)
         plan_row = db.get_plan(conn, plan_id)
         return {
             "ready": True,
@@ -504,17 +592,11 @@ def review_and_complete(
                 "reason": "review awaiting agent; child review step (re)created",
             }
         if child["status"] == "COMPLETED":
-            db.update_step_status(conn, review_step_id, "COMPLETED", set_completed=True)
-            db.update_plan_status(conn, plan_id, "COMPLETED")
-            db.set_review_state(conn, plan_id, "reviewed")  # BE-D4
-            return {
-                "ready": True,
-                "plan_status": "COMPLETED",
-                "review_step_id": review_step_id,
-                "review_status": "COMPLETED",
-                "review_child_step_id": child["step_id"],
-                "reason": "agent review child step COMPLETED; finalizing plan COMPLETED",
-            }
+            return _close_reviewed(conn, plan_id, review_step_id, child, registry_path)
+        if child["status"] == "FAILED" and _is_step_recovered(conn, child["step_id"]):
+            # FL-019: the review child failed, the agent recovered it through a
+            # deviation sub-tree (judged + fixed) — close as reviewed.
+            return _close_reviewed(conn, plan_id, review_step_id, child, registry_path, reopened=True)
         if child["status"] == "FAILED":
             db.update_step_status(conn, review_step_id, "FAILED", set_completed=True)
             db.update_plan_status(conn, plan_id, "FAILED")
@@ -628,8 +710,11 @@ def review_and_complete(
     # LLM-review routing: when the plan WOULD close COMPLETED and it mentions a
     # registered project, defer the close to an agent review instead. The FAILED
     # path is never intercepted — unrecovered failures propagate immediately.
+    # S1 (spec §2.10): when we do NOT review, the reason is written down.
+    review_skipped: str | None = None
     if new_plan_status == "COMPLETED":
-        project = detect_registered_project(conn, plan_id, registry_path)
+        project, why = _detect_with_reason(conn, plan_id, registry_path)
+        review_skipped = why if project is None else None
         if project is not None:
             child_id = _open_agent_review(conn, plan_id, review_step_id)
             return {
@@ -647,15 +732,23 @@ def review_and_complete(
                 ),
             }
 
-    # Apply writes: review step status first, then plan status.
-    # Use db.update_step_status with set_completed=True so completed_at gets set.
-    db.update_step_status(conn, review_step_id, new_review_status, set_completed=True)
-    db.update_plan_status(conn, plan_id, new_plan_status)
+    # Apply writes: review step status first, then plan status — plus the
+    # skip reason (column + log line) in the SAME transaction, so a plan can
+    # never end up COMPLETED without saying why it was not reviewed.
+    with db.transaction(conn):
+        db.update_step_status(conn, review_step_id, new_review_status, set_completed=True, commit=False)
+        db.update_plan_status(conn, plan_id, new_plan_status, commit=False)
+        if review_skipped:
+            db.set_review_skip_reason(conn, plan_id, review_skipped, commit=False)
+            telemetry.append_step_log(conn, review_step_id, f"[REVIEW SKIPPED] {review_skipped}", commit=False)
 
-    return {
+    out = {
         "ready": True,
         "plan_status": new_plan_status,
         "review_step_id": review_step_id,
         "review_status": new_review_status,
         "reason": reason,
     }
+    if review_skipped:
+        out["review_skipped"] = review_skipped
+    return out

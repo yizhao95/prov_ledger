@@ -64,6 +64,9 @@ def test_unregistered_plan_closes_as_before(conn, tmp_path):
     assert result["plan_status"] == "COMPLETED"
     assert db.get_step(conn, review_id)["status"] == "COMPLETED"
     assert db.get_plan(conn, "p-unreg")["status"] == "COMPLETED"
+    # S1 (phase 3): skipping the review is never silent
+    assert result["review_skipped"].startswith("no registered project mentioned")
+    assert db.get_plan(conn, "p-unreg")["review_skip_reason"] == result["review_skipped"]
 
 
 def test_idempotent_when_already_needs_review(conn, tmp_path):

@@ -130,7 +130,10 @@ def test_full_lifecycle(tmp_path):
 
     # ── 10. step C: start + complete ───────────────────────────────────
     _run(EXEC / "start-step.sh",    {"step_id": sc, "type": "COMMAND"}, db_path, tmp_path)
-    _run(EXEC / "complete-step.sh", {"step_id": sc, "summary": "C done"}, db_path, tmp_path)
+    # S2 / E6-2 (phase 3): a COMMAND step closes only with run-step's exit-code
+    # footer as evidence — hand-completing a shell step is refused (exit 5).
+    _run(EXEC / "complete-step.sh", {"step_id": sc, "summary": "C done",
+                                     "log_context": "echo hi\nhi\n--- exit_code=0, runtime=0s ---"}, db_path, tmp_path)
 
     # ── 11. finish the plan ────────────────────────────────────────────
     _run(EXEC / "finish-plan.sh", {"plan_id": pid}, db_path, tmp_path)

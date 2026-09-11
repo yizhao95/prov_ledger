@@ -333,6 +333,102 @@ def insert_step(
         conn.commit()
 
 
+# ── Reasons / expectations / outcomes (migration 014) ─────────────────────────
+# The "why" (node_reason) and the "did it work" (expectations → outcomes) that no
+# analysis can recover. All three tables are append-only by trigger; text NULL in
+# node_reason means explicitly UNSTATED — never fabricated, never blocking.
+VALID_REASON_KINDS = ("reason", "rejected_path", "constraint_ref")
+VALID_REASON_SOURCES = ("agent", "human", "system")
+VALID_REASON_TIERS = ("stated", "asserted", "derived")
+
+
+def insert_node_reason(
+    conn: sqlite3.Connection,
+    *,
+    node_key: str | None,
+    project: str,
+    run_id: int | None,
+    plan_id: str,
+    kind: str,
+    text: str | None,
+    source: str,
+    tier: str,
+    step_id: str | None = None,
+    commit: bool = True,
+) -> int:
+    """Append one reason row keyed by PSG node_key (survives renames). Raises
+    ValueError on a bad kind/source/tier before touching the DB; the table's
+    CHECK rejects an unanchored row unless kind == 'rejected_path'."""
+    if kind not in VALID_REASON_KINDS or source not in VALID_REASON_SOURCES or tier not in VALID_REASON_TIERS:
+        raise ValueError(f"node_reason: bad kind/source/tier {kind!r}/{source!r}/{tier!r}")
+    cur = conn.execute(
+        "INSERT INTO node_reason (node_key, project, run_id, plan_id, step_id, kind, text, source, tier) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        (node_key, project, run_id, plan_id, step_id, kind, text, source, tier))
+    if commit:
+        conn.commit()
+    return int(cur.lastrowid)
+
+
+def get_node_reasons(conn: sqlite3.Connection, *, node_key: str | None = None,
+                     plan_id: str | None = None) -> list[dict]:
+    where, args = [], []
+    if node_key is not None:
+        where.append("node_key = ?"); args.append(node_key)
+    if plan_id is not None:
+        where.append("plan_id = ?"); args.append(plan_id)
+    sql = "SELECT * FROM node_reason" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY id"
+    return [dict(r) for r in conn.execute(sql, args)]
+
+
+def set_review_skip_reason(conn: sqlite3.Connection, plan_id: str, reason: str,
+                           commit: bool = True) -> None:
+    """Record WHY review_and_complete did not review a plan (S1: never silent)."""
+    conn.execute("UPDATE Plans SET review_skip_reason = ? WHERE plan_id = ?", (reason, plan_id))
+    if commit:
+        conn.commit()
+
+
+def insert_expectation(conn: sqlite3.Connection, *, plan_id: str, step_id: str | None, project: str,
+                       target: str, target_kind: str, claim: str, channel: str,
+                       commit: bool = True) -> int:
+    cur = conn.execute(
+        "INSERT INTO expectations (plan_id, step_id, project, target, target_kind, claim, channel) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (plan_id, step_id, project, target, target_kind, claim, channel))
+    if commit:
+        conn.commit()
+    return int(cur.lastrowid)
+
+
+def get_pending_expectations(conn: sqlite3.Connection, project: str, *, exclude_plan_id: str,
+                             kind: str) -> list[dict]:
+    """Expectations of OTHER plans of `project` that have no outcome of `kind` yet."""
+    return [dict(r) for r in conn.execute(
+        """SELECT e.* FROM expectations e
+           WHERE e.project = ? AND e.plan_id <> ?
+             AND NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.expectation_id = e.id AND o.kind = ?)
+           ORDER BY e.id""", (project, exclude_plan_id, kind))]
+
+
+def insert_outcome(conn: sqlite3.Connection, *, expectation_id: int, kind: str, value,
+                   source: str, tier: str, reason: str | None = None,
+                   backfilled_by_plan: str | None = None, commit: bool = True) -> int:
+    cur = conn.execute(
+        "INSERT INTO outcomes (expectation_id, kind, value_json, source, tier, reason, backfilled_by_plan) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (expectation_id, kind, json.dumps(value, sort_keys=True, default=str), source, tier, reason,
+         backfilled_by_plan))
+    if commit:
+        conn.commit()
+    return int(cur.lastrowid)
+
+
+def get_outcomes(conn: sqlite3.Connection, expectation_id: int) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM outcomes WHERE expectation_id = ? ORDER BY id", (expectation_id,))]
+
+
 def get_step(conn: sqlite3.Connection, step_id: str) -> dict | None:
     row = conn.execute("SELECT * FROM Steps WHERE step_id = ?", (step_id,)).fetchone()
     return dict(row) if row else None
@@ -378,7 +474,8 @@ def update_step_status(
         conn.commit()
 
 
-def set_failure_reason(conn: sqlite3.Connection, step_id: str, reason: str) -> None:
+def set_failure_reason(conn: sqlite3.Connection, step_id: str, reason: str,
+                       commit: bool = True) -> None:
     """Persist a step's failure reason as a first-class column (BE-D3).
 
     Survives log_context truncation; the dashboard reads this directly.
@@ -387,7 +484,8 @@ def set_failure_reason(conn: sqlite3.Connection, step_id: str, reason: str) -> N
         "UPDATE Steps SET failure_reason = ?, updated_at = ? WHERE step_id = ?",
         (reason, _now(), step_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def update_step_log(conn: sqlite3.Connection, step_id: str, log_context: str) -> None:

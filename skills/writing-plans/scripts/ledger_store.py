@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 """ledger_store.py — provLedger Phase E manual decision-memory store.
 
-The "ledger track": stores DECISIONS (+ rationale) and ANTI-PATTERNS (failures +
-cause) scoped to a project, with subject symbols/tables + free keywords used for
-plan-time fuzzy matching. Populated by MANUAL entries (ledger_cli.py) — gradual,
+The "ledger track": stores DECISIONS (+ rationale), ANTI-PATTERNS (failures +
+cause) and CONSTRAINTS (externally imposed rules anchored to data points) scoped
+to a project, with subject symbols/tables/node_keys + free keywords used for
+plan-time matching. Populated by MANUAL entries (ledger_cli.py) — gradual,
 opt-in, never auto-populated.
+
+Constraints (spec §2.9): `subjects` may carry PSG node_keys (nk_…) or
+owner.column names; constraints_for matches them EXACTLY, never lexically.
+`why_ref` points at the source of the WHY (meeting notes, decision doc);
+`why_visibility='restricted'` keeps the rationale inside the ledger — only the
+reference leaves. No category taxonomy lives here (E4-4): anything beyond
+`kind` is a free keyword.
 
 Stdlib only (sqlite3 + json). Rows are returned as plain dicts with `subjects`
 and `keywords` already decoded from JSON into lists.
@@ -18,7 +26,8 @@ import json
 import sqlite3
 from typing import List, Optional
 
-VALID_KINDS = ("decision", "anti_pattern")
+VALID_KINDS = ("decision", "anti_pattern", "constraint")
+VALID_VISIBILITY = ("shared", "restricted")
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
@@ -33,22 +42,51 @@ def add_entry(conn: sqlite3.Connection, *, project: str, kind: str,
               subjects: Optional[List[str]] = None,
               keywords: Optional[List[str]] = None,
               source: str = "manual",
-              plan_id: Optional[str] = None) -> int:
+              plan_id: Optional[str] = None,
+              why_ref: Optional[str] = None,
+              why_visibility: str = "shared") -> int:
     """Insert one ledger entry. Returns the new row id. Raises ValueError on a
-    bad kind (caught before hitting the DB so callers get a clean message).
+    bad kind / visibility (caught before hitting the DB so callers get a clean
+    message).
 
     `plan_id` (SK-D1) records the provenance plan that produced this decision.
+    `why_ref` / `why_visibility` (migration 015) anchor the WHY to an external
+    reference and say whether the rationale may leave the ledger.
     """
     if kind not in VALID_KINDS:
         raise ValueError(f"invalid kind {kind!r}; must be one of {VALID_KINDS}")
+    if why_visibility not in VALID_VISIBILITY:
+        raise ValueError(f"invalid why_visibility {why_visibility!r}; must be one of {VALID_VISIBILITY}")
     cur = conn.execute(
         "INSERT INTO LedgerEntries "
-        "(project, kind, subjects, keywords, statement, rationale, source, plan_id) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "(project, kind, subjects, keywords, statement, rationale, source, plan_id, why_ref, why_visibility) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (project, kind, json.dumps(subjects or []), json.dumps(keywords or []),
-         statement, rationale, source, plan_id))
+         statement, rationale, source, plan_id, why_ref, why_visibility))
     conn.commit()
     return int(cur.lastrowid)
+
+
+def constraints_for(conn: sqlite3.Connection, project: str,
+                    node_keys: List[str]) -> List[dict]:
+    """Active constraint entries whose subjects contain ANY of `node_keys` —
+    exact match on the anchor, never lexical. A restricted entry comes back
+    with rationale=None: only why_ref leaves the ledger."""
+    keys = [k for k in (node_keys or []) if k]
+    if not keys:
+        return []
+    rows = conn.execute(
+        "SELECT DISTINCT l.* FROM LedgerEntries l, json_each(l.subjects) s "
+        "WHERE l.project = ? AND l.kind = 'constraint' AND l.status = 'active' "
+        f"AND s.value IN ({','.join('?' * len(keys))}) ORDER BY l.id",
+        (project, *keys)).fetchall()
+    out = []
+    for r in rows:
+        d = _row_to_dict(r)
+        if d.get("why_visibility") == "restricted":
+            d["rationale"] = None
+        out.append(d)
+    return out
 
 
 def get_entries(conn: sqlite3.Connection, project: str, *,

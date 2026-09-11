@@ -70,6 +70,10 @@ def _fingerprint_function(node: ast.FunctionDef | ast.AsyncFunctionDef,
     for p in (a.posonlyargs + a.args + a.kwonlyargs):
         if p.annotation is not None:
             annotations[p.arg] = _annotation_str(p.annotation)
+    # FL-018: which params carry a default — an ADDED param with a default (or
+    # an added **kwargs) does not break any caller and must not be reported.
+    defaulted = set(positional[len(positional) - len(a.defaults):] if a.defaults else [])
+    defaulted |= {p.arg for p, d in zip(a.kwonlyargs, a.kw_defaults) if d is not None}
     return {
         "qualified_name": qualified_name,
         "positional": positional,
@@ -77,6 +81,7 @@ def _fingerprint_function(node: ast.FunctionDef | ast.AsyncFunctionDef,
         "star_args": a.vararg is not None,
         "kwstar": a.kwarg is not None,
         "annotations": annotations,
+        "defaulted": sorted(defaulted),
         "returns": _annotation_str(node.returns),
     }
 
@@ -118,6 +123,11 @@ def compare_signatures(base: dict[str, dict], head: dict[str, dict]) -> list[dic
 
     Functions present on only one side are NOT reported (rename is handled by the
     reviewer's changed_symbols path). Body-only changes produce no entry.
+
+    FL-018: ADDITIVE changes are compatible and produce no entry — new trailing
+    positional params that all carry defaults, new keyword-only params with
+    defaults, a new **kwargs. Removing, reordering, dropping a default, adding a
+    required param or changing an annotation are still `signature_changed`.
     """
     changes: list[dict] = []
     for qname in sorted(set(base) & set(head)):
@@ -128,7 +138,10 @@ def compare_signatures(base: dict[str, dict], head: dict[str, dict]) -> list[dic
             or b["star_args"] != h["star_args"]
             or b["kwstar"] != h["kwstar"]
             or b["annotations"] != h["annotations"]
+            or b.get("defaulted", []) != h.get("defaulted", [])
         )
+        if sig_differs and _is_additive(b, h):
+            sig_differs = False
         if sig_differs:
             changes.append({"qualified_name": qname,
                             "change_kind": "signature_changed"})
@@ -136,6 +149,31 @@ def compare_signatures(base: dict[str, dict], head: dict[str, dict]) -> list[dic
             changes.append({"qualified_name": qname,
                             "change_kind": "return_contract_changed"})
     return changes
+
+
+def _is_additive(b: dict, h: dict) -> bool:
+    """True when `h` only ADDS optional surface to `b` (FL-018)."""
+    bd, hd = set(b.get("defaulted", [])), set(h.get("defaulted", []))
+    if h["positional"][:len(b["positional"])] != b["positional"]:
+        return False
+    new_pos = h["positional"][len(b["positional"]):]
+    if any(p not in hd for p in new_pos):
+        return False                       # a new REQUIRED positional param
+    if not set(b["kwonly"]) <= set(h["kwonly"]):
+        return False                       # a keyword-only param disappeared
+    new_kw = [k for k in h["kwonly"] if k not in b["kwonly"]]
+    if any(k not in hd for k in new_kw):
+        return False                       # a new REQUIRED keyword-only param
+    if not bd <= hd:
+        return False                       # an existing default was dropped
+    if b["star_args"] != h["star_args"]:
+        return False
+    if b["kwstar"] and not h["kwstar"]:
+        return False                       # **kwargs removed
+    old_params = set(b["positional"]) | set(b["kwonly"])
+    if b["annotations"] != {k: v for k, v in h["annotations"].items() if k in old_params}:
+        return False                       # an existing param's annotation changed or appeared
+    return True
 
 
 # ── shared graph helpers ─────────────────────────────────────────────────────────
@@ -194,6 +232,34 @@ def _file_of(conn: sqlite3.Connection, name: str,
     return rows[0][0] if len(rows) == 1 else None
 
 
+def _weakly_linked_callers(conn: sqlite3.Connection, qualified_name: str,
+                           module: Optional[str] = None) -> set[str]:
+    """Names of callers whose ONLY calls edge onto `qualified_name` is not
+    high-confidence (FL-018: bare-name resolution guesses). Empty when the
+    graph records no calls edges / no confidence (legacy graphs)."""
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(edge)")}
+    except sqlite3.OperationalError:
+        return set()
+    if "confidence" not in cols:
+        return set()
+    target = None
+    for q in ([f"{module}.{qualified_name}"] if module else []) + [qualified_name]:
+        row = conn.execute("SELECT id FROM node WHERE qualified_name = ?", (q,)).fetchone()
+        if row:
+            target = row[0]
+            break
+    if target is None:
+        return set()
+    best: dict[str, str] = {}
+    for name, conf in conn.execute(
+            """SELECT s.name, e.confidence FROM edge e JOIN edge_type t ON e.edge_type_id = t.id
+               JOIN node s ON s.id = e.src_node_id WHERE t.name = 'calls' AND e.dst_node_id = ?""", (target,)):
+        strong = conf is None or conf == "high"
+        best[name] = "high" if (strong or best.get(name) == "high") else "weak"
+    return {n for n, c in best.items() if c == "weak"}
+
+
 def _verdict(gaps: list[dict], clean_text: str, header: str) -> dict:
     """Assemble {ok, gaps, text}. ok is False iff any gap has severity 'fail'."""
     if not gaps:
@@ -247,9 +313,16 @@ def signature_contract(db_path: str, repo: str, base: str, head: str) -> dict:
             dependents = list(card.get("callers", []))
             if ch["change_kind"] == "return_contract_changed":
                 dependents += list(card.get("output_consumers", []))
+            # FL-018: a caller that reached this function only through an
+            # INFERRED (bare-name) calls edge is a guess, not a dependent.
+            weak = _weakly_linked_callers(conn, qname, module=ch.get("module"))
             for dep in sorted(set(dependents)):
+                if dep in weak:
+                    continue
                 dep_file = _file_of(conn, dep)
-                in_diff = dep_file in files if dep_file else False
+                if dep_file is None:
+                    continue           # ambiguous bare name — never guess a file
+                in_diff = dep_file in files
                 severity = "warning" if in_diff else "fail"
                 gaps.append({
                     "kind": ch["change_kind"],

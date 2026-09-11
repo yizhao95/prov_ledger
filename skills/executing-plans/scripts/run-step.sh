@@ -128,31 +128,29 @@ END_NS=$(date +%s)
 RUNTIME=$(( END_NS - START_NS ))
 
 # ---- 3. truncate + 4. footer ----
-TRUNCATED_LOG="$(${PYBIN} "${SCRIPT_DIR}/_truncate_log.py" < "${LOG_TMP}")"
+# E6-5 / FL-017: the captured bytes may not be valid UTF-8 — decode with
+# errors="replace" INSIDE Python (bash argv would carry the raw bytes through
+# and crash the JSON write after the status had already been committed).
 FOOTER=$'\n--- exit_code='"${EXIT_CODE}"', runtime='"${RUNTIME}"$'s ---'
-FINAL_LOG="${TRUNCATED_LOG}${FOOTER}"
+TRUNC_TMP="${TMPDIR:-/tmp}/orch-rs-trunc-$$-${RANDOM}.log"
+"${PYBIN}" "${SCRIPT_DIR}/_truncate_log.py" < "${LOG_TMP}" > "${TRUNC_TMP}"
+FINAL_LEN=$(( $(wc -c < "${TRUNC_TMP}") + ${#FOOTER} ))
 
 # ---- 5. complete-step OR fail-step ----
 COMPLETE_TMP="${TMPDIR:-/tmp}/orch-rs-fin-$$-${RANDOM}.json"
-if [[ $EXIT_CODE -eq 0 ]]; then
-    "${PYBIN}" -c "
+trap 'rm -f "${START_TMP}" "${LOG_TMP:-}" "${TRUNC_TMP:-}" "${COMPLETE_TMP:-}"' EXIT
+"${PYBIN}" - "${STEP_ID}" "${SUMMARY}" "${EXIT_CODE}" "${TRUNC_TMP}" "${FOOTER}" > "${COMPLETE_TMP}" <<'PYEOF'
 import json, sys
-print(json.dumps({
-    'step_id': sys.argv[1],
-    'summary': sys.argv[2],
-    'log_context': sys.argv[3],
-}))
-" "${STEP_ID}" "${SUMMARY}" "${FINAL_LOG}" > "${COMPLETE_TMP}"
+step_id, summary, exit_code, trunc_path, footer = sys.argv[1:6]
+log = open(trunc_path, "rb").read().decode("utf-8", errors="replace") + footer
+if exit_code == "0":
+    print(json.dumps({"step_id": step_id, "summary": summary, "log_context": log}))
+else:
+    print(json.dumps({"step_id": step_id, "reason": f"exit_code={exit_code}", "log_context": log}))
+PYEOF
+if [[ $EXIT_CODE -eq 0 ]]; then
     "${SCRIPT_DIR}/complete-step.sh" "${COMPLETE_TMP}" >/dev/null
 else
-    "${PYBIN}" -c "
-import json, sys
-print(json.dumps({
-    'step_id': sys.argv[1],
-    'reason':  f'exit_code={sys.argv[2]}',
-    'log_context': sys.argv[3],
-}))
-" "${STEP_ID}" "${EXIT_CODE}" "${FINAL_LOG}" > "${COMPLETE_TMP}"
     "${SCRIPT_DIR}/fail-step.sh" "${COMPLETE_TMP}" >/dev/null
 fi
 
@@ -167,7 +165,7 @@ print(json.dumps({
     'log_chars': int(sys.argv[3]),
     'truncated': sys.argv[4] == 'true',
 }))
-" "${STEP_ID}" "${EXIT_CODE}" "${#FINAL_LOG}" \
-    "$([[ ${#FINAL_LOG} -gt 16500 ]] && echo true || echo false)"
+" "${STEP_ID}" "${EXIT_CODE}" "${FINAL_LEN}" \
+    "$([[ ${FINAL_LEN} -gt 16500 ]] && echo true || echo false)"
 
 exit $EXIT_CODE

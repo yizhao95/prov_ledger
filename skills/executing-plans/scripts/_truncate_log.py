@@ -40,5 +40,7 @@ def head_tail_truncate(text: str, cap: int = DEFAULT_CAP) -> str:
 
 if __name__ == "__main__":  # pragma: no cover — manual smoke
     import sys
-    content = sys.stdin.read()
-    sys.stdout.write(head_tail_truncate(content))
+    # E6-5 / FL-017: a wrapped command may print bytes that are not UTF-8;
+    # replace them (U+FFFD) instead of dying — the step must still close.
+    content = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    sys.stdout.buffer.write(head_tail_truncate(content).encode("utf-8", errors="replace"))

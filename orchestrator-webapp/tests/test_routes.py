@@ -206,3 +206,74 @@ def test_db_is_opened_read_only(client):
     with pytest.raises(sqlite3.OperationalError):
         conn.execute("INSERT INTO Plans (plan_id, original_goal) VALUES ('x', 'y')")
     conn.close()
+
+
+# ── 3.7-A: tier badges, reasons panel, unstated tile (E3-1 / E3-2 / E3-3) ──
+
+def _insert_reasons(db_path, plan_id):
+    conn = odb.open_db(db_path)
+    rows = [("nk_obs", "constraint_ref", "constraint_bypassed:1: exclude region X", "system", "derived"),
+            ("nk_ast", "rejected_path", "TimeSeriesSplit leaked future rows", "agent", "asserted"),
+            ("nk_sta", "reason", "fiscal weeks", "agent", "stated"),
+            ("nk_uns", "reason", None, "system", "derived")]
+    for key, kind, text, source, tier in rows:
+        odb.insert_node_reason(conn, node_key=key, project="demo", run_id=1, plan_id=plan_id, kind=kind,
+                               text=text, source=source, tier=tier)
+    conn.close()
+
+
+def test_e3_1_tier_badges_distinct_without_color(client):
+    _insert_reasons(client._db, client._seeded["plan_id"])
+    r = client.get("/api/dashboard")
+    assert r.status_code == 200 and "🧭 Reasons" in r.text
+    for tier in ("derived", "asserted", "stated", "unstated"):
+        assert f'data-tier="{tier}"' in r.text and f">{tier}<" in r.text, tier
+    assert "— unstated —" in r.text and "fiscal weeks" in r.text and "nk_uns" in r.text
+    # observed is a known tier even when no row carries it
+    from app import queries
+    assert queries.tier_badge("observed")[0] == "observed" and queries.tier_badge(None)[0] == "unstated"
+    assert len({queries.tier_badge(t)[0] for t in ("observed", "derived", "asserted", "stated", "unstated")}) == 5
+
+
+def test_e3_2_failed_step_stays_visible_after_plan_completes(client):
+    """The seeded plan has a FAILED step with a recovered deviation; finishing the
+    plan must not hide the failure."""
+    seeded = client._seeded
+    conn = odb.open_db(client._db)
+    s1, s2 = seeded["step_ids"][1], seeded["step_ids"][2]
+    # recover s1's failure through its sub-step, finish s2, close the plan
+    api.evaluate_and_update_plan(conn, deviation_detected=True, target_step_id=s1,
+                                 justification="rerun with the new schema", new_sub_steps=["rerun ingest"])
+    odb.update_step_status(conn, f"{s1}.1", "COMPLETED", set_completed=True)
+    odb.update_step_status(conn, f"{s2}.1", "COMPLETED", set_completed=True)
+    api.complete_step(conn, s2)
+    odb.insert_review_step(conn, seeded["plan_id"])        # initialize_plan has no review row; publish-plan adds it
+    out = api.review_and_complete(conn, seeded["plan_id"], registry_path=str(client._db.parent / "absent.json"))
+    assert out["plan_status"] == "COMPLETED", out
+    conn.close()
+    r = client.get("/api/dashboard")
+    assert "COMPLETED" in r.text and "FAILED" in r.text and "never hidden" in r.text
+    assert "upstream schema changed" in r.text
+
+
+def test_e3_3_no_non_get_routes():
+    from app import main
+    for route in main.app.routes:
+        methods = getattr(route, "methods", None) or {"GET"}
+        assert set(methods) <= {"GET", "HEAD"}, (route.path, methods)
+
+
+def test_unstated_tile_and_etag(client):
+    r0 = client.get("/api/dashboard")
+    etag0 = r0.headers["etag"]
+    assert "unstated" in r0.text            # the tile is always there (0 when nothing recorded)
+    _insert_reasons(client._db, client._seeded["plan_id"])
+    r1 = client.get("/api/dashboard", headers={"If-None-Match": etag0})
+    assert r1.status_code == 200 and r1.headers["etag"] != etag0      # a node_reason row invalidates the etag
+    assert "1/2" in r1.text or "50%" in r1.text                        # slots 2 (nk_sta, nk_uns), unstated 1
+    from app import queries
+    conn = odb.open_db(client._db)
+    assert queries.get_unstated(conn, client._seeded["plan_id"]) == {"slots": 2, "unstated": 1, "pct": 50}
+    rows = queries.get_node_reasons(conn, client._seeded["plan_id"])
+    assert [r["display_tier"] for r in rows] == ["derived", "asserted", "stated", "unstated"]
+    conn.close()

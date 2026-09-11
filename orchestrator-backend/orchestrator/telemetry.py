@@ -42,8 +42,11 @@ def append_step_log(
     step_id: str,
     raw_chunk: str,
     separator: str = "\n---\n",
+    commit: bool = True,
 ) -> str:
-    """Append a chunk of telemetry to the step's log_context. Returns the new log_context."""
+    """Append a chunk of telemetry to the step's log_context. Returns the new
+    log_context. commit=False lets the append join an enclosing db.transaction
+    (status + log land together or not at all — FL-017)."""
     cur = conn.execute("SELECT log_context FROM Steps WHERE step_id = ?", (step_id,))
     row = cur.fetchone()
     if row is None:
@@ -54,5 +57,6 @@ def append_step_log(
     # Re-truncate combined log to keep it bounded
     final = truncate_for_log(combined)
     conn.execute("UPDATE Steps SET log_context = ? WHERE step_id = ?", (final, step_id))
-    conn.commit()
+    if commit:
+        conn.commit()
     return final

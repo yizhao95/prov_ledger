@@ -12,7 +12,7 @@ user's input file. This module:
     with a friendly stderr message naming the offending field
 
 Op enum: start-step, complete-step, fail-step, append-log, deviate,
-         record-skill, finish-plan
+         record-skill, finish-plan, agent-review-close, reason-slots, reason-fill
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ _DEV_ORCH = Path.home() / "skill-workspace" / "orchestrator"
 ORCH_ROOT = _BUNDLED_ORCH if (_BUNDLED_ORCH / "orchestrator" / "__init__.py").exists() else _DEV_ORCH
 sys.path.insert(0, str(ORCH_ROOT))
 
-from orchestrator import api, db  # noqa: E402
+from orchestrator import api, db, psg_bridge, reasons  # noqa: E402
 
 VALID_SKILL_SOURCES = {"iron-law", "auto-search", "explicit-mention", "deferred-load"}
 VALID_STEP_TYPES = {"THINKING", "ANALYSIS", "CODE", "COMMAND", "DOCUMENTATION", "SUB_AGENT"}
@@ -146,8 +146,25 @@ def _op_complete_step(conn, data: dict) -> dict:
     summary = data.get("summary")
     agent_output = data.get("agent_output")
     log_context = data.get("log_context")
+    # S2 / E6-2: a COMMAND step is only ever completed by run-step.sh — the
+    # exit-code footer is the evidence. Hand-completing a shell step is how a
+    # command that never ran got marked COMPLETED (phase-1 dogfood).
+    step = db.get_step(conn, step_id)
+    if step and step.get("step_type") == "COMMAND":
+        evidence = (log_context or "") + "\n" + (step.get("log_context") or "")
+        if "--- exit_code=" not in evidence:
+            _die("COMMAND steps complete only through run-step.sh (exit-code evidence missing). "
+                 "Re-run the command via scripts/run-step.sh, or set type to CODE/ANALYSIS if this is not a shell step.",
+                 code=5)
+    # FL-017: status + inline log are ONE transaction — a step is never marked
+    # COMPLETED with its evidence lost (the old code committed the status, then
+    # crashed in append_log on e.g. invalid UTF-8).
     try:
-        result = api.complete_step(conn, step_id)
+        with db.transaction(conn):
+            result = api.complete_step(conn, step_id, commit=False)
+            if log_context:
+                api.append_log(conn, step_id, log_context, commit=False)
+                result["log_chars_appended"] = len(log_context)
     except Exception as e:
         _die(f"complete_step failed: {e}")
     if summary:
@@ -156,13 +173,6 @@ def _op_complete_step(conn, data: dict) -> dict:
     if agent_output:
         db.set_agent_output(conn, step_id, agent_output)
         result["agent_output_recorded"] = True
-    # Inline log capture (Bug 2 fix): no need for a separate append-log call.
-    # Goes through the same api.append_log used by append-log.sh, so the same
-    # `--- ts ---\n<chunk>\n` delimiter format applies and count_log_entries()
-    # in the dashboard keeps counting correctly.
-    if log_context:
-        api.append_log(conn, step_id, log_context)
-        result["log_chars_appended"] = len(log_context)
     # Deterministic auto-promotion (migration 006): if this was the last
     # non-review step in the plan, review_and_complete will flip BOTH the
     # review step AND the plan to COMPLETED — NO LLM call needed.
@@ -174,15 +184,16 @@ def _op_fail_step(conn, data: dict) -> dict:
     _require(data, "step_id")
     reason = data.get("reason", "")
     log_context = data.get("log_context")
+    # Inline log on failure is especially valuable — captures the error output
+    # that explains WHY the step failed. Same transaction as the status (FL-017).
     try:
-        result = api.fail_step(conn, data["step_id"], reason)
+        with db.transaction(conn):
+            result = api.fail_step(conn, data["step_id"], reason, commit=False)
+            if log_context:
+                api.append_log(conn, data["step_id"], log_context, commit=False)
+                result["log_chars_appended"] = len(log_context)
     except Exception as e:
         _die(f"fail_step failed: {e}")
-    # Inline log on failure is especially valuable — captures the error output
-    # that explains WHY the step failed, so the dashboard panel isn't empty.
-    if log_context:
-        api.append_log(conn, data["step_id"], log_context)
-        result["log_chars_appended"] = len(log_context)
     # Auto-trigger: if this failure leaves no PENDING/IN_PROGRESS steps,
     # review_and_complete propagates FAILED to the plan.
     _maybe_auto_review(conn, result)
@@ -214,7 +225,20 @@ def _op_agent_review_close(conn, data: dict) -> dict:
     if review_row is None:
         _die(f"no review step found for plan {plan_id}")
     review_step_id = review_row["step_id"]
-    if review_row["status"] != "NEEDS_REVIEW":
+    recovered = False
+    if review_row["status"] == "FAILED" and outcome == "pass":
+        # FL-019: a FAILED review whose child REVIEW.1 was recovered through a
+        # completed deviation sub-tree may be closed as a PASS after all.
+        children = db.get_children(conn, review_step_id)
+        recovered = bool(children) and all(
+            c["status"] == "COMPLETED" or (c["status"] == "FAILED" and api._is_step_recovered(conn, c["step_id"]))
+            for c in children)
+        if not recovered:
+            _die(
+                f"review step {review_step_id} is FAILED and its child review step has not been recovered "
+                "(deviate under <plan>-REVIEW.1 and complete the sub-step first); nothing to close"
+            )
+    elif review_row["status"] != "NEEDS_REVIEW":
         _die(
             f"review step {review_step_id} is {review_row['status']!r}, expected "
             f"NEEDS_REVIEW; nothing to close"
@@ -225,8 +249,8 @@ def _op_agent_review_close(conn, data: dict) -> dict:
     detail = summary or ""
     if log_context:
         detail = f"{detail}\n{log_context}" if detail else log_context
-    if detail:
-        api.append_log(conn, review_step_id, f"[AGENT-REVIEW {outcome.upper()}] {detail}")
+    tag = f"[AGENT-REVIEW {outcome.upper()}{' after recovery' if recovered else ''}]"
+    api.append_log(conn, review_step_id, f"{tag} {detail}".rstrip())
     if summary:
         db.set_step_summary(conn, review_step_id, summary)
 
@@ -238,9 +262,16 @@ def _op_agent_review_close(conn, data: dict) -> dict:
             db.update_step_status(conn, child["step_id"], child_terminal, set_completed=True)
 
     try:
-        if outcome == "pass":
+        if outcome == "pass" and recovered:
+            # the review step is FAILED (terminal): re-open it deterministically
+            db.update_step_status(conn, review_step_id, "COMPLETED", set_completed=True)
+            db.update_plan_status(conn, plan_id, "COMPLETED")
+            db.set_review_state(conn, plan_id, "reviewed")
+            new_status = "COMPLETED"
+        elif outcome == "pass":
             api.complete_step(conn, review_step_id)
             db.update_plan_status(conn, plan_id, "COMPLETED")
+            db.set_review_state(conn, plan_id, "reviewed")
             new_status = "COMPLETED"
         else:
             api.fail_step(conn, review_step_id, reason=summary or "agent review found gaps")
@@ -351,6 +382,38 @@ def _op_finish_plan(conn, data: dict) -> dict:
     return plan_row
 
 
+def _op_reason_slots(conn, data: dict) -> dict:
+    """The closed-form checklist for a plan under review (spec §2.8): the nodes
+    its runs changed that have no reason yet. Exit 6 when the project has no
+    usable state graph — the agent must know it cannot fill anything."""
+    _require(data, "plan_id", "project")
+    psg_db = psg_bridge.db_path_for(data["project"])
+    if not psg_db or not os.path.exists(psg_db):
+        _die(f"no state graph registered (or built) for project {data['project']!r}", code=6)
+    slots = reasons.slots_for_plan(conn, data["project"], data["plan_id"], psg_db)
+    return {"plan_id": data["plan_id"], "project": data["project"], "slots": slots,
+            "checklist": reasons.checklist_text(slots)}
+
+
+def _op_reason_fill(conn, data: dict) -> dict:
+    """Record one answer per changed node: [{node_key, text}] — 'unstated' or
+    empty is stored as NULL. Keys outside the plan's change set are refused
+    (exit 6, nothing written)."""
+    _require(data, "plan_id", "project", "run_id", "reasons")
+    if not isinstance(data["reasons"], list) or not all(isinstance(r, dict) and r.get("node_key") for r in data["reasons"]):
+        _die("'reasons' must be a non-empty list of {node_key, text}")
+    psg_db = psg_bridge.db_path_for(data["project"])
+    if not psg_db or not os.path.exists(psg_db):
+        _die(f"no state graph registered (or built) for project {data['project']!r}", code=6)
+    r = reasons.fill(conn, project=data["project"], plan_id=data["plan_id"], run_id=int(data["run_id"]),
+                     reasons=data["reasons"], source=data.get("source", "agent"),
+                     step_id=data.get("step_id"), psg_db_path=psg_db)
+    if r["unknown_keys"]:
+        print(json.dumps(r, indent=2))
+        _die(f"unknown node_key(s) for this plan: {r['unknown_keys']} — only the checklist's keys are accepted", code=6)
+    return r
+
+
 OPS = {
     "start-step":   _op_start_step,
     "complete-step": _op_complete_step,
@@ -360,6 +423,8 @@ OPS = {
     "record-skill": _op_record_skill,
     "finish-plan":  _op_finish_plan,
     "agent-review-close": _op_agent_review_close,
+    "reason-slots": _op_reason_slots,
+    "reason-fill":  _op_reason_fill,
 }
 
 

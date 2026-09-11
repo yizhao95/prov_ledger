@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory() as td:
     conn = db.open_db(Path(td) / "orch.db")
     n = db.run_migrations(conn)
     print(f"migrations applied from the wheel: {n}")
-    assert n >= 13
+    assert n >= 15
 
     # plan + typed steps
     r = api.initialize_plan(conn, "pkg smoke", [

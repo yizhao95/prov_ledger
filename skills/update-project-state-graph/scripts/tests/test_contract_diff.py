@@ -585,3 +585,70 @@ def test_file_of_module_qualified_and_unique_only(tmp_path):
         assert contract_diff._file_of(c, "helper") is None  # ambiguous -> no guess
     finally:
         c.close()
+
+
+# ── FL-018: additive signatures are compatible; dependents resolve by qualified name ──
+
+def test_fl018_added_defaulted_kwarg_is_compatible():
+    base = _fp("def run(repo, project):\n    return 1\n")
+    head = _fp("def run(repo, project, plan_id=None, step_id=None, trigger='manual'):\n    return 1\n")
+    assert contract_diff.compare_signatures(base, head) == []
+    head2 = _fp("def run(repo, project, *, plan_id=None):\n    return 1\n")
+    assert contract_diff.compare_signatures(base, head2) == []
+
+
+def test_fl018_added_kwstar_is_compatible():
+    base = _fp("def f(a):\n    return a\n")
+    head = _fp("def f(a, **kw):\n    return a\n")
+    assert contract_diff.compare_signatures(base, head) == []
+
+
+def test_fl018_removed_or_reordered_or_required_added_still_changed():
+    base = _fp("def f(a, b=1):\n    return a\n")
+    kinds = lambda head: [c["change_kind"] for c in contract_diff.compare_signatures(base, _fp(head))]
+    assert kinds("def f(a):\n    return a\n") == ["signature_changed"]                 # removed
+    assert kinds("def f(b=1, a=2):\n    return a\n") == ["signature_changed"]          # reordered
+    assert kinds("def f(a, b=1, *, c):\n    return a\n") == ["signature_changed"]      # required kw-only added
+    assert kinds("def f(a, b):\n    return a\n") == ["signature_changed"]              # default dropped
+    assert kinds("def f(a: int, b=1):\n    return a\n") == ["signature_changed"]       # annotation changed
+
+
+def test_fl018_bare_name_collision_not_reported(tmp_path):
+    """cli.run gains a defaulted kwarg — compatible, nothing to report even though
+    subprocess.run callers were resolved onto it by the analyzer (inferred edge)."""
+    repo = _init_repo(tmp_path)
+    (repo / "cli.py").write_text("def run(repo, project):\n    return 1\n")
+    (repo / "helper.py").write_text("import subprocess\n\ndef git_ok():\n    return subprocess.run(['git'])\n")
+    base = _commit(repo, "base")
+    (repo / "cli.py").write_text("def run(repo, project, trigger='manual'):\n    return 1\n")
+    head = _commit(repo, "additive")
+    db = tmp_path / "g.db"
+    _graph_with_card(db, fn_qname="cli.run", fn_file="cli.py",
+                     callers=[{"name": "git_ok", "file": "helper.py"}], output_consumers=[])
+    rep = contract_diff.signature_contract(str(db), str(repo), base, head)
+    assert rep["ok"] is True and rep["gaps"] == []
+
+
+def test_fl018_inferred_edge_dependent_skipped_on_real_change(tmp_path):
+    """A REAL signature change: dependents reached only through an inferred
+    (bare-name) calls edge are not reported; high-confidence ones are."""
+    repo = _init_repo(tmp_path)
+    (repo / "cli.py").write_text("def run(repo, project):\n    return 1\n")
+    (repo / "helper.py").write_text("def git_ok():\n    return 1\n")
+    (repo / "main.py").write_text("from cli import run\n\ndef main():\n    return run('r', 'p')\n")
+    base = _commit(repo, "base")
+    (repo / "cli.py").write_text("def run(repo, project, required):\n    return 1\n")
+    head = _commit(repo, "break")
+    db = tmp_path / "g.db"
+    _graph_with_card(db, fn_qname="cli.run", fn_file="cli.py",
+                     callers=[{"name": "git_ok", "file": "helper.py"}, {"name": "main", "file": "main.py"}],
+                     output_consumers=[])
+    c = sqlite3.connect(str(db))
+    c.execute("ALTER TABLE edge ADD COLUMN confidence TEXT")
+    c.execute("INSERT INTO edge_type (id, name) VALUES (1, 'calls')")
+    c.execute("INSERT INTO edge (edge_type_id, src_node_id, dst_node_id, confidence) VALUES (1, 2, 1, 'inferred')")   # git_ok -> run (bare-name guess)
+    c.execute("INSERT INTO edge (edge_type_id, src_node_id, dst_node_id, confidence) VALUES (1, 3, 1, 'high')")       # main -> run
+    c.commit(); c.close()
+    rep = contract_diff.signature_contract(str(db), str(repo), base, head)
+    assert rep["ok"] is False
+    assert [g["caller"] for g in rep["gaps"]] == ["main"]
