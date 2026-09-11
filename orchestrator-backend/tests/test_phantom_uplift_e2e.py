@@ -2,6 +2,8 @@
 on the checkout-orders dataset gets an observed outcome containing
 column_dropped when the next plan closes (promo_discount vanished upstream)."""
 import json
+import random
+import sys
 from pathlib import Path
 
 from orchestrator import api, db, outcomes
@@ -9,6 +11,18 @@ from orchestrator.profiler import profile_records
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "phantom-uplift"
 DATASET = "checkout_orders"
+
+# The feeds are gitignored build products of gen_upstream.py; a fresh clone has
+# none. Generate them in-memory with the demo's own deterministic generator
+# (seed 42) so this test never depends on `make demo` having run (cf. FL-016).
+sys.path.insert(0, str(EXAMPLE))
+import gen_upstream  # noqa: E402
+
+
+def _feeds() -> tuple[list[dict], list[dict]]:
+    fixed = gen_upstream.generate(random.Random(gen_upstream.SEED_THIS_WEEK), gen_upstream.THIS_WEEK_DAYS, 100_000)
+    drifted = [{k: v for k, v in o.items() if k != "promo_discount"} for o in fixed]
+    return fixed, drifted
 
 
 def _plan(conn, plan_id, goal):
@@ -18,8 +32,7 @@ def _plan(conn, plan_id, goal):
 
 
 def test_phantom_uplift_expectation_gets_observed_column_dropped(conn, tmp_path):
-    fixed = json.loads((EXAMPLE / "orders_fixed.json").read_text())
-    drifted = json.loads((EXAMPLE / "orders_drifted.json").read_text())
+    fixed, drifted = _feeds()
     assert "promo_discount" in fixed[0] and "promo_discount" not in drifted[0]
     reg = tmp_path / "projects.json"
     reg.write_text(json.dumps({"projects": [{"name": "phantom-uplift", "repo": str(EXAMPLE), "db_path": str(tmp_path / "absent.db"), "commit_sha": "c"}]}))
