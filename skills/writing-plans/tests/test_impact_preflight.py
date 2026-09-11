@@ -342,3 +342,29 @@ def test_compute_impact_context_empty_ledger_ok(graph_db):
     ic = impact_preflight.compute_impact_context(
         graph_db, "refactor process", ["pipeline.process"], project="proj")
     assert ic["ledger_reminders"] == []
+
+
+# ── FL-020: a busy graph (review refresh holds the write lock) must degrade ──
+
+def test_fl020_busy_graph_degrades_instead_of_crashing(graph_db, monkeypatch):
+    monkeypatch.setattr(impact_preflight, "BUSY_TIMEOUT_MS", 100)
+    holder = sqlite3.connect(graph_db)
+    holder.execute("BEGIN EXCLUSIVE")           # what init_project.sh's rebuild looks like from outside
+    try:
+        ctx = impact_preflight.compute_impact_context(graph_db, "tweak process", ["pipeline.process"], project="proj")
+    finally:
+        holder.rollback(); holder.close()
+    assert ctx["degraded"] == "graph busy"
+    assert ctx["symbols"] == [] and ctx["upstream_assumptions"] == [] and ctx["ledger_reminders"] == []
+    assert [t["name"] for t in ctx["targets"]] == ["pipeline.process"]     # declared targets kept verbatim
+    assert "graph busy" in ctx["capability_boundary"]
+    # once the lock is gone the same call is a normal, non-degraded context
+    ctx2 = impact_preflight.compute_impact_context(graph_db, "tweak process", ["pipeline.process"], project="proj")
+    assert "degraded" not in ctx2 and ctx2["symbols"][0]["status"] == "existing"
+
+
+def test_connect_is_read_only(graph_db):
+    conn = impact_preflight._connect(graph_db)
+    with pytest.raises(sqlite3.OperationalError):
+        conn.execute("INSERT INTO node_type (name) VALUES ('x')")
+    conn.close()

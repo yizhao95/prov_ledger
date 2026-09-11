@@ -26,6 +26,7 @@ look like" — the graph only describes code that exists.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -45,10 +46,22 @@ _STOPWORDS = {
 _TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
 
 
+# FL-020: the graph is rebuilt by init_project.sh during a review; publishing a
+# plan at that moment must never crash. Open read-only, wait a bounded time for
+# the writer, then degrade (see compute_impact_context) instead of raising.
+BUSY_TIMEOUT_MS = int(os.environ.get("PROVLEDGER_GRAPH_BUSY_TIMEOUT_MS", "5000"))
+
+
 def _connect(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
+    """Read-only connection to a project graph with a busy timeout."""
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=BUSY_TIMEOUT_MS / 1000)
     conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout = {int(BUSY_TIMEOUT_MS)}")
     return conn
+
+
+def _is_busy(exc: BaseException) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and "locked" in str(exc).lower()
 
 
 def _meta(raw) -> dict:
@@ -363,21 +376,38 @@ def compute_impact_context(db_path: str, user_query: str,
     no LedgerEntries table or no project is given, ledger_reminders degrades to []
     without raising.
     """
-    collected = collect_targets(user_query, declared_targets, db_path)
-    target_names = [t["name"] for t in collected["targets"]]
-
-    conn = _connect(db_path)
     try:
-        symbols = [verify_symbol(conn, t) for t in target_names]
-        upstream = upstream_assumptions(conn, target_names)
-    finally:
-        conn.close()
+        collected = collect_targets(user_query, declared_targets, db_path)
+        target_names = [t["name"] for t in collected["targets"]]
+        conn = _connect(db_path)
+        try:
+            symbols = [verify_symbol(conn, t) for t in target_names]
+            upstream = upstream_assumptions(conn, target_names)
+        finally:
+            conn.close()
+        reminders = ledger_matches(db_path, project, user_query, declared_targets) \
+            if project else []
+    except sqlite3.OperationalError as exc:
+        if not _is_busy(exc):
+            raise
+        # FL-020: the graph is being rebuilt (review refresh). Publish anyway,
+        # say so loudly, keep the declared targets verbatim so the plan row still
+        # records what the author intended to touch.
+        return {
+            "degraded": "graph busy",
+            "targets": [{"name": n, "route": ["declared"]} for n in (declared_targets or []) if n],
+            "symbols": [],
+            "upstream_assumptions": [],
+            "ledger_reminders": [],
+            "capability_boundary": (
+                f"graph busy: {db_path} was locked for {BUSY_TIMEOUT_MS} ms (a refresh in "
+                "progress?) — no impact analysis was performed; re-check the blast radius "
+                "before touching the declared targets."),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     any_new = any(s["status"] == "new" for s in symbols)
     boundary = _BOUNDARY_MODIFY + (_BOUNDARY_NEW if any_new else "")
-
-    reminders = ledger_matches(db_path, project, user_query, declared_targets) \
-        if project else []
 
     return {
         "targets": collected["targets"],

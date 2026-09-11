@@ -207,6 +207,10 @@ def main() -> None:
             graph_db, data.get("user_query") or "", declared_targets,
             project=project)
         _ensure_impact_column(conn)
+        if impact_context.get("degraded"):
+            # FL-020: never silent — the plan publishes, the reader is told.
+            print(f"⚠️  publish-plan: impact analysis degraded ({impact_context['degraded']}): "
+                  f"{impact_context['capability_boundary']}", file=sys.stderr)
 
     skills_activated_input = data.get("skills") or None
     # Translate the user-facing 'name' key to the api's 'skill_name' key.
@@ -238,6 +242,7 @@ def main() -> None:
         db.set_plan_impact_context(
             conn, result["plan_id"], json.dumps(impact_context, default=str))
         result["impact_context"] = {
+            **({"degraded": impact_context["degraded"]} if impact_context.get("degraded") else {}),
             "targets": [t["name"] for t in impact_context["targets"]],
             "symbols": [{"name": s["name"], "status": s["status"]}
                         for s in impact_context["symbols"]],

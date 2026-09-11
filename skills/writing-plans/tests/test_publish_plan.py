@@ -309,3 +309,26 @@ def test_projectless_plan_still_publishes(tmp_path, tmp_db, scripts_dir):
     p = tmp_path / "in.json"; p.write_text(_json.dumps(plan))
     res = _run_publish_env(scripts_dir, p, tmp_db, tmp_path / "nonexistent.json")
     assert res.returncode == 0, res.stderr
+
+
+def test_fl020_publish_succeeds_while_graph_locked(tmp_path, tmp_db, scripts_dir):
+    """A review refresh holds the graph's write lock while a plan is published:
+    the plan must still land, with a visibly degraded impact_context."""
+    gdb = tmp_path / "proj.db"; _seed_project_graph(gdb)
+    reg = _registry(tmp_path, "demoproj", gdb)
+    plan = _valid_input_dict()
+    plan["project"] = "demoproj"; plan["declared_targets"] = ["pipeline.process"]
+    p = tmp_path / "in.json"; p.write_text(_json.dumps(plan))
+    holder = _sqlite.connect(str(gdb)); holder.execute("BEGIN EXCLUSIVE")
+    try:
+        env_extra = {"PROVLEDGER_GRAPH_BUSY_TIMEOUT_MS": "100"}
+        env = os.environ.copy(); env.update(env_extra)
+        env["ORCH_DB"] = str(tmp_db); env["PSG_REGISTRY_PATH"] = str(reg)
+        res = subprocess.run(["bash", str(scripts_dir / "publish-plan.sh"), str(p)],
+                             capture_output=True, text=True, env=env, timeout=30)
+    finally:
+        holder.rollback(); holder.close()
+    assert res.returncode == 0, res.stderr
+    assert "graph busy" in (res.stdout + res.stderr)
+    ctx = _impact_context(tmp_db)
+    assert ctx.get("degraded") == "graph busy"
