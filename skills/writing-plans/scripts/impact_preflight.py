@@ -46,7 +46,7 @@ import ledger_store  # sibling, stdlib-only: constraints_for / record_hit
 
 CALLABLE_TYPES = ("function", "method", "route")
 SQL_SOURCE_TYPES = ("sql_table", "api_source")
-HISTORY_LIMIT = 10
+HISTORY_LIMIT = 5   # phase 3.5: 10 made impact_context ~30k chars per plan; 5 slim entries keep it under ~4k tokens
 
 # Small stopword set — keep deterministic + dependency-free. Tokens shorter than
 # 3 chars are dropped regardless.
@@ -195,16 +195,28 @@ def _history(conn, node_key: Optional[str], limit: int) -> List[Dict]:
     try:
         rows = conn.execute(
             """SELECT e.event_type, e.run_id, e.seq, e.payload_json, e.created_at,
-                      a.plan_id, a.step_id, a.commit_sha
+                      a.plan_id, a.step_id, a.trigger
                FROM node_event e JOIN analysis_run a ON a.id = e.run_id
                WHERE e.node_key = ? ORDER BY e.run_id DESC, e.seq DESC LIMIT ?""", (node_key, limit)).fetchall()
     except sqlite3.OperationalError:
         return []
     out = []
     for r in reversed(rows):
-        out.append({"event_type": r["event_type"], "run_id": r["run_id"], "plan_id": r["plan_id"],
-                    "step_id": r["step_id"], "commit_sha": r["commit_sha"], "created_at": r["created_at"],
-                    "payload": _meta(r["payload_json"])})
+        payload = _meta(r["payload_json"])
+        entry = {"event_type": r["event_type"], "run_id": r["run_id"], "plan_id": r["plan_id"],
+                 "step_id": r["step_id"], "trigger": r["trigger"], "created_at": r["created_at"]}
+        # Slim (phase 3.5): keep what a change author reads — how it matched,
+        # what changed, the qualified-name from/to — never signature hashes or
+        # line spans (those live in node_event for `analyzer history`).
+        if payload.get("via"):
+            entry["via"] = payload["via"]
+        if payload.get("changed"):
+            entry["changed"] = payload["changed"]
+        if isinstance(payload.get("from"), str):
+            entry["from"] = payload["from"]
+        if isinstance(payload.get("to"), str):
+            entry["to"] = payload["to"]
+        out.append(entry)
     return out
 
 

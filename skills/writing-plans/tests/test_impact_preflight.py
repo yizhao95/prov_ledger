@@ -473,7 +473,7 @@ def test_e2_1_impact_context_joins_history_reasons_constraints(graph_db_with_his
     assert sym["status"] == "existing" and sym["node_key"] == "nk_a"
     assert [h["event_type"] for h in sym["history"]] == ["node_added", "node_matched", "node_changed"]
     assert sym["history"][-1]["plan_id"] == "P0b" and sym["history"][-1]["step_id"] == "P0b-A"
-    assert sym["history"][-1]["payload"] == {"changed": ["struct_sig"]}
+    assert sym["history"][-1]["changed"] == ["struct_sig"]          # slim entry (phase 3.5): no payload blob
     assert sym["reasons"][0]["text"] == "fiscal weeks" and sym["reasons"][0]["plan_id"] == "P0b"
     c = sym["constraints"][0]
     assert c["statement"].startswith("exclude region") and c["rationale"].startswith("legal hold")
@@ -525,3 +525,51 @@ def test_verify_symbol_without_history_tables_still_works(graph_db):
     sym = impact_preflight.verify_symbol(conn, "pipeline.process")
     assert sym["status"] == "existing" and sym["node_key"] is None and sym["history"] == []
     conn.close()
+
+
+# ── phase 3.5 Task 5: slimmer history entries, HISTORY_LIMIT 5 ───────────────
+
+def test_history_entries_are_slim(graph_db_with_history):
+    conn = sqlite3.connect(graph_db_with_history); conn.row_factory = sqlite3.Row
+    sym = impact_preflight.verify_symbol(conn, "pipeline.process")
+    for h in sym["history"]:
+        assert set(h) <= {"event_type", "run_id", "plan_id", "step_id", "trigger", "created_at", "via", "changed", "from", "to"}
+        assert "struct_sig" not in h and "span" not in h and "payload" not in h
+    changed = next(h for h in sym["history"] if h["event_type"] == "node_changed")
+    assert changed["changed"] == ["struct_sig"]
+    matched = next(h for h in sym["history"] if h["event_type"] == "node_matched")
+    assert matched["via"] == "qualname"
+    conn.close()
+
+
+def test_history_limit_defaults_to_five(graph_db_with_history):
+    conn = sqlite3.connect(graph_db_with_history)
+    for seq in range(3, 9):     # six more events on nk_a in run 2 -> 8 events total
+        conn.execute("INSERT INTO node_event (run_id, seq, event_type, node_key, tier, payload_json, created_at) "
+                     "VALUES (2, ?, 'node_changed', 'nk_a', 'observed', '{\"changed\": [\"struct_sig\"]}', ?)",
+                     (seq, f"2026-09-11T01:00:{seq:02d}+00:00"))
+    conn.commit(); conn.row_factory = sqlite3.Row
+    assert impact_preflight.HISTORY_LIMIT == 5
+    sym = impact_preflight.verify_symbol(conn, "pipeline.process")
+    assert len(sym["history"]) == 5 and sym["history"][-1]["run_id"] == 2      # newest kept
+    assert len(impact_preflight.verify_symbol(conn, "pipeline.process", history_limit=2)["history"]) == 2
+    conn.close()
+
+
+def test_e2_3_five_targets_stay_under_four_thousand_tokens(graph_db_with_history, orch_db):
+    conn = sqlite3.connect(graph_db_with_history)
+    for i in range(5):
+        conn.execute("INSERT INTO node (node_type_id, name, qualified_name, file_path, node_key) VALUES (1, ?, ?, 'pipeline.py', ?)",
+                     (f"fn{i}", f"pipeline.fn{i}", f"nk_{i}"))
+        for seq in range(1, 6):
+            conn.execute("INSERT INTO node_event (run_id, seq, event_type, node_key, tier, payload_json, created_at) "
+                         "VALUES (2, ?, 'node_changed', ?, 'observed', '{\"changed\": [\"struct_sig\"], \"struct_sig\": {\"from\": \"aaaaaaaaaaaaaaaa\", \"to\": \"bbbbbbbbbbbbbbbb\"}, \"span\": {\"from\": [1, 9], \"to\": [1, 12]}}', ?)",
+                         (100 + i * 10 + seq, f"nk_{i}", f"2026-09-11T02:00:{seq:02d}+00:00"))
+        for j in range(3):
+            orch_db.execute("INSERT INTO node_reason (node_key, project, run_id, plan_id, kind, text, source, tier) "
+                            "VALUES (?, 'proj', 2, 'P0b', 'reason', ?, 'agent', 'stated')", (f"nk_{i}", f"reason {j} for fn{i}: kept the weekly grain"))
+    conn.commit(); orch_db.commit(); conn.close()
+    ctx = impact_preflight.compute_impact_context(graph_db_with_history, "tweak", [f"pipeline.fn{i}" for i in range(5)],
+                                                  project="proj", orch_conn=orch_db)
+    assert len(ctx["symbols"]) == 5 and all(len(s["history"]) == 5 and len(s["reasons"]) == 3 for s in ctx["symbols"])
+    assert ctx["approx_tokens"] <= 4000, ctx["approx_tokens"]
