@@ -34,6 +34,33 @@ def run_migrations(conn: sqlite3.Connection) -> int:
     files. Compatible with the original integer-only schema_version table from 001.
     """
     applied = 0
+    # FL-021: a DB migrated before filename bookkeeping existed has version rows
+    # without migration_file. Reconcile FIRST so only NEW files run below and
+    # 001 is never re-executed ("duplicate column name"). Bookkeeping facts:
+    # 001 inserts its own marker row (version 1, no filename) and the loop then
+    # records one row per applied file as MAX(version)+1 — so a pure legacy DB
+    # holds files+1 unlabelled rows, and every DB keeps that one unlabelled
+    # marker forever. Rule: labelled rows present -> nothing to reconcile (the
+    # marker is 001's); none present -> the unlabelled rows minus the marker are
+    # the first N files, in order.
+    try:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(schema_version)").fetchall()]
+        if cols and "migration_file" not in cols:
+            conn.execute("ALTER TABLE schema_version ADD COLUMN migration_file TEXT")
+            cols.append("migration_file")
+        if cols:
+            files = sorted(MIGRATIONS_DIR.glob("*.sql"))
+            labelled = [r[0] for r in conn.execute(
+                "SELECT migration_file FROM schema_version WHERE migration_file IS NOT NULL")]
+            unlabelled = [r[0] for r in conn.execute(
+                "SELECT version FROM schema_version WHERE migration_file IS NULL ORDER BY version")]
+            if unlabelled and not labelled:
+                rows = [v for v in unlabelled if v != 1] if len(unlabelled) > 1 else unlabelled
+                for version, f in zip(rows, files):
+                    conn.execute("UPDATE schema_version SET migration_file = ? WHERE version = ?", (f.name, version))
+                conn.commit()
+    except sqlite3.OperationalError:
+        pass  # no schema_version yet — a fresh DB; 001 creates it below
     for sql_file in sorted(MIGRATIONS_DIR.glob("*.sql")):
         fname = sql_file.name
         # LAZY bootstrap: ensure schema_version.migration_file column exists
@@ -103,6 +130,13 @@ def transaction(conn: sqlite3.Connection):
 
 
 # ── Plan CRUD ─────────────────────────────────────────────────────────────────
+# FL-014: how a plan's project attribution was decided. 'declared' = in the
+# plan input (incl. the explicit "none"), 'cwd' = derived from the repo the
+# plan was published from, 'legacy' = inferred once from goal text for plans
+# that predate the column. Assigned exactly once.
+PROJECT_SOURCES = ("declared", "cwd", "legacy")
+
+
 def insert_plan(
     conn: sqlite3.Connection,
     plan_id: str,
@@ -111,13 +145,42 @@ def insert_plan(
     status: str = "IN_PROGRESS",
     created_at: str | None = None,
     user_query: str | None = None,
+    project: str | None = None,
+    project_source: str | None = None,
 ) -> None:
+    if (project is None) != (project_source is None):
+        raise ValueError("project and project_source must be given together")
+    if project_source is not None and project_source not in PROJECT_SOURCES:
+        raise ValueError(f"project_source must be one of {PROJECT_SOURCES}, got {project_source!r}")
     conn.execute(
-        "INSERT INTO Plans (plan_id, original_goal, max_revisions, status, created_at, user_query) "
-        "VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?)",
-        (plan_id, original_goal, max_revisions, status, created_at, user_query),
+        "INSERT INTO Plans (plan_id, original_goal, max_revisions, status, created_at, user_query, "
+        "project, project_source) VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?)",
+        (plan_id, original_goal, max_revisions, status, created_at, user_query, project, project_source),
     )
     conn.commit()
+
+
+def set_plan_project(conn: sqlite3.Connection, plan_id: str, project: str, project_source: str,
+                     commit: bool = True) -> None:
+    """Assign a plan's project ONCE. A plan that already has one keeps it —
+    attribution is a fact recorded at publish (or a one-time legacy inference),
+    never re-decided."""
+    if project_source not in PROJECT_SOURCES:
+        raise ValueError(f"project_source must be one of {PROJECT_SOURCES}, got {project_source!r}")
+    if not project:
+        raise ValueError("project must be non-empty ('none' means: explicitly no project)")
+    cur = conn.execute(
+        "UPDATE Plans SET project = ?, project_source = ?, updated_at = ? "
+        "WHERE plan_id = ? AND project IS NULL",
+        (project, project_source, _now(), plan_id))
+    if cur.rowcount != 1:
+        current = get_plan(conn, plan_id)
+        if current is None:
+            raise ValueError(f"plan_id not found: {plan_id}")
+        raise ValueError(f"plan {plan_id} is already attributed to {current['project']!r} "
+                         f"({current['project_source']}); attribution is assigned once")
+    if commit:
+        conn.commit()
 
 
 def get_plan(conn: sqlite3.Connection, plan_id: str) -> dict | None:
