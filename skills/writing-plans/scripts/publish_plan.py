@@ -74,15 +74,6 @@ def _resolve_project_db(project: str) -> str:
     return ""  # unreachable
 
 
-def _ensure_impact_column(conn) -> None:
-    """The live orchestrator.db already has a Plans table, so run_migrations is a
-    no-op there — make sure the Phase D column exists before we write to it."""
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(Plans)").fetchall()]
-    if "impact_context" not in cols:
-        conn.execute("ALTER TABLE Plans ADD COLUMN impact_context TEXT")
-        conn.commit()
-
-
 def _die(msg: str, code: int = 1) -> None:
     """Print a one-line error to stderr and exit non-zero."""
     print(f"❌ publish-plan: {msg}", file=sys.stderr)
@@ -197,13 +188,9 @@ def main() -> None:
     db_path_env = os.environ.get("ORCH_DB")
     db_path = Path(db_path_env) if db_path_env else None
     conn = db.open_db(db_path) if db_path else db.open_db()
-    # Only migrate if the schema is missing — run_migrations is NOT safely
-    # re-runnable on an already-migrated DB (it raises 'duplicate column name').
-    has_plans = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='Plans'"
-    ).fetchone()
-    if not has_plans:
-        db.run_migrations(conn)
+    # FL-021: every open migrates (reconcile first, idempotent) — a new
+    # migration reaches an existing DB the moment a plan is published.
+    db.run_migrations(conn)
 
     # ── Phase D: plan-time pre-flight (un-skippable for tracked projects) ──
     # If the plan-input names a tracked project, declared_targets is MANDATORY
@@ -224,7 +211,6 @@ def main() -> None:
         impact_context = impact_preflight.compute_impact_context(
             graph_db, data.get("user_query") or "", declared_targets,
             project=project, orch_conn=conn)
-        _ensure_impact_column(conn)
         if impact_context.get("degraded"):
             # FL-020: never silent — the plan publishes, the reader is told.
             print(f"⚠️  publish-plan: impact analysis degraded ({impact_context['degraded']}): "

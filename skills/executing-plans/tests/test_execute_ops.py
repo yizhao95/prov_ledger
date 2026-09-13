@@ -332,3 +332,26 @@ class TestCommandGate:
         run_script_fn("start-step", {"step_id": sid, "type": "CODE"}, tmp_db)
         r = run_script_fn("complete-step", {"step_id": sid, "summary": "edited by hand"}, tmp_db)
         assert r.returncode == 0, r.stderr
+
+
+# ── FL-021: every open migrates (a legacy DB gets 016 on the first start-step) ──
+def test_fl021_open_migrates_a_legacy_db(tmp_path, scripts_dir, run_script_fn):
+    """A DB migrated the pre-bookkeeping way up to 013: the first script that
+    opens it must bring it to the current schema, not crash on duplicate columns."""
+    from conftest import orch_db
+    legacy = tmp_path / "legacy.db"
+    c = orch_db.open_db(legacy)
+    files = sorted(orch_db.MIGRATIONS_DIR.glob("*.sql"))[:13]
+    for f in files:
+        c.executescript(f.read_text())
+        c.execute("INSERT OR IGNORE INTO schema_version (version) VALUES ((SELECT COALESCE(MAX(version), 0) + 1 FROM schema_version))")
+    c.commit()
+    # a plan row written by the OLD schema (initialize_plan would now try to write Plans.project)
+    c.execute("INSERT INTO Plans (plan_id, original_goal) VALUES ('legacy-1', 'legacy plan')")
+    orch_db.insert_step(c, "legacy-1-A", "legacy-1", "a", 0)
+    c.commit(); c.close()
+    assert "project" not in {row[1] for row in sqlite3.connect(str(legacy)).execute("PRAGMA table_info(Plans)")}
+    res = run_script_fn("start-step", {"step_id": "legacy-1-A", "type": "CODE"}, legacy)
+    assert res.returncode == 0, res.stderr
+    cols = {row[1] for row in sqlite3.connect(str(legacy)).execute("PRAGMA table_info(Plans)")}
+    assert {"project", "project_source", "impact_context", "review_skip_reason"} <= cols

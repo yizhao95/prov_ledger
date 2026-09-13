@@ -381,3 +381,21 @@ def test_expectations_require_a_project(tmp_path, tmp_db, scripts_dir):
     res = _project_plan(tmp_path, tmp_db, scripts_dir,
                         [{"target": "x", "target_kind": "node", "claim": "c", "channel": "graph"}], with_project=False)
     assert res.returncode != 0 and "project" in (res.stderr + res.stdout)
+
+
+# ── FL-021: publish migrates a legacy DB on open ─────────────────────────────
+
+def test_fl021_publish_migrates_a_legacy_db(tmp_path, scripts_dir):
+    from orchestrator import db as orch_db
+    legacy = tmp_path / "legacy.db"
+    c = orch_db.open_db(legacy)
+    for f in sorted(orch_db.MIGRATIONS_DIR.glob("*.sql"))[:13]:
+        c.executescript(f.read_text())
+        c.execute("INSERT OR IGNORE INTO schema_version (version) VALUES ((SELECT COALESCE(MAX(version), 0) + 1 FROM schema_version))")
+    c.commit(); c.close()
+    p = tmp_path / "in.json"; p.write_text(_json.dumps(_valid_input_dict()))
+    res = _run_publish(scripts_dir, p, legacy)
+    assert res.returncode == 0, res.stderr
+    cols = {row[1] for row in _sqlite.connect(str(legacy)).execute("PRAGMA table_info(Plans)")}
+    assert {"project", "project_source", "impact_context"} <= cols
+    assert _sqlite.connect(str(legacy)).execute("SELECT COUNT(*) FROM Plans").fetchone()[0] == 1

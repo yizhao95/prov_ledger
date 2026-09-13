@@ -74,11 +74,10 @@ def _open_db():
     db_path_env = os.environ.get("ORCH_DB")
     db_path = Path(db_path_env) if db_path_env else None
     conn = db.open_db(db_path) if db_path else db.open_db()
-    has_plans = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='Plans'"
-    ).fetchone()
-    if not has_plans:
-        db.run_migrations(conn)
+    # FL-021: every open migrates. run_migrations reconciles legacy bookkeeping
+    # first and is idempotent, so a new migration reaches an existing DB the
+    # first time any script touches it — no more hand-applied migrations.
+    db.run_migrations(conn)
     return conn
 
 
