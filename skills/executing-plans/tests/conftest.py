@@ -109,3 +109,14 @@ def run_script_fn(scripts_dir: Path):
     def _run(script_name: str, input_obj: dict, db_path: Path, env_extra: dict | None = None) -> subprocess.CompletedProcess:
         return run_script(scripts_dir, script_name, input_obj, db_path, env_extra=env_extra)
     return _run
+
+
+@pytest.fixture(autouse=True)
+def _isolated_registry(tmp_path, monkeypatch):
+    """FL-014 (phase 3.5): publish derives a plan's project from the repo it runs
+    in. These tests run inside prov_ledger — a registered project — so every
+    test gets an EMPTY registry unless it points PSG_REGISTRY_PATH elsewhere.
+    Tests must never read the real ~/skill-workspace registry."""
+    reg = tmp_path / "empty-registry.json"
+    reg.write_text('{"projects": []}')
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))

@@ -399,3 +399,98 @@ def test_fl021_publish_migrates_a_legacy_db(tmp_path, scripts_dir):
     cols = {row[1] for row in _sqlite.connect(str(legacy)).execute("PRAGMA table_info(Plans)")}
     assert {"project", "project_source", "impact_context"} <= cols
     assert _sqlite.connect(str(legacy)).execute("SELECT COUNT(*) FROM Plans").fetchone()[0] == 1
+
+
+# ── FL-014 / E5-3: attribution is explicit — declared or derived from cwd ────
+
+def _git_repo(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(path), "init", "-q"], check=True)
+    (path / "README.md").write_text("x\n")
+    subprocess.run(["git", "-C", str(path), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(path), "-c", "user.email=a@b.c", "-c", "user.name=t", "commit", "-qm", "init"], check=True)
+    return path
+
+
+def _registry_repos(tmp_path: Path, entries: dict) -> Path:
+    """entries: name -> repo path; each gets a seeded graph."""
+    projects = []
+    for name, repo in entries.items():
+        gdb = tmp_path / f"{name}.db"
+        if not gdb.exists():
+            _seed_project_graph(gdb)
+        projects.append({"name": name, "repo": str(repo), "db_path": str(gdb), "commit_sha": "abc"})
+    reg = tmp_path / "projects.json"; reg.write_text(_json.dumps({"projects": projects}))
+    return reg
+
+
+def _publish_from(scripts_dir: Path, plan: dict, db_path: Path, registry: Path, cwd: Path, tmp_path: Path):
+    p = tmp_path / "in.json"; p.write_text(_json.dumps(plan))
+    env = os.environ.copy(); env["ORCH_DB"] = str(db_path); env["PSG_REGISTRY_PATH"] = str(registry)
+    return subprocess.run(["bash", str(scripts_dir / "publish-plan.sh"), str(p)],
+                          capture_output=True, text=True, env=env, timeout=30, cwd=str(cwd))
+
+
+def _latest_plan(db_path: Path) -> dict:
+    c = _sqlite.connect(str(db_path)); c.row_factory = _sqlite.Row
+    return dict(c.execute("SELECT * FROM Plans ORDER BY rowid DESC LIMIT 1").fetchone())
+
+
+def test_e5_3a_cwd_inside_registered_repo_attributes_automatically(tmp_path, tmp_db, scripts_dir):
+    repo = _git_repo(tmp_path / "repo")
+    reg = _registry_repos(tmp_path, {"myproj": repo})
+    plan = _valid_input_dict(); plan["declared_targets"] = ["pipeline.process"]   # no 'project' key, goal says nothing
+    (repo / "sub").mkdir()
+    r = _publish_from(scripts_dir, plan, tmp_db, reg, cwd=repo / "sub", tmp_path=tmp_path)   # a subdirectory of the repo
+    assert r.returncode == 0, r.stderr
+    p = _latest_plan(tmp_db)
+    assert (p["project"], p["project_source"]) == ("myproj", "cwd")
+    assert '"project_source": "cwd"' in r.stdout
+    assert p["impact_context"] is not None                                        # preflight ran for the derived project
+
+
+def test_e5_3b_project_none_is_recorded_and_announced(tmp_path, tmp_db, scripts_dir):
+    repo = _git_repo(tmp_path / "repo")
+    reg = _registry_repos(tmp_path, {"myproj": repo})
+    plan = _valid_input_dict(); plan["project"] = "none"
+    r = _publish_from(scripts_dir, plan, tmp_db, reg, cwd=repo, tmp_path=tmp_path)
+    assert r.returncode == 0, r.stderr
+    p = _latest_plan(tmp_db)
+    assert (p["project"], p["project_source"]) == ("none", "declared")
+    assert "no state-graph review" in (r.stdout + r.stderr)
+
+
+def test_e5_3c_conflict_between_cwd_and_declared_fails_publish(tmp_path, tmp_db, scripts_dir):
+    repo = _git_repo(tmp_path / "repo"); other = _git_repo(tmp_path / "other")
+    reg = _registry_repos(tmp_path, {"myproj": repo, "other": other})
+    plan = _valid_input_dict(); plan["project"] = "other"; plan["declared_targets"] = ["pipeline.process"]
+    r = _publish_from(scripts_dir, plan, tmp_db, reg, cwd=repo, tmp_path=tmp_path)
+    assert r.returncode != 0 and "pick one" in (r.stderr + r.stdout)
+    assert _sqlite.connect(str(tmp_db)).execute("SELECT COUNT(*) FROM Plans").fetchone()[0] == 0
+
+
+def test_declared_matching_cwd_is_fine(tmp_path, tmp_db, scripts_dir):
+    repo = _git_repo(tmp_path / "repo")
+    reg = _registry_repos(tmp_path, {"myproj": repo})
+    plan = _valid_input_dict(); plan["project"] = "myproj"; plan["declared_targets"] = ["pipeline.process"]
+    r = _publish_from(scripts_dir, plan, tmp_db, reg, cwd=repo, tmp_path=tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert (_latest_plan(tmp_db)["project"], _latest_plan(tmp_db)["project_source"]) == ("myproj", "declared")
+
+
+def test_no_repo_no_project_publishes_with_warning(tmp_path, tmp_db, scripts_dir):
+    reg = _registry_repos(tmp_path, {"myproj": _git_repo(tmp_path / "repo")})
+    plan = _valid_input_dict()
+    r = _publish_from(scripts_dir, plan, tmp_db, reg, cwd=tmp_path, tmp_path=tmp_path)   # tmp_path is not a git repo
+    assert r.returncode == 0, r.stderr
+    p = _latest_plan(tmp_db)
+    assert p["project"] is None and p["project_source"] is None
+    assert "not attributed" in (r.stdout + r.stderr)
+
+
+def test_cwd_in_unregistered_nested_repo_is_not_attributed(tmp_path, tmp_db, scripts_dir):
+    repo = _git_repo(tmp_path / "repo"); inner = _git_repo(repo / "vendor" / "inner")
+    reg = _registry_repos(tmp_path, {"myproj": repo})
+    r = _publish_from(scripts_dir, _valid_input_dict(), tmp_db, reg, cwd=inner, tmp_path=tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert _latest_plan(tmp_db)["project"] is None            # the inner repo is what git sees; it is not registered
