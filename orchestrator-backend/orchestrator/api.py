@@ -440,6 +440,22 @@ def _matches_token_run(words: list[str], target: str) -> bool:
     return False
 
 
+def _regular_failures_recovered(conn: sqlite3.Connection, plan_id: str) -> bool:
+    """True when the plan has no non-terminal regular step and every top-level
+    FAILED regular step is recovered (FL-022 re-judge precondition)."""
+    rows = conn.execute(
+        "SELECT step_id, status, parent_step_id FROM Steps WHERE plan_id = ? AND is_review = 0", (plan_id,)
+    ).fetchall()
+    if any(r["status"] in ("PENDING", "STARTING", "IN_PROGRESS") for r in rows):
+        return False
+    failed = [r for r in rows if r["status"] == "FAILED"]
+    if not failed:
+        return False          # nothing to re-judge: the plan did not fail through a regular step
+    by_id = {r["step_id"]: r for r in rows}
+    top = [r for r in failed if r["parent_step_id"] is None or by_id.get(r["parent_step_id"], {}).get("status") != "FAILED"]
+    return all(_is_step_recovered(conn, r["step_id"]) for r in top)
+
+
 def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str, child,
                     registry_path, reopened: bool = False) -> dict:
     """Finalize a reviewed plan as COMPLETED — the close-time capture of spec
@@ -603,6 +619,23 @@ def review_and_complete(
             child = next(iter(db.get_children(conn, review_step_id)), None)
             if child is not None and child["status"] == "FAILED" and _is_step_recovered(conn, child["step_id"]):
                 return _close_reviewed(conn, plan_id, review_step_id, child, registry_path, reopened=True)
+            if child is None and _regular_failures_recovered(conn, plan_id):
+                # FL-022: the plan failed through a regular step (no review
+                # child was ever created); every failed step has since been
+                # recovered through a deviation sub-tree. Re-judge once: the
+                # host resets the review row (FAILED -> PENDING is not a step
+                # transition the state machine offers, like FL-019's re-open)
+                # and runs the normal decision below.
+                with db.transaction(conn):
+                    db.update_step_status(conn, review_step_id, "PENDING", commit=False)
+                    db.update_plan_status(conn, plan_id, "IN_PROGRESS", commit=False)
+                    telemetry.append_step_log(
+                        conn, review_step_id,
+                        "[REVIEW REOPENED] plan had failed through regular step(s); all recovered — re-judging (FL-022)",
+                        commit=False)
+                out = review_and_complete(conn, plan_id, registry_path)
+                out["reopened"] = True
+                return out
         plan_row = db.get_plan(conn, plan_id)
         return {
             "ready": True,
