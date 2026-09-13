@@ -277,3 +277,20 @@ def test_unstated_tile_and_etag(client):
     rows = queries.get_node_reasons(conn, client._seeded["plan_id"])
     assert [r["display_tier"] for r in rows] == ["derived", "asserted", "stated", "unstated"]
     conn.close()
+
+
+# ── phase 3.5 Task 6: the plan card shows its project attribution ────────────
+
+def test_plan_card_shows_project_attribution(client):
+    conn = odb.open_db(client._db)
+    odb.set_plan_project(conn, client._seeded["plan_id"], "demo-app", "declared")
+    conn.close()
+    r = client.get("/api/dashboard")
+    assert r.status_code == 200
+    assert 'data-project-source="declared"' in r.text and "demo-app" in r.text
+    assert "unattributed" not in r.text
+
+
+def test_plan_card_shows_unattributed_when_null(client):
+    r = client.get("/api/dashboard")
+    assert 'data-project-source="none"' in r.text and "unattributed" in r.text

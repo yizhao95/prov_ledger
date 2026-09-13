@@ -17,7 +17,16 @@
            The FULL user_query is rendered below in its own "Original Query" block when
            viewing the plan-detail page (viewing_plan_id set) — keeps cards scannable. #}
         <h2 class="text-base font-bold text-gray-900">{{ short_title(plan) }}</h2>
-        <p class="text-xs font-mono text-brand-gray mt-1">{{ plan.plan_id }}</p>
+        <p class="text-xs font-mono text-brand-gray mt-1">{{ plan.plan_id }}
+          {# Phase 3.5 (FL-014): which project this plan belongs to and how that was decided —
+             declared in the plan input, derived from the publishing repo (cwd), or a one-time
+             legacy goal-text match; NULL is shown as unattributed, never guessed here. #}
+          {% set psrc = plan.project_source if plan.project else 'none' %}
+          <span data-project-source="{{ psrc }}" class="ml-2 font-sans text-[11px] px-1.5 py-0.5 rounded {{ 'bg-brand-blue/10 text-brand-blue' if plan.project and plan.project != 'none' else 'bg-brand-gray/10 text-brand-gray' }}"
+                title="project attribution source: {{ psrc }}">
+            {% if plan.project and plan.project != 'none' %}{{ plan.project }} · {{ plan.project_source }}{% elif plan.project == 'none' %}no project · declared{% else %}unattributed{% endif %}
+          </span>
+        </p>
         <p class="text-sm text-gray-700 mt-2">{{ plan.original_goal }}</p>
       </div>
       <span class="px-3 py-1 rounded-full text-sm font-semibold {{ badge[1] }} flex-shrink-0">
