@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -54,6 +55,62 @@ _REGISTRY_PATH = os.environ.get(
 )
 
 
+def _load_registry() -> dict:
+    reg = Path(_REGISTRY_PATH)
+    if not reg.exists():
+        return {"projects": []}
+    try:
+        return json.loads(reg.read_text())
+    except (ValueError, OSError):
+        return {"projects": []}
+
+
+def _project_from_cwd(registry: dict, cwd: Path) -> str | None:
+    """The registered project whose repo IS the git toplevel of `cwd` (realpath
+    equality, no prefix matching: a nested unregistered repo is not its parent).
+    None when cwd is not inside a git repo or the repo is not registered."""
+    try:
+        top = subprocess.run(["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
+                             capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if top.returncode != 0 or not top.stdout.strip():
+        return None
+    here = os.path.realpath(top.stdout.strip())
+    for entry in registry.get("projects", []):
+        repo = entry.get("repo")
+        if repo and os.path.realpath(repo) == here and entry.get("name"):
+            return entry["name"]
+    return None
+
+
+def _resolve_project(data: dict, registry: dict, cwd: Path) -> tuple:
+    """(project, project_source) — FL-014, three sources in fixed order:
+    declared in the plan input (incl. the explicit "none") -> the registered
+    repo the plan is published from (cwd) -> (None, None) with a warning.
+    A declared project that contradicts the cwd repo is an error, not a guess."""
+    declared = data.get("project")
+    names = {e.get("name") for e in registry.get("projects", [])}
+    from_cwd = _project_from_cwd(registry, cwd)
+    if declared == "none":
+        print("⚠️  publish-plan: project=none — this plan belongs to no registered project; "
+              "no state-graph review will run at close", file=sys.stderr)
+        return "none", "declared"
+    if declared:
+        if declared not in names:
+            _die(f"project {declared!r} not found in registry {_REGISTRY_PATH}")
+        if from_cwd and from_cwd != declared:
+            _die(f"plan declares project {declared!r} but is published from {from_cwd!r}'s repo — "
+                 f"pick one (or 'none')")
+        return declared, "declared"
+    if from_cwd:
+        return from_cwd, "cwd"
+    print("⚠️  publish-plan: plan is not attributed to any registered project (not published from a "
+          "registered repo, no 'project' given); it will close without a state-graph review",
+          file=sys.stderr)
+    return None, None
+
+
 def _resolve_project_db(project: str) -> str:
     """Look up a tracked project's state-graph DB path from the registry.
     _die() (non-zero) if the registry or the named project is missing."""
@@ -72,15 +129,6 @@ def _resolve_project_db(project: str) -> str:
             return db_path
     _die(f"project {project!r} not found in registry {reg}")
     return ""  # unreachable
-
-
-def _ensure_impact_column(conn) -> None:
-    """The live orchestrator.db already has a Plans table, so run_migrations is a
-    no-op there — make sure the Phase D column exists before we write to it."""
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(Plans)").fetchall()]
-    if "impact_context" not in cols:
-        conn.execute("ALTER TABLE Plans ADD COLUMN impact_context TEXT")
-        conn.commit()
 
 
 def _die(msg: str, code: int = 1) -> None:
@@ -155,8 +203,6 @@ def _validate(data: dict) -> None:
     exps = data.get("expectations") or []
     if not isinstance(exps, list):
         _die("'expectations' must be an array (or omitted)")
-    if exps and not data.get("project"):
-        _die("'expectations' need a tracked 'project' (they are recorded against it)")
     for i, e in enumerate(exps):
         if not isinstance(e, dict) or not all(e.get(k) for k in ("target", "target_kind", "claim", "channel")):
             _die(f"expectations[{i}] must be an object with target, target_kind, claim, channel")
@@ -197,34 +243,33 @@ def main() -> None:
     db_path_env = os.environ.get("ORCH_DB")
     db_path = Path(db_path_env) if db_path_env else None
     conn = db.open_db(db_path) if db_path else db.open_db()
-    # Only migrate if the schema is missing — run_migrations is NOT safely
-    # re-runnable on an already-migrated DB (it raises 'duplicate column name').
-    has_plans = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='Plans'"
-    ).fetchone()
-    if not has_plans:
-        db.run_migrations(conn)
+    # FL-021: every open migrates (reconcile first, idempotent) — a new
+    # migration reaches an existing DB the moment a plan is published.
+    db.run_migrations(conn)
 
     # ── Phase D: plan-time pre-flight (un-skippable for tracked projects) ──
     # If the plan-input names a tracked project, declared_targets is MANDATORY
     # and the forward impact analysis runs synchronously here — "publish a plan"
     # and "do impact analysis" become one atomic act. Project-less plans skip
     # this entirely (backward compatible).
-    project = data.get("project")
+    project, project_source = _resolve_project(data, _load_registry(), Path.cwd())
     impact_context = None
-    if project:
+    tracked = project not in (None, "none")
+    if tracked:
         declared_targets = data.get("declared_targets")
         if not declared_targets or not isinstance(declared_targets, list):
+            how = ("names project" if project_source == "declared"
+                   else f"is published from {project!r}'s repo, so it belongs to that project;")
             _die(
-                f"plan names project {project!r} but 'declared_targets' is missing. "
+                f"plan {how} {project!r} but 'declared_targets' is missing. "
                 f"Forward impact analysis is mandatory for tracked projects: list "
-                f"the symbols/columns this change will touch in 'declared_targets'."
+                f"the symbols/columns this change will touch in 'declared_targets' "
+                f"(or set \"project\": \"none\" to opt out of the state-graph review)."
             )
         graph_db = _resolve_project_db(project)
         impact_context = impact_preflight.compute_impact_context(
             graph_db, data.get("user_query") or "", declared_targets,
             project=project, orch_conn=conn)
-        _ensure_impact_column(conn)
         if impact_context.get("degraded"):
             # FL-020: never silent — the plan publishes, the reader is told.
             print(f"⚠️  publish-plan: impact analysis degraded ({impact_context['degraded']}): "
@@ -246,7 +291,12 @@ def main() -> None:
         max_revisions=data.get("max_revisions", 5),
         user_query=data.get("user_query"),
         skills_activated=skills_activated,
+        project=project,
+        project_source=project_source,
     )
+    if project is not None:
+        result["project"] = project
+        result["project_source"] = project_source
     # Append the deterministic auto-review-and-complete marker step (migration
     # 006). This guarantees every newly-published plan has a terminal step that
     # the executing-plans complete-step / fail-step / finish-plan ops can flip
@@ -270,6 +320,8 @@ def main() -> None:
     if skills_activated_input:
         result["skills_recorded"] = [s["name"] for s in skills_activated_input]
     exps = data.get("expectations") or []
+    if exps and not tracked:
+        _die("'expectations' need a tracked project (declared, or published from a registered repo)")
     if exps:
         step_ids = result.get("step_ids") or []
         for e in exps:

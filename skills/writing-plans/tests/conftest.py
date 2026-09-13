@@ -40,3 +40,14 @@ def tmp_db(tmp_path: Path) -> Path:
 def scripts_dir() -> Path:
     """Path to writing-plans/scripts/ — used to invoke publish-plan.sh."""
     return SCRIPTS_DIR
+
+
+@pytest.fixture(autouse=True)
+def _isolated_registry(tmp_path, monkeypatch):
+    """FL-014 (phase 3.5): publish derives a plan's project from the repo it runs
+    in. These tests run inside prov_ledger — a registered project — so every
+    test gets an EMPTY registry unless it points PSG_REGISTRY_PATH elsewhere.
+    Tests must never read the real ~/skill-workspace registry."""
+    reg = tmp_path / "empty-registry.json"
+    reg.write_text('{"projects": []}')
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))

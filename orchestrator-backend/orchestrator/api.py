@@ -47,8 +47,15 @@ def initialize_plan(
     max_revisions: int = 5,
     user_query: str | None = None,
     skills_activated: list[dict] | None = None,
+    project: str | None = None,
+    project_source: str | None = None,
 ) -> dict:
     """Create a new plan with N top-level steps. Returns {plan_id, step_ids}.
+
+    `project` / `project_source` (FL-014) record which registered project the
+    plan belongs to and how that was decided ('declared' | 'cwd'); "none" is
+    the explicit "no project". Left NULL, review_and_complete falls back to a
+    one-time legacy goal-text match.
 
     `original_goal` is the agent's one-line summary of intent.
     `initial_steps` items are bare description strings, or dicts of
@@ -65,7 +72,8 @@ def initialize_plan(
     if not initial_steps:
         raise ValueError("initial_steps must contain at least 1 step")
     plan_id = f"{plan_id_prefix}-{_now_compact()}"
-    db.insert_plan(conn, plan_id, original_goal, max_revisions=max_revisions, user_query=user_query)
+    db.insert_plan(conn, plan_id, original_goal, max_revisions=max_revisions, user_query=user_query,
+                   project=project, project_source=project_source)
     step_ids = []
     for i, spec in enumerate(initial_steps):
         desc, step_type = _step_spec(spec)
@@ -328,6 +336,38 @@ def detect_registered_project(
     return _detect_with_reason(conn, plan_id, registry_path)[0]
 
 
+def _project_for_review(
+    conn: sqlite3.Connection,
+    plan_id: str,
+    registry_path=_REGISTRY_DEFAULT,
+) -> tuple[str | None, str, str | None]:
+    """(project, why, source) — FL-014: the plan's project comes from
+    Plans.project (declared at publish, derived from the cwd repo, or "none");
+    the goal-text token match is a compatibility path for NULL rows only and,
+    when it hits, the result is stored once as 'legacy'."""
+    plan = db.get_plan(conn, plan_id) or {}
+    stored, source = plan.get("project"), plan.get("project_source")
+    if stored == "none":
+        return None, "plan declared project=none", source
+    if stored:
+        path = _resolve_registry_path(registry_path)
+        names: set[str] = set()
+        if path and os.path.exists(path):
+            try:
+                with open(path) as f:
+                    names = {p.get("name") for p in json.load(f).get("projects", [])}
+            except (json.JSONDecodeError, OSError):
+                names = set()
+        if stored in names:
+            return stored, source or "declared", source
+        return None, f"project {stored!r} not registered", source
+    project, why = _detect_with_reason(conn, plan_id, registry_path)
+    if project is not None:
+        db.set_plan_project(conn, plan_id, project, "legacy")
+        return project, "legacy token match", "legacy"
+    return None, why, None
+
+
 def _detect_with_reason(
     conn: sqlite3.Connection,
     plan_id: str,
@@ -400,13 +440,29 @@ def _matches_token_run(words: list[str], target: str) -> bool:
     return False
 
 
+def _regular_failures_recovered(conn: sqlite3.Connection, plan_id: str) -> bool:
+    """True when the plan has no non-terminal regular step and every top-level
+    FAILED regular step is recovered (FL-022 re-judge precondition)."""
+    rows = conn.execute(
+        "SELECT step_id, status, parent_step_id FROM Steps WHERE plan_id = ? AND is_review = 0", (plan_id,)
+    ).fetchall()
+    if any(r["status"] in ("PENDING", "STARTING", "IN_PROGRESS") for r in rows):
+        return False
+    failed = [r for r in rows if r["status"] == "FAILED"]
+    if not failed:
+        return False          # nothing to re-judge: the plan did not fail through a regular step
+    by_id = {r["step_id"]: r for r in rows}
+    top = [r for r in failed if r["parent_step_id"] is None or by_id.get(r["parent_step_id"], {}).get("status") != "FAILED"]
+    return all(_is_step_recovered(conn, r["step_id"]) for r in top)
+
+
 def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str, child,
                     registry_path, reopened: bool = False) -> dict:
     """Finalize a reviewed plan as COMPLETED — the close-time capture of spec
     §2.8/§2.9 (unstated backstop, rejected paths, constraint bypasses) and the
     terminal writes in ONE transaction; nothing here can block the close.
     `reopened` (FL-019): the review had FAILED and its child recovered."""
-    project = detect_registered_project(conn, plan_id, registry_path)
+    project, _why, project_source = _project_for_review(conn, plan_id, registry_path)
     psg_db = _usable_graph(project, registry_path)
     with db.transaction(conn):
         n_unstated = reasons.backstop_unstated(
@@ -449,6 +505,8 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         "reason": ("agent review child step recovered after FAILED; finalizing plan COMPLETED" if reopened
                    else "agent review child step COMPLETED; finalizing plan COMPLETED"),
         "reopened": reopened,
+        "project": project,
+        "project_source": project_source,
         "unstated_backstopped": n_unstated,
         "rejected_paths": n_rejected,
         "constraints_bypassed": n_bypassed,
@@ -561,6 +619,23 @@ def review_and_complete(
             child = next(iter(db.get_children(conn, review_step_id)), None)
             if child is not None and child["status"] == "FAILED" and _is_step_recovered(conn, child["step_id"]):
                 return _close_reviewed(conn, plan_id, review_step_id, child, registry_path, reopened=True)
+            if child is None and _regular_failures_recovered(conn, plan_id):
+                # FL-022: the plan failed through a regular step (no review
+                # child was ever created); every failed step has since been
+                # recovered through a deviation sub-tree. Re-judge once: the
+                # host resets the review row (FAILED -> PENDING is not a step
+                # transition the state machine offers, like FL-019's re-open)
+                # and runs the normal decision below.
+                with db.transaction(conn):
+                    db.update_step_status(conn, review_step_id, "PENDING", commit=False)
+                    db.update_plan_status(conn, plan_id, "IN_PROGRESS", commit=False)
+                    telemetry.append_step_log(
+                        conn, review_step_id,
+                        "[REVIEW REOPENED] plan had failed through regular step(s); all recovered — re-judging (FL-022)",
+                        commit=False)
+                out = review_and_complete(conn, plan_id, registry_path)
+                out["reopened"] = True
+                return out
         plan_row = db.get_plan(conn, plan_id)
         return {
             "ready": True,
@@ -584,7 +659,7 @@ def review_and_complete(
             return {
                 "ready": False,
                 "needs_agent_review": True,
-                "project": detect_registered_project(conn, plan_id, registry_path),
+                "project": _project_for_review(conn, plan_id, registry_path)[0],
                 "plan_status": "IN_PROGRESS",
                 "review_step_id": review_step_id,
                 "review_child_step_id": child_id,
@@ -613,7 +688,7 @@ def review_and_complete(
         return {
             "ready": False,
             "needs_agent_review": True,
-            "project": detect_registered_project(conn, plan_id, registry_path),
+            "project": _project_for_review(conn, plan_id, registry_path)[0],
             "plan_status": "IN_PROGRESS",
             "review_step_id": review_step_id,
             "review_child_step_id": child["step_id"],
@@ -713,7 +788,7 @@ def review_and_complete(
     # S1 (spec §2.10): when we do NOT review, the reason is written down.
     review_skipped: str | None = None
     if new_plan_status == "COMPLETED":
-        project, why = _detect_with_reason(conn, plan_id, registry_path)
+        project, why, project_source = _project_for_review(conn, plan_id, registry_path)
         review_skipped = why if project is None else None
         if project is not None:
             child_id = _open_agent_review(conn, plan_id, review_step_id)
@@ -721,6 +796,7 @@ def review_and_complete(
                 "ready": False,
                 "needs_agent_review": True,
                 "project": project,
+                "project_source": project_source,
                 "plan_status": "IN_PROGRESS",
                 "review_step_id": review_step_id,
                 "review_child_step_id": child_id,

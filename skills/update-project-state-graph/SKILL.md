@@ -31,6 +31,10 @@ refresh the graph + re-run tests, then close COMPLETED.
 
 ## Inputs (from the dispatch)
 
+The `project` is the plan's own attribution (`Plans.project` /
+`project_source` — declared, derived from the publishing repo, or `legacy`),
+not something inferred from the goal text (FL-014, phase 3.5).
+
 - `plan_id`, `project` (canonical registry name), `review_step_id`, and
   `review_child_step_id` (the tracked child step `<plan>-REVIEW.1` you must drive).
 - Registry: `~/skill-workspace/project-graphs/projects.json` →

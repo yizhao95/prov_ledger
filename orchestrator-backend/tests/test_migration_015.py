@@ -37,7 +37,8 @@ def test_015_preserves_existing_rows_and_indexes(tmp_path, monkeypatch):
     with pytest.raises(sqlite3.IntegrityError):
         c.execute("INSERT INTO LedgerEntries (project, kind, statement) VALUES ('p','constraint','not yet')")
     monkeypatch.setattr(db, "MIGRATIONS_DIR", MIGRATIONS)
-    assert db.run_migrations(c) == 1                         # exactly 015
+    later = [f for f in sorted(MIGRATIONS.glob("*.sql")) if f.name >= "015"]
+    assert db.run_migrations(c) == len(later)                # 015 and whatever came after it
     row = c.execute("SELECT id, statement, rationale, plan_id, hit_count, why_visibility FROM LedgerEntries").fetchone()
     assert tuple(row) == (1, "legacy", "because", "plan-1", 3, "shared")
     names = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='LedgerEntries'")}

@@ -100,9 +100,11 @@ recovered and still poisons the plan. Recursion depth is bounded by the
 
 ### 🤖 NEEDS_REVIEW handoff (registered-project plans)
 
-When a plan mentions a **registered project** (one in
-`~/skill-workspace/project-graphs/projects.json`, variance-tolerant match), the
-deterministic procedure does **not** auto-close it. Instead it (1) flips the
+When a plan **belongs to a registered project** — `Plans.project`, declared in
+the plan-input or derived from the repo it was published from (FL-014, phase
+3.5); the goal text no longer needs to mention the project, and a plan
+published before the column existed is matched once from its goal and
+labelled `legacy` — the deterministic procedure does **not** auto-close it. Instead it (1) flips the
 review step to `NEEDS_REVIEW`, (2) bumps the plan revision, and (3) inserts a
 **tracked child step** `<plan>-REVIEW.1` (type `SUB_AGENT`, status `PENDING`)
 under the review step. The plan stays `IN_PROGRESS`, and the

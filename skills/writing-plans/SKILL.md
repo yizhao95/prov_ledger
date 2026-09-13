@@ -78,6 +78,22 @@ without declaring what it touches:
   — the graph only describes code that exists.
 - Project-less plans skip all of this and publish exactly as before.
 
+## 🏷️ Project attribution (FL-014, phase 3.5)
+
+Which registered project a plan belongs to is **explicit** (`Plans.project` +
+`project_source`), decided once at publish, in this order:
+
+1. `"project": "<name>"` in the plan-input (must be registered) — or
+   `"project": "none"` to say "no project, no state-graph review" on purpose;
+2. otherwise the **repo you publish from**: when `cwd` is inside a git repo whose
+   toplevel is a registered project's `repo`, the plan is attributed to it
+   (`project_source = cwd`) — the goal does **not** need to mention the project;
+3. otherwise NULL, with a ⚠️ on stderr (the plan closes without a review).
+
+A declared project that contradicts the cwd repo fails the publish ("pick one").
+Plans published before this column existed are matched once from goal text at
+close and labelled `legacy`.
+
 ## 📓 Decision-Memory Ledger (provLedger Phase E)
 
 The **ledger track** — the home for everything the gate track honestly *cannot*
