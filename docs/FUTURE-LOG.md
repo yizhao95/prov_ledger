@@ -8,10 +8,10 @@
 | FL-001 | phase1 | DEFERRED | notebook `.ipynb` 支持 | 未定 |
 | FL-002 | phase1 | DEFERRED | 拆分 / 合并的历史分叉（DAG）建模；现按断裂处理并标注 | 阶段 4 后 |
 | FL-003 | phase1 | DEFERRED | 第四层身份：多签名分歧度打分 + LLM 仲裁（需先有校准数据） | 阶段 7 |
-| FL-004 | phase1 | DEFERRED | 历史 commit 回填命令（`analyzer backfill --since <sha>`） | 阶段 7 后 |
+| FL-004 | phase1 | DONE（阶段 7 Task 3：`analyzer backfill <repo> --since SHA [--until] [--every] [--subdir] [--fresh-db]`，worktree 回放、trigger=backfill、拒绝真实历史除非 fresh、可续跑） | 历史 commit 回填命令（`analyzer backfill --since <sha>`） | 阶段 7 后 |
 | FL-005 | phase1 | DEFERRED | `node_snapshot` 累积压缩策略 | 阶段 3 后 |
 | FL-006 | phase6 | DONE | host API（NodeTypeProvider / provledger.testing）放 pip 包还是 skills/ | 阶段 6 前拍板 |
-| FL-007 | phase1 | DEFERRED | eval metric outcome 通道（当前无表，demo 指标只在日志） | 阶段 7 |
+| FL-007 | phase1 | DONE（阶段 7 Task 1：migration 017 `metrics` + `record-metric` / `metrics_from_stdout` + `MetricChannel`，demo 的 +23.2% 成为 observed outcome） | eval metric outcome 通道（当前无表，demo 指标只在日志） | 阶段 7 |
 | FL-008 | phase1 | DEFERRED | 与 superpowers 同名 skill 的长期方案（现为项目级禁用 + bootstrap 提示） | 阶段 5 |
 | FL-009 | phase1 | DEFERRED | dashboard 展示 node 历史与 outcome | 阶段 4 后 |
 | FL-010 | phase1 | DEFERRED | 数据流签名依赖 dtype 覆盖率（unknown 偏多 → trivial 签名不参与匹配） | 持续 |
@@ -31,7 +31,7 @@
 | FL-024 | phase4 | DONE | dogfood：`finish-plan.sh` 的"强制完成兜底"在 `review_and_complete` 返回 `ready=False` 时直接 `complete_plan`，包括 plan 刚进入 NEEDS_REVIEW 的情形（FL-022 重开 `p3-t3` 后 status=COMPLETED 而 review_state=awaiting_agent）；兜底必须排除 `needs_agent_review` | 阶段 4 前 |
 | FL-025 | phase4 | DONE | 场景测试抓到：`ledger-add.sh`（`ledger_cli._connect`）裸 `sqlite3.connect` 打开 orchestrator 库、不跑迁移，在一个还没被任何脚本打开过的库上 `add` 死于 `no such table: LedgerEntries`；改为经 `orchestrator.db.open_db + run_migrations`（FL-021 的"每次打开都迁移"应覆盖每一条写路径） | 阶段 4 |
 | FL-026 | phase4 | DEFERRED | 场景体系不覆盖 notebook 变更（FL-001 的 notebook 节点在 `pipeline_repo` fixture 里没有对应物）；需要一个带 `.ipynb` 的 fixture 和 `cell_changed`/`cell_moved` 一类事件的 expect 词汇 | 阶段 5 |
-| FL-027 | phase4 | DEFERRED | 身份仲裁只有确定性 stub：`test_llm_consistency.py` 用 `PROVLEDGER_ARBITER=module:function` 注入真实模型并要求 N 次一致，但没有任何模型接入、没有把 `identity_asserted` 事件接进 `init_project.sh`（`history.resolve(arbitrate=...)` 仍是 None）；接入时要先过一致性门槛再写 asserted | 阶段 5 |
+| FL-027 | phase4 | WIP（阶段 7 Task 2：`graph_api.Arbiter` + 校准导出 + `arbiter-eval` 门槛 + `cli.run` 按门槛接线已做，模型仍未接——见 FL-040/041） | 身份仲裁只有确定性 stub：`test_llm_consistency.py` 用 `PROVLEDGER_ARBITER=module:function` 注入真实模型并要求 N 次一致，但没有任何模型接入、没有把 `identity_asserted` 事件接进 `init_project.sh`（`history.resolve(arbitrate=...)` 仍是 None）；接入时要先过一致性门槛再写 asserted | 阶段 5 |
 | FL-028 | phase5 | DONE | dogfood：review 刷新中途被杀（系统低内存杀掉 `review_run.py`）后，项目图库留下一行 0 事件的 `analysis_run`（run 32，plan `p4-t5`）和一个只重建了一部分的 node 表，直到下一次刷新才被 `reset_graph` 覆盖；`init_project.sh` 应把分析写进临时库再原子替换，或至少把中断的 run 标成 aborted，让 history/selfcheck 不把它当成一次真实观测。`review_run.py` 这侧已修：REVIEW.1 IN_PROGRESS 且注册 sha 落后 HEAD 时重做 1–4b 而不是跳到 4c | 阶段 5 |
 | FL-029 | phase6 | DONE | dogfood：两个闸门按**裸名**连线——`stale_references` 对改名 `namesets.get → names` 报了 20 个 "still calls get"（仓库里所有 dict/requests 的 `.get()` 调用方，全在 diff 之外），`selfcheck.dtype_consistency_e2e` 把返回 `frozenset[str]` 的 `get` 当成所有 `.get()` 消费者的生产者（23 处断裂，刷新直接失败）；两处都应按限定名 / 已解析的边连线（PSG-C2 已给 profiles 做过），裸名只作降级并降为 warning。本阶段绕过：访问器改名 `names()` | 阶段 6 |
 | FL-030 | phase6 | DONE | dogfood：FL-019 的递归恢复在恢复子步骤 COMPLETED 的一瞬间就把 plan 关成 reviewed——不检查注册 sha 是否等于 HEAD、不给填理由的机会（Task 2 的 28 个槽位全被系统兜底成 unstated，事后用 reason-fill 追加）。`_close_reviewed(reopened=True)` 应在注册 sha 落后 HEAD 时拒绝关闭（或自动跑 4b），并把 reason-slots 清单打进日志；另外 review_run 应能在 REVIEW.1 已 FAILED 时以恢复子步骤的身份重跑 1–4c | 阶段 6 |
