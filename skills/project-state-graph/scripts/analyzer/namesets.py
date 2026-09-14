@@ -70,6 +70,15 @@ def configure(repo_root: str | None) -> dict | None:
     return {"path": ext.path, "sha256": ext.sha256, "namesets": ext.fingerprint()["namesets"]}
 
 
+def extensions_fingerprint(repo_root: str | None) -> dict | None:
+    """The full fingerprint of the extensions file in force for `repo_root`
+    (drift kinds, namesets, constraints, sha256) — what analysis_run records.
+    None without a file (or without the loader)."""
+    if _ext is None:
+        return None
+    return _ext.current(repo_root).fingerprint()
+
+
 def names(name: str) -> frozenset[str]:
     """The active set (DEFAULTS until configure applied a file). KeyError for an unknown set.
     (Named `names`, not `get`: the graph's dtype_consistency_e2e gate links producers and

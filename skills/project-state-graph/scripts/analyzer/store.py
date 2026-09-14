@@ -148,6 +148,9 @@ def init_db(path: str) -> sqlite3.Connection:
     # FL-028: a run whose process died before finish_run is marked aborted by
     # the next start_run of the same project; history readers skip it.
     _ensure_columns(conn, "analysis_run", {"aborted": "INTEGER NOT NULL DEFAULT 0"})
+    # Phase 5: the extension set behind every run (extensions.fingerprint()),
+    # NULL when no provledger-extensions.json applied — reproducibility.
+    _ensure_columns(conn, "analysis_run", {"extensions_json": "TEXT"})
     conn.executescript(_INDEXES)
     conn.executescript(_HISTORY_SCHEMA)
     conn.commit()
@@ -273,9 +276,12 @@ def start_run(
     plan_id: Optional[str] = None,
     step_id: Optional[str] = None,
     trigger: str = "manual",
+    extensions_json: Optional[str] = None,
 ) -> int:
     """Open an analysis run. plan_id/step_id/trigger attribute the run to the
     orchestrator step that caused it (spec §2.5); trigger defaults to manual.
+    extensions_json (phase 5) is the JSON fingerprint of the extension set in
+    force for this run, None when no extensions file applied.
     FL-028: any earlier run of this project that never reached finish_run is
     marked aborted=1 first — it is not an observation, only a leftover."""
     conn.execute(
@@ -284,9 +290,9 @@ def start_run(
     )
     cur = conn.execute(
         """INSERT INTO analysis_run
-           (project_name, commit_sha, started_at, tool_version, plan_id, step_id, trigger)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (project_name, commit_sha, _now(), TOOL_VERSION, plan_id, step_id, trigger),
+           (project_name, commit_sha, started_at, tool_version, plan_id, step_id, trigger, extensions_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (project_name, commit_sha, _now(), TOOL_VERSION, plan_id, step_id, trigger, extensions_json),
     )
     conn.commit()
     return int(cur.lastrowid)

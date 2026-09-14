@@ -76,10 +76,12 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
         )
     # Phase 5: the repo's provledger-extensions.json may patch the analyzers'
     # name sets — configured here, read by the analyzers via namesets.get().
-    ns_fp = namesets.configure(repo_path)
+    namesets.configure(repo_path)
+    ext_fp = namesets.extensions_fingerprint(repo_path)
     conn = store.init_db(db_path)
     run_id = store.start_run(conn, project_name=project, commit_sha=info["commit_sha"],
-                             plan_id=plan_id, step_id=step_id, trigger=trigger)
+                             plan_id=plan_id, step_id=step_id, trigger=trigger,
+                             extensions_json=json.dumps(ext_fp, sort_keys=True) if ext_fp else None)
     store.reset_graph(conn)  # PSG-C1: idempotent rebuild — clear prior graph rows
     try:
         file_map = walker.walk(conn, repo_path)
@@ -133,9 +135,14 @@ def history_main(argv) -> int:
     lines = [f"history of {args.node} ({len(events)} events)"]
     for e in events:
         sha = (e["commit_sha"] or "")[:7]
+        try:
+            ext_sha = (json.loads(e.get("extensions_json") or "null") or {}).get("sha256")
+        except ValueError:
+            ext_sha = None
         lines.append(f"  run={e['run_id']} seq={e['seq']} {e['event_type']} [{e['tier']}] "
                      f"plan={e['plan_id'] or '-'} step={e['step_id'] or '-'} trigger={e['trigger'] or '-'} "
-                     f"sha={sha or '-'} at={e['created_at']} payload={json.dumps(e['payload'], sort_keys=True)}")
+                     f"sha={sha or '-'} ext={ext_sha[:8] if ext_sha else 'none'} at={e['created_at']} "
+                     f"payload={json.dumps(e['payload'], sort_keys=True)}")
     text = "\n".join(lines)
     print(text)
     print(f"approx_tokens={len(text) // 4}")
