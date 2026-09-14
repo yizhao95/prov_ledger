@@ -42,3 +42,14 @@ def test_only_host_mentions_the_bundled_backend_path():
             if "sys.path.insert" in ln and "orchestrator-backend" in ln:
                 lines.append(f"{p.relative_to(REPO)}:{n}")
     assert lines == [], lines
+
+
+def test_analyzer_uv_env_can_import_provledger():
+    """A third-party provider imports `provledger.graph_api`; the analyzer's own
+    uv environment (init_project.sh runs `uv run python -m analyzer`) must
+    therefore contain the package, and _host must pick it there (acceptance C)."""
+    r = subprocess.run(["uv", "run", "--quiet", "python", "-c",
+                        "import provledger.graph_api; from analyzer import _host; print(_host.SOURCE)"],
+                       capture_output=True, text=True, cwd=str(SCRIPTS), timeout=300)
+    assert r.returncode == 0, r.stderr[-800:]
+    assert r.stdout.strip() == "provledger"

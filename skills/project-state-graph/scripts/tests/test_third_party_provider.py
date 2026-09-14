@@ -84,7 +84,7 @@ def test_third_party_provider_snapshots_and_matches_by_qualname(conn, tmp_path, 
     assert {k for t, k in ev if t == "node_matched"} >= keys1 and not [t for t, _ in ev if t == "node_added"]
 
 
-def test_cli_records_the_provider_set_and_selfcheck_warns_on_degradation(tmp_path, monkeypatch):
+def test_cli_records_the_provider_set_and_selfcheck_warns_on_degradation(tmp_path, monkeypatch, capsys):
     (tmp_path / "acme_provider.py").write_text(textwrap.dedent(PROVIDER_MOD))
     monkeypatch.syspath_prepend(str(tmp_path))
     repo = tmp_path / "repo"
@@ -107,3 +107,5 @@ def test_cli_records_the_provider_set_and_selfcheck_warns_on_degradation(tmp_pat
     res = selfcheck.run(str(db))
     chk = next(x for x in res["checks"] if x["name"] == "providers_degraded")
     assert chk["ok"] is False and chk["severity"] == "warning" and "acme.missing" in chk["detail"]
+    err = capsys.readouterr().err
+    assert "WARNING: provider acme.missing degraded" in err and "import failed" in err     # never silent on stdout/stderr

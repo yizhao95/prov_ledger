@@ -83,3 +83,17 @@ def test_report_shape():
     for c in rep.checks:
         assert set(c) >= {"name", "ok", "severity", "detail"} and c["severity"] in ("error", "warning")
     assert isinstance(rep.text(), str) and "conformance" in rep.text().lower()
+
+
+def test_vacuous_pass_is_flagged_as_a_warning():
+    """A provider whose nodes never appear in the corpus proves nothing: the
+    declaration check must say so (warning, not a silent PASS)."""
+    class Nothing(example_provider.ModuleProvider):
+        type_id = "acme.nothing"
+        def extract(self, ctx):
+            return []
+    rep = conformance.run(Nothing())
+    chk = next(c for c in rep.checks if c["name"] == "stability_matches_declaration")
+    assert chk["ok"] is False and chk["severity"] == "warning"
+    assert "no observation" in chk["detail"].lower() and "corpus=" in chk["detail"]
+    assert rep.ok is True                                   # a warning never fails the report

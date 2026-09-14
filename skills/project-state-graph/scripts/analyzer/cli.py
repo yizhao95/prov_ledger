@@ -112,6 +112,10 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
                              timeout_s=max([r.get("timeout_s") or 30.0 for r in prov_records] + [30.0]))
         # Phase 6: the provider set behind this run — declared, loaded or degraded —
         # with what each one produced, next to the extensions fingerprint.
+        for r in prov_records:                      # never silent: a degraded provider is said out loud
+            reason = r.get("degraded") or prov_report.get(r["id"], {}).get("degraded")
+            if reason:
+                print(f"WARNING: provider {r['id']} degraded: {reason}", file=sys.stderr)
         if ext_fp is not None:
             ext_fp["providers"] = [{**r, **{k: v for k, v in prov_report.get(r["id"], {}).items() if k != "schema_version"},
                                     "observations": prov_report.get(r["id"], {}).get("observations", 0)}

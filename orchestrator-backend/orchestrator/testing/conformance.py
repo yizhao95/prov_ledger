@@ -254,9 +254,15 @@ def run(provider, *, corpus: Path | None = None, declared_stability: dict | None
             exercised.add(name)
             if observed != declared[name]:
                 problems.append(f"{case.name}/{name}: declared {declared[name]}, observed {observed}")
-    checks.append({"name": "stability_matches_declaration", "ok": not problems, "severity": "error",
-                   "detail": "; ".join(problems) if problems else
-                   f"declaration holds for {sorted(exercised)} over {len(cases)} case(s)"})
+    if not problems and not exercised:
+        # nothing in the corpus reached this provider's nodes: a PASS here would be vacuous
+        checks.append({"name": "stability_matches_declaration", "ok": False, "severity": "warning",
+                       "detail": f"no observation of this provider on {len(cases)} corpus case(s) — the declaration was "
+                                 "not exercised; pass corpus=<dir of cases that contain your nodes> for real evidence"})
+    else:
+        checks.append({"name": "stability_matches_declaration", "ok": not problems, "severity": "error",
+                       "detail": "; ".join(problems) if problems else
+                       f"declaration holds for {sorted(exercised)} over {len(cases)} case(s)"})
 
     # 4. schema
     problems = []
