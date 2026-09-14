@@ -312,7 +312,9 @@ def test_as_recovery_reruns_the_review_under_a_recovery_sub_step(ws):
     ws.op("deviate", {"parent_step_id": child, "justification": "tests command was wrong; re-run the review",
                       "sub_steps": [{"description": "ANALYSIS: re-run the review as recovery", "type": "ANALYSIS"}]})
     runs_before = ws.runs()
-    p = ws.review_run(plan_id, "--reasons", "stub", "--as-recovery", f"{child}.1")
+    p = ws.review_run(plan_id, "--reasons", "ask", "--as-recovery", f"{child}.1")      # look at the checklist first
+    assert p.returncode == 6 and ws.step(f"{child}.1")[0] == "IN_PROGRESS"
+    p = ws.review_run(plan_id, "--reasons", "stub", "--as-recovery", f"{child}.1")     # resume at 4c as the same sub-step
     assert p.returncode == 0, p.stdout + p.stderr
     out = _json_tail(p)
     assert out["closed"] == "COMPLETED" and out["slots"] == 1 and out["filled"] == 1

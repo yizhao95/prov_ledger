@@ -155,9 +155,10 @@ class Driver:
             sub = self.read("SELECT status, parent_step_id FROM Steps WHERE step_id = ?", a.as_recovery)
             parent_status = self.read("SELECT status FROM Steps WHERE step_id = ?", self.child)
             if not sub or sub[0][1] != self.child or not parent_status or parent_status[0][0] != "FAILED" \
-                    or sub[0][0] != "PENDING":
-                _die(f"--as-recovery {a.as_recovery}: must be a PENDING sub-step of {self.child}, which must be FAILED "
-                     f"(got sub={sub[0][0] if sub else None}, parent={parent_status[0][0] if parent_status else None})", 6)
+                    or sub[0][0] not in ("PENDING", "IN_PROGRESS"):
+                _die(f"--as-recovery {a.as_recovery}: must be a PENDING (or IN_PROGRESS, to resume at 4c) sub-step of "
+                     f"{self.child}, which must be FAILED (got sub={sub[0][0] if sub else None}, "
+                     f"parent={parent_status[0][0] if parent_status else None})", 6)
             self.child = a.as_recovery
             self.say(f"[recovery] running the review as {self.child}")
         rows = self.read("SELECT status FROM Steps WHERE step_id = ?", self.child)
