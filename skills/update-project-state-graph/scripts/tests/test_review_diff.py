@@ -393,3 +393,49 @@ def test_range_gate_passes_when_range_has_files(repo, tmp_path):
     assert v["gates"]["range_nonempty"] is True
     # without registered_sha the gate cannot fire (legacy callers unchanged)
     assert review_diff.full_verdict(str(db), str(repo), "HEAD", "HEAD")["gates"]["range_nonempty"] is True
+
+
+# ── FL-023: a caller edited in the same diff is a warning, not a stale-reference fail ──
+
+def test_fl023_stale_reference_in_changed_file_is_a_warning(tmp_path):
+    """pipeline.run still points at old_name in the graph, but pipeline.py is in the
+    diff — the caller was (very likely) edited alongside the removal. Report it,
+    never block on it."""
+    db = tmp_path / "graph.db"
+    _build_graph(db)
+    hits = review_diff.stale_references(str(db), ["old_name"], changed_files={"pipeline.py"})
+    assert [h["severity"] for h in hits] == ["warning"]
+    rep = review_diff.report(str(db), [{"old_name": "old_name", "kind": "removed"}],
+                             changed_files={"pipeline.py"})
+    assert rep["ok"] is True
+    assert len(rep["gaps"]) == 1 and rep["gaps"][0]["severity"] == "warning"
+    assert "warning" in rep["text"].lower() and "old_name" in rep["text"]
+
+
+def test_fl023_stale_reference_outside_the_diff_still_fails(tmp_path):
+    db = tmp_path / "graph.db"
+    _build_graph(db)
+    hits = review_diff.stale_references(str(db), ["old_name"], changed_files={"other.py"})
+    assert [h["severity"] for h in hits] == ["fail"]
+    rep = review_diff.report(str(db), [{"old_name": "old_name", "kind": "removed"}],
+                             changed_files={"other.py"})
+    assert rep["ok"] is False
+    # and the pre-FL-023 call shape (no changed_files) is unchanged: every hit fails
+    rep0 = review_diff.report(str(db), [{"old_name": "old_name", "kind": "removed"}])
+    assert rep0["ok"] is False and rep0["gaps"][0]["severity"] == "fail"
+
+
+def test_fl023_full_verdict_passes_diff_files_to_the_stale_gate(repo, tmp_path):
+    """Remove old_name AND its only call site in one diff: the graph (built at
+    sha0) still has run -> old_name, but pipeline.py is in the range -> the stale
+    gate passes with one warning gap."""
+    sha0 = _git(repo, "rev-parse", "HEAD")
+    (repo / "pipeline.py").write_text("def run():\n    return 1\n")
+    _git(repo, "commit", "-aqm", "remove old_name and its caller's reference")
+    db = tmp_path / "g.db"
+    _build_graph(db)
+    changed = review_diff.changed_symbols(str(repo), sha0, "HEAD")
+    assert any(c.get("kind") == "removed" and c.get("old_name") == "old_name" for c in changed), changed
+    v = review_diff.full_verdict(str(db), str(repo), sha0, "HEAD", changed=changed, registered_sha=sha0)
+    assert v["gates"]["stale_references"] is True, v["text"]
+    assert [g["severity"] for g in v["gaps"]["stale_references"]] == ["warning"]

@@ -1,6 +1,6 @@
 # 🧾 provLedger
 
-![tests](https://img.shields.io/badge/tests-563%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-849%20passing-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -142,7 +142,7 @@ Intent) → `data_loop` (decision → fix through the backbone → re-verify).
 **Pillar B — Project State Graph.** A two-layer map of a repo: a deep SQLite
 node/edge graph built by analyzers (Python via AST; JS / HTML / CSS structures
 via tree-sitter), plus a human-readable `ARCHITECTURE.md`. A companion reviewer
-(`update-project-state-graph`) checks each change against the graph at close
+(`update-project-state-graph`, driven by `scripts/review_run.py`) checks each change against the graph at close
 time — code contracts **and** data contracts.
 
 🔗 **How they connect:** the graph is read at two moments — once at **planning time**
@@ -279,7 +279,7 @@ prov_ledger/
 │   │                          # also pip-buildable as the `provledger` library
 │   ├── orchestrator/          # api.py, db.py, state_machine.py, circuit_breakers.py,
 │   │   │                      # profiler.py, drift.py, data_loop.py, telemetry.py
-│   │   └── migrations/        # 001..013 SQL migrations (ship inside the wheel)
+│   │   └── migrations/        # 001..016 SQL migrations (ship inside the wheel)
 │   └── tests/
 ├── orchestrator-webapp/       # Live read-only provLedger Dashboard (FastAPI + HTMX)
 │   └── app/                   # main.py, queries.py, templates/
@@ -289,7 +289,8 @@ prov_ledger/
     ├── writing-plans/             # ← evolved from Superpowers
     ├── executing-plans/           # ← evolved from Superpowers
     ├── project-state-graph/       # Pillar B — deep code/data graph builder
-    ├── update-project-state-graph/# Pillar B — reviewer / contract gates
+    │   └── scripts/tests/scenarios/   # timeline scenarios: synthetic project, 9 cases + goldens
+    ├── update-project-state-graph/# Pillar B — reviewer / contract gates (scripts/review_run.py)
     ├── brainstorming/             # supporting process skills (locally adapted)
     ├── systematic-debugging/
     ├── test-driven-development/
@@ -312,6 +313,7 @@ This README is the high-level entry point. What's in the repo today:
 | [`examples/silent-class-drop/`](examples/silent-class-drop/) | the demo: how it works, the 5-step plan, regenerating the GIF/screenshots |
 | [`docs/benchmark-silent-class-drop.md`](docs/benchmark-silent-class-drop.md) | the mini-benchmark writeup (0.31 → 0.91) |
 | Each skill's `SKILL.md` + `reference/` | the iron-law workflows (writing-plans, executing-plans, project-state-graph, update-project-state-graph) |
+| [`skills/project-state-graph/scripts/tests/scenarios/README.md`](skills/project-state-graph/scripts/tests/scenarios/README.md) | the timeline-scenario suite: what changing a node triggers, asserted as an event stream with `must_not`, golden per scenario, fully isolated |
 
 A deeper architecture/reference documentation tree exists as maintainer
 working notes and will be published as it stabilizes.
@@ -377,13 +379,13 @@ PY=~/skill-workspace/.venv/bin/python
 
 # 3. Run the test suites to confirm a healthy install (run each separately —
 #    each suite has its own pyproject/pythonpath; one combined invocation breaks)
-$PY -m pytest scripts/tests -q                                    #   3 passed
-$PY -m pytest orchestrator-backend -q                             # 152 passed
-$PY -m pytest orchestrator-webapp  -q                             #  23 passed
-$PY -m pytest skills/writing-plans/tests -q                       #  46 passed, 2 skipped
-$PY -m pytest skills/executing-plans -q                           #  52 passed
-$PY -m pytest skills/project-state-graph/scripts/tests -q         # 232 passed, 1 skipped
-$PY -m pytest skills/update-project-state-graph/scripts/tests -q  #  55 passed
+$PY -m pytest scripts/tests -q                                    #   5 passed
+$PY -m pytest orchestrator-backend -q                             # 229 passed
+$PY -m pytest orchestrator-webapp  -q                             #  29 passed
+$PY -m pytest skills/writing-plans/tests -q                       #  81 passed
+$PY -m pytest skills/executing-plans -q                           #  69 passed
+(cd skills/project-state-graph/scripts && $PY -m pytest tests -q) # 358 passed, 1 skipped, 1 deselected (llm_consistency)
+$PY -m pytest skills/update-project-state-graph/scripts/tests -q  #  78 passed
 
 # 4. Launch the dashboard
 PROVLEDGER_WEBAPP_DIR=orchestrator-webapp bash orchestrator-webapp/launch_dashboard.sh
@@ -395,7 +397,7 @@ PROVLEDGER_WEBAPP_DIR=orchestrator-webapp bash orchestrator-webapp/launch_dashbo
 | Level | Command | Expect |
 |---|---|---|
 | Quickest — end-to-end demo | `make demo` | the MISMATCH → VERIFIED arc, purity 0.31 → 0.91, `SELF-CHECK OK`, exit 0 |
-| Full — all test suites | the seven `pytest` commands above, **run separately** | **563 passed, 3 skipped** total |
+| Full — all test suites | the seven `pytest` commands above, **run separately** | **849 passed, 1 skipped** total (the 9 timeline scenarios run inside the project-state-graph suite, ≤ 11 s each) |
 | Packaging — pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
 
 The dashboard reads the orchestrator database **read-only**. Point it at any

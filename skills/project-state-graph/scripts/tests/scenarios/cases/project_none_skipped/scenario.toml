@@ -1,0 +1,29 @@
+# A plan that opts out of attribution (project = "none") inside a registered
+# repo: it closes without a review, says why, refreshes nothing and leaves no
+# node event or reason behind — and never asks for an agent review.
+[scenario]
+name = "project_none_skipped"
+fixture = "pipeline_repo"
+
+[[tasks]]
+name = "t1"
+goal = "loosen the qty filter (unattributed housekeeping plan)"
+project = "none"
+change = { replace = { "pkg/pipeline.py" = [['r["qty"] > MIN_QTY', 'r["qty"] >= MIN_QTY']] } }
+reasons = "stub"
+
+[expect]
+events = [
+  { plan = "t1", type = "plan", closed = "COMPLETED", project = "none", project_source = "declared", review_skipped = "plan declared project=none" },
+  { plan = "t1", type = "review_log", step = "REVIEW", tag = "[REVIEW SKIPPED]" },
+]
+must_not = [
+  { plan = "t1", type = "node_changed" },
+  { plan = "t1", type = "node_matched" },
+  { plan = "t1", type = "node_added" },
+  { plan = "t1", type = "reason" },
+  { plan = "t1", type = "expectation" },
+  { plan = "t1", type = "review_log", tag = "[REVIEW LOCK]" },
+  { plan = "t1", type = "plan", review_state = "awaiting_agent" },
+  { anywhere = "needs_agent_review" },
+]

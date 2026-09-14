@@ -1,0 +1,393 @@
+{
+ "events": [
+  {
+   "node": "pkg.pipeline.clean",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.clean",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.fit",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.fit",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.load",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.load",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.main",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.main",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.split",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.split",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.report.summary",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.report.summary",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "tests.test_pipeline.test_main_runs",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "tests.test_pipeline.test_main_runs",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "tests.test_pipeline.test_summary_counts_rows",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "tests.test_pipeline.test_summary_counts_rows",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.main",
+   "plan": "t0",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.split",
+   "plan": "t0",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.clean",
+   "plan": "t0",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.fit",
+   "plan": "t0",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "tests.test_pipeline.test_summary_counts_rows",
+   "plan": "t0",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "tests.test_pipeline.test_main_runs",
+   "plan": "t0",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.load",
+   "plan": "t0",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.report.summary",
+   "plan": "t0",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.main",
+   "plan": "t1",
+   "prev_run": 2,
+   "run": 3,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.split",
+   "plan": "t1",
+   "prev_run": 2,
+   "run": 3,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.clean",
+   "plan": "t1",
+   "prev_run": 2,
+   "run": 3,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.fit",
+   "plan": "t1",
+   "prev_run": 2,
+   "run": 3,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "tests.test_pipeline.test_summary_counts_rows",
+   "plan": "t1",
+   "prev_run": 2,
+   "run": 3,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "tests.test_pipeline.test_main_runs",
+   "plan": "t1",
+   "prev_run": 2,
+   "run": 3,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.load",
+   "plan": "t1",
+   "prev_run": 2,
+   "run": 3,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.report.summary",
+   "plan": "t1",
+   "prev_run": 2,
+   "run": 3,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.main",
+   "plan": "t2",
+   "prev_run": 3,
+   "run": 4,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.split",
+   "plan": "t2",
+   "prev_run": 3,
+   "run": 4,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.clean",
+   "plan": "t2",
+   "prev_run": 3,
+   "run": 4,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.fit",
+   "plan": "t2",
+   "prev_run": 3,
+   "run": 4,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "tests.test_pipeline.test_summary_counts_rows",
+   "plan": "t2",
+   "prev_run": 3,
+   "run": 4,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "tests.test_pipeline.test_main_runs",
+   "plan": "t2",
+   "prev_run": 3,
+   "run": 4,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.load",
+   "plan": "t2",
+   "prev_run": 3,
+   "run": 4,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.report.summary",
+   "plan": "t2",
+   "prev_run": 3,
+   "run": 4,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "closed": "COMPLETED",
+   "plan": "t0",
+   "project": "scn",
+   "project_source": "cwd",
+   "review_skipped": null,
+   "review_state": "reviewed",
+   "type": "plan"
+  },
+  {
+   "closed": "COMPLETED",
+   "plan": "t1",
+   "project": "scn",
+   "project_source": "cwd",
+   "review_skipped": null,
+   "review_state": "reviewed",
+   "type": "plan"
+  },
+  {
+   "closed": "COMPLETED",
+   "plan": "t2",
+   "project": "scn",
+   "project_source": "cwd",
+   "review_skipped": null,
+   "review_state": "reviewed",
+   "type": "plan"
+  },
+  {
+   "plan": "t0",
+   "step": "REVIEW",
+   "tag": "[REVIEW LOCK]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t0",
+   "step": "REVIEW.1",
+   "tag": "[REVIEW LOCK]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t1",
+   "step": "REVIEW",
+   "tag": "[REVIEW LOCK]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t1",
+   "step": "REVIEW.1",
+   "tag": "[FAIL]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t1",
+   "step": "REVIEW.1",
+   "tag": "[MANUAL VERDICT]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t1",
+   "step": "REVIEW.1",
+   "tag": "[REVIEW LOCK]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t2",
+   "step": "REVIEW",
+   "tag": "[REVIEW LOCK]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t2",
+   "step": "REVIEW.1",
+   "tag": "[REVIEW LOCK]",
+   "type": "review_log"
+  }
+ ],
+ "runs": [
+  {
+   "plan": null,
+   "run": 1,
+   "step": null,
+   "trigger": "manual"
+  },
+  {
+   "plan": "t0",
+   "run": 2,
+   "step": "REVIEW.1",
+   "trigger": "review"
+  },
+  {
+   "plan": "t1",
+   "run": 3,
+   "step": "REVIEW.1",
+   "trigger": "review"
+  },
+  {
+   "plan": "t2",
+   "run": 4,
+   "step": "REVIEW.1",
+   "trigger": "review"
+  }
+ ]
+}

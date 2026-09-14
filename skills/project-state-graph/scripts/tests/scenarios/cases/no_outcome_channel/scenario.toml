@@ -1,0 +1,35 @@
+# An expectation on a channel nobody can observe (metric:latency): the close
+# records none_available with the honest reason, never a fake observation.
+[scenario]
+name = "no_outcome_channel"
+fixture = "pipeline_repo"
+
+[[tasks]]
+name = "t1"
+goal = "avoid a second pass over the rows"
+declared_targets = ["pkg.pipeline.clean"]
+change = { replace = { "pkg/pipeline.py" = [['''    df = [r for r in df if r["qty"] > MIN_QTY]
+    df = [r for r in df if r.get("label")]''', '''    df = [r for r in df if r["qty"] > MIN_QTY and r.get("label")]''']] } }
+expectations = [ { target = "latency", target_kind = "metric", claim = "clean() gets faster", channel = "metric:latency" } ]
+reasons = { "pkg.pipeline.clean" = "single pass over the rows" }
+
+[[tasks]]
+name = "t2"
+goal = "annotate the functions"
+declared_targets = ["pkg.pipeline.main"]
+change = { generated = "add_comments" }
+reasons = "stub"
+
+[expect]
+events = [
+  { plan = "t1", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
+  { plan = "t1", type = "expectation", target = "latency", channel = "metric:latency" },
+  { plan = "t1", type = "outcome", kind = "none_available", tier = "none", backfilled_by = "t2", reason_contains = "no metric channel" },
+  { plan = "t2", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
+]
+must_not = [
+  { type = "outcome", kind = "observed" },
+  { type = "outcome", kind = "survival" },
+  { type = "node_removed" },
+  { type = "plan", closed = "FAILED" },
+]

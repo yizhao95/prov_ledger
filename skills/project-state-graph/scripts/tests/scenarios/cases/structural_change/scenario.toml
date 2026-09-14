@@ -1,0 +1,50 @@
+# A structural change: a new node dedupe() wired between clean and split.
+# dedupe is added, main (the wiring) is changed, both get a reason slot;
+# nothing is removed and the untouched upstream stays clean.
+[scenario]
+name = "structural_change"
+fixture = "pipeline_repo"
+
+[[tasks]]
+name = "t1"
+goal = "drop duplicate ids before splitting"
+declared_targets = ["pkg.pipeline.main", "pkg.pipeline.dedupe"]
+reasons = { "pkg.pipeline.dedupe" = "new step: duplicate ids double-counted revenue", "pkg.pipeline.main" = "wires dedupe between clean and split" }
+[tasks.change.replace]
+"pkg/pipeline.py" = [
+  ['''def split(df: list, test_size: float = TEST_SIZE) -> tuple:''', '''def dedupe(df: list) -> list:
+    seen = set()
+    out = []
+    for r in df:
+        if r["id"] not in seen:
+            seen.add(r["id"])
+            out.append(r)
+    return out
+
+
+def split(df: list, test_size: float = TEST_SIZE) -> tuple:'''],
+  ['''    df = clean(df)
+    X_train, X_test = split(df)''', '''    df = clean(df)
+    df = dedupe(df)
+    X_train, X_test = split(df)'''],
+]
+
+[expect]
+events = [
+  { plan = "t1", type = "node_added", node = "pkg.pipeline.dedupe" },
+  { plan = "t1", type = "node_changed", node = "pkg.pipeline.main", changed = ["struct_sig"] },
+  { plan = "t1", type = "reason", node = "pkg.pipeline.dedupe", text_is = "stated" },
+  { plan = "t1", type = "reason", node = "pkg.pipeline.main", text_is = "stated" },
+  { plan = "t1", type = "node_matched", node = "pkg.pipeline.clean" },
+  { plan = "t1", type = "node_matched", node = "pkg.pipeline.split" },
+  { plan = "t1", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
+]
+must_not = [
+  { type = "node_removed" },
+  { plan = "t1", type = "node_changed", node = "pkg.pipeline.load" },
+  { plan = "t1", type = "node_changed", node = "pkg.pipeline.clean" },
+  { plan = "t1", type = "node_changed", node = "pkg.pipeline.split" },
+  { plan = "t1", type = "reason", text_is = "unstated" },
+  { type = "identity_ambiguous" },
+  { type = "plan", closed = "FAILED" },
+]

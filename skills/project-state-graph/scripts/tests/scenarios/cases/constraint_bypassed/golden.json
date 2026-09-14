@@ -1,0 +1,237 @@
+{
+ "events": [
+  {
+   "node": "pkg.pipeline.clean",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.clean",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.fit",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.fit",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.load",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.load",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.main",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.main",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.split",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.split",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.report.summary",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.report.summary",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "tests.test_pipeline.test_main_runs",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "tests.test_pipeline.test_main_runs",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "tests.test_pipeline.test_summary_counts_rows",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "tests.test_pipeline.test_summary_counts_rows",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.main",
+   "plan": "t1",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.split",
+   "plan": "t1",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.clean",
+   "plan": "t1",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.fit",
+   "plan": "t1",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "tests.test_pipeline.test_summary_counts_rows",
+   "plan": "t1",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "tests.test_pipeline.test_main_runs",
+   "plan": "t1",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.pipeline.load",
+   "plan": "t1",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "node": "pkg.report.summary",
+   "plan": "t1",
+   "prev_run": 1,
+   "run": 2,
+   "tier": "observed",
+   "type": "node_matched",
+   "via": "qualname"
+  },
+  {
+   "changed": [
+    "struct_sig"
+   ],
+   "dataflow_sig": {
+    "from": "be17464cfcd0da10",
+    "to": "be17464cfcd0da10"
+   },
+   "node": "pkg.pipeline.clean",
+   "plan": "t1",
+   "run": 2,
+   "span": {
+    "from": [
+     18,
+     21
+    ],
+    "to": [
+     18,
+     21
+    ]
+   },
+   "struct_sig": {
+    "from": "f1277c669ba971f3",
+    "to": "051834694554c58a"
+   },
+   "tier": "observed",
+   "type": "node_changed"
+  },
+  {
+   "node": "pkg.pipeline.clean",
+   "plan": "t1",
+   "run": 2,
+   "source": "agent",
+   "text": "zero-quantity rows are returns; kept for the report",
+   "text_is": "stated",
+   "tier": "stated",
+   "type": "reason"
+  },
+  {
+   "node": "pkg.pipeline.clean",
+   "plan": "t1",
+   "run": 2,
+   "source": "system",
+   "text": "constraint_bypassed:1: clean() must keep dropping zero-quantity rows",
+   "text_is": "stated",
+   "tier": "derived",
+   "type": "constraint_ref"
+  },
+  {
+   "closed": "COMPLETED",
+   "plan": "t1",
+   "project": "scn",
+   "project_source": "cwd",
+   "review_skipped": null,
+   "review_state": "reviewed",
+   "type": "plan"
+  },
+  {
+   "plan": "t1",
+   "step": "REVIEW",
+   "tag": "[CONSTRAINT BYPASSED]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t1",
+   "step": "REVIEW",
+   "tag": "[REVIEW LOCK]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t1",
+   "step": "REVIEW.1",
+   "tag": "[REVIEW LOCK]",
+   "type": "review_log"
+  }
+ ],
+ "runs": [
+  {
+   "plan": null,
+   "run": 1,
+   "step": null,
+   "trigger": "manual"
+  },
+  {
+   "plan": "t1",
+   "run": 2,
+   "step": "REVIEW.1",
+   "trigger": "review"
+  }
+ ]
+}

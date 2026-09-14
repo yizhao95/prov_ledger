@@ -1,0 +1,32 @@
+# A restricted constraint anchored to clean is changed by a plan that never
+# declared clean (so the constraint was never surfaced at plan time): the
+# close records constraint_bypassed on the node and tags the review log, the
+# plan still completes, and the restricted rationale never leaves the ledger.
+[scenario]
+name = "constraint_bypassed"
+fixture = "pipeline_repo"
+
+[[setup]]
+ledger_constraint = { subject = "pkg.pipeline.clean", statement = "clean() must keep dropping zero-quantity rows", rationale = "finance reconciles returns separately (ticket FIN-4412)", visibility = "restricted" }
+
+[[tasks]]
+name = "t1"
+goal = "loosen the qty filter while touching the split"
+declared_targets = ["pkg.pipeline.split"]
+change = { replace = { "pkg/pipeline.py" = [['r["qty"] > MIN_QTY', 'r["qty"] >= MIN_QTY']] } }
+reasons = { "pkg.pipeline.clean" = "zero-quantity rows are returns; kept for the report" }
+
+[expect]
+events = [
+  { plan = "t1", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
+  { plan = "t1", type = "constraint_ref", node = "pkg.pipeline.clean", source = "system", tier = "derived", text_startswith = "constraint_bypassed:" },
+  { plan = "t1", type = "constraint_ref", text_contains = "clean() must keep dropping zero-quantity rows" },
+  { plan = "t1", type = "review_log", tag = "[CONSTRAINT BYPASSED]" },
+  { plan = "t1", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
+]
+must_not = [
+  { anywhere = "finance reconciles returns separately" },
+  { anywhere = "FIN-4412" },
+  { type = "plan", closed = "FAILED" },
+  { type = "node_removed" },
+]

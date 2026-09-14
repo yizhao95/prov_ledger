@@ -353,6 +353,8 @@ def _op_finish_plan(conn, data: dict) -> dict:
         COMPLETED vs FAILED vs not-ready.
       - If the plan is a LEGACY plan (no review row), fall back to plain
         api.complete_plan so back-fill of pre-migration plans keeps working.
+      - If the review is awaiting an agent (needs_agent_review), refuse with
+        exit 7 — the tracked child step is the only way to close it (FL-024).
       - If review_and_complete returns ready=False (non-terminal steps still
         exist), still call api.complete_plan as a force-finish escape hatch —
         matches the pre-006 behavior so manual back-fill of partial plans
@@ -370,6 +372,14 @@ def _op_finish_plan(conn, data: dict) -> dict:
         plan_row = db.get_plan(conn, plan_id) or {}
         plan_row["review_outcome"] = review
         return plan_row
+    if review.get("needs_agent_review"):
+        # FL-024: the review is parked on an agent (NEEDS_REVIEW + tracked child).
+        # The escape hatch below would write COMPLETED over a plan whose
+        # review_state is still awaiting_agent — the only way forward is the
+        # child step. Nothing has been written; exit 7 so the caller notices.
+        child = review.get("review_child_step_id") or f"{plan_id}-REVIEW.1"
+        _die(f"plan {plan_id} is in NEEDS_REVIEW — drive {child} "
+             "(update-project-state-graph); finish-plan cannot force it", code=7)
     # Either legacy plan (no review row) or partial plan with pending steps.
     # Fall back to unconditional COMPLETED for backward compatibility with the
     # pre-006 finish-plan behavior.

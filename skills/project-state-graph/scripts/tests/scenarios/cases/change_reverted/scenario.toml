@@ -1,0 +1,42 @@
+# A change that is reverted by the next plan: the revert is itself a
+# node_changed whose struct_sig returns to the baseline value, and the first
+# plan's expectation is judged `reverted` when the reverting plan closes.
+[scenario]
+name = "change_reverted"
+fixture = "pipeline_repo"
+
+[[tasks]]
+name = "t0"
+goal = "baseline: register the pipeline as it is"
+declared_targets = ["pkg.pipeline.main"]
+reasons = "stub"
+
+[[tasks]]
+name = "t1"
+goal = "loosen the qty filter"
+declared_targets = ["pkg.pipeline.clean"]
+change = { replace = { "pkg/pipeline.py" = [['r["qty"] > MIN_QTY', 'r["qty"] >= MIN_QTY']] } }
+expectations = [ { target = "pkg.pipeline.clean", target_kind = "node", claim = "fewer rows dropped", channel = "graph" } ]
+reasons = { "pkg.pipeline.clean" = "loosened for Q3" }
+
+[[tasks]]
+name = "t2"
+goal = "revert the filter change"
+declared_targets = ["pkg.pipeline.clean"]
+change = { revert_to = "t0" }
+reasons = { "pkg.pipeline.clean" = "Q3 returns are handled upstream now; back to the baseline filter" }
+
+[expect]
+events = [
+  { plan = "t1", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
+  { plan = "t2", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
+  { plan = "t1", type = "outcome", target = "pkg.pipeline.clean", kind = "survival", signal = "reverted", backfilled_by = "t2" },
+  { plan = "t2", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
+]
+must_not = [
+  { type = "node_removed" },
+  { type = "identity_ambiguous" },
+  { plan = "t1", type = "outcome", signal = "untouched_consumed" },
+  { plan = "t2", type = "node_changed", node = "pkg.pipeline.main" },
+  { type = "plan", closed = "FAILED" },
+]

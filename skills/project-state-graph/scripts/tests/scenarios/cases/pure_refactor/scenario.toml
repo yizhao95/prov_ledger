@@ -1,0 +1,57 @@
+# Pure refactors must not look like changes: renaming locals and reformatting
+# keep every node's identity (node_matched), open no reason slot and never
+# trip the review.
+[scenario]
+name = "pure_refactor"
+fixture = "pipeline_repo"
+
+[[tasks]]
+name = "t0"
+goal = "baseline: register the pipeline as it is"
+declared_targets = ["pkg.pipeline.main"]
+reasons = "stub"
+
+[[tasks]]
+name = "t1"
+goal = "rename locals for readability"
+declared_targets = ["pkg.pipeline.clean", "pkg.pipeline.split"]
+change = { generated = "rename_variable" }
+reasons = "stub"
+# rename_variable also renames the PARAMETER df -> frame: the signature gate
+# reports a contract change for clean/split/fit (pkg.report.summary, outside
+# the diff, still calls clean). Every caller passes positionally, so the agent
+# accepts it — exactly the judgment --accept-signature exists for.
+accept_signature = "parameter rename only (df -> frame); every caller passes positionally"
+
+[[tasks]]
+name = "t2"
+goal = "reformat the pipeline module"
+declared_targets = ["pkg.pipeline.main"]
+change = { generated = "reformat" }
+reasons = "stub"
+
+[expect]
+events = [
+  { plan = "t0", type = "node_matched", node = "pkg.pipeline.clean" },
+  { plan = "t1", type = "node_matched", node = "pkg.pipeline.clean" },
+  { plan = "t1", type = "node_matched", node = "pkg.pipeline.split" },
+  { plan = "t1", type = "node_matched", node = "pkg.pipeline.fit" },
+  { plan = "t2", type = "node_matched", node = "pkg.pipeline.main" },
+  { plan = "t2", type = "node_matched", node = "pkg.report.summary" },
+  { plan = "t0", type = "plan", closed = "COMPLETED", review_state = "reviewed", project = "scn", project_source = "cwd" },
+  { plan = "t1", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
+  { plan = "t2", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
+  { plan = "t1", type = "review_log", step = "REVIEW", tag = "[REVIEW LOCK]" },
+  { plan = "t1", type = "review_log", step = "REVIEW.1", tag = "[MANUAL VERDICT]" },
+]
+must_not = [
+  { type = "node_changed", changed = ["struct_sig"] },
+  { type = "node_removed" },
+  { type = "node_added", plan = "t1" },
+  { type = "node_added", plan = "t2" },
+  { type = "identity_ambiguous" },
+  { type = "reason" },                                   # slots == 0: no reason row, not even a system backstop
+  { type = "review_log", tag = "[REVIEW SKIPPED]" },
+  { plan = "t2", type = "review_log", tag = "[MANUAL VERDICT]" },   # reformat needs no override
+  { type = "plan", closed = "FAILED" },
+]
