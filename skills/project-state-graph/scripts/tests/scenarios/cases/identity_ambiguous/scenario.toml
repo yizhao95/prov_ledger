@@ -1,0 +1,53 @@
+# Two body-identical helpers are renamed in the same plan: the matcher must
+# NOT silently connect either (identity_ambiguous on the struct_sig layer),
+# neither old name is reported removed, and the review still completes —
+# ambiguity is a warning for a human/LLM arbiter, not a gap.
+[scenario]
+name = "identity_ambiguous"
+fixture = "pipeline_repo"
+
+[[tasks]]
+name = "t1"
+goal = "add two scaling helpers"
+declared_targets = ["pkg.pipeline.norm_a", "pkg.pipeline.norm_b"]
+reasons = "stub"
+[tasks.change.replace]
+"pkg/pipeline.py" = [
+  ['''def fit(X_train: list) -> dict:''', '''def norm_a(v: float) -> float:
+    return v / 100.0
+
+
+def norm_b(v: float) -> float:
+    return v / 100.0
+
+
+def fit(X_train: list) -> dict:'''],
+]
+
+[[tasks]]
+name = "t2"
+goal = "rename the scaling helpers"
+declared_targets = ["pkg.pipeline.scale_a", "pkg.pipeline.scale_b"]
+reasons = "stub"
+[tasks.change.replace]
+"pkg/pipeline.py" = [
+  ["def norm_a(v: float) -> float:", "def scale_a(v: float) -> float:"],
+  ["def norm_b(v: float) -> float:", "def scale_b(v: float) -> float:"],
+]
+
+[expect]
+events = [
+  { plan = "t1", type = "node_added", node = "pkg.pipeline.norm_a" },
+  { plan = "t1", type = "node_added", node = "pkg.pipeline.norm_b" },
+  { plan = "t2", type = "identity_ambiguous", layer = "struct_sig", prev = ["pkg.pipeline.norm_a", "pkg.pipeline.norm_b"], cur = ["pkg.pipeline.scale_a", "pkg.pipeline.scale_b"], same_struct_sig = true },
+  { plan = "t2", type = "node_matched", node = "pkg.pipeline.clean" },
+  { plan = "t2", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
+]
+must_not = [
+  { plan = "t2", type = "node_matched", node = "pkg.pipeline.scale_a" },
+  { plan = "t2", type = "node_matched", node = "pkg.pipeline.scale_b" },
+  { plan = "t2", type = "node_removed", node = "pkg.pipeline.norm_a" },
+  { plan = "t2", type = "node_removed", node = "pkg.pipeline.norm_b" },
+  { plan = "t2", type = "node_changed" },
+  { type = "plan", closed = "FAILED" },
+]
