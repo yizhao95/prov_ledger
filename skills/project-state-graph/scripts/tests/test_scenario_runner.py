@@ -8,6 +8,7 @@ import ast
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -210,3 +211,28 @@ def test_one_task_through_publish_run_steps_close_and_collect(tmp_path):
     assert errs == [], errs
     # nothing leaked outside the workspace
     assert not (REAL_HOME / "skill-workspace" / "project-graphs" / "scn").exists()
+
+
+# ── suite wiring (Task 5) ─────────────────────────────────────────────────────
+
+def test_llm_consistency_marker_registered_and_deselected_by_default():
+    import tomllib
+    cfg = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text())
+    ini = cfg.get("tool", {}).get("pytest", {}).get("ini_options", {})
+    assert any(m.startswith("llm_consistency:") for m in ini.get("markers", [])), "marker not registered"
+    assert 'not llm_consistency' in ini.get("addopts", ""), "llm_consistency tests must be deselected by default"
+    r = subprocess.run([sys.executable, "-m", "pytest", "tests/test_llm_consistency.py", "-q", "-p", "no:cacheprovider"],
+                       cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
+    assert "1 deselected" in r.stdout and r.returncode in (0, 5), r.stdout[-400:]
+    r = subprocess.run([sys.executable, "-m", "pytest", "tests/test_llm_consistency.py", "-q", "-p", "no:cacheprovider",
+                        "-m", "llm_consistency"], cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
+    assert r.returncode == 0 and "1 passed" in r.stdout, r.stdout[-400:]
+
+
+def test_scenario_fixtures_are_never_collected():
+    """fixtures/pipeline_repo carries its own tests/ package; collecting it would
+    shadow this suite's `tests` package (48 import errors) — norecursedirs."""
+    r = subprocess.run([sys.executable, "-m", "pytest", "tests", "--co", "-q", "-p", "no:cacheprovider"],
+                       cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
+    assert "pipeline_repo" not in r.stdout and "error" not in r.stdout.lower(), r.stdout[-600:]
+    assert "test_api_refs.py" in r.stdout

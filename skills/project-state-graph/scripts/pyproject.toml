@@ -12,3 +12,12 @@ dependencies = [
     "tree-sitter-javascript>=0.25.0",
     "tree-sitter-python>=0.25.0",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "llm_consistency: needs a live model; never in CI (deselected by default, run with -m llm_consistency)",
+]
+addopts = "-m 'not llm_consistency'"
+# scenario fixtures are synthetic projects with their own tests/ package —
+# collecting them would shadow this suite's `tests` package
+norecursedirs = [".*", "*.egg", "build", "dist", "node_modules", "venv", ".venv", "__pycache__", "fixtures"]
