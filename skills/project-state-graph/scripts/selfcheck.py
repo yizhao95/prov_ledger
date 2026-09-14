@@ -473,6 +473,28 @@ def _check_aborted_runs(conn) -> Dict[str, Any]:
                       "its events are ignored)"}
 
 
+def _check_providers_degraded(conn) -> Dict[str, Any]:
+    """Phase 6: providers that were declared for the latest run but degraded
+    (import failure, unavailable capability, exception, timeout, schema)."""
+    import json
+    if not _table_exists(conn, "analysis_run"):
+        return {"name": "providers_degraded", "ok": True, "severity": "warning", "detail": "no runs"}
+    try:
+        row = conn.execute("SELECT extensions_json FROM analysis_run ORDER BY id DESC LIMIT 1").fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    try:
+        provs = (json.loads(row[0]) if row and row[0] else {}).get("providers") or []
+    except ValueError:
+        provs = []
+    bad = [p for p in provs if p.get("degraded")]
+    if not bad:
+        return {"name": "providers_degraded", "ok": True, "severity": "warning",
+                "detail": f"{len(provs)} provider(s) recorded, none degraded" if provs else "default providers, none degraded"}
+    return {"name": "providers_degraded", "ok": False, "severity": "warning",
+            "detail": "; ".join(f"{p['id']}: {p['degraded']}" for p in bad)}
+
+
 _CHECKS = [
     _check_node_types_nonempty,
     _check_no_dangling_edges,
@@ -493,6 +515,7 @@ _CHECKS = [
     _check_history_ambiguous,
     _check_history_broken_ratio,
     _check_aborted_runs,
+    _check_providers_degraded,
 ]
 
 

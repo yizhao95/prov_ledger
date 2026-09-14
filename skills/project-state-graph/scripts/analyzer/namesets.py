@@ -52,6 +52,11 @@ def configure(repo_root: str | None) -> dict | None:
     return {"path": ext.path, "sha256": ext.sha256, "namesets": ext.fingerprint()["namesets"]}
 
 
+def current_extensions(repo_root: str | None):
+    """The Extensions object in force for `repo_root` (EMPTY without a file)."""
+    return _ext.current(repo_root)
+
+
 def extensions_fingerprint(repo_root: str | None) -> dict | None:
     """The full fingerprint of the extensions file in force for `repo_root`
     (drift kinds, namesets, constraints, sha256) — what analysis_run records.

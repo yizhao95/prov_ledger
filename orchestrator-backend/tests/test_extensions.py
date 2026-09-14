@@ -63,7 +63,7 @@ def test_load_good_file(tmp_path):
     fp = e.fingerprint()
     assert fp == {"path": p, "sha256": e.sha256, "drift_kinds": ["acme.null_spike_strict", "acme.rows_halved"],
                   "namesets": {"split_funcs": ["stratified_split", "time_split"], "fit_methods": ["fit_transform_all", "-train"]},
-                  "constraints": 1}
+                  "constraints": 1, "providers": []}
     assert ext.load(p).fingerprint() == fp                   # stable across loads
 
 

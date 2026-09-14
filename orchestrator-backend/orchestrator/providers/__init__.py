@@ -95,3 +95,64 @@ def make_context(db_path: str, repo_root: str, run_id: int, file_map=None):
 
     return ExtractionContext(repo_root=repo_root, conn_ro=conn, run_id=run_id, file_map=dict(file_map or {}),
                              node_rows=node_rows)
+
+
+HOST_CAPABILITIES: tuple[str, ...] = ()      # "runtime_capture" | "network" | "llm": none offered yet
+
+
+def _record(pid: str, module, schema_version, enabled: bool, priority: int, degraded, timeout_s: float = DEFAULT_TIMEOUT_S) -> dict:
+    return {"id": pid, "module": module, "schema_version": schema_version, "enabled": enabled,
+            "priority": priority, "degraded": degraded, "timeout_s": timeout_s}
+
+
+def load_providers(extensions, builtin: bool = True):
+    """-> (providers, records). The built-ins (priority 0, disable-able by
+    declaring their id with enabled=false) plus every provider declared in the
+    extensions file, imported by `pkg.mod:Class`. Nothing here raises: an import
+    error, a class that is not a NodeTypeProvider, a type_id that differs from
+    the declared id, or a required capability the host does not offer is a
+    degradation record and the provider is left out. Ordered by priority
+    (larger first), then declaration order (built-ins first)."""
+    import importlib
+
+    from ..graph_api import NodeTypeProvider
+    decls = {d.id: d for d in getattr(extensions, "providers", ())}
+    loaded: list[tuple[int, int, object]] = []
+    records: list[dict] = []
+    order = 0
+    if builtin:
+        for p in builtin_providers():
+            d = decls.pop(p.type_id, None)
+            enabled = d.enabled if d else True
+            prio = d.priority if d else 0
+            records.append(_record(p.type_id, None, p.schema_version, enabled, prio, None, d.timeout_s if d else DEFAULT_TIMEOUT_S))
+            if enabled:
+                loaded.append((-prio, order, p))
+            order += 1
+    for d in decls.values():
+        degraded = None
+        provider = None
+        if not d.enabled:
+            records.append(_record(d.id, d.module, None, False, d.priority, None, d.timeout_s))
+            continue
+        try:
+            mod_name, _, cls_name = (d.module or "").partition(":")
+            mod = importlib.import_module(mod_name)
+            cls = getattr(mod, cls_name)
+            provider = cls()
+        except Exception as e:  # noqa: BLE001 — every failure degrades
+            degraded = f"import failed: {type(e).__name__}: {e}"
+        if degraded is None and not isinstance(provider, NodeTypeProvider):
+            degraded = f"{d.module} is not a NodeTypeProvider (type_id/schema_version/requires/extract/attributes_schema/declared_stability)"
+        if degraded is None and getattr(provider, "type_id", None) != d.id:
+            degraded = f"declared id {d.id!r} but the class says type_id {getattr(provider, 'type_id', None)!r}"
+        if degraded is None:
+            missing = [c for c in getattr(provider, "requires", ()) if c not in HOST_CAPABILITIES]
+            if missing:
+                degraded = f"capability {missing[0]!r} unavailable on this host (offers {list(HOST_CAPABILITIES)})"
+        records.append(_record(d.id, d.module, getattr(provider, "schema_version", None), True, d.priority, degraded, d.timeout_s))
+        if degraded is None:
+            loaded.append((-d.priority, order, provider))
+        order += 1
+    loaded.sort(key=lambda t: (t[0], t[1]))
+    return [p for _, _, p in loaded], records
