@@ -20,8 +20,9 @@ PROVLEDGER_* attribution) -> --tests -> selfcheck · 4c reason-slots ->
 reason-fill -> complete-step REVIEW.1 (exit 0).
 
 Every write goes through the executing-plans shell scripts (single write path).
-If REVIEW.1 is already IN_PROGRESS (a previous run stopped in 4c, e.g. exit 6 on
-an unknown reasons key) the driver resumes at 4c without refreshing again.
+If REVIEW.1 is already IN_PROGRESS the driver resumes: at 4c when the registry
+already points at HEAD (a previous run stopped in 4c, e.g. exit 6 on an unknown
+reasons key), otherwise from step 1 (a previous run died before its refresh).
 
 Exit codes: 0 closed COMPLETED · 1 closed FAILED (or a failing --dry-run verdict)
 · 5 a write script failed · 6 bad input (unknown project / reasons key / file).
@@ -150,16 +151,23 @@ class Driver:
             _die(f"{self.child} does not exist — the plan is not in NEEDS_REVIEW", 6)
         head = review_diff._git(repo, "rev-parse", "HEAD").strip()
 
-        if child_status == "IN_PROGRESS" and not a.dry_run:
-            self.say(f"[resume] {self.child} is IN_PROGRESS — continuing at 4c (no second refresh)")
+        resumed = child_status == "IN_PROGRESS" and not a.dry_run
+        if resumed and registered_sha == head:
+            self.say(f"[resume] {self.child} is IN_PROGRESS and the registry is at HEAD — continuing at 4c (no second refresh)")
             self.result["refreshed_sha"] = registered_sha
             return self.close_with_reasons()
+        if resumed:
+            # the previous run died between start-step and the end of the refresh
+            # (killed process): the lock line and start-step already exist, the
+            # refresh does not — redo 1–4b, never skip to 4c.
+            self.say(f"[resume] {self.child} is IN_PROGRESS but the registry ({registered_sha[:10]}) is behind "
+                     f"HEAD ({head[:10]}): the previous run died before the refresh completed — redoing 1–4b")
 
         # 0. lock the registered sha BEFORE anything else
         lock = (f"[REVIEW LOCK] registered_sha={registered_sha} repo={repo} head={head} "
                 f"registry_updated_at={entry.get('updated_at')} locked_at={_utc()}")
         self.say(lock)
-        if not a.dry_run:
+        if not a.dry_run and not resumed:
             self.op("append-log", {"step_id": self.review_step, "text": lock})
             self.op("start-step", {"step_id": self.child, "type": "SUB_AGENT",
                                    "agent_input": f"review_run.py --plan-id {self.plan} --project {self.project}"

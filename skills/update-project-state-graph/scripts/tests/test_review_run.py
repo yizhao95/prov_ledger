@@ -242,3 +242,23 @@ def test_dry_run_writes_nothing(ws):
     assert "[REVIEW LOCK]" not in ws.step(f"{plan_id}-REVIEW")[1]
     assert ws.registered_sha() == ws.sha0 and ws.runs() == runs_before
     assert ws.reasons(plan_id) == []
+
+
+def test_resume_redoes_the_refresh_when_the_registry_is_behind_head(ws):
+    """A previous run died between start-step and the refresh (killed process):
+    REVIEW.1 is IN_PROGRESS but the registry still points at the old sha. Resume
+    must NOT jump to 4c — it re-runs the gates and the refresh first."""
+    head = ws.change(BODY_CHANGE)
+    plan_id = ws.needs_review_plan()
+    ws.op("start-step", {"step_id": f"{plan_id}-REVIEW.1", "type": "SUB_AGENT"})     # the dead run got this far
+    assert ws.registered_sha() == ws.sha0 != head
+    runs_before = ws.runs()
+    p = ws.review_run(plan_id, "--reasons", "stub")
+    assert p.returncode == 0, p.stdout + p.stderr
+    out = _json_tail(p)
+    assert out["closed"] == "COMPLETED" and out["verdict"] is True and out["refreshed_sha"] == head
+    assert ws.runs() == runs_before + 1                          # the refresh happened exactly once
+    assert ws.registered_sha() == head
+    assert out["slots"] == 1 and out["filled"] == 1
+    status, log = ws.step(f"{plan_id}-REVIEW.1")
+    assert status == "COMPLETED" and "[resume]" in log and "refresh" in log.lower()
