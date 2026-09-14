@@ -145,6 +145,9 @@ def init_db(path: str) -> sqlite3.Connection:
     # append-only tables and their triggers.
     _ensure_columns(conn, "node", {"node_key": "TEXT"})
     _ensure_columns(conn, "analysis_run", {"plan_id": "TEXT", "step_id": "TEXT", "trigger": "TEXT"})
+    # FL-028: a run whose process died before finish_run is marked aborted by
+    # the next start_run of the same project; history readers skip it.
+    _ensure_columns(conn, "analysis_run", {"aborted": "INTEGER NOT NULL DEFAULT 0"})
     conn.executescript(_INDEXES)
     conn.executescript(_HISTORY_SCHEMA)
     conn.commit()
@@ -272,7 +275,13 @@ def start_run(
     trigger: str = "manual",
 ) -> int:
     """Open an analysis run. plan_id/step_id/trigger attribute the run to the
-    orchestrator step that caused it (spec §2.5); trigger defaults to manual."""
+    orchestrator step that caused it (spec §2.5); trigger defaults to manual.
+    FL-028: any earlier run of this project that never reached finish_run is
+    marked aborted=1 first — it is not an observation, only a leftover."""
+    conn.execute(
+        "UPDATE analysis_run SET aborted = 1 WHERE project_name = ? AND finished_at IS NULL AND aborted = 0",
+        (project_name,),
+    )
     cur = conn.execute(
         """INSERT INTO analysis_run
            (project_name, commit_sha, started_at, tool_version, plan_id, step_id, trigger)
