@@ -24,8 +24,8 @@ import sqlite3
 from typing import Dict, Optional, Tuple
 
 from . import store
+from . import namesets
 
-_DF_CONSTRUCTORS = {"DataFrame", "createDataFrame"}
 _DF_READERS_PREFIX = "read_"  # read_csv, read_parquet, ...
 
 
@@ -217,7 +217,7 @@ def _is_df_constructor(node) -> bool:
     if not isinstance(node, ast.Call):
         return False
     attr = _func_attr(node.func)
-    if attr in _DF_CONSTRUCTORS:
+    if attr in namesets.get("df_constructors"):
         return True
     if attr and attr.startswith(_DF_READERS_PREFIX):
         return True

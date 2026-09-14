@@ -234,5 +234,6 @@ def test_scenario_fixtures_are_never_collected():
     shadow this suite's `tests` package (48 import errors) — norecursedirs."""
     r = subprocess.run([sys.executable, "-m", "pytest", "tests", "--co", "-q", "-p", "no:cacheprovider"],
                        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True)
-    assert "pipeline_repo" not in r.stdout and "error" not in r.stdout.lower(), r.stdout[-600:]
+    assert "pipeline_repo" not in r.stdout, r.stdout[-600:]
+    assert "ERROR collecting" not in r.stdout and "errors during collection" not in r.stdout, r.stdout[-600:]
     assert "test_api_refs.py" in r.stdout

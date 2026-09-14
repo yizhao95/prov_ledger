@@ -22,6 +22,7 @@ from . import (
     dataflow_types,
     de_overlay,
     history,
+    namesets,
     leakage,
     ml_overlay,
     pipeline,
@@ -73,6 +74,9 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
             "the state-graph may not match committed code.",
             file=sys.stderr,
         )
+    # Phase 5: the repo's provledger-extensions.json may patch the analyzers'
+    # name sets — configured here, read by the analyzers via namesets.get().
+    ns_fp = namesets.configure(repo_path)
     conn = store.init_db(db_path)
     run_id = store.start_run(conn, project_name=project, commit_sha=info["commit_sha"],
                              plan_id=plan_id, step_id=step_id, trigger=trigger)
