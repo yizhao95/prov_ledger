@@ -121,3 +121,28 @@ def test_backfill_cli(repo4, tmp_path):
     assert rc == 0 and len(_runs(db)) == 4                                # resumed: the missing commit only
     with pytest.raises(SystemExit):
         cli.main(["backfill", str(repo), "--project", "bf", "--db-path", str(db)])   # --since is required
+
+
+def test_backfill_subdir_limits_commits_and_analyzes_only_that_directory(repo4, tmp_path):
+    """A project that lives in a subdirectory of a bigger repo (examples/phantom-uplift):
+    only commits touching the subdir are replayed, and the graph is built from the
+    subdir alone (qualified names without the subdir prefix)."""
+    repo, shas = repo4
+    (repo / "app").mkdir()
+    (repo / "app" / "svc.py").write_text("def serve(q):\n    return q * 2\n")
+    _git(repo, "add", "."); _git(repo, "commit", "-qm", "c5 app: add serve")
+    (repo / "pkg" / "other.py").write_text("def keep(z):\n    return z + 1\n")
+    _git(repo, "commit", "-qam", "c6 unrelated change outside app")
+    (repo / "app" / "svc.py").write_text("def serve_v2(q):\n    return q * 2\n")
+    _git(repo, "commit", "-qam", "c7 app: rename serve")
+    all_shas = _git(repo, "rev-list", "--reverse", "HEAD").split()
+    db = tmp_path / "g.db"
+    stats = backfill.run(str(repo), "app", str(db), since=all_shas[0], subdir="app")
+    assert stats["runs"] == 2 and [r[1] for r in _runs(db)] == [all_shas[5], all_shas[7]]      # c5 and c7 only
+    c = sqlite3.connect(str(db))
+    qns = {r[0] for r in c.execute("SELECT qualified_name FROM node_snapshot WHERE node_key <> ''")}
+    assert "svc.serve" in qns and "svc.serve_v2" in qns and not any(q.startswith("app.") or q.startswith("pkg.") for q in qns)
+    assert c.execute("SELECT COUNT(*) FROM node_event WHERE event_type='node_renamed'").fetchone()[0] == 1
+    with redirect_stdout(io.StringIO()):
+        assert cli.main(["backfill", str(repo), "--project", "app2", "--db-path", str(tmp_path / "h.db"), "--since", all_shas[0], "--subdir", "app"]) == 0
+    assert len(_runs(tmp_path / "h.db")) == 2

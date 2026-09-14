@@ -130,6 +130,9 @@ version or its dependencies; an out-of-date environment shows up as
 `WARNING: provider <id> degraded: ModuleNotFoundError: provledger...` on the
 analyzer's stderr and as a `providers_degraded` warning in `selfcheck.py`.
 
+Other analyzer subcommands: `history`, `backfill` (replay past commits into a
+fresh graph), `ambiguities` / `arbiter-eval` (see `docs/arbitration.md`).
+
 The analyzer also accepts `--isolate subprocess` (env `PROVLEDGER_ISOLATE=subprocess`
 for `init_project.sh`): each provider's `extract()` is then forked and **killed**
 on timeout instead of abandoned in a thread (the default `--isolate thread`).

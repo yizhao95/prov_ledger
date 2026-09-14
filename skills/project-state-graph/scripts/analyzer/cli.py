@@ -219,12 +219,15 @@ def backfill_main(argv) -> int:
     parser.add_argument("--until", default="HEAD", help="last commit to replay (inclusive; default HEAD)")
     parser.add_argument("--every", type=int, default=1, help="sample every Nth commit (the tip is always analyzed)")
     parser.add_argument("--max-commits", type=int, default=None)
+    parser.add_argument("--subdir", default=None,
+                        help="replay only commits touching this repo-relative directory and analyze it alone")
     parser.add_argument("--fresh-db", action="store_true",
                         help="delete --db-path first; required when it already holds observed (keyed) history")
     args = parser.parse_args(argv)
     try:
         stats = backfill.run(args.repo_path, args.project, args.db_path, args.since, until=args.until,
-                             every=args.every, max_commits=args.max_commits, fresh_db=args.fresh_db, log=print)
+                             every=args.every, max_commits=args.max_commits, fresh_db=args.fresh_db,
+                             subdir=args.subdir, log=print)
     except backfill.BackfillRefused as exc:
         print(f"backfill refused: {exc}", file=sys.stderr)
         return 3

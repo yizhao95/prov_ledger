@@ -28,15 +28,22 @@ def _git(repo: str, *args: str) -> str:
     return subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
-def commits(repo: str, since: str, until: str = "HEAD") -> list[str]:
-    """Oldest-first shas from `since` (inclusive) to `until` (inclusive)."""
+def commits(repo: str, since: str, until: str = "HEAD", subdir: str | None = None) -> list[str]:
+    """Oldest-first shas from `since` (inclusive) to `until` (inclusive); with
+    `subdir`, only commits that touch that path (`git rev-list -- subdir`)."""
     since_sha = _git(repo, "rev-parse", "--verify", f"{since}^{{commit}}")
+    path = ["--", subdir] if subdir else []
     try:
-        out = _git(repo, "rev-list", "--reverse", f"{since_sha}^..{until}")
+        out = _git(repo, "rev-list", "--reverse", f"{since_sha}^..{until}", *path)
     except subprocess.CalledProcessError:                      # `since` is a root commit: no parent
-        out = _git(repo, "rev-list", "--reverse", until)
+        out = _git(repo, "rev-list", "--reverse", until, *path)
         shas = out.split()
-        return shas[shas.index(since_sha):] if since_sha in shas else shas
+        if not subdir:
+            return shas[shas.index(since_sha):] if since_sha in shas else shas
+        all_shas = _git(repo, "rev-list", "--reverse", until).split()
+        start = all_shas.index(since_sha) if since_sha in all_shas else 0
+        allowed = set(all_shas[start:])
+        return [s for s in shas if s in allowed]
     return out.split()
 
 
@@ -77,8 +84,10 @@ def _run_events(db_path: str, run_id: int) -> dict:
 
 
 def run(repo: str, project: str, db_path: str, since: str, *, until: str = "HEAD", every: int = 1,
-        max_commits: int | None = None, fresh_db: bool = False, log=None) -> dict:
+        max_commits: int | None = None, fresh_db: bool = False, subdir: str | None = None, log=None) -> dict:
     """Replay commits since..until (sampled every `every`) into db_path.
+    `subdir` (relative to the repo) replays only the commits touching it and
+    analyzes that directory alone — a project that lives inside a bigger repo.
     Returns {commits, sampled, runs, skipped, events: {type: n}, ambiguous, shas}."""
     repo = str(Path(repo).resolve())
     log = log or (lambda s: None)
@@ -94,7 +103,7 @@ def run(repo: str, project: str, db_path: str, since: str, *, until: str = "HEAD
     if keyed:
         raise BackfillRefused(f"{db_path} already holds {keyed} keyed snapshot(s) — backfill only writes a fresh "
                               "history; pass --fresh-db to start over (the observed history would be lost)")
-    all_shas = commits(repo, since, until)
+    all_shas = commits(repo, since, until, subdir)
     sampled = all_shas[::every]
     if sampled and all_shas[-1] not in sampled:
         sampled.append(all_shas[-1])                            # the range's tip is always analyzed
@@ -113,7 +122,10 @@ def run(repo: str, project: str, db_path: str, since: str, *, until: str = "HEAD
         _git(repo, "worktree", "add", "--detach", wt, sha)
         try:
             last = i == len(sampled) - 1
-            cli.run(wt, project, db_path, build_cards=last, trigger="backfill", commit_sha=sha)
+            target = os.path.join(wt, subdir) if subdir else wt
+            if not os.path.isdir(target):
+                raise FileNotFoundError(f"{subdir!r} does not exist at {sha[:7]}")
+            cli.run(target, project, db_path, build_cards=last, trigger="backfill", commit_sha=sha)
             conn = store.init_db(db_path)
             try:
                 run_id = store.latest_run_id(conn)
