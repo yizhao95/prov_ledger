@@ -328,3 +328,22 @@ def test_as_recovery_requires_a_pending_sub_step_of_a_failed_review(ws):
     plan_id = ws.needs_review_plan()
     p = ws.review_run(plan_id, "--reasons", "stub", "--as-recovery", f"{plan_id}-REVIEW.1.9")
     assert p.returncode == 6 and "REVIEW.1.9" in (p.stdout + p.stderr)
+
+
+# ── --accept-stale: a manual verdict for the stale_references gate ────────────
+
+def test_accept_stale_overrides_only_that_gate_and_leaves_a_trace(ws):
+    ws.change(STALE_CHANGE)
+    plan_id = ws.needs_review_plan("drop old_name")
+    p = ws.review_run(plan_id, "--reasons", "stub", "--accept-stale", "old_name moved and is re-exported; callers unchanged, suite green")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert ws.plan(plan_id) == ("COMPLETED", "reviewed")
+    status, log = ws.step(f"{plan_id}-REVIEW.1")
+    assert status == "COMPLETED" and "[MANUAL VERDICT] stale_references gate overridden" in log and "re-exported" in log
+
+
+def test_accept_stale_cannot_cover_a_signature_break(ws):
+    ws.change(SIGNATURE_CHANGE)
+    plan_id = ws.needs_review_plan("old_name takes x")
+    p = ws.review_run(plan_id, "--reasons", "stub", "--accept-stale", "not applicable")
+    assert p.returncode == 1 and ws.plan(plan_id)[0] == "FAILED"

@@ -10,6 +10,7 @@ chooses the test command, decides a signature override and supplies reasons.
                                                 # json: [{node_key|qualified_name, text}, ...]
         [--tests "<command>"]                   # 4b re-test, run in the repo; absent -> logged as skipped
         [--accept-signature "<reason>"]         # may override ONLY the signature gate; reason is logged
+        [--accept-stale "<reason>"]             # may override ONLY the stale_references gate (moved + re-exported defs)
         [--allow-dirty]                         # refresh despite uncommitted tracked changes (traced); default: FAIL
         [--as-recovery <plan>-REVIEW.1.k]       # REVIEW.1 FAILED: run 1–4c as that PENDING recovery sub-step
         [--dry-run]                             # steps 0–3 only, nothing written
@@ -208,14 +209,17 @@ class Driver:
         self.say(f"[2] changed_symbols: {[(c.get('kind'), c.get('old_name') or c.get('name')) for c in changed]}")
         self.say("[3] " + verdict["text"])
         ok = verdict["ok"]
-        if not ok and a.accept_signature:
+        accepted = {g: r for g, r in (("signature", a.accept_signature), ("stale_references", a.accept_stale)) if r}
+        if not ok and accepted:
             failing = [g for g, v in verdict["gates"].items() if not v]
-            if failing == ["signature"]:
+            if failing and all(g in accepted for g in failing):
                 ok = True
-                self.manual.append(f"[MANUAL VERDICT] signature gate overridden: {a.accept_signature}")
-                self.say(self.manual[-1])
+                for g in failing:
+                    self.manual.append(f"[MANUAL VERDICT] {g} gate overridden: {accepted[g]}")
+                    self.say(self.manual[-1])
             else:
-                self.say(f"[MANUAL VERDICT] --accept-signature ignored: failing gates {failing} are not just signature")
+                self.say(f"[MANUAL VERDICT] override ignored: failing gates {failing} are not all covered by "
+                         f"{sorted(accepted)} — only the signature and stale_references gates can be accepted")
         self.result["verdict"] = ok
         if a.dry_run:
             self.say(f"[dry-run] verdict {'PASS' if ok else 'FAIL'}; nothing written")
@@ -330,6 +334,9 @@ def main() -> None:
     ap.add_argument("--reasons", default="unstated", help="stub | unstated | ask | <file.json>")
     ap.add_argument("--tests", default=None)
     ap.add_argument("--accept-signature", default=None, metavar="REASON")
+    ap.add_argument("--accept-stale", default=None, metavar="REASON",
+                    help="override the stale_references gate only (e.g. a definition moved and is re-exported; "
+                         "the graph does not follow imports); the reason is logged")
     ap.add_argument("--as-recovery", default=None, metavar="STEP_ID",
                     help="run the review as this PENDING sub-step of a FAILED REVIEW.1 (FL-030)")
     ap.add_argument("--allow-dirty", action="store_true",
