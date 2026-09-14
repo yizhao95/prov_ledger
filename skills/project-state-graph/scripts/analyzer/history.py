@@ -8,18 +8,23 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import importlib as _importlib
 import json
 import os
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import signatures, store
+from . import store
+from ._host import providers as _providers
 
-SYMBOL_TYPES = ("function", "method", "class")
-NAME_ONLY_TYPES = ("sql_table", "bq_dataset", "api_source", "dataset")
+# The type sets are the reference providers' (phase 6): one source.
+_bs = _importlib.import_module(f"{_providers.__name__}.builtin_symbols")
+_bo = _importlib.import_module(f"{_providers.__name__}.builtin_owned")
+SYMBOL_TYPES = _bs.SYMBOL_TYPES
+NAME_ONLY_TYPES = _bs.NAME_ONLY_TYPES
 # Owned nodes (spec §2.2, E0/D1): identity = owner identity + local name.
 # dataframe qualified_name = "<fn_qn>:<var>", column = "<owner_qn>.<column>".
-OWNED_TYPES = ("dataframe", "column")
+OWNED_TYPES = _bo.OWNED_TYPES
 EVENT_ORDER = ("node_matched", "node_renamed", "node_moved", "node_changed",
                "node_added", "node_removed", "identity_ambiguous", "identity_asserted")
 
@@ -35,68 +40,38 @@ _changed, _group, _LAYERS, match = _g._changed, _g._group, _g._LAYERS, _g.match
 
 
 # ── snapshot ─────────────────────────────────────────────────────────────────
-def _defs_of(tree: ast.Module) -> list[ast.AST]:
-    return [n for n in ast.walk(tree)
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
-
-
-def _find_def(defs: list[ast.AST], line_start: int | None, name: str | None):
-    """The def recorded by py_ast: same start line, else the unique def of that
-    name (decorators can shift the recorded line by one or two)."""
-    if line_start is not None:
-        for d in defs:
-            if d.lineno == line_start:
-                return d
-    if name:
-        named = [d for d in defs if d.name == name]
-        if len(named) == 1:
-            return named[0]
-        if line_start is not None and named:
-            return min(named, key=lambda d: abs(d.lineno - line_start))
-    return None
-
-
-def _owner_fn(fn_spans: list[tuple[int, int | None, str]], line: int | None) -> str | None:
-    """Innermost function/method (by start line) whose span contains `line`."""
-    if line is None:
-        return None
-    best = None
-    for ls, le, qn in fn_spans:
-        if ls <= line and (le is None or line <= le) and (best is None or ls > best[0]):
-            best = (ls, qn)
-    return best[1] if best else None
-
-
-def snapshot_run(conn, repo_root: str, run_id: int) -> int:
-    """Write this run's node_snapshot rows (node_key '' placeholder). Must run
-    BEFORE store.stamp_run: it selects the rebuild's rows by run_id IS NULL.
-
-    Symbols get struct_sig (source AST) + dataflow_sig (edges); name-only data
-    nodes carry their qualified_name; dataframes are keyed to the function that
-    binds them and columns to their has_column owner (spec §2.2)."""
-    types = SYMBOL_TYPES + NAME_ONLY_TYPES + OWNED_TYPES
-    rows = conn.execute(
-        f"""SELECT n.id, t.name, n.qualified_name, n.name, n.file_path, n.line_start, n.line_end, n.dtype
-            FROM node n JOIN node_type t ON n.node_type_id=t.id
-            WHERE t.name IN ({','.join('?' * len(types))}) AND n.run_id IS NULL""", types).fetchall()
-    by_type: dict[str, list] = {}
-    for r in rows:
-        by_type.setdefault(r[1], []).append(r)
-    fn_spans: dict[str, list[tuple[int, int | None, str]]] = {}
-    for ntype in ("function", "method"):
-        for nid, _t, qn, name, path, ls, le, _d in by_type.get(ntype, []):
-            if path and ls:
-                fn_spans.setdefault(path, []).append((ls, le, qn or name))
-    owner_of_col = {dst: src for src, dst in conn.execute(
-        """SELECT e.src_node_id, e.dst_node_id FROM edge e JOIN edge_type t ON e.edge_type_id=t.id
-           WHERE t.name='has_column'""")}
+def snapshot_run(conn, repo_root: str, run_id: int, providers=None, report: dict | None = None,
+                 timeout_s: float = 30.0, file_map=None) -> int:
+    """Write this run's node_snapshot rows (node_key '' placeholder) from the
+    providers' observations. Must run BEFORE store.stamp_run: providers see the
+    rebuild's rows by run_id IS NULL. Phase 6: the built-in symbol/owned
+    identities are providers too; every provider runs through
+    providers.run_provider (exception / timeout / schema -> degraded, empty).
+    `report` (optional dict) receives {type_id: {degraded, observations, elapsed_s}}."""
+    plist = list(providers) if providers is not None else _providers.builtin_providers()
+    conn.commit()                                   # the read-only view must see the rebuild
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    ctx = _providers.make_context(db_path, repo_root, run_id, file_map)
     node_qn: dict[int, str] = {}   # node id -> snapshot qualified_name (owners resolve through this)
-    trees: dict[str, list[ast.AST]] = {}
     seen: dict[tuple[str, str], int] = {}
     n = 0
 
-    def emit(nid, ntype, qn, path, ls, le, struct, df_sig, trivial, attrs):
+    def emit(obs):
         nonlocal n
+        ntype, qn = obs.node_type, obs.qualified_name
+        attrs = dict(obs.attrs)
+        if ntype == "column":
+            # the owner's SNAPSHOT name (may carry a #2 suffix) wins over the provider's guess
+            oid = attrs.pop("owner_node_id", None)
+            owner = node_qn.get(oid) if oid is not None else None
+            if owner is not None:
+                qn = f"{owner}.{obs.name}"
+                attrs["owner_qn"] = owner
+            else:
+                attrs["owner_qn"] = obs.owner_qn
+            attrs["name"] = obs.name
+        elif obs.owner_qn is not None:
+            attrs["owner_qn"], attrs["name"] = obs.owner_qn, obs.name
         # The graph may hold several nodes with one (type, qualified_name) — e.g.
         # `df = read(); df = df.dropna()` binds two dataframe nodes to `df` in one
         # function. Suffix repeats (#2, #3 ...) in the deterministic emit order so
@@ -104,41 +79,27 @@ def snapshot_run(conn, repo_root: str, run_id: int) -> int:
         seen[(ntype, qn)] = seen.get((ntype, qn), 0) + 1
         if seen[(ntype, qn)] > 1:
             qn = f"{qn}#{seen[(ntype, qn)]}"
-        node_qn[nid] = qn
-        store.add_node_snapshot(conn, run_id, node_type=ntype, qualified_name=qn, file_path=path,
-                                line_start=ls, line_end=le, struct_sig=struct, dataflow_sig=df_sig,
-                                dataflow_trivial=trivial, attrs={"node_id": nid, **attrs})
+        if obs.node_id is not None:
+            node_qn[obs.node_id] = qn
+        st, df = obs.signature("struct"), obs.signature("dataflow")
+        store.add_node_snapshot(conn, run_id, node_type=ntype, qualified_name=qn, file_path=obs.file_path,
+                                line_start=obs.line_start, line_end=obs.line_end,
+                                struct_sig=st.value if st else None, dataflow_sig=df.value if df else None,
+                                dataflow_trivial=bool(df.trivial) if df else True,
+                                attrs={"node_id": obs.node_id, **attrs, "type_id": obs.type_id,
+                                       "schema_version": obs.schema_version})
         n += 1
 
-    for ntype in SYMBOL_TYPES + NAME_ONLY_TYPES:
-        for nid, _t, qn, name, path, ls, le, _d in sorted(by_type.get(ntype, []), key=lambda r: (r[2] or r[3], r[0])):
-            struct = df_sig = None
-            trivial, attrs = True, {}
-            if ntype in SYMBOL_TYPES and path:
-                if path not in trees:
-                    try:
-                        src = open(os.path.join(repo_root, path), encoding="utf-8").read()
-                        trees[path] = _defs_of(ast.parse(src))
-                    except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
-                        trees[path] = []
-                node = _find_def(trees[path], ls, name)
-                if node is not None:
-                    struct = signatures.struct_sig(node)
-                df_sig, trivial, attrs = signatures.dataflow_sig(conn, nid)
-            emit(nid, ntype, qn or name, path, ls, le, struct, df_sig, trivial, attrs)
-    for nid, _t, _qn, name, path, ls, le, _d in sorted(by_type.get("dataframe", []), key=lambda r: (r[4] or "", r[5] or 0, r[0])):
-        owner = _owner_fn(fn_spans.get(path, []), ls) or (path or "?")
-        emit(nid, "dataframe", f"{owner}:{name}", path, ls, le, None, None, True,
-             {"owner_qn": owner, "name": name})
-    for nid, _t, _qn, name, path, ls, le, dtype in sorted(by_type.get("column", []), key=lambda r: (r[0],)):
-        oid = owner_of_col.get(nid)
-        owner = node_qn.get(oid) if oid is not None else None
-        if owner is None and oid is not None:
-            row = conn.execute("SELECT qualified_name, name FROM node WHERE id=?", (oid,)).fetchone()
-            owner = (row[0] or row[1]) if row else None
-        owner = owner or (path or "?")
-        emit(nid, "column", f"{owner}.{name}", path, ls, le, None, None, True,
-             {"owner_qn": owner, "name": name, "dtype": dtype or "unknown"})
+    try:
+        for p in plist:
+            obs, degraded, elapsed = _providers.run_provider(p, ctx, timeout_s=timeout_s)
+            if report is not None:
+                report[p.type_id] = {"degraded": degraded, "observations": len(obs), "elapsed_s": round(elapsed, 3),
+                                     "schema_version": getattr(p, "schema_version", 1)}
+            for o in obs:
+                emit(o)
+    finally:
+        ctx.conn_ro.close()
     conn.commit()
     return n
 

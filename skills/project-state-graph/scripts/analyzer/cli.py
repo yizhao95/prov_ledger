@@ -14,6 +14,7 @@ import subprocess
 import sys
 from typing import Optional
 
+from ._host import providers as _providers  # noqa: E402
 from . import (
     api_refs,
     cards,
@@ -104,7 +105,9 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
         # History layer (spec §2.5): snapshot this rebuild's rows (selected by
         # run_id IS NULL, hence BEFORE stamp_run), match against the previous
         # run, assign node_keys and append events.
-        history.snapshot_run(conn, repo_path, run_id)
+        prov_report: dict = {}
+        history.snapshot_run(conn, repo_path, run_id, providers=_providers.builtin_providers(),
+                             report=prov_report, file_map=file_map)
         history.resolve(conn, run_id)
         if build_cards:
             cards.attach_history(conn)  # symbol_card gains node_key + recent history

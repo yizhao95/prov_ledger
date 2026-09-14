@@ -5,7 +5,9 @@ honour, checked over the mutation corpus (phase 6, v2 C.4):
   2. purity           — extract() reads only: no SQL writes, no file changes under the repo
   3. stability_matches_declaration — what a mutation does to the provider's nodes (preserved /
                         broken / ambiguous, decided by the HOST matcher) equals what the provider
-                        declares. The suite demands honesty, not stability.
+                        declares, on every corpus case where the mutation reaches the provider's
+                        nodes at all (a case it leaves untouched is no evidence). The suite demands
+                        honesty, not stability.
   4. schema           — namespaced type_id, attrs satisfy the provider's own schema (tier forbidden),
                         known or x- signature layers
   5. failure_isolation — a raising provider is degraded (empty), never propagated or partial
@@ -109,9 +111,12 @@ def default_matcher(prev, cur) -> dict:
                           for a in out.ambiguous]}
 
 
-def observed_stability(base, variant, matcher) -> str:
-    """What the mutation did to the provider's base nodes, by the host matcher."""
-    out = matcher(base, variant)
+def observed_stability(base, variant, matcher, base_all=None, variant_all=None) -> str:
+    """What the mutation did to the provider's base nodes, by the host matcher.
+    base_all / variant_all (optional) add companion providers' observations to
+    the match — owned nodes inherit identity through their owners — while the
+    verdict is judged over the provider's own `base` nodes only."""
+    out = matcher(base_all if base_all is not None else base, variant_all if variant_all is not None else variant)
     removed = {g.observation_key(o) for o in out["removed"]}
     amb = {g.observation_key(o) for prev, _ in out["ambiguous"] for o in prev}
     keys = [g.observation_key(o) for o in base]
@@ -119,7 +124,10 @@ def observed_stability(base, variant, matcher) -> str:
         return "ambiguous"
     if any(k in removed for k in keys):
         return "broken"
-    return "preserved"
+    own = set(keys)
+    touched = any(g.observation_key(p) in own and (changed or p.qualified_name != c.qualified_name)
+                  for p, c, _via, changed in out["pairs"])
+    return "preserved" if touched else "untouched"
 
 
 def _snapshot(repo: Path) -> dict:
@@ -128,28 +136,38 @@ def _snapshot(repo: Path) -> dict:
 
 def run(provider, *, corpus: Path | None = None, declared_stability: dict | None = None,
         timeout_s: float = 30.0, matcher: Callable | None = None,
-        context_factory: Callable[[Path], g.ExtractionContext] | None = None) -> Report:
+        context_factory: Callable[[Path], g.ExtractionContext] | None = None,
+        companions: list | None = None) -> Report:
     matcher = matcher or default_matcher
     factory = context_factory or default_context
     cases = default_corpus_cases(corpus)
     checks: list[dict] = []
     base_obs: dict[str, list] = {}
+    base_all: dict[str, list] = {}
     elapsed_max = 0.0
+    companions = list(companions or [])
 
     def extract(repo: Path):
-        obs, degraded, elapsed = run_provider(provider, factory(repo), timeout_s=timeout_s)
-        return obs, degraded, elapsed
+        ctx = factory(repo)
+        obs, degraded, elapsed = run_provider(provider, ctx, timeout_s=timeout_s)
+        extra: list = []
+        for c in companions:
+            cobs, cdeg, _ = run_provider(c, ctx, timeout_s=timeout_s)
+            extra.extend(cobs)
+        return obs, degraded, elapsed, obs + extra
 
     # 1. determinism
     problems = []
     for case in cases:
-        o1, d1, e1 = extract(case.base)
-        o2, d2, e2 = extract(case.base)
+        o1, d1, e1, a1 = extract(case.base)
+        o2, d2, e2, _ = extract(case.base)
         elapsed_max = max(elapsed_max, e1, e2)
         if d1 or d2:
             problems.append(f"{case.name}: degraded ({d1 or d2})")
             base_obs[case.name] = []
+            base_all[case.name] = []
             continue
+        base_all[case.name] = a1
         j1 = [g.observation_json(o) for o in sorted(o1, key=g.observation_key)]
         j2 = [g.observation_json(o) for o in sorted(o2, key=g.observation_key)]
         if j1 != j2:
@@ -208,11 +226,13 @@ def run(provider, *, corpus: Path | None = None, declared_stability: dict | None
                 dst = Path(td) / "repo"
                 shutil.copytree(case.base, dst)
                 mutate.GENERATED[name](case.base, dst)
-                v, dv, _ = extract(dst)
+                v, dv, _, va = extract(dst)
             if dv:
                 problems.append(f"{case.name}/{name}: variant extraction degraded ({dv})")
                 continue
-            observed = observed_stability(base, v, matcher)
+            observed = observed_stability(base, v, matcher, base_all.get(case.name), va)
+            if observed == "untouched":
+                continue                       # the mutation never reached this provider's nodes: no evidence
             exercised.add(name)
             if observed != declared[name]:
                 problems.append(f"{case.name}/{name}: declared {declared[name]}, observed {observed}")
@@ -220,15 +240,17 @@ def run(provider, *, corpus: Path | None = None, declared_stability: dict | None
             if name not in g.MUTATIONS or name in missing:
                 continue
             if (vdir / "before").exists():
-                b, db_, _ = extract(vdir / "before")
-                v, dv, _ = extract(vdir / "after")
+                b, db_, _, ba = extract(vdir / "before")
+                v, dv, _, va = extract(vdir / "after")
             else:
-                b, db_ = base, None
-                v, dv, _ = extract(vdir)
+                b, db_, ba = base, None, base_all.get(case.name)
+                v, dv, _, va = extract(vdir)
             if db_ or dv:
                 problems.append(f"{case.name}/{name}: variant extraction degraded ({db_ or dv})")
                 continue
-            observed = observed_stability(b, v, matcher)
+            observed = observed_stability(b, v, matcher, ba, va)
+            if observed == "untouched":
+                continue
             exercised.add(name)
             if observed != declared[name]:
                 problems.append(f"{case.name}/{name}: declared {declared[name]}, observed {observed}")

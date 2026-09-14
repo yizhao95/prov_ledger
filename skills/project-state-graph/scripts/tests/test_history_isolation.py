@@ -21,7 +21,7 @@ REPOS = {
 
 def _build(repo: Path, db: Path, monkeypatch=None) -> None:
     if monkeypatch is not None:
-        monkeypatch.setattr(history, "snapshot_run", lambda conn, root, run_id: 0)
+        monkeypatch.setattr(history, "snapshot_run", lambda conn, root, run_id, **kw: 0)   # phase 6: providers=, report=, file_map=
         monkeypatch.setattr(history, "resolve", lambda conn, run_id, arbitrate=None: {})
         monkeypatch.setattr(cards, "attach_history", lambda conn, limit=10: 0)
     cli.run(str(repo), "iso", str(db))

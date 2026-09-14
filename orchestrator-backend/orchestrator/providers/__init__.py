@@ -68,3 +68,30 @@ def run_provider(provider, ctx, timeout_s: float = DEFAULT_TIMEOUT_S):
         head = "; ".join(problems[:3]) + (f" (+{len(problems) - 3} more)" if len(problems) > 3 else "")
         return [], f"schema: {len(problems)} violation(s) — {head}", elapsed
     return obs, None, elapsed
+
+
+def builtin_providers() -> list:
+    """The two reference providers, in the host's emission order."""
+    from .builtin_owned import BuiltinOwnedProvider
+    from .builtin_symbols import BuiltinSymbolProvider
+    return [BuiltinSymbolProvider(), BuiltinOwnedProvider()]
+
+
+def make_context(db_path: str, repo_root: str, run_id: int, file_map=None):
+    """An ExtractionContext over a built graph: a read-only connection (usable
+    from the provider thread) and node_rows() over this run's not-yet-stamped
+    node rows -> (id, node_type, qualified_name, name, file_path, line_start, line_end, dtype)."""
+    import sqlite3
+
+    from ..graph_api import ExtractionContext
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, check_same_thread=False)
+
+    def node_rows(kinds: tuple[str, ...]) -> list:
+        ph = ",".join("?" for _ in kinds) or "''"
+        return conn.execute(
+            f"""SELECT n.id, t.name, n.qualified_name, n.name, n.file_path, n.line_start, n.line_end, n.dtype
+                FROM node n JOIN node_type t ON n.node_type_id=t.id
+                WHERE t.name IN ({ph}) AND n.run_id IS NULL ORDER BY n.id""", tuple(kinds)).fetchall()
+
+    return ExtractionContext(repo_root=repo_root, conn_ro=conn, run_id=run_id, file_map=dict(file_map or {}),
+                             node_rows=node_rows)
