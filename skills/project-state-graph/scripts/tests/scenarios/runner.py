@@ -166,7 +166,17 @@ def node_key_of(ws: Workspace, qualified_name: str) -> str | None:
     return rows[0]["node_key"] if rows else None
 
 
+LEDGER_CLI = SKILLS / "writing-plans" / "scripts" / "ledger_cli.py"
+
+
 def setup(ws: Workspace, item: dict) -> None:
+    if "ledger_import" in item:
+        # declarative constraints: a provledger-extensions.json imported through
+        # `ledger_cli.py import` (subjects resolve to node_keys via the graph)
+        f = ws.root / "provledger-extensions.json"
+        f.write_text(json.dumps({"version": 1, "constraints": item["ledger_import"]["constraints"]}, ensure_ascii=False))
+        ws.sh([sys.executable, str(LEDGER_CLI), "import", str(f), "--project", ws.project])
+        return
     if "ledger_constraint" in item:
         c = item["ledger_constraint"]
         subject = c.get("subject_key") or node_key_of(ws, c["subject"]) or c["subject"]

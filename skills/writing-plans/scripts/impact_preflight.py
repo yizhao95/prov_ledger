@@ -233,11 +233,12 @@ def _reasons(orch_conn, node_key: Optional[str]) -> List[Dict]:
     return [dict(zip(cols, r)) for r in rows]
 
 
-def _constraints(orch_conn, project: str, node_key: Optional[str]) -> List[Dict]:
-    if orch_conn is None or not node_key or not project:
+def _constraints(orch_conn, project: str, node_key: Optional[str], qualified_name: Optional[str] = None) -> List[Dict]:
+    if orch_conn is None or not project or not (node_key or qualified_name):
         return []
     try:
-        return ledger_store.constraints_for(orch_conn, project, [node_key])
+        return ledger_store.constraints_for(orch_conn, project, [node_key] if node_key else [],
+                                            qualified_names=[qualified_name] if qualified_name else [])
     except sqlite3.OperationalError:      # orchestrator DB predates migration 015
         return []
 
@@ -263,7 +264,7 @@ def verify_symbol(conn, name: str, *, orch_conn=None, project: str = "",
     extras = {"kind": node["kind"], "node_key": key,
               "history": _history(conn, key, history_limit),
               "reasons": _reasons(orch_conn, key),
-              "constraints": _constraints(orch_conn, project, key)}
+              "constraints": _constraints(orch_conn, project, key, node.get("qualified_name"))}
     nid = node["id"]
     if nid is None:                       # column / dataframe: identity + history only
         return {"name": node["qualified_name"], "status": "existing", "callers": [],
@@ -457,7 +458,11 @@ def ledger_matches(db_or_conn, project, user_query, declared_targets, top_n=5):
         d = dict(r)
         subjects = json.loads(d["subjects"]) if d.get("subjects") else []
         keywords = json.loads(d["keywords"]) if d.get("keywords") else []
-        entry_tokens = _tokens(" ".join(subjects), " ".join(keywords))
+        # Phase 5: dotted subjects (qualified names, owner.column) and nk_ keys
+        # are exact ANCHORS — matched exactly by constraints_for, never split
+        # into tokens here; bare-name subjects and keywords stay lexical.
+        lexical_subjects = [x for x in subjects if "." not in x and not x.startswith("nk_")]
+        entry_tokens = _tokens(" ".join(lexical_subjects), " ".join(keywords))
         score = len(query_tokens & entry_tokens)
         if score <= 0:
             continue

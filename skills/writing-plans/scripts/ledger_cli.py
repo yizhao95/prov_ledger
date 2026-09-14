@@ -29,6 +29,7 @@ Environment:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sqlite3
 import sys
@@ -115,6 +116,63 @@ def cmd_list(args) -> int:
     return 0
 
 
+def cmd_import(args) -> int:
+    """Declarative constraints (phase 5): import the `constraints` of a
+    provledger-extensions.json. Idempotent on (project, statement, declared
+    subjects); subjects that resolve in the registered graph get their node_key
+    appended (the original text is kept)."""
+    if str(_ORCH_ROOT) not in sys.path:
+        sys.path.insert(0, str(_ORCH_ROOT))
+    try:
+        from orchestrator import extensions as ext_mod, psg_bridge
+    except ImportError as e:
+        print(f"❌ the orchestrator package is needed to import extensions: {e}", file=sys.stderr)
+        return 1
+    try:
+        ext = ext_mod.load(args.file)
+    except ext_mod.ExtensionsError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        return 1
+    decls = []
+    for i, c in enumerate(ext.constraints):
+        if c.project is not None and c.project != args.project:
+            print(f"❌ constraints[{i}] declares project {c.project!r} but --project is {args.project!r}; "
+                  "nothing imported", file=sys.stderr)
+            return 1
+        decls.append(c)
+    psg_db = psg_bridge.db_path_for(args.project)
+    conn = _connect()
+    imported = skipped = 0
+    unresolved: set = set()
+    try:
+        existing = [e for e in ledger_store.get_entries(conn, args.project) if e.get("kind") == "constraint"]
+        for c in decls:
+            declared = list(c.subjects)
+            dup = any(e["statement"] == c.statement and set(declared) <= set(e.get("subjects") or []) for e in existing)
+            if dup:
+                skipped += 1
+                continue
+            subjects = list(declared)
+            for subj in declared:
+                key = psg_bridge.node_key_of(psg_db, subj) if psg_db else None
+                if key:
+                    if key not in subjects:
+                        subjects.append(key)
+                elif not subj.startswith("nk_"):
+                    unresolved.add(subj)
+            ledger_store.add_entry(conn, project=args.project, kind="constraint", statement=c.statement,
+                                   rationale="", subjects=subjects, keywords=list(c.keywords),
+                                   source=f"extensions:{ext.sha256[:8]}" if ext.sha256 else "extensions",
+                                   why_ref=c.why_ref, why_visibility=c.why_visibility)
+            existing.append({"statement": c.statement, "subjects": subjects, "kind": "constraint"})
+            imported += 1
+    finally:
+        conn.close()
+    print(json.dumps({"imported": imported, "skipped": skipped, "unresolved_subjects": sorted(unresolved),
+                      "project": args.project, "file": args.file, "sha256": ext.sha256}))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Manual decision-memory ledger (provLedger Phase E). "
@@ -137,6 +195,11 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--why-visibility", default="shared", choices=list(ledger_store.VALID_VISIBILITY),
                    help="restricted: the rationale never leaves the ledger, only --why-ref does")
     a.set_defaults(func=cmd_add)
+
+    i = sub.add_parser("import", help="import the constraints of a provledger-extensions.json (idempotent)")
+    i.add_argument("file", help="path to provledger-extensions.json")
+    i.add_argument("--project", required=True, help="the project the constraints belong to")
+    i.set_defaults(func=cmd_import)
 
     l = sub.add_parser("list", help="list entries for a project")
     l.add_argument("--project", required=True)

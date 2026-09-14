@@ -85,3 +85,10 @@ def test_bypass_idempotent(conn, psg_with_plan, registry):
     n = constraints.bypassed_at_close(conn, project="proj", plan_id=plan_id, psg_db_path=psg_with_plan,
                                       review_step_id=review, commit=True)
     assert n == 0 and len([r for r in db.get_node_reasons(conn, plan_id=plan_id) if r["kind"] == "constraint_ref"]) == 1
+
+
+def test_anchored_constraints_match_qualified_names_too(conn):
+    cid = _constraint(conn, ["orders.region"])
+    assert [c["id"] for c in constraints.anchored_constraints(conn, "proj", [], qualified_names=["orders.region"])] == [cid]
+    assert [c["id"] for c in constraints.anchored_constraints(conn, "proj", ["nk_zzz"], qualified_names=["orders.region"])] == [cid]
+    assert constraints.anchored_constraints(conn, "proj", [], qualified_names=["nope"]) == []
