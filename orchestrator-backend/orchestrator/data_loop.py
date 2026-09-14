@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import Callable
 
 from . import db, drift as drift_mod
+from . import extensions as ext_mod
 
 _FAILURE_ACTIONS = {"coerce_upstream", "halt"}
 
@@ -34,10 +35,14 @@ def run_data_decision_loop(
     decide: Callable[[dict], dict],
     apply_action: Callable[[str, dict], None],
     reprofile: Callable[[], list[dict]],
+    extensions=None,
 ) -> list[dict]:
     """Run the loop over the drifts between prev/curr profiles. Returns one result
-    per drift: {drift, decision_id, action, outcome}."""
-    drifts = drift_mod.detect_drift(prev_profile, curr_profile)
+    per drift: {drift, decision_id, action, outcome}. `extensions` defaults to
+    the discovered provledger-extensions.json (declared drift kinds apply)."""
+    if extensions is None:
+        extensions = ext_mod.current()
+    drifts = drift_mod.detect_drift(prev_profile, curr_profile, extensions=extensions)
     results: list[dict] = []
 
     for d in drifts:
@@ -52,7 +57,7 @@ def run_data_decision_loop(
         if action in ("coerce_upstream", "adapt_downstream"):
             apply_action(action, d)                         # through the backbone
             new_profile = reprofile()
-            cleared = not _column_still_drifted(prev_profile, new_profile, d["column"])
+            cleared = not _column_still_drifted(prev_profile, new_profile, d["column"], extensions)
             outcome = "resolved" if cleared else "unresolved"
         elif action == "halt":
             outcome = "halted"
@@ -75,7 +80,7 @@ def run_data_decision_loop(
     return results
 
 
-def _column_still_drifted(prev_profile, new_profile, column) -> bool:
+def _column_still_drifted(prev_profile, new_profile, column, extensions=None) -> bool:
     """True if the named column still shows any drift after the fix."""
     return any(d.get("column") == column
-               for d in drift_mod.detect_drift(prev_profile, new_profile))
+               for d in drift_mod.detect_drift(prev_profile, new_profile, extensions=extensions))

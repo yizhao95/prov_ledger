@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from . import db, drift, psg_bridge, survival
+from . import db, drift, extensions, psg_bridge, survival
 
 
 def _profile_rows(conn, dataset: str, project: str, created_at: str) -> tuple[list[dict], list[dict]]:
@@ -34,7 +34,7 @@ def _observed(conn, e: dict, closing_plan_id: str) -> tuple[str, dict, str, str,
         if not before or not after:
             return ("none_available", {"before_rows": len(before), "after_rows": len(after)}, "data_profile", "none",
                     "no data_profile snapshot before and after the expectation")
-        drifts = drift.detect_drift(before, after)
+        drifts = drift.detect_drift(before, after, extensions=extensions.current(psg_bridge.repo_for(e["project"])))
         return ("observed", {"drifts": drifts, "kinds": sorted({d["kind"] for d in drifts})}, "data_profile", "observed", None)
     if ch.startswith("metric:"):
         return ("none_available", {"channel": ch}, "metric", "none", f"no metric channel registered for {ch[7:]!r}")
