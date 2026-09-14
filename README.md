@@ -1,6 +1,6 @@
 # 🧾 provLedger
 
-![tests](https://img.shields.io/badge/tests-849%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-897%20passing-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -381,12 +381,12 @@ PY=~/skill-workspace/.venv/bin/python
 # 3. Run the test suites to confirm a healthy install (run each separately —
 #    each suite has its own pyproject/pythonpath; one combined invocation breaks)
 $PY -m pytest scripts/tests -q                                    #   5 passed
-$PY -m pytest orchestrator-backend -q                             # 229 passed
+$PY -m pytest orchestrator-backend -q                             # 254 passed
 $PY -m pytest orchestrator-webapp  -q                             #  29 passed
-$PY -m pytest skills/writing-plans/tests -q                       #  81 passed
+$PY -m pytest skills/writing-plans/tests -q                       #  87 passed
 $PY -m pytest skills/executing-plans -q                           #  69 passed
-(cd skills/project-state-graph/scripts && $PY -m pytest tests -q) # 358 passed, 1 skipped, 1 deselected (llm_consistency)
-$PY -m pytest skills/update-project-state-graph/scripts/tests -q  #  78 passed
+(cd skills/project-state-graph/scripts && $PY -m pytest tests -q) # 372 passed, 1 skipped, 1 deselected (llm_consistency; >10 min — split it, see INSTALL.md)
+$PY -m pytest skills/update-project-state-graph/scripts/tests -q  #  81 passed
 
 # 4. Launch the dashboard
 PROVLEDGER_WEBAPP_DIR=orchestrator-webapp bash orchestrator-webapp/launch_dashboard.sh
@@ -398,7 +398,7 @@ PROVLEDGER_WEBAPP_DIR=orchestrator-webapp bash orchestrator-webapp/launch_dashbo
 | Level | Command | Expect |
 |---|---|---|
 | Quickest — end-to-end demo | `make demo` | the MISMATCH → VERIFIED arc, purity 0.31 → 0.91, `SELF-CHECK OK`, exit 0 |
-| Full — all test suites | the seven `pytest` commands above, **run separately** | **849 passed, 1 skipped** total (the 9 timeline scenarios run inside the project-state-graph suite, ≤ 11 s each) |
+| Full — all test suites | the seven `pytest` commands above, **run separately** | **897 passed, 1 skipped** total (the 9 timeline scenarios run inside the project-state-graph suite, ≤ 11 s each) |
 | Packaging — pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
 
 The dashboard reads the orchestrator database **read-only**. Point it at any
