@@ -10,37 +10,47 @@ from __future__ import annotations
 
 import json
 
-from . import db, drift, extensions, psg_bridge, survival
-
-
-def _profile_rows(conn, dataset: str, project: str, created_at: str) -> tuple[list[dict], list[dict]]:
-    """(latest snapshot before the expectation, latest snapshot after) as
-    profile-row lists — one row per column, newest observation wins."""
-    rows = db.get_data_profile(conn, dataset, project) or db.get_data_profile(conn, dataset)
-    before: dict[str, dict] = {}
-    after: dict[str, dict] = {}
-    for r in rows:
-        ts = r.get("observed_at") or r.get("created_at") or ""
-        bucket = after if ts > created_at else before
-        bucket[r["column_name"]] = r
-    return list(before.values()), list(after.values())
+from . import db, extensions, outcome_channels, psg_bridge, survival
 
 
 def _observed(conn, e: dict, closing_plan_id: str) -> tuple[str, dict, str, str, str | None]:
-    """-> (kind, value, source, tier, reason) for the `observed` slot of one expectation."""
-    ch = e["channel"] or "none"
-    if ch == "profile_drift":
-        before, after = _profile_rows(conn, e["target"], e["project"], e["created_at"])
-        if not before or not after:
-            return ("none_available", {"before_rows": len(before), "after_rows": len(after)}, "data_profile", "none",
-                    "no data_profile snapshot before and after the expectation")
-        drifts = drift.detect_drift(before, after, extensions=extensions.current(psg_bridge.repo_for(e["project"])))
-        return ("observed", {"drifts": drifts, "kinds": sorted({d["kind"] for d in drifts})}, "data_profile", "observed", None)
-    if ch.startswith("metric:"):
-        return ("none_available", {"channel": ch}, "metric", "none", f"no metric channel registered for {ch[7:]!r}")
+    """-> (kind, value, source, tier, reason) for the `observed` slot of one
+    expectation. Phase 7: every applicable outcome channel (built-ins +
+    extensions.outcome_channels, highest priority first) is asked in turn; the
+    first non-None answer wins. A channel that raises is recorded under
+    value['channel_errors'] and skipped. Nothing applicable / nothing said ->
+    none_available naming the channels that were asked."""
+    ch = e.get("channel") or "none"
     if ch == "none":
         return ("none_available", {"channel": ch}, "none", "none", e.get("claim") or "no observation channel declared")
-    return ("none_available", {"channel": ch}, ch, "none", f"unknown channel {ch!r}")
+    ext = extensions.current(psg_bridge.repo_for(e["project"]))
+    asked: list[str] = []
+    errors: dict[str, str] = {}
+    for chan in outcome_channels.load_channels(ext):
+        try:
+            if not chan.applicable_to(e):
+                continue
+        except Exception as exc:  # noqa: BLE001
+            errors[chan.channel_id] = f"{type(exc).__name__}: {exc}"
+            continue
+        asked.append(chan.channel_id)
+        try:
+            r = chan.collect(conn, e, closing_plan_id=closing_plan_id, extensions=ext)
+        except Exception as exc:  # noqa: BLE001 — one broken channel never blocks a close
+            errors[chan.channel_id] = f"{type(exc).__name__}: {exc}"
+            continue
+        if r is None:
+            continue
+        kind, value, source, tier, reason = r
+        if errors:
+            value = {**value, "channel_errors": errors}
+        return (kind, value, source, tier, reason)
+    available = [c.channel_id for c in outcome_channels.load_channels(ext)]
+    detail = f"asked {asked}" if asked else f"no channel applies (available: {available})"
+    if errors:
+        detail += f"; errors {errors}"
+    return ("none_available", {"channel": ch, "asked": asked, "channel_errors": errors}, ch.split(":")[0], "none",
+            f"no observation for channel {ch!r}: {detail}")
 
 
 def _verdict_key(sig: dict) -> tuple:

@@ -2,6 +2,7 @@
 on the checkout-orders dataset gets an observed outcome containing
 column_dropped when the next plan closes (promo_discount vanished upstream)."""
 import json
+import pytest
 import random
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ DATASET = "checkout_orders"
 # (seed 42) so this test never depends on `make demo` having run (cf. FL-016).
 sys.path.insert(0, str(EXAMPLE))
 import gen_upstream  # noqa: E402
+import revenue_rollup  # noqa: E402
 
 
 def _feeds() -> tuple[list[dict], list[dict]]:
@@ -63,3 +65,37 @@ def test_phantom_uplift_expectation_gets_observed_column_dropped(conn, tmp_path)
     # the SQL a reviewer would paste into the PR
     row = conn.execute("SELECT e.target, e.claim, o.kind, o.value_json FROM outcomes o JOIN expectations e ON e.id=o.expectation_id").fetchone()
     assert row["target"] == DATASET and "column_dropped" in row["value_json"]
+
+
+def test_phantom_uplift_metric_expectation_gets_observed_delta_pct(conn, tmp_path):
+    """The number that got BETTER — mean net revenue +23% WoW because every
+    discount fell back to $0 — becomes an observed outcome of the claim
+    'revenue stays within ±5% WoW' when the next plan closes."""
+    fixed, drifted = _feeds()
+    reg = tmp_path / "projects.json"
+    reg.write_text(json.dumps({"projects": [{"name": "phantom-uplift", "repo": str(EXAMPLE), "db_path": str(tmp_path / "absent.db"), "commit_sha": "c"}]}))
+    last_week = gen_upstream.generate(random.Random(gen_upstream.SEED_LAST_WEEK), gen_upstream.LAST_WEEK_DAYS, 90_000)
+    base = revenue_rollup.rollup(last_week)["mean_net"]          # the demo's last_week_metrics.json baseline
+    drift = revenue_rollup.rollup(drifted)["mean_net"]           # this week's rollup on the feed that lost promo_discount
+    assert revenue_rollup.rollup(fixed)["mean_net"] < drift      # the uplift is the imputed $0 discounts, nothing else
+
+    _plan(conn, "PU1", "phantom-uplift weekly rollup")
+    db.insert_metric(conn, project="phantom-uplift", name="mean_net_revenue", value=base, unit="usd",
+                     plan_id="PU1", step_id="PU1-A", source="demo", observed_at="2026-09-11 00:30:00")
+    eid = conn.execute("INSERT INTO expectations (plan_id, step_id, project, target, target_kind, claim, channel, created_at) "
+                       "VALUES ('PU1','PU1-A','phantom-uplift','mean_net_revenue','metric','revenue stays within ±5% WoW','metric:mean_net_revenue','2026-09-11 01:00:00')").lastrowid
+    conn.commit()
+
+    _plan(conn, "PU2", "phantom-uplift weekly rollup, week 2")
+    db.insert_metric(conn, project="phantom-uplift", name="mean_net_revenue", value=drift, unit="usd",
+                     plan_id="PU2", step_id="PU2-A", source="demo", observed_at="2026-09-11 02:00:00")
+    out = api.review_and_complete(conn, "PU2", registry_path=str(reg))
+    db.update_step_status(conn, out["review_child_step_id"], "COMPLETED", set_completed=True)
+    out = api.review_and_complete(conn, "PU2", registry_path=str(reg))
+    assert out["plan_status"] == "COMPLETED"
+    o = db.get_outcomes(conn, eid)
+    assert len(o) == 1 and o[0]["kind"] == "observed" and o[0]["source"] == "metrics" and o[0]["tier"] == "observed"
+    v = json.loads(o[0]["value_json"])
+    assert v["before"] == base and v["after"] == drift and v["unit"] == "usd"
+    assert v["delta_pct"] == pytest.approx(23.2, abs=0.5), v
+    assert abs(v["delta_pct"]) > 5      # the claim is contradicted by the observation — recorded, not judged

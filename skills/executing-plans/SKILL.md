@@ -24,6 +24,7 @@ If you find yourself wanting to "update the plan" — you ARE the update mechani
 | `scripts/append-log.sh`    | Captured raw shell/tool output worth keeping AFTER the fact | `step_id`, `text` | — |
 | `scripts/deviate.sh`       | Realized the plan needs new sub-steps         | `parent_step_id`, `justification`, `sub_steps[]` | — |
 | `scripts/record-skill.sh`  | Activated a NEW skill mid-flight              | `plan_id`, `name`, `source` | `step_id`, `reason` |
+| `scripts/record-metric.sh` | Phase 7: a NUMERIC observation (a rollup's mean, an AUC) for the metric outcome channel — or pass `metrics_from_stdout: true` to `run-step.sh` and print `metric name=<x> value=<v> [unit=<u>]` | `name`, `value` (a number) | `unit`, `project` (defaults to the plan's), `plan_id`, `step_id` |
 | `scripts/finish-plan.sh`   | **Usually auto** — manual only for back-fill of pre-2026-05-26 plans, or to force-finish a plan with PENDING steps | `plan_id` | — |
 | `scripts/agent-review-close.sh` | **Only after a `needs_agent_review` handoff** — the review sub-agent's sole way to finalize a `NEEDS_REVIEW` plan | `plan_id`, `outcome` (`pass`\|`fail`) | `summary`, `log_context` |
 

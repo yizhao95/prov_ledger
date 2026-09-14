@@ -315,6 +315,8 @@ This README is the high-level entry point. What's in the repo today:
 | Each skill's `SKILL.md` + `reference/` | the iron-law workflows (writing-plans, executing-plans, project-state-graph, update-project-state-graph) |
 | [`docs/extensions.md`](docs/extensions.md) | register constraints, analyzer name sets, drift kinds and node-type providers in `provledger-extensions.json` without touching source; discovery, priorities, reproducibility |
 | [`docs/conformance.md`](docs/conformance.md) | write your own node-type provider against `provledger.graph_api` and prove it keeps the six contracts with `provledger.testing.conformance` |
+| [`docs/outcomes.md`](docs/outcomes.md) | expectations → outcomes: the `profile_drift` and `metric:<name>` channels, `record-metric`, third-party outcome channels; how the phantom uplift's +23% becomes a recorded outcome of a "±5%" claim |
+| [`docs/arbitration.md`](docs/arbitration.md) | linking identities the matcher refuses to: the `Arbiter` interface, the calibration export, `arbiter-eval`, and the gate (consistency 1.0, accuracy ≥ 0.9 on ≥ 10 labelled items) an arbiter must clear before it writes anything |
 | [`skills/project-state-graph/scripts/tests/scenarios/README.md`](skills/project-state-graph/scripts/tests/scenarios/README.md) | the timeline-scenario suite: what changing a node triggers, asserted as an event stream with `must_not`, golden per scenario, fully isolated |
 
 A deeper architecture/reference documentation tree exists as maintainer
@@ -378,6 +380,14 @@ cd prov_ledger
 # 2. Bootstrap dependencies into the unified venv (idempotent)
 bash scripts/bootstrap.sh
 PY=~/skill-workspace/.venv/bin/python
+
+# 2b. The state-graph analyzer runs in its OWN uv environment (init_project.sh
+#     calls `uv run python -m analyzer`). It depends on the `provledger` package
+#     as an editable path source ([tool.uv.sources] in scripts/pyproject.toml),
+#     so third-party NodeTypeProviders can import provledger.graph_api there.
+#     `uv.lock` is not committed — sync once per clone (and after pulling a
+#     change to orchestrator-backend's version):
+(cd skills/project-state-graph/scripts && uv sync)
 
 # 3. Run the test suites to confirm a healthy install (run each separately —
 #    each suite has its own pyproject/pythonpath; one combined invocation breaks)

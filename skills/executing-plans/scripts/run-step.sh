@@ -9,8 +9,9 @@
 #     "type":    "COMMAND",        # required — one of the step_type enum values
 #     "command": "pytest tests/",  # required — passed to `bash -c "$command"`
 #     "summary": "...",            # optional — defaults to "run-step: <cmd-80>"
-#     "allow_nonzero": false       # optional bool — reserved for future; v1 must be false/absent
-#   }
+#     "allow_nonzero": false,      # optional bool — reserved for future; v1 must be false/absent
+#     "metrics_from_stdout": false # optional bool — phase 7: lines `metric name=<x> value=<v> [unit=<u>]`
+#   }                              #   in the captured output are recorded via the record-metric op
 #
 # Behavior:
 #   1. start-step with "[run-step] kickoff" banner as initial log_context
@@ -81,6 +82,7 @@ print(f"STEP_ID_B64={b64(data['step_id'])}")
 print(f"STEP_TYPE_B64={b64(data['type'])}")
 print(f"CMD_B64={b64(data['command'])}")
 print(f"SUMMARY_B64={b64(summary)}")
+print(f"METRICS_FROM_STDOUT={'1' if data.get('metrics_from_stdout') else '0'}")
 PYEOF
 )
 PARSE_RC=$?
@@ -126,6 +128,43 @@ set +o pipefail
 set -e
 END_NS=$(date +%s)
 RUNTIME=$(( END_NS - START_NS ))
+
+# ---- 2b. phase 7: metrics from stdout (optional) ----
+# Every line `metric name=<x> value=<v> [unit=<u>]` becomes a metrics row via
+# the record-metric op (project = the step's plan's project). Recorded
+# whatever the exit code — an observation is an observation. Non-numeric
+# values are skipped with a note; nothing here changes the step's outcome.
+if [[ "${METRICS_FROM_STDOUT}" == "1" ]]; then
+    "${PYBIN}" - "${STEP_ID}" "${LOG_TMP}" "${SCRIPT_DIR}" <<'PYEOF' || echo "run-step: metrics_from_stdout failed (non-fatal)" >&2
+import json, math, re, subprocess, sys, tempfile, os
+step_id, log_path, script_dir = sys.argv[1:4]
+pat = re.compile(r"^metric name=(\S+) value=(\S+)(?: unit=(\S+))?\s*$")
+for line in open(log_path, "rb").read().decode("utf-8", errors="replace").splitlines():
+    m = pat.match(line.strip())
+    if not m:
+        continue
+    name, value, unit = m.groups()
+    try:
+        v = float(value)
+        if not math.isfinite(v):
+            raise ValueError
+    except ValueError:
+        sys.stderr.write(f"run-step: metric {name!r} skipped — value {value!r} is not a number\n")
+        continue
+    payload = {"step_id": step_id, "name": name, "value": v, "source": "run-step"}
+    if unit:
+        payload["unit"] = unit
+    fd, path = tempfile.mkstemp(prefix="orch-rs-metric-", suffix=".json")
+    with os.fdopen(fd, "w") as f:
+        json.dump(payload, f)
+    try:
+        r = subprocess.run(["bash", os.path.join(script_dir, "record-metric.sh"), path], capture_output=True, text=True)
+        if r.returncode != 0:
+            sys.stderr.write(f"run-step: metric {name!r} not recorded — {r.stderr.strip()}\n")
+    finally:
+        os.unlink(path)
+PYEOF
+fi
 
 # ---- 3. truncate + 4. footer ----
 # E6-5 / FL-017: the captured bytes may not be valid UTF-8 — decode with

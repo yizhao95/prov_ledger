@@ -107,6 +107,36 @@ uv pip install pytest fastapi "uvicorn[standard]" jinja2 \
 > **Minimal install (orchestrator only, no graph, no dashboard):**
 > the backend needs nothing beyond Python + `pytest` for the tests.
 
+### 4b · The state-graph analyzer's `uv` environment
+
+`skills/project-state-graph/scripts/` is a `uv` project of its own:
+`init_project.sh` (and therefore every review refresh) runs the analyzer with
+`uv run python -m analyzer`, inside the environment described by that
+directory's `pyproject.toml` — **not** inside the venv above. Since phase 6 it
+depends on the `provledger` package as an **editable path source**
+(`[tool.uv.sources] provledger = { path = "../../../orchestrator-backend", editable = true }`),
+so third-party `NodeTypeProvider`s registered in `provledger-extensions.json`
+can `import provledger.graph_api` when the analyzer runs them.
+
+```bash
+cd skills/project-state-graph/scripts
+uv sync                       # resolves + installs into scripts/.venv (first run: ~1 min)
+uv run python -c "import provledger.graph_api, analyzer; print('ok')"
+```
+
+`uv.lock` is **not committed** (git-ignored): every clone resolves it locally.
+Re-run `uv sync` after pulling a change that bumps `orchestrator-backend`'s
+version or its dependencies; an out-of-date environment shows up as
+`WARNING: provider <id> degraded: ModuleNotFoundError: provledger...` on the
+analyzer's stderr and as a `providers_degraded` warning in `selfcheck.py`.
+
+Other analyzer subcommands: `history`, `backfill` (replay past commits into a
+fresh graph), `ambiguities` / `arbiter-eval` (see `docs/arbitration.md`).
+
+The analyzer also accepts `--isolate subprocess` (env `PROVLEDGER_ISOLATE=subprocess`
+for `init_project.sh`): each provider's `extract()` is then forked and **killed**
+on timeout instead of abandoned in a thread (the default `--isolate thread`).
+
 ---
 
 ## 5 · Verify the install

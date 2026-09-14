@@ -53,11 +53,14 @@ def test_fl021_fresh_db_applies_everything(tmp_path):
 
 def test_reconcile_self_heals_when_a_version_row_is_missing(tmp_path, capsys):
     """Every file was applied but the bookkeeping is one row short: reconcile can
-    only label the rows it has, so the last file re-runs, hits 'duplicate column
-    name' and must be rolled back + marked applied — never raise."""
-    total = len(list(db.MIGRATIONS_DIR.glob("*.sql")))
-    c = _legacy_db(tmp_path, upto=total)
-    c.execute("DELETE FROM schema_version WHERE version = (SELECT MAX(version) FROM schema_version)")
+    only label the rows it has, so the unrecorded file re-runs, hits 'duplicate
+    column name' and must be rolled back + marked applied — never raise. The
+    row dropped is 016's (an ALTER TABLE, not idempotent) rather than the newest
+    file's: since 017 the newest migrations are IF NOT EXISTS-idempotent and
+    re-run silently, which is fine but exercises nothing."""
+    c = db.open_db(tmp_path / "labelled.db")
+    db.run_migrations(c)                                       # every file applied AND labelled
+    c.execute("DELETE FROM schema_version WHERE migration_file = '016_plans_project.sql'")
     c.commit()
     n = db.run_migrations(c)                                   # must NOT raise
     assert n == 1

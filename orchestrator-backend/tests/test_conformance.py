@@ -97,3 +97,44 @@ def test_vacuous_pass_is_flagged_as_a_warning():
     assert chk["ok"] is False and chk["severity"] == "warning"
     assert "no observation" in chk["detail"].lower() and "corpus=" in chk["detail"]
     assert rep.ok is True                                   # a warning never fails the report
+
+
+# ── phase 7 Task 0: run_provider(isolate="subprocess") ────────────────────────────
+
+def test_run_provider_subprocess_returns_the_same_observations():
+    ctx = conformance.default_context(conformance.default_corpus_cases()[0].base)
+    want, d0, _ = providers.run_provider(example_provider.ModuleProvider(), ctx, timeout_s=10)
+    got, d1, elapsed = providers.run_provider(example_provider.ModuleProvider(), ctx, timeout_s=10, isolate="subprocess")
+    assert d0 is None and d1 is None, (d0, d1)
+    assert [g.observation_key(o) for o in got] == [g.observation_key(o) for o in want] and got
+    assert elapsed >= 0
+
+
+class _SleepForever(example_provider.ModuleProvider):
+    def extract(self, ctx):
+        time.sleep(60)
+        return []
+
+
+class _Crash(example_provider.ModuleProvider):
+    def extract(self, ctx):
+        raise ValueError("bad day")
+
+
+def test_run_provider_subprocess_kills_a_sleeping_provider_within_budget():
+    ctx = conformance.default_context(conformance.default_corpus_cases()[0].base)
+    obs, degraded, elapsed = providers.run_provider(_SleepForever(), ctx, timeout_s=0.5, isolate="subprocess")
+    assert obs == [] and "timeout" in degraded and "killed" in degraded, degraded
+    assert elapsed < 3, elapsed
+
+
+def test_run_provider_subprocess_isolates_an_exception():
+    ctx = conformance.default_context(conformance.default_corpus_cases()[0].base)
+    obs, degraded, _ = providers.run_provider(_Crash(), ctx, timeout_s=5, isolate="subprocess")
+    assert obs == [] and "ValueError" in degraded and "bad day" in degraded
+
+
+def test_run_provider_rejects_an_unknown_isolate_mode():
+    ctx = conformance.default_context(conformance.default_corpus_cases()[0].base)
+    with pytest.raises(ValueError, match="isolate"):
+        providers.run_provider(example_provider.ModuleProvider(), ctx, isolate="container")

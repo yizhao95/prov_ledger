@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import threading
 import time
+import warnings
 
 from ..graph_api import KNOWN_LAYERS, TYPE_ID_RE, NodeObservation, validate_attrs
 
 DEFAULT_TIMEOUT_S = 30.0
+ISOLATE_MODES = ("thread", "subprocess")
 
 
 def check_observations(provider, observations) -> list[str]:
@@ -39,11 +41,34 @@ def check_observations(provider, observations) -> list[str]:
     return problems
 
 
-def run_provider(provider, ctx, timeout_s: float = DEFAULT_TIMEOUT_S):
+def run_provider(provider, ctx, timeout_s: float = DEFAULT_TIMEOUT_S, isolate: str = "thread"):
     """-> (observations, degraded, elapsed_s). degraded is None on success,
-    otherwise the reason the provider's output was discarded WHOLE."""
+    otherwise the reason the provider's output was discarded WHOLE.
+
+    isolate="thread" (default): extract() runs in a daemon thread; on timeout
+    the thread is abandoned (it keeps running until the process exits).
+    isolate="subprocess": extract() runs in a forked child that is KILLED on
+    timeout — a hard budget, at the cost of a fork per provider (Linux/macOS;
+    platforms without fork degrade with a reason). Observations travel back
+    pickled, so a provider's attrs must be picklable."""
+    if isolate not in ISOLATE_MODES:
+        raise ValueError(f"isolate must be one of {ISOLATE_MODES}, got {isolate!r}")
     if not TYPE_ID_RE.match(getattr(provider, "type_id", "") or ""):
         return [], f"type_id {getattr(provider, 'type_id', None)!r} is not namespaced vendor.name", 0.0
+    if isolate == "subprocess":
+        obs, degraded, elapsed = _extract_in_subprocess(provider, ctx, timeout_s)
+    else:
+        obs, degraded, elapsed = _extract_in_thread(provider, ctx, timeout_s)
+    if degraded:
+        return [], degraded, elapsed
+    problems = check_observations(provider, obs)
+    if problems:
+        head = "; ".join(problems[:3]) + (f" (+{len(problems) - 3} more)" if len(problems) > 3 else "")
+        return [], f"schema: {len(problems)} violation(s) — {head}", elapsed
+    return obs, None, elapsed
+
+
+def _extract_in_thread(provider, ctx, timeout_s: float):
     box: dict = {}
 
     def target():
@@ -62,12 +87,62 @@ def run_provider(provider, ctx, timeout_s: float = DEFAULT_TIMEOUT_S):
     if "err" in box:
         e = box["err"]
         return [], f"{type(e).__name__}: {e}", elapsed
-    obs = box.get("obs", [])
-    problems = check_observations(provider, obs)
-    if problems:
-        head = "; ".join(problems[:3]) + (f" (+{len(problems) - 3} more)" if len(problems) > 3 else "")
-        return [], f"schema: {len(problems)} violation(s) — {head}", elapsed
-    return obs, None, elapsed
+    return box.get("obs", []), None, elapsed
+
+
+def _extract_in_subprocess(provider, ctx, timeout_s: float):
+    """Fork, run extract() in the child, ship the observations back over a
+    pipe, kill the child if the budget runs out. The child inherits ctx
+    (including its read-only sqlite connection) — nothing is pickled on the
+    way in, only the observations on the way out."""
+    import multiprocessing as mp
+    try:
+        mpctx = mp.get_context("fork")
+    except ValueError:
+        return [], "subprocess isolation needs the fork start method (unavailable on this platform)", 0.0
+    parent_end, child_end = mpctx.Pipe(duplex=False)
+
+    def target(pipe):
+        try:
+            pipe.send(("ok", list(provider.extract(ctx))))
+        except BaseException as e:  # noqa: BLE001
+            try:
+                pipe.send(("err", f"{type(e).__name__}: {e}"))
+            except BaseException:  # noqa: BLE001
+                pass
+        finally:
+            pipe.close()
+
+    t0 = time.monotonic()
+    proc = mpctx.Process(target=target, args=(child_end,), name=f"provider:{provider.type_id}", daemon=True)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)   # fork() in a threaded parent: intended here
+        proc.start()
+    child_end.close()
+    msg = None
+    try:
+        if parent_end.poll(timeout_s):
+            msg = parent_end.recv()
+    except (EOFError, OSError):
+        msg = None
+    finally:
+        parent_end.close()
+    elapsed = time.monotonic() - t0
+    if msg is None:
+        if proc.is_alive():
+            proc.kill()
+        proc.join(5)
+        if elapsed >= timeout_s:
+            return [], f"timeout after {timeout_s}s (budget exceeded; the subprocess was killed)", elapsed
+        return [], f"subprocess exited without a result (exitcode {proc.exitcode})", elapsed
+    proc.join(5)
+    if proc.is_alive():
+        proc.kill()
+        proc.join(5)
+    kind, payload = msg
+    if kind == "err":
+        return [], payload, elapsed
+    return payload, None, elapsed
 
 
 def builtin_providers() -> list:

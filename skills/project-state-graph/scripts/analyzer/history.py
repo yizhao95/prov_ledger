@@ -41,13 +41,14 @@ _changed, _group, _LAYERS, match = _g._changed, _g._group, _g._LAYERS, _g.match
 
 # ── snapshot ─────────────────────────────────────────────────────────────────
 def snapshot_run(conn, repo_root: str, run_id: int, providers=None, report: dict | None = None,
-                 timeout_s: float = 30.0, file_map=None) -> int:
+                 timeout_s: float = 30.0, file_map=None, isolate: str = "thread") -> int:
     """Write this run's node_snapshot rows (node_key '' placeholder) from the
     providers' observations. Must run BEFORE store.stamp_run: providers see the
     rebuild's rows by run_id IS NULL. Phase 6: the built-in symbol/owned
     identities are providers too; every provider runs through
     providers.run_provider (exception / timeout / schema -> degraded, empty).
-    `report` (optional dict) receives {type_id: {degraded, observations, elapsed_s}}."""
+    `report` (optional dict) receives {type_id: {degraded, observations, elapsed_s}}.
+    `isolate` ("thread" | "subprocess", phase 7) is passed to run_provider."""
     plist = list(providers) if providers is not None else _providers.builtin_providers()
     conn.commit()                                   # the read-only view must see the rebuild
     db_path = conn.execute("PRAGMA database_list").fetchone()[2]
@@ -92,7 +93,7 @@ def snapshot_run(conn, repo_root: str, run_id: int, providers=None, report: dict
 
     try:
         for p in plist:
-            obs, degraded, elapsed = _providers.run_provider(p, ctx, timeout_s=timeout_s)
+            obs, degraded, elapsed = _providers.run_provider(p, ctx, timeout_s=timeout_s, isolate=isolate)
             if report is not None:
                 report[p.type_id] = {"degraded": degraded, "observations": len(obs), "elapsed_s": round(elapsed, 3),
                                      "schema_version": getattr(p, "schema_version", 1)}

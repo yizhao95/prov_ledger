@@ -89,7 +89,8 @@ fi
 uv run python -m analyzer "$REPO" --project "$NAME" --db-path "$DB_PATH" \
     ${PROVLEDGER_PLAN_ID:+--plan-id "$PROVLEDGER_PLAN_ID"} \
     ${PROVLEDGER_STEP_ID:+--step-id "$PROVLEDGER_STEP_ID"} \
-    --trigger "${PROVLEDGER_TRIGGER:-manual}"
+    --trigger "${PROVLEDGER_TRIGGER:-manual}" \
+    ${PROVLEDGER_ISOLATE:+--isolate "$PROVLEDGER_ISOLATE"}
 
 # Capture the commit sha that was analyzed (best-effort).
 COMMIT_SHA="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo "")"

@@ -224,6 +224,7 @@ keeps the six contracts, is in [`docs/conformance.md`](conformance.md).
 | `enabled` | default `true`; `false` disables — the only way to switch a built-in off |
 | `priority` | integer, larger runs first (built-ins are 0) |
 | `timeout_s` | budget per extraction (default 30); over budget → degraded |
+| *(host flag)* `analyzer --isolate thread\|subprocess` | how the host isolates `extract()`: a thread (default; a timed-out provider is abandoned) or a forked subprocess that is killed on timeout (`PROVLEDGER_ISOLATE=subprocess` for `init_project.sh`; observations must be picklable) |
 
 Nothing here raises at analysis time: an import that fails, a class that is
 not a `NodeTypeProvider`, a `type_id` that differs from the declared id, a
@@ -238,6 +239,43 @@ continues without that provider, the analyzer prints
 ```bash
 cd <provledger checkout>/skills/project-state-graph/scripts && uv run python selfcheck.py /tmp/myproj.db
 ```
+
+## 8 · Outcome channels
+
+An **outcome channel** is how an expectation's `observed` outcome gets
+collected when another plan of the project closes reviewed (phase 7; the
+whole path is in [`docs/outcomes.md`](outcomes.md)). Two are built in —
+`profile_drift` (the data-profile before/after diff) and `metric`
+(expectations `metric:<name>`, judged against the nearest `metrics` row
+before and after the claim) — and a third party can add its own:
+
+```json
+{
+  "version": 1,
+  "outcome_channels": [
+    {"id": "acme.ab_test", "module": "acme_channels:ABTestChannel", "enabled": true, "priority": 5},
+    {"id": "metric", "enabled": false}
+  ]
+}
+```
+
+| field | meaning |
+|---|---|
+| `id` | `vendor.name`; must equal the class's `channel_id`. A built-in id (`profile_drift`, `metric`) may appear only to disable it (`enabled: false`) — it cannot be re-pointed |
+| `module` | import path `pkg.mod:Class`, importable by the interpreter that closes plans (the executing-plans venv) |
+| `enabled` | default `true` |
+| `priority` | integer, larger is asked first; built-ins are 0 and, on a tie, come first |
+
+The class implements `provledger.outcome_channels.OutcomeChannel`:
+`channel_id`, `applicable_to(expectation) -> bool`, and
+`collect(conn, expectation, *, closing_plan_id, extensions)` returning
+`(kind, value, source, tier, reason)` — `kind` `observed` / `none_available`,
+`tier` `observed` / `none` — or `None` to let the next channel answer. The
+first applicable channel that returns non-None wins. A channel that cannot be
+imported, is not an `OutcomeChannel`, or raises inside `collect()` is
+**isolated**: the close continues, the error is recorded on the winning
+outcome's value (`channel_errors`) or in the `none_available` reason. Values
+are measured from stored rows — a channel is never handed to a model.
 
 ## 9 · Error messages
 
@@ -256,6 +294,8 @@ cd <provledger checkout>/skills/project-state-graph/scripts && uv run python sel
 | `providers[0] acme.x: module must be an import path like pkg.mod:Class` | registration without `pkg.mod:Class` |
 | `providers[0]: module is required (...)` | a non-built-in id without a module |
 | `duplicate id 'acme.x' in providers` | the same provider id twice |
+| `outcome_channels[0] profile_drift: a built-in channel cannot be re-pointed (module)` | `module` on a built-in channel id — only `enabled: false` is allowed |
+| `outcome_channels[0]: id must be namespaced vendor.name (...) or a built-in id` | channel id without a dot that is not `profile_drift` / `metric` |
 | (run record) `import failed: ModuleNotFoundError: ...` / `capability 'llm' unavailable on this host` | a provider that could not be loaded — recorded, never raised |
 
 Errors are raised by the loader before anything is applied.

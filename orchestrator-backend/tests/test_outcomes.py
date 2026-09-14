@@ -55,7 +55,7 @@ def test_metric_and_none_channels(conn):
     n = _expect(conn, "P1", target="orders", channel="none", claim="no way to observe this yet")
     counts = outcomes.backfill(conn, "proj", None, "P2")
     assert counts["none_available"] == 2
-    assert "no metric channel registered" in db.get_outcomes(conn, m)[0]["reason"]
+    assert "no metric 'ctr' observed before" in db.get_outcomes(conn, m)[0]["reason"]   # phase 7: MetricChannel answers
     assert db.get_outcomes(conn, n)[0]["reason"] == "no way to observe this yet"
 
 
