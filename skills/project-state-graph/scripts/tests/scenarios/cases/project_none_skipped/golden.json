@@ -1,0 +1,99 @@
+{
+ "events": [
+  {
+   "node": "pkg.pipeline.clean",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.clean",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.fit",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.fit",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.load",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.load",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.main",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.main",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.pipeline.split",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.pipeline.split",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "pkg.report.summary",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "pkg.report.summary",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "tests.test_pipeline.test_main_runs",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "tests.test_pipeline.test_main_runs",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "node": "tests.test_pipeline.test_summary_counts_rows",
+   "node_type": "function",
+   "plan": null,
+   "qualified_name": "tests.test_pipeline.test_summary_counts_rows",
+   "run": 1,
+   "tier": "observed",
+   "type": "node_added"
+  },
+  {
+   "closed": "COMPLETED",
+   "plan": "t1",
+   "project": "none",
+   "project_source": "declared",
+   "review_skipped": "plan declared project=none",
+   "review_state": null,
+   "type": "plan"
+  },
+  {
+   "plan": "t1",
+   "step": "REVIEW",
+   "tag": "[REVIEW SKIPPED]",
+   "type": "review_log"
+  }
+ ],
+ "runs": [
+  {
+   "plan": null,
+   "run": 1,
+   "step": null,
+   "trigger": "manual"
+  }
+ ]
+}
