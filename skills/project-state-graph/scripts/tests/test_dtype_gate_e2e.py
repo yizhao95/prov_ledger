@@ -170,3 +170,24 @@ def test_inferred_edges_are_not_asserted(tmp_path):
 def test_real_break_still_fires_after_relaxations(tmp_path):
     r = _gate(tmp_path, MISMATCH)
     assert r["ok"] is False and "int" in r["detail"] and "str" in r["detail"]
+
+
+def test_fl029_bare_name_attribute_call_is_not_asserted(tmp_path):
+    """FL-029: `d.get("k")` is a method call on a dict, not a call to the
+    unrelated free function pkg.ns.get that happens to share the name. The
+    builder may only guess (inferred) and the ERROR gate must not assert it."""
+    conn = _analyze_files(tmp_path, {
+        "pkg/ns.py": "def get(name: str) -> frozenset[str]:\n    return frozenset({name})\n",
+        "pkg/use.py": ("def take(x: int) -> int:\n    return x\n\n"
+                       "def flow(d: dict) -> int:\n    v = d.get('k')\n    return take(v)\n"),
+    })
+    try:
+        r = _check_dtype_consistency_e2e(conn)
+        assert r["ok"] is True, r["detail"]
+        rows = conn.execute(
+            """SELECT e.confidence FROM edge e JOIN edge_type t ON t.id=e.edge_type_id
+               JOIN node s ON s.id=e.src_node_id JOIN node d ON d.id=e.dst_node_id
+               WHERE t.name='calls' AND s.qualified_name='pkg.use.flow' AND d.qualified_name='pkg.ns.get'""").fetchall()
+        assert all(c[0] == "inferred" for c in rows), rows       # never a high-confidence call
+    finally:
+        conn.close()

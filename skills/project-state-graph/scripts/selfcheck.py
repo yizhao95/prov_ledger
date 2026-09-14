@@ -265,8 +265,10 @@ def _check_dtype_consistency_e2e(conn) -> Dict[str, Any]:
         info = json.loads(meta) if meta else {}
         if info.get("unpacked"):
             continue
-        # PSG-C4: prefer the consumer's declared param type; fall back to legacy.
-        want = info.get("expected_type") or info.get("type", "unknown")
+        # PSG-C4: the CONSUMER's declared param type. FL-029: without it there is
+        # nothing to compare against (the legacy `type` field was the producer's
+        # own type copied over — a tautology, never evidence).
+        want = info.get("expected_type")
         have = produced_type.get(int(dv), "unknown")
         if want not in (None, "unknown") and have not in (None, "unknown") \
                 and not _dtype_compatible(have, want):

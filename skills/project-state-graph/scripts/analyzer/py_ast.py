@@ -193,8 +193,11 @@ class _ModuleVisitor:
                 if name and name in self.by_name:
                     dst = self.by_name[name]
                     if dst != src_id:
+                        # FL-029: `obj.name(...)` is a method call on some object;
+                        # matching it to a same-named free function is a guess.
                         confidence = (
                             "high" if self.name_counts.get(name, 0) <= 1
+                            and not isinstance(sub.func, ast.Attribute)
                             else "inferred"
                         )
                         store.add_edge(self.conn, self.edges["calls"], src_id, dst,
@@ -252,7 +255,9 @@ def _collect_calls_global(conn, tree, module, idx, calls_e, property_names) -> N
                         # same-named top-level function.
                         cands = idx.resolve(name, module=module, klass=klass)
                     else:
-                        cands = idx.resolve(name)  # other attribute: simple-name only
+                        # FL-029: `obj.name(...)` on an unknown receiver — a
+                        # simple-name match is a guess, never high confidence.
+                        cands = [(i, "inferred") for i, _ in idx.resolve(name)]
                 else:
                     cands = idx.resolve(name, module=module)
                 _emit_calls(conn, calls_e, src_id, cands, seen,

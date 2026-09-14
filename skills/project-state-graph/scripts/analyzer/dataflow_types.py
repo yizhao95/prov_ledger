@@ -93,6 +93,15 @@ def _has_return_value(fn) -> bool:
     return False
 
 
+def _is_foreign_attr_call(func) -> bool:
+    """`obj.name(...)` where obj is not `self`/`cls`: the callee lives on the
+    receiver, not among this repo's free functions (FL-029)."""
+    if not isinstance(func, ast.Attribute):
+        return False
+    recv = func.value
+    return not (isinstance(recv, ast.Name) and recv.id in ("self", "cls"))
+
+
 def _call_name(func) -> Optional[str]:
     if isinstance(func, ast.Name):
         return func.id
@@ -310,6 +319,8 @@ def _trace_consumes(conn, fn, idx, module, var_of, consumes_e,
             pname = _call_name(stmt.value.func)
             if pname is None:
                 continue
+            if _is_foreign_attr_call(stmt.value.func):
+                continue   # FL-029: `d.get(...)` is not a call to a free function named get
             pid = idx.resolve_one(pname, module=module)  # taint binds ONE producer
             if pid is None or pid not in var_of:
                 continue
@@ -339,6 +350,9 @@ def _trace_consumes(conn, fn, idx, module, var_of, consumes_e,
         candidates = idx.resolve(cname, module=module)
         if not candidates:
             continue
+        if _is_foreign_attr_call(sub.func):
+            # FL-029: a method call on some object matched by bare name is a guess
+            candidates = [(cid, "inferred") for cid, _ in candidates]
         # Tainted args tagged with the param slot they fill (for the expected type).
         slots = []  # (var_name, is_direct, slot)
         for i, arg in enumerate(sub.args):

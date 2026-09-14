@@ -131,42 +131,65 @@ def changed_symbols(repo: str, base: str, head: str) -> list[dict]:
     return results
 
 
+def _module_from_path(path: str | None) -> str | None:
+    if not path:
+        return None
+    p = path[:-3] if path.endswith(".py") else path
+    return p.replace("\\", "/").replace("/", ".")
+
+
 def stale_references(db_path: str, removed_symbols: list[str],
                      changed_files: set[str] | None = None) -> list[dict]:
-    """Find edges in the deep graph whose destination is a removed/renamed symbol.
+    """Find call edges in the deep graph whose destination is a removed/renamed
+    symbol. `removed_symbols` are QUALIFIED names (`module.name`, as report()
+    derives them from changed_symbols' file); a bare name still works but can
+    only produce warnings.
 
-    Returns [{caller, callee, file, severity}] — callers that still reference a
-    symbol that no longer exists after the diff. Matches dst node by name OR
-    qualified_name. FL-023: the graph describes the BASE commit, so a caller whose
-    file is in `changed_files` was edited in the same diff (very likely dropping
-    the call) — severity "warning"; a caller outside the diff is a real gap —
-    severity "fail". Without `changed_files` every hit is a fail (old behaviour).
+    Returns [{caller, callee, file, severity, match, confidence}]:
+      match "qualified_name" — dst.qualified_name == symbol (FL-029): the edge's
+        confidence decides: high/NULL -> "fail", inferred -> "warning";
+      match "bare_name"       — no qualified hit at all, dst.name == last segment:
+        a guess, always "warning".
+    FL-023: a caller whose file is in `changed_files` is a warning either way.
     """
     if not removed_symbols:
         return []
     changed_files = set(changed_files or ())
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
-    placeholders = ",".join("?" for _ in removed_symbols)
-    rows = conn.execute(
-        f"""
+    has_conf = "confidence" in {r[1] for r in conn.execute("PRAGMA table_info(edge)")}
+    conf_col = "e.confidence" if has_conf else "NULL"
+    edge_type_filter = ""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='edge_type'").fetchone():
+        edge_type_filter = "AND (et.name IS NULL OR et.name = 'calls')"
+    sql = f"""
         SELECT src.name AS caller, src.qualified_name AS caller_q,
                dst.name AS callee, dst.qualified_name AS callee_q,
-               src.file_path AS file
+               src.file_path AS file, {conf_col} AS confidence
         FROM edge e
         JOIN node src ON src.id = e.src_node_id
         JOIN node dst ON dst.id = e.dst_node_id
-        WHERE dst.name IN ({placeholders})
-           OR dst.qualified_name IN ({placeholders})
-        """,
-        (*removed_symbols, *removed_symbols),
-    ).fetchall()
+        LEFT JOIN edge_type et ON et.id = e.edge_type_id
+        WHERE {{where}} {edge_type_filter}
+    """
+    out: list[dict] = []
+    for sym in removed_symbols:
+        rows = conn.execute(sql.format(where="dst.qualified_name = ?"), (sym,)).fetchall()
+        match = "qualified_name"
+        if not rows:
+            bare = sym.rsplit(".", 1)[-1]
+            rows = conn.execute(sql.format(where="dst.name = ?"), (bare,)).fetchall()
+            match = "bare_name"
+        for r in rows:
+            conf = r["confidence"] or "high"
+            if match == "bare_name" or conf != "high" or r["file"] in changed_files:
+                severity = "warning"
+            else:
+                severity = "fail"
+            out.append({"caller": r["caller"], "callee": r["callee"], "file": r["file"],
+                        "severity": severity, "match": match, "confidence": conf, "symbol": sym})
     conn.close()
-    return [
-        {"caller": r["caller"], "callee": r["callee"], "file": r["file"],
-         "severity": "warning" if r["file"] in changed_files else "fail"}
-        for r in rows
-    ]
+    return out
 
 
 def report(db_path: str, changed: list[dict], changed_files: set[str] | None = None) -> dict:
@@ -177,10 +200,11 @@ def report(db_path: str, changed: list[dict], changed_files: set[str] | None = N
     of them are warnings. Returns {ok: bool, gaps: [...], text: str}; gaps carries
     every hit (each with its severity), ok=False iff a "fail" hit exists.
     """
-    removed = [
-        c["old_name"] for c in changed
-        if c.get("kind") in ("removed", "renamed") and c.get("old_name")
-    ]
+    removed = []
+    for c in changed:
+        if c.get("kind") in ("removed", "renamed") and c.get("old_name"):
+            mod = _module_from_path(c.get("file"))
+            removed.append(f"{mod}.{c['old_name']}" if mod else c["old_name"])   # FL-029: qualified
     hits = stale_references(db_path, removed, changed_files=changed_files)
     if not hits:
         return {
@@ -192,11 +216,17 @@ def report(db_path: str, changed: list[dict], changed_files: set[str] | None = N
     fails = [h for h in hits if h["severity"] == "fail"]
     lines = ["Stale references found (callers still target removed/renamed symbols):"]
     for h in hits:
-        note = (" [warning: caller's file is in this diff — confirm the call was dropped]"
-                if h["severity"] == "warning" else "")
+        if h.get("match") == "bare_name":
+            note = " [warning: bare-name match only — the qualified symbol is not in the graph]"
+        elif h.get("confidence", "high") != "high":
+            note = f" [warning: {h['confidence']} call edge — a guess, not evidence]"
+        elif h["severity"] == "warning":
+            note = " [warning: caller's file is in this diff — confirm the call was dropped]"
+        else:
+            note = ""
         lines.append(f"  - {h['caller']} ({h['file']}) still calls {h['callee']}{note}")
     if not fails:
-        lines.append("  all hits are warnings (callers edited in the same diff) — not blocking")
+        lines.append("  all hits are warnings (bare-name / inferred / edited in the same diff) — not blocking")
     return {"ok": not fails, "gaps": hits, "text": "\n".join(lines)}
 
 
