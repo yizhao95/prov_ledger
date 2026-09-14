@@ -24,10 +24,8 @@ import sqlite3
 from typing import Dict, List, Optional
 
 from . import store
+from . import namesets
 
-_SPLIT_FUNCS = {"train_test_split"}
-_FIT_METHODS = {"fit", "train"}
-_EVAL_METHODS = {"predict", "score", "evaluate"}
 _EVAL_ROLES = {"test", "validation"}
 
 
@@ -53,7 +51,7 @@ def _is_split_call(node) -> bool:
     f = node.func
     name = f.id if isinstance(f, ast.Name) else (
         f.attr if isinstance(f, ast.Attribute) else None)
-    return name in _SPLIT_FUNCS
+    return name in namesets.names("split_funcs")
 
 
 def _target_names(targets) -> List[str]:
@@ -112,9 +110,9 @@ def _scan_function(fn) -> List[dict]:
         if recv is None or dvar is None:
             continue
         meth = sub.func.attr
-        if meth in _FIT_METHODS:
+        if meth in namesets.names("fit_methods"):
             models.setdefault(recv, {"fit": set(), "eval": set()})["fit"].add(dvar)
-        elif meth in _EVAL_METHODS:
+        elif meth in namesets.names("eval_methods"):
             models.setdefault(recv, {"fit": set(), "eval": set()})["eval"].add(dvar)
 
     leaks: List[dict] = []
@@ -139,8 +137,8 @@ def _scan_function(fn) -> List[dict]:
     return leaks
 
 
-_MODEL_DATA_METHODS = _FIT_METHODS | _EVAL_METHODS
-_VALIDATOR_NAMES = {"validate", "check", "check_schema", "expect", "assert_schema"}
+def _model_data_methods() -> frozenset:
+    return namesets.names("fit_methods") | namesets.names("eval_methods")
 
 
 def _function_has_guard(fn) -> bool:
@@ -153,7 +151,7 @@ def _function_has_guard(fn) -> bool:
             f = sub.func
             name = f.id if isinstance(f, ast.Name) else (
                 f.attr if isinstance(f, ast.Attribute) else None)
-            if name and ("validat" in name.lower() or name in _VALIDATOR_NAMES):
+            if name and ("validat" in name.lower() or name in namesets.names("validator_names")):
                 return True
     return False
 
@@ -174,7 +172,7 @@ def detect_unguarded_inputs(source: str) -> List[dict]:
         inputs = []
         for sub in ast.walk(fn):
             if (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
-                    and sub.func.attr in _MODEL_DATA_METHODS):
+                    and sub.func.attr in _model_data_methods()):
                 dv = _first_arg_name(sub)
                 recv = _attr_root(sub.func.value)
                 if dv and recv:

@@ -453,6 +453,24 @@ def _check_history_broken_ratio(conn) -> Dict[str, Any]:
             "detail": f"{removed}/{prev_n} previous nodes removed in run {run} ({pct:.1f}%)"}
 
 
+def _check_aborted_runs(conn) -> Dict[str, Any]:
+    """FL-028: runs whose process died before finish_run (marked by the next
+    start_run). Their events are ignored by the history readers; this only
+    makes the leftover visible."""
+    if not _table_exists(conn, "analysis_run"):
+        return {"name": "aborted_runs", "ok": True, "severity": "warning", "detail": "no runs"}
+    try:
+        rows = conn.execute("SELECT id FROM analysis_run WHERE aborted = 1 ORDER BY id").fetchall()
+    except sqlite3.OperationalError:     # graph built before the column existed
+        rows = []
+    ids = [r[0] for r in rows]
+    if not ids:
+        return {"name": "aborted_runs", "ok": True, "severity": "warning", "detail": "0 aborted runs"}
+    return {"name": "aborted_runs", "ok": False, "severity": "warning",
+            "detail": f"{len(ids)} aborted run(s), last: run {ids[-1]} (a refresh died before finishing; "
+                      "its events are ignored)"}
+
+
 _CHECKS = [
     _check_node_types_nonempty,
     _check_no_dangling_edges,
@@ -472,6 +490,7 @@ _CHECKS = [
     _check_history_key_coverage,
     _check_history_ambiguous,
     _check_history_broken_ratio,
+    _check_aborted_runs,
 ]
 
 

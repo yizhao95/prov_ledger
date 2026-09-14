@@ -10,6 +10,7 @@ chooses the test command, decides a signature override and supplies reasons.
                                                 # json: [{node_key|qualified_name, text}, ...]
         [--tests "<command>"]                   # 4b re-test, run in the repo; absent -> logged as skipped
         [--accept-signature "<reason>"]         # may override ONLY the signature gate; reason is logged
+        [--allow-dirty]                         # refresh despite uncommitted tracked changes (traced); default: FAIL
         [--dry-run]                             # steps 0–3 only, nothing written
         [--json]                                # machine-readable result on stdout (last line)
 
@@ -74,7 +75,7 @@ class Driver:
         self.orch_db = os.environ.get("ORCH_DB", DEFAULT_ORCH_DB)
         self.tmp = Path(tempfile.mkdtemp(prefix="review_run-"))
         self.log: list[str] = []
-        self.manual: str | None = None
+        self.manual: list[str] = []
         self.result: dict = {"plan_id": self.plan, "project": self.project, "verdict": None, "gates": {},
                              "range": None, "refreshed_sha": None, "slots": 0, "filled": 0,
                              "unstated": 0, "closed": None}
@@ -196,8 +197,8 @@ class Driver:
             failing = [g for g, v in verdict["gates"].items() if not v]
             if failing == ["signature"]:
                 ok = True
-                self.manual = f"[MANUAL VERDICT] signature gate overridden: {a.accept_signature}"
-                self.say(self.manual)
+                self.manual.append(f"[MANUAL VERDICT] signature gate overridden: {a.accept_signature}")
+                self.say(self.manual[-1])
             else:
                 self.say(f"[MANUAL VERDICT] --accept-signature ignored: failing gates {failing} are not just signature")
         self.result["verdict"] = ok
@@ -208,7 +209,16 @@ class Driver:
             gaps = {g: v for g, v in verdict["gaps"].items() if not verdict["gates"].get(g, True)}
             self.fail(f"gates failed {[g for g in gaps]}: {json.dumps(gaps, ensure_ascii=False)[:1500]}")
 
-        # 4b. refresh with attribution, re-test, selfcheck
+        # 4b (guard, phase 5): the refresh analyses the WORKING TREE. Tracked
+        # files with uncommitted changes would put unreviewed code into the
+        # graph — refuse unless the agent takes it on the record.
+        dirty = review_diff._git(repo, "status", "--porcelain", "--untracked-files=no").rstrip("\n")
+        if dirty.strip():
+            files = sorted({ln.split(maxsplit=1)[1] for ln in dirty.splitlines() if ln.strip()})
+            if not a.allow_dirty:
+                self.fail(f"working tree has uncommitted changes: {files}; commit/stash them or pass --allow-dirty")
+            self.manual.append(f"[MANUAL VERDICT] refresh on dirty tree: {files}")
+            self.say(self.manual[-1])
         env = dict(self.env, PROVLEDGER_PLAN_ID=self.plan, PROVLEDGER_STEP_ID=self.child, PROVLEDGER_TRIGGER="review")
         p = subprocess.run(["bash", str(INIT_PROJECT), "--name", self.project, "--repo", repo],
                            env=env, capture_output=True, text=True)
@@ -252,11 +262,11 @@ class Driver:
         self.result["filled"] = filled
         self.result["unstated"] = len(slots) - filled
         self.say(f"[4c] reason-fill: filled={filled} unstated={self.result['unstated']} (source {a.reasons})")
-        if self.manual:
-            self.say(self.manual)          # re-emitted at the tail: log_context keeps the last 50 lines
+        for line in self.manual:
+            self.say(line)                 # re-emitted at the tail: log_context keeps the last 50 lines
         summary = (f"review PASS via review_run.py: gates={self.result['gates'] or 'resumed'}, "
                    f"refreshed_sha={(self.result['refreshed_sha'] or '')[:10]}, slots={len(slots)}, filled={filled}"
-                   + (f"; {self.manual}" if self.manual else ""))
+                   + ("; " + "; ".join(self.manual) if self.manual else ""))
         self.op("complete-step", {"step_id": self.child, "summary": summary, "log_context": "\n".join(self.log)})
         rows = self.read("SELECT status FROM Plans WHERE plan_id = ?", self.plan)
         self.result["closed"] = rows[0][0] if rows else "COMPLETED"
@@ -305,6 +315,8 @@ def main() -> None:
     ap.add_argument("--reasons", default="unstated", help="stub | unstated | ask | <file.json>")
     ap.add_argument("--tests", default=None)
     ap.add_argument("--accept-signature", default=None, metavar="REASON")
+    ap.add_argument("--allow-dirty", action="store_true",
+                    help="refresh even with uncommitted tracked changes (traced as a manual verdict)")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json", action="store_true")
     Driver(ap.parse_args()).run()

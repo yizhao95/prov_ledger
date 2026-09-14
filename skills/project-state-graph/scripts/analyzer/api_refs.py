@@ -15,11 +15,9 @@ import sqlite3
 from typing import Dict, Optional
 
 from . import _resolve, store
+from . import namesets
 from .py_ast import _module_name
 
-_READ_METHODS = {"get", "head", "options"}
-_WRITE_METHODS = {"post", "put", "patch", "delete"}
-_HTTP_LIBS = {"requests", "httpx", "aiohttp", "session", "client"}
 
 
 def analyze(
@@ -62,11 +60,11 @@ def analyze(
                 if hit is None:
                     continue
                 method, url = hit
-                edge = writes_e if method in _WRITE_METHODS else reads_e
+                edge = writes_e if method in namesets.names("http_write_methods") else reads_e
                 node_id = api_node(url)
                 store.add_edge(conn, edge, fn_id, node_id,
                                metadata={"method": method.upper()})
-                if method not in _WRITE_METHODS and expected_keys:
+                if method not in namesets.names("http_write_methods") and expected_keys:
                     _merge_assumed_schema(conn, node_id, expected_keys)
 
 
@@ -115,10 +113,10 @@ def _http_call(node) -> Optional[tuple]:
     if not isinstance(func, ast.Attribute):
         return None
     method = func.attr.lower()
-    if method not in _READ_METHODS and method not in _WRITE_METHODS:
+    if method not in namesets.names("http_read_methods") and method not in namesets.names("http_write_methods"):
         return None
     root = _attr_root(func.value)
-    if root is not None and root.lower() not in _HTTP_LIBS:
+    if root is not None and root.lower() not in namesets.names("http_libs"):
         return None
     if not node.args:
         return None

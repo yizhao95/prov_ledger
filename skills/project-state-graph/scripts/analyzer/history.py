@@ -361,7 +361,8 @@ def resolve(conn, run_id: int, arbitrate: Arbitrate | None = None) -> dict:
 
 def events_of(conn, node_key_or_qn: str) -> list[dict]:
     """All events of one node (by node_key, or by its most recent qualified
-    name), each with its run's commit_sha / plan_id / step_id / trigger."""
+    name), each with its run's commit_sha / plan_id / step_id / trigger.
+    Events of aborted runs (FL-028) are never returned."""
     key = node_key_or_qn
     if not key.startswith("nk_"):
         row = conn.execute(
@@ -372,9 +373,10 @@ def events_of(conn, node_key_or_qn: str) -> list[dict]:
         key = row[0]
     return [{"event_id": r[0], "run_id": r[1], "seq": r[2], "event_type": r[3], "tier": r[4],
              "payload": json.loads(r[5]), "created_at": r[6], "commit_sha": r[7],
-             "plan_id": r[8], "step_id": r[9], "trigger": r[10]}
+             "plan_id": r[8], "step_id": r[9], "trigger": r[10], "extensions_json": r[11]}
             for r in conn.execute(
                 """SELECT e.id, e.run_id, e.seq, e.event_type, e.tier, e.payload_json, e.created_at,
-                          a.commit_sha, a.plan_id, a.step_id, a.trigger
+                          a.commit_sha, a.plan_id, a.step_id, a.trigger, a.extensions_json
                    FROM node_event e JOIN analysis_run a ON a.id=e.run_id
-                   WHERE e.node_key=? ORDER BY e.run_id, e.seq""", (key,))]
+                   WHERE e.node_key=? AND COALESCE(a.aborted, 0) = 0
+                   ORDER BY e.run_id, e.seq""", (key,))]

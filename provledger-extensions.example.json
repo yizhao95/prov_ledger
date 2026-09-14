@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "drift_kinds": [
+    {"id": "acme.null_spike_strict", "metric": "null_frac", "op": "delta_gte", "value": 0.1, "priority": 10},
+    {"id": "acme.rows_halved", "metric": "row_count", "op": "dropped_below", "value": 0.5, "priority": 0}
+  ],
+  "namesets": [
+    {"set": "split_funcs", "add": ["stratified_split", "time_split"]},
+    {"set": "fit_methods", "add": ["fit_transform_all"], "remove": ["train"]}
+  ],
+  "constraints": [
+    {"project": "prov_ledger", "statement": "orders.region != 'X' must stay excluded",
+     "subjects": ["pkg.pipeline.clean", "orders.region"], "keywords": ["scope-change", "finance"],
+     "why_ref": "https://wiki/decisions/42", "why_visibility": "restricted"}
+  ]
+}

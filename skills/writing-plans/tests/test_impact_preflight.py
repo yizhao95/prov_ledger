@@ -573,3 +573,18 @@ def test_e2_3_five_targets_stay_under_four_thousand_tokens(graph_db_with_history
                                                   project="proj", orch_conn=orch_db)
     assert len(ctx["symbols"]) == 5 and all(len(s["history"]) == 5 and len(s["reasons"]) == 3 for s in ctx["symbols"])
     assert ctx["approx_tokens"] <= 4000, ctx["approx_tokens"]
+
+
+def test_ledger_matches_does_not_tokenise_anchors(ledger_db):
+    """Phase 5: a constraint's dotted anchors (qualified names, owner.column,
+    nk_ keys) are exact anchors, not keywords — a plan in the same module must
+    not be told it 'read' the constraint because it shares 'pkg' / 'pipeline'."""
+    c = sqlite3.connect(ledger_db); c.row_factory = sqlite3.Row
+    cid = ledger_store.add_entry(
+        c, project="proj", kind="constraint", statement="clean() must keep dropping zero-quantity rows",
+        subjects=["pkg.pipeline.clean", "nk_290532fc7c77"], keywords=["scope-change"], source="extensions")
+    c.commit(); c.close()
+    same_module = impact_preflight.ledger_matches(ledger_db, "proj", "touch the split", ["pkg.pipeline.split"])
+    assert cid not in [m["id"] for m in same_module]
+    by_keyword = impact_preflight.ledger_matches(ledger_db, "proj", "a scope-change of the filter", ["pkg.pipeline.split"])
+    assert cid in [m["id"] for m in by_keyword]                     # keywords still match lexically

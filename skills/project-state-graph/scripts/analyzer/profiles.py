@@ -25,6 +25,7 @@ import sqlite3
 from typing import Dict, Set
 
 from . import _resolve, store
+from . import namesets
 from .py_ast import _module_name
 
 PROFILE_NAMES = (
@@ -36,7 +37,6 @@ PROFILE_NAMES = (
     "endpoint",
 )
 
-_ML_CALL_NAMES = {"train_test_split", "fit", "train"}
 
 
 def _symbol_index(conn: sqlite3.Connection) -> Dict[str, int]:
@@ -89,7 +89,7 @@ def _ml_symbols(repo_root: str, file_map: Dict[str, int], idx) -> Set[int]:
             if fn_id is None:
                 continue
             for sub in ast.walk(fn):
-                if isinstance(sub, ast.Call) and _call_name(sub.func) in _ML_CALL_NAMES:
+                if isinstance(sub, ast.Call) and _call_name(sub.func) in namesets.names("ml_call_names"):
                     found.add(fn_id)
                     break
     return found

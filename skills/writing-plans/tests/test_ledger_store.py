@@ -173,3 +173,11 @@ def test_e4_4_no_hardcoded_taxonomy():
         assert not re.search(r"CATEGOR|TAXONOM", src), mod.__name__
         consts = re.findall(r"^([A-Z][A-Z_]+)\s*=\s*[\(\[]", src, re.M)
         assert set(consts) <= {"VALID_KINDS", "VALID_VISIBILITY"}, (mod.__name__, consts)
+
+
+def test_constraints_for_matches_qualified_names_too(conn):
+    cid = _constraint(conn, ["nk_abc", "orders.region"])
+    assert [c["id"] for c in ledger_store.constraints_for(conn, "proj", [], qualified_names=["orders.region"])] == [cid]
+    assert [c["id"] for c in ledger_store.constraints_for(conn, "proj", ["nk_zzz"], qualified_names=["orders.region"])] == [cid]
+    assert ledger_store.constraints_for(conn, "proj", [], qualified_names=["nope"]) == []
+    assert ledger_store.constraints_for(conn, "proj", [], qualified_names=[]) == []

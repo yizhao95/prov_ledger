@@ -29,10 +29,12 @@ def _row_to_dict(row) -> dict:
     return d
 
 
-def anchored_constraints(conn, project: str, node_keys) -> list[dict]:
-    """Active constraints whose subjects contain ANY of `node_keys` — exact
-    anchor match; a restricted entry comes back with rationale=None."""
-    keys = [k for k in (node_keys or []) if k]
+def anchored_constraints(conn, project: str, node_keys, qualified_names=()) -> list[dict]:
+    """Active constraints whose subjects contain ANY of `node_keys` or
+    `qualified_names` — exact anchor match (phase 5: a declared constraint may
+    anchor by qualified name / owner.column); a restricted entry comes back
+    with rationale=None."""
+    keys = [k for k in (*(node_keys or []), *(qualified_names or ())) if k]
     if not keys:
         return []
     try:
@@ -59,7 +61,8 @@ def bypassed_at_close(conn, *, project: str, plan_id: str, psg_db_path: str | No
     continue. Returns the number of (constraint, node) pairs recorded."""
     changed = psg_bridge.changed_node_keys(psg_db_path, plan_id)
     keys = [c["node_key"] for c in changed]
-    hit = anchored_constraints(conn, project, keys)
+    qn_of = {c["node_key"]: c.get("qualified_name") for c in changed}
+    hit = anchored_constraints(conn, project, keys, qualified_names=[q for q in qn_of.values() if q])
     if not hit:
         return 0
     plan = db.get_plan(conn, plan_id) or {}
@@ -75,7 +78,7 @@ def bypassed_at_close(conn, *, project: str, plan_id: str, psg_db_path: str | No
             continue
         text = f"constraint_bypassed:{c['id']}: {c['statement']}"
         for k in keys:
-            if k in c["subjects"] and text not in already:
+            if (k in c["subjects"] or qn_of.get(k) in c["subjects"]) and text not in already:
                 db.insert_node_reason(conn, node_key=k, project=project, run_id=run_id, plan_id=plan_id,
                                       kind="constraint_ref", text=text, source="system", tier="derived",
                                       commit=commit)

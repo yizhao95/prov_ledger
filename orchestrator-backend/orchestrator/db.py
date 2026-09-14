@@ -531,12 +531,21 @@ def insert_expectation(conn: sqlite3.Connection, *, plan_id: str, step_id: str |
 
 def get_pending_expectations(conn: sqlite3.Connection, project: str, *, exclude_plan_id: str,
                              kind: str) -> list[dict]:
-    """Expectations of OTHER plans of `project` that have no outcome of `kind` yet."""
+    """Expectations of OTHER plans of `project` still to judge for `kind`.
+    survival (phase 5): EVERY node/column expectation — survival is re-judged at
+    each close and the caller appends only when the verdict changed.
+    observed: judged once — an observed OR none_available outcome settles it."""
+    if kind == "survival":
+        return [dict(r) for r in conn.execute(
+            """SELECT e.* FROM expectations e
+               WHERE e.project = ? AND e.plan_id <> ? AND (e.target_kind IN ('node', 'column') OR e.channel = 'graph')
+               ORDER BY e.id""", (project, exclude_plan_id))]
+    kinds = ("observed", "none_available") if kind == "observed" else (kind, kind)
     return [dict(r) for r in conn.execute(
         """SELECT e.* FROM expectations e
            WHERE e.project = ? AND e.plan_id <> ?
-             AND NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.expectation_id = e.id AND o.kind = ?)
-           ORDER BY e.id""", (project, exclude_plan_id, kind))]
+             AND NOT EXISTS (SELECT 1 FROM outcomes o WHERE o.expectation_id = e.id AND o.kind IN (?, ?))
+           ORDER BY e.id""", (project, exclude_plan_id, *kinds))]
 
 
 def insert_outcome(conn: sqlite3.Connection, *, expectation_id: int, kind: str, value,

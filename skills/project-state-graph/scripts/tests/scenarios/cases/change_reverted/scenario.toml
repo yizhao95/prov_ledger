@@ -1,6 +1,7 @@
 # A change that is reverted by the next plan: the revert is itself a
-# node_changed whose struct_sig returns to the baseline value, and the first
-# plan's expectation is judged `reverted` when the reverting plan closes.
+# node_changed whose struct_sig returns to the baseline value, the first
+# plan's expectation is judged `reverted` when the reverting plan closes, and
+# a later close that changes nothing appends no second verdict.
 [scenario]
 name = "change_reverted"
 fixture = "pipeline_repo"
@@ -26,14 +27,23 @@ declared_targets = ["pkg.pipeline.clean"]
 change = { revert_to = "t0" }
 reasons = { "pkg.pipeline.clean" = "Q3 returns are handled upstream now; back to the baseline filter" }
 
+[[tasks]]
+name = "t3"
+goal = "annotate the functions"
+declared_targets = ["pkg.pipeline.main"]
+change = { generated = "add_comments" }
+reasons = "stub"
+
 [expect]
 events = [
   { plan = "t1", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
   { plan = "t2", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
   { plan = "t1", type = "outcome", target = "pkg.pipeline.clean", kind = "survival", signal = "reverted", backfilled_by = "t2" },
   { plan = "t2", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
+  { plan = "t3", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
 ]
 must_not = [
+  { plan = "t1", type = "outcome", backfilled_by = "t3" },      # still reverted: nothing appended
   { type = "node_removed" },
   { type = "identity_ambiguous" },
   { plan = "t1", type = "outcome", signal = "untouched_consumed" },

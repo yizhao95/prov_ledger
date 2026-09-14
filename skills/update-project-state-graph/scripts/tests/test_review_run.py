@@ -262,3 +262,40 @@ def test_resume_redoes_the_refresh_when_the_registry_is_behind_head(ws):
     assert out["slots"] == 1 and out["filled"] == 1
     status, log = ws.step(f"{plan_id}-REVIEW.1")
     assert status == "COMPLETED" and "[resume]" in log and "refresh" in log.lower()
+
+
+# ── dirty working tree (phase 5 Task 0-C) ─────────────────────────────────────
+
+def test_dirty_tracked_file_fails_the_review_before_the_refresh(ws):
+    ws.change(BODY_CHANGE)
+    plan_id = ws.needs_review_plan()
+    (ws.repo / "pipeline.py").write_text(BODY_CHANGE + "\n# uncommitted edit\n")     # tracked, modified, not committed
+    runs_before = ws.runs()
+    p = ws.review_run(plan_id, "--reasons", "stub")
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert _json_tail(p)["closed"] == "FAILED"
+    assert ws.plan(plan_id)[0] == "FAILED"
+    status, log = ws.step(f"{plan_id}-REVIEW.1")
+    assert status == "FAILED" and "uncommitted" in log and "pipeline.py" in log and "--allow-dirty" in log
+    assert ws.runs() == runs_before and ws.registered_sha() == ws.sha0            # no refresh happened
+
+
+def test_allow_dirty_refreshes_and_leaves_a_trace(ws):
+    head = ws.change(BODY_CHANGE)
+    plan_id = ws.needs_review_plan()
+    (ws.repo / "pipeline.py").write_text(BODY_CHANGE + "\n# uncommitted edit\n")
+    p = ws.review_run(plan_id, "--reasons", "stub", "--allow-dirty")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert ws.plan(plan_id) == ("COMPLETED", "reviewed") and ws.registered_sha() == head
+    status, log = ws.step(f"{plan_id}-REVIEW.1")
+    assert status == "COMPLETED" and "[MANUAL VERDICT] refresh on dirty tree" in log and "pipeline.py" in log
+
+
+def test_untracked_files_are_not_dirty(ws):
+    ws.change(BODY_CHANGE)
+    plan_id = ws.needs_review_plan()
+    (ws.repo / "scratch.txt").write_text("not tracked\n")
+    p = ws.review_run(plan_id, "--reasons", "stub")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert ws.plan(plan_id) == ("COMPLETED", "reviewed")
+    assert "[MANUAL VERDICT]" not in ws.step(f"{plan_id}-REVIEW.1")[1]

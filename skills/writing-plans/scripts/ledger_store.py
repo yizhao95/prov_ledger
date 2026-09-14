@@ -68,11 +68,12 @@ def add_entry(conn: sqlite3.Connection, *, project: str, kind: str,
 
 
 def constraints_for(conn: sqlite3.Connection, project: str,
-                    node_keys: List[str]) -> List[dict]:
-    """Active constraint entries whose subjects contain ANY of `node_keys` —
-    exact match on the anchor, never lexical. A restricted entry comes back
-    with rationale=None: only why_ref leaves the ledger."""
-    keys = [k for k in (node_keys or []) if k]
+                    node_keys: List[str], qualified_names: Optional[List[str]] = None) -> List[dict]:
+    """Active constraint entries whose subjects contain ANY of `node_keys` or
+    `qualified_names` — exact match on the anchor (a node_key, a qualified name
+    or an owner.column), never lexical. A restricted entry comes back with
+    rationale=None: only why_ref leaves the ledger."""
+    keys = [k for k in (*(node_keys or []), *(qualified_names or [])) if k]
     if not keys:
         return []
     rows = conn.execute(

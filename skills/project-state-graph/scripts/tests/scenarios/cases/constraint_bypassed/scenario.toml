@@ -7,7 +7,15 @@ name = "constraint_bypassed"
 fixture = "pipeline_repo"
 
 [[setup]]
-ledger_constraint = { subject = "pkg.pipeline.clean", statement = "clean() must keep dropping zero-quantity rows", rationale = "finance reconciles returns separately (ticket FIN-4412)", visibility = "restricted" }
+# declared, not typed in: the constraints block of a provledger-extensions.json,
+# imported with `ledger_cli.py import`; the subject is a qualified name that the
+# import resolves to the node's key through the registered graph
+[[setup.ledger_import.constraints]]
+statement = "clean() must keep dropping zero-quantity rows"
+subjects = ["pkg.pipeline.clean"]
+rationale = "finance reconciles returns separately (ticket FIN-4412)"
+why_ref = "ticket FIN-4412"
+why_visibility = "restricted"
 
 [[tasks]]
 name = "t1"
