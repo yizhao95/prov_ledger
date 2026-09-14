@@ -50,10 +50,27 @@ def _split_csv(value: str | None) -> list:
     return [v.strip() for v in value.split(",") if v.strip()]
 
 
+# The orchestrator package (bundled orchestrator-backend/ first, the author's
+# workspace install as fallback) — every write path migrates on open (FL-021).
+_BUNDLED_ORCH = Path(__file__).resolve().parents[3] / "orchestrator-backend"
+_DEV_ORCH = Path.home() / "skill-workspace" / "orchestrator"
+_ORCH_ROOT = _BUNDLED_ORCH if (_BUNDLED_ORCH / "orchestrator" / "__init__.py").exists() else _DEV_ORCH
+
+
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Open ORCH_DB migrated (FL-025: a raw sqlite3.connect on a DB nothing
+    else had opened yet died with 'no such table: LedgerEntries')."""
+    try:
+        if str(_ORCH_ROOT) not in sys.path:
+            sys.path.insert(0, str(_ORCH_ROOT))
+        from orchestrator import db as orch_db  # noqa: WPS433
+        conn = orch_db.open_db(_db_path())
+        orch_db.run_migrations(conn)
+        return conn
+    except ImportError:            # no orchestrator package around: raw open, as before
+        conn = sqlite3.connect(_db_path())
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 def cmd_add(args) -> int:

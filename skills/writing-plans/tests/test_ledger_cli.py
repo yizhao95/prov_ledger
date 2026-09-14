@@ -85,3 +85,18 @@ def test_add_constraint_with_why_ref_and_visibility(orch_db_path):
     r2 = _run(["add", "--project", "proj", "--kind", "constraint", "--statement", "s",
                "--why-visibility", "secret"], orch_db_path)
     assert r2.returncode != 0
+
+
+def test_add_on_a_fresh_db_runs_the_migrations_first(tmp_path):
+    """FL-025: the ledger CLI opened the orchestrator DB raw, so on a DB that
+    no other script had touched yet 'add' died with 'no such table:
+    LedgerEntries'. Every write path migrates on open (FL-021) — this one too."""
+    fresh = tmp_path / "never-opened.db"
+    assert not fresh.exists()
+    r = _run(["add", "--project", "p", "--kind", "constraint", "--statement", "keep it",
+              "--subjects", "nk_1", "--why-visibility", "restricted"], fresh)
+    assert r.returncode == 0, r.stderr
+    c = sqlite3.connect(str(fresh))
+    assert c.execute("SELECT COUNT(*) FROM LedgerEntries WHERE project='p'").fetchone()[0] == 1
+    assert "project" in {row[1] for row in c.execute("PRAGMA table_info(Plans)")}   # fully migrated, not just one table
+    c.close()
