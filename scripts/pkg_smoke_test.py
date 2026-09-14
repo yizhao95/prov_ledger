@@ -14,6 +14,7 @@ from provledger import api, db, state_machine            # noqa: E402, F401
 from provledger.profiler import profile_records          # noqa: E402
 from provledger.drift import detect_drift                # noqa: E402
 from provledger.data_loop import run_data_decision_loop  # noqa: E402
+from provledger import graph_api, providers, testing     # noqa: E402, F401  (phase 6: host API ships in the wheel)
 
 print(f"import ok — provledger {provledger.__version__} "
       f"from {Path(provledger.__file__).parent}")
