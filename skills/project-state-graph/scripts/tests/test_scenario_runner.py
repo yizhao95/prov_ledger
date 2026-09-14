@@ -67,6 +67,17 @@ def test_apply_change_files_generated_and_revert(tmp_path):
         runner.apply_change(ws, {"bogus": 1}, task="t4")
 
 
+def test_apply_change_replace_requires_a_unique_match(tmp_path):
+    ws = runner.make_workspace(tmp_path, CORPUS_BASE)
+    sha = runner.apply_change(ws, {"replace": {"pkg/pipeline.py": [["df.qty > 0", "df.qty > 5"]]}}, task="t1")
+    assert sha == _git(ws.repo, "rev-parse", "HEAD") and ws.task_shas["t1"] == sha
+    assert "df.qty > 5" in (ws.repo / "pkg" / "pipeline.py").read_text()
+    with pytest.raises(ValueError):                      # old text absent
+        runner.apply_change(ws, {"replace": {"pkg/pipeline.py": [["df.qty > 0", "x"]]}}, task="t2")
+    with pytest.raises(ValueError):                      # old text ambiguous (two occurrences)
+        runner.apply_change(ws, {"replace": {"pkg/pipeline.py": [["df", "frame"]]}}, task="t3")
+
+
 # ── normalize: pure ───────────────────────────────────────────────────────────
 
 RAW = {

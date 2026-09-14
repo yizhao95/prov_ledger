@@ -47,6 +47,7 @@ name = "t1"                                          # becomes the plan's prefix
 goal = "loosen the qty filter"                       # no project name — cwd attribution
 declared_targets = ["pkg.pipeline.clean"]
 change = { files = { "pkg/pipeline.py" = "..." } }   # or { generated = "rename_variable" } / { revert_to = "t0" }
+                                                     # or { replace = { "pkg/pipeline.py" = [["old", "new"], ...] } }
 expectations = [ { target = "pkg.pipeline.clean", target_kind = "node", claim = "fewer rows dropped", channel = "graph" } ]
 reasons = "stub"                                     # "stub" | "unstated" | { "pkg.pipeline.clean" = "loosened for Q3" }
 tests = "python3 -m pytest -q tests"                 # optional: review_run.py --tests
@@ -69,6 +70,9 @@ must_not = [
 (`rename_variable`, `rename_function`, `strip_comments`, `add_comments`,
 `reformat`). `change.revert_to` checks out every file as it was at that task's
 commit and commits the result (a new commit, so the graph sees a change).
+`change.replace` rewrites one or more files by exact substring replacement;
+every `old` must occur exactly once (the scenario stays readable without
+repeating whole files).
 
 ### Matching
 
@@ -84,7 +88,7 @@ least one event; a `must_not` entry must match none. `must_not` is mandatory.
 | `node_added` / `node_changed` / `node_removed` / `node_matched` / `identity_ambiguous` … | `plan`, `run`, `node`, `tier`, plus the event payload (`changed`, `struct_sig`, `via`, `prev_run`, …) |
 | `reason` / `constraint_ref` / `rejected_path` | `plan`, `run`, `node`, `text_is` (`stated` \| `unstated`), `text`, `source`, `tier` |
 | `expectation` | `plan`, `target`, `target_kind`, `claim`, `channel` |
-| `outcome` | `plan` (the expectation's), `target`, `kind`, `signal` (survival), `value`, `source`, `tier`, `reason`, `backfilled_by` |
+| `outcome` | `plan` (the expectation's), `target`, `kind`, `signal` (survival), `plans` (the plans in a survival verdict), `value`, `source`, `tier`, `reason`, `backfilled_by` |
 | `plan` | `plan`, `closed`, `review_state`, `project`, `project_source`, `review_skipped` |
 | `review_log` | `plan`, `step` (`REVIEW` \| `REVIEW.1`), `tag` (e.g. `[REVIEW LOCK]`, `[CONSTRAINT BYPASSED]`) |
 

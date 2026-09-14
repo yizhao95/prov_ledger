@@ -1,0 +1,42 @@
+# An attribute change inside one node: only that node is dirty, its reason is
+# stated, and the expectation hung on it is judged (survival) when the next
+# plan closes — untouched since, and consumed by report.summary / main.
+[scenario]
+name = "attribute_change"
+fixture = "pipeline_repo"
+
+[[tasks]]
+name = "t1"
+goal = "loosen the qty filter"
+declared_targets = ["pkg.pipeline.clean"]
+change = { replace = { "pkg/pipeline.py" = [['r["qty"] > MIN_QTY', 'r["qty"] >= MIN_QTY']] } }
+expectations = [ { target = "pkg.pipeline.clean", target_kind = "node", claim = "fewer rows dropped", channel = "graph" } ]
+reasons = { "pkg.pipeline.clean" = "loosened for Q3: zero-quantity rows are legitimate returns" }
+
+[[tasks]]
+name = "t2"
+goal = "annotate the functions"
+declared_targets = ["pkg.pipeline.main"]
+change = { generated = "add_comments" }
+reasons = "stub"
+
+[expect]
+events = [
+  { plan = "t1", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
+  { plan = "t1", type = "reason", node = "pkg.pipeline.clean", text_is = "stated", source = "agent", tier = "stated" },
+  { plan = "t1", type = "expectation", target = "pkg.pipeline.clean", channel = "graph" },
+  { plan = "t1", type = "outcome", target = "pkg.pipeline.clean", kind = "survival", signal = "untouched_consumed", backfilled_by = "t2", tier = "derived" },
+  { plan = "t1", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
+  { plan = "t2", type = "node_matched", node = "pkg.pipeline.clean" },
+  { plan = "t2", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
+]
+must_not = [
+  { plan = "t1", type = "node_changed", node = "pkg.pipeline.load" },
+  { plan = "t1", type = "node_changed", node = "pkg.pipeline.split" },
+  { plan = "t1", type = "node_changed", node = "pkg.report.summary" },
+  { type = "node_removed" },
+  { type = "identity_ambiguous" },
+  { plan = "t2", type = "node_changed" },
+  { plan = "t1", type = "reason", text_is = "unstated" },
+  { type = "plan", closed = "FAILED" },
+]

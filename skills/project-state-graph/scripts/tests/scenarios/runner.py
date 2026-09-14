@@ -122,7 +122,8 @@ def make_workspace(tmp_path: Path, fixture_dir: Path, project: str = "scn") -> W
 # ── changes ───────────────────────────────────────────────────────────────────
 
 def apply_change(ws: Workspace, change: dict, task: str = "change") -> str:
-    """{"files": {rel: content}} | {"generated": mutator} | {"revert_to": task}; one commit; returns its sha."""
+    """{"files": {rel: content}} | {"generated": mutator} | {"replace": {rel: [[old, new], ...]}} |
+    {"revert_to": task}; one commit; returns its sha."""
     if "files" in change:
         for rel, content in change["files"].items():
             p = ws.repo / rel
@@ -133,13 +134,23 @@ def apply_change(ws: Workspace, change: dict, task: str = "change") -> str:
         if name not in mutate.GENERATED:
             raise ValueError(f"unknown generated mutator {name!r}; known: {sorted(mutate.GENERATED)}")
         mutate.GENERATED[name](ws.repo, ws.repo)
+    elif "replace" in change:
+        for rel, edits in change["replace"].items():
+            f = ws.repo / rel
+            text = f.read_text()
+            for old, new in edits:
+                n = text.count(old)
+                if n != 1:
+                    raise ValueError(f"replace in {rel}: {old!r} occurs {n} times, must be exactly once")
+                text = text.replace(old, new)
+            f.write_text(text)
     elif "revert_to" in change:
         target = change["revert_to"]
         if target not in ws.task_shas:
             raise ValueError(f"revert_to {target!r}: no such task; known: {sorted(ws.task_shas)}")
         ws.git("checkout", "-q", ws.task_shas[target], "--", ".")
     else:
-        raise ValueError(f"change must be one of files / generated / revert_to, got {sorted(change)}")
+        raise ValueError(f"change must be one of files / generated / replace / revert_to, got {sorted(change)}")
     ws.git("add", "-A")
     ws.git("commit", "-q", "--allow-empty", "-m", f"{task}: {'/'.join(sorted(change))}")
     sha = ws.git("rev-parse", "HEAD")
@@ -354,6 +365,7 @@ def normalize(raw: dict, plan_names: dict[str, str]) -> dict:
         value = mapval(o.get("value") or {})
         events.append({"plan": plan(e.get("plan_id")), "type": "outcome", "target": e.get("target"),
                        "kind": o["kind"], "signal": value.get("signal") if isinstance(value, dict) else None,
+                       "plans": (value.get("plans") or value.get("changed_by")) if isinstance(value, dict) else None,
                        "value": value, "source": o["source"], "tier": o["tier"], "reason": o["reason"],
                        "backfilled_by": plan(o["backfilled_by_plan"])})
     order = {pid: i for i, pid in enumerate(plan_names)}
