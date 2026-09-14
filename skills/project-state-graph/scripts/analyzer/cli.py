@@ -68,8 +68,13 @@ def git_info(repo_path: str) -> dict:
 
 def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
         plan_id: Optional[str] = None, step_id: Optional[str] = None,
-        trigger: str = "manual", isolate: str = "thread") -> str:
+        trigger: str = "manual", isolate: str = "thread", commit_sha: Optional[str] = None) -> str:
+    """Build the graph of repo_path into db_path as one analysis run.
+    commit_sha (phase 7 backfill) overrides the sha git_info reads — a detached
+    worktree's HEAD is that sha already, but the record says so explicitly."""
     info = git_info(repo_path)
+    if commit_sha:
+        info["commit_sha"] = commit_sha
     if info["dirty"]:
         print(
             f"WARNING: working tree at {repo_path} has uncommitted changes; "
@@ -201,6 +206,34 @@ def arbiter_eval_main(argv) -> int:
     return 0
 
 
+def backfill_main(argv) -> int:
+    """`analyzer backfill <repo> --project P --db-path D --since SHA [--until HEAD]
+    [--every N] [--max-commits N] [--fresh-db]` — replay past commits into a
+    fresh graph (trigger=backfill, plan_id NULL); resumable."""
+    from . import backfill
+    parser = argparse.ArgumentParser(prog="analyzer backfill", description="Replay a repo's history into a fresh state-graph DB.")
+    parser.add_argument("repo_path")
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--db-path", required=True)
+    parser.add_argument("--since", required=True, help="first commit to replay (inclusive)")
+    parser.add_argument("--until", default="HEAD", help="last commit to replay (inclusive; default HEAD)")
+    parser.add_argument("--every", type=int, default=1, help="sample every Nth commit (the tip is always analyzed)")
+    parser.add_argument("--max-commits", type=int, default=None)
+    parser.add_argument("--fresh-db", action="store_true",
+                        help="delete --db-path first; required when it already holds observed (keyed) history")
+    args = parser.parse_args(argv)
+    try:
+        stats = backfill.run(args.repo_path, args.project, args.db_path, args.since, until=args.until,
+                             every=args.every, max_commits=args.max_commits, fresh_db=args.fresh_db, log=print)
+    except backfill.BackfillRefused as exc:
+        print(f"backfill refused: {exc}", file=sys.stderr)
+        return 3
+    ev = " ".join(f"{k}={v}" for k, v in sorted(stats["events"].items()))
+    print(f"backfill done: commits={stats['commits']} sampled={stats['sampled']} runs={stats['runs']} "
+          f"skipped={stats['skipped']} ambiguous={stats['ambiguous']} events: {ev or 'none'}")
+    return 0
+
+
 def history_main(argv) -> int:
     """`analyzer history <db> <qualified_name|node_key>` — print the event
     stream of one node with run attribution, then the approximate token cost
@@ -243,6 +276,8 @@ def main(argv=None) -> int:
         return ambiguities_main(argv[1:])
     if argv and argv[0] == "arbiter-eval":
         return arbiter_eval_main(argv[1:])
+    if argv and argv[0] == "backfill":
+        return backfill_main(argv[1:])
     parser = argparse.ArgumentParser(
         prog="analyzer",
         description="Build a project state-graph SQLite DB from a repo.",

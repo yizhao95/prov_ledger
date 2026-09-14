@@ -157,6 +157,10 @@ Two low-cost protections run automatically during `init_project.sh`:
 | Render the 4 DataFrame-aware slices | `uv run python viz_slices.py <db> <out.html> [--title N] [--focus QNAME]` |
 | Cold-snapshot a DB before overwrite | `bash archive_db.sh <db>` |
 | Verify a built DB (+ dtype coverage %) | `uv run python selfcheck.py <db>` |
+| History of one node (events + run attribution) | `uv run python -m analyzer history <db> <qualified_name\|node_key>` |
+| Replay past commits into a FRESH graph (phase 7) | `uv run python -m analyzer backfill <repo> --project N --db-path P --since SHA [--until HEAD] [--every N] [--fresh-db]` |
+| Export identity ambiguities for calibration (phase 7) | `uv run python -m analyzer ambiguities <db> --export calib.json --repo R` |
+| Evaluate an arbiter against a calibration file (phase 7) | `uv run python -m analyzer arbiter-eval calib.json --arbiter pkg.mod:Class` — see `docs/arbitration.md` |
 | List projects on record | read `~/skill-workspace/project-graphs/projects.json` |
 
 All Pythony points run inside the skill's `uv` env (`cd scripts && uv run ...`).
