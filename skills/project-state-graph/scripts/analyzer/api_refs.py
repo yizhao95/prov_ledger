@@ -60,11 +60,11 @@ def analyze(
                 if hit is None:
                     continue
                 method, url = hit
-                edge = writes_e if method in namesets.get("http_write_methods") else reads_e
+                edge = writes_e if method in namesets.names("http_write_methods") else reads_e
                 node_id = api_node(url)
                 store.add_edge(conn, edge, fn_id, node_id,
                                metadata={"method": method.upper()})
-                if method not in namesets.get("http_write_methods") and expected_keys:
+                if method not in namesets.names("http_write_methods") and expected_keys:
                     _merge_assumed_schema(conn, node_id, expected_keys)
 
 
@@ -113,10 +113,10 @@ def _http_call(node) -> Optional[tuple]:
     if not isinstance(func, ast.Attribute):
         return None
     method = func.attr.lower()
-    if method not in namesets.get("http_read_methods") and method not in namesets.get("http_write_methods"):
+    if method not in namesets.names("http_read_methods") and method not in namesets.names("http_write_methods"):
         return None
     root = _attr_root(func.value)
-    if root is not None and root.lower() not in namesets.get("http_libs"):
+    if root is not None and root.lower() not in namesets.names("http_libs"):
         return None
     if not node.args:
         return None

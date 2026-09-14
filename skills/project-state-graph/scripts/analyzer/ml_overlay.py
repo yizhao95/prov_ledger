@@ -81,7 +81,7 @@ def _scan_function(conn, fn, rel_path, split_t, model_t, hp_t,
         # hyperparameter dicts
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 \
                 and isinstance(stmt.targets[0], ast.Name) \
-                and stmt.targets[0].id in namesets.get("hp_names") \
+                and stmt.targets[0].id in namesets.names("hp_names") \
                 and isinstance(stmt.value, ast.Dict):
             for k, v in zip(stmt.value.keys, stmt.value.values):
                 key = _const(k)
@@ -98,7 +98,7 @@ def _scan_function(conn, fn, rel_path, split_t, model_t, hp_t,
     # model from .fit/.train
     for sub in ast.walk(fn):
         if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) \
-                and sub.func.attr in namesets.get("fit_methods"):
+                and sub.func.attr in namesets.names("fit_methods"):
             receiver = _attr_root(sub.func.value) or "model"
             model_id = store.add_node(
                 conn, model_t, name=f"{fn.name}:{receiver}",
@@ -120,7 +120,7 @@ def _is_split_call(node) -> bool:
         return False
     f = node.func
     name = f.id if isinstance(f, ast.Name) else (f.attr if isinstance(f, ast.Attribute) else None)
-    return name in namesets.get("split_funcs")
+    return name in namesets.names("split_funcs")
 
 
 def _roles_for_targets(targets) -> List[str]:

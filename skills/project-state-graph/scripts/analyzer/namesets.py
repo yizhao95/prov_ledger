@@ -6,7 +6,7 @@ DEFAULTS are the former module constants verbatim. A repo's
 `provledger-extensions.json` (same file, same discovery rules as the backend's
 orchestrator.extensions) patches them with `namesets` add/remove entries:
 `cli.run` calls configure(repo_root) BEFORE walking; the analyzers call
-get(name) inside their functions — never at import time, so a configure that
+names(set) inside their functions — never at import time, so a configure that
 happens after import still applies. Entries of the same set apply in ascending
 priority, so the highest priority lands last and wins.
 """
@@ -70,8 +70,10 @@ def configure(repo_root: str | None) -> dict | None:
     return {"path": ext.path, "sha256": ext.sha256, "namesets": ext.fingerprint()["namesets"]}
 
 
-def get(name: str) -> frozenset[str]:
-    """The active set (DEFAULTS until configure applied a file). KeyError for an unknown set."""
+def names(name: str) -> frozenset[str]:
+    """The active set (DEFAULTS until configure applied a file). KeyError for an unknown set.
+    (Named `names`, not `get`: the graph's dtype_consistency_e2e gate links producers and
+    consumers by bare name, and a `get` returning frozenset collided with every `.get()`.)"""
     src = _ACTIVE if _ACTIVE is not None else DEFAULTS
     if name not in src:
         raise KeyError(f"unknown name set {name!r}; known: {sorted(DEFAULTS)}")

@@ -51,7 +51,7 @@ def _is_split_call(node) -> bool:
     f = node.func
     name = f.id if isinstance(f, ast.Name) else (
         f.attr if isinstance(f, ast.Attribute) else None)
-    return name in namesets.get("split_funcs")
+    return name in namesets.names("split_funcs")
 
 
 def _target_names(targets) -> List[str]:
@@ -110,9 +110,9 @@ def _scan_function(fn) -> List[dict]:
         if recv is None or dvar is None:
             continue
         meth = sub.func.attr
-        if meth in namesets.get("fit_methods"):
+        if meth in namesets.names("fit_methods"):
             models.setdefault(recv, {"fit": set(), "eval": set()})["fit"].add(dvar)
-        elif meth in namesets.get("eval_methods"):
+        elif meth in namesets.names("eval_methods"):
             models.setdefault(recv, {"fit": set(), "eval": set()})["eval"].add(dvar)
 
     leaks: List[dict] = []
@@ -138,7 +138,7 @@ def _scan_function(fn) -> List[dict]:
 
 
 def _model_data_methods() -> frozenset:
-    return namesets.get("fit_methods") | namesets.get("eval_methods")
+    return namesets.names("fit_methods") | namesets.names("eval_methods")
 
 
 def _function_has_guard(fn) -> bool:
@@ -151,7 +151,7 @@ def _function_has_guard(fn) -> bool:
             f = sub.func
             name = f.id if isinstance(f, ast.Name) else (
                 f.attr if isinstance(f, ast.Attribute) else None)
-            if name and ("validat" in name.lower() or name in namesets.get("validator_names")):
+            if name and ("validat" in name.lower() or name in namesets.names("validator_names")):
                 return True
     return False
 

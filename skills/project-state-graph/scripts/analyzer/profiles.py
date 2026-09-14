@@ -89,7 +89,7 @@ def _ml_symbols(repo_root: str, file_map: Dict[str, int], idx) -> Set[int]:
             if fn_id is None:
                 continue
             for sub in ast.walk(fn):
-                if isinstance(sub, ast.Call) and _call_name(sub.func) in namesets.get("ml_call_names"):
+                if isinstance(sub, ast.Call) and _call_name(sub.func) in namesets.names("ml_call_names"):
                     found.add(fn_id)
                     break
     return found

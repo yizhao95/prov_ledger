@@ -217,7 +217,7 @@ def _is_df_constructor(node) -> bool:
     if not isinstance(node, ast.Call):
         return False
     attr = _func_attr(node.func)
-    if attr in namesets.get("df_constructors"):
+    if attr in namesets.names("df_constructors"):
         return True
     if attr and attr.startswith(_DF_READERS_PREFIX):
         return True
