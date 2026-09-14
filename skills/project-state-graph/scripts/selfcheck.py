@@ -495,6 +495,28 @@ def _check_providers_degraded(conn) -> Dict[str, Any]:
             "detail": "; ".join(f"{p['id']}: {p['degraded']}" for p in bad)}
 
 
+def _check_arbiter_gate(conn) -> Dict[str, Any]:
+    """Phase 7: an arbiter was named for the latest run but the calibration
+    gate refused it (no report / inconsistent / inaccurate / stale sha)."""
+    import json
+    if not _table_exists(conn, "analysis_run"):
+        return {"name": "arbiter_gate", "ok": True, "severity": "warning", "detail": "no runs"}
+    try:
+        row = conn.execute("SELECT extensions_json FROM analysis_run ORDER BY id DESC LIMIT 1").fetchone()
+    except sqlite3.OperationalError:
+        row = None
+    try:
+        arb = (json.loads(row[0]) if row and row[0] else {}).get("arbiter")
+    except ValueError:
+        arb = None
+    if not arb:
+        return {"name": "arbiter_gate", "ok": True, "severity": "warning", "detail": "no arbiter named (identities stay observed)"}
+    gate = str(arb.get("gate") or "")
+    if gate.startswith("passed"):
+        return {"name": "arbiter_gate", "ok": True, "severity": "warning", "detail": f"{arb.get('id')}: {gate}"}
+    return {"name": "arbiter_gate", "ok": False, "severity": "warning", "detail": f"{arb.get('id')}: {gate}"}
+
+
 _CHECKS = [
     _check_node_types_nonempty,
     _check_no_dangling_edges,
@@ -516,6 +538,7 @@ _CHECKS = [
     _check_history_broken_ratio,
     _check_aborted_runs,
     _check_providers_degraded,
+    _check_arbiter_gate,
 ]
 
 

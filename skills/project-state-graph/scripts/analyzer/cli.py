@@ -15,6 +15,7 @@ import sys
 from typing import Optional
 
 from ._host import providers as _providers  # noqa: E402
+from ._host import testing as _testing  # noqa: E402
 from . import (
     api_refs,
     cards,
@@ -122,7 +123,15 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
                                     "observations": prov_report.get(r["id"], {}).get("observations", 0)}
                                    for r in prov_records]
             store.set_run_extensions(conn, run_id, json.dumps(ext_fp, sort_keys=True))
-        history.resolve(conn, run_id)
+        # Phase 7: an arbiter is wired ONLY through the calibration gate.
+        arbitrate, arb_record = _arbiter_gate()
+        if arb_record is not None:
+            ext_fp = ext_fp or {}
+            ext_fp["arbiter"] = arb_record
+            store.set_run_extensions(conn, run_id, json.dumps(ext_fp, sort_keys=True))
+            if not arb_record["gate"].startswith("passed"):
+                print(f"WARNING: arbiter {arb_record['id']} not wired: {arb_record['gate']}", file=sys.stderr)
+        history.resolve(conn, run_id, arbitrate=arbitrate)
         if build_cards:
             cards.attach_history(conn)  # symbol_card gains node_key + recent history
         store.stamp_run(conn, run_id)  # PSG-D2: tag this rebuild's rows
@@ -130,6 +139,66 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
         store.finish_run(conn, run_id)
         conn.close()
     return db_path
+
+
+def _arbiter_gate():
+    """-> (arbitrate or None, record or None). PROVLEDGER_ARBITER=pkg.mod:Class
+    names a graph_api.Arbiter; it is handed to history.resolve only when its
+    evaluation report (calibration.run, under PROVLEDGER_ARBITER_EVAL_DIR or
+    ~/skill-workspace/arbiter-eval) clears the bar for the calibration file
+    PROVLEDGER_ARBITER_CALIB names. Refusal is recorded, never raised."""
+    spec = os.environ.get("PROVLEDGER_ARBITER")
+    if not spec:
+        return None, None
+    cal = _testing.calibration
+    calib = os.environ.get("PROVLEDGER_ARBITER_CALIB") or os.path.join(str(cal.eval_dir()), "calibration.json")
+    try:
+        arbiter = cal.load_arbiter(spec)
+    except Exception as exc:  # noqa: BLE001
+        return None, {"id": spec, "gate": f"refused: cannot load arbiter ({type(exc).__name__}: {exc})", "calibration": calib}
+    ok, detail = cal.gate(arbiter.arbiter_id, calib)
+    record = {"id": arbiter.arbiter_id, "spec": spec, "gate": detail, "calibration": calib}
+    return (arbiter.arbitrate if ok else None), record
+
+
+def ambiguities_main(argv) -> int:
+    """`analyzer ambiguities <db> --export calib.json [--repo R]` — every
+    identity_ambiguous event as a calibration item (truth left null)."""
+    from . import calibration_export
+    parser = argparse.ArgumentParser(prog="analyzer ambiguities", description="Export identity_ambiguous events for calibration.")
+    parser.add_argument("db_path")
+    parser.add_argument("--export", required=True, help="output calibration JSON")
+    parser.add_argument("--repo", default=None, help="repo to read ±10-line source context from (at each run's commit)")
+    args = parser.parse_args(argv)
+    conn = store.init_db(args.db_path)
+    try:
+        doc = calibration_export.export(conn, args.export, repo=args.repo)
+    finally:
+        conn.close()
+    print(f"{len(doc['items'])} ambiguity item(s) written to {args.export} (truth: null — label by hand)")
+    return 0
+
+
+def arbiter_eval_main(argv) -> int:
+    """`analyzer arbiter-eval <calib.json> --arbiter pkg.mod:Class [--n-runs N]`
+    — replay the arbiter over the calibration file, write its report, print
+    the numbers and whether the gate would pass."""
+    parser = argparse.ArgumentParser(prog="analyzer arbiter-eval", description="Evaluate an arbiter on a calibration file.")
+    parser.add_argument("calib_path")
+    parser.add_argument("--arbiter", required=True, help="pkg.mod:Class implementing graph_api.Arbiter")
+    parser.add_argument("--n-runs", type=int, default=3)
+    args = parser.parse_args(argv)
+    cal = _testing.calibration
+    arbiter = cal.load_arbiter(args.arbiter)
+    rep = cal.run(arbiter, args.calib_path, n_runs=args.n_runs)
+    ok, detail = cal.gate(rep.arbiter_id, args.calib_path)
+    acc = f"{rep.accuracy:.3f}" if rep.accuracy is not None else "n/a"
+    print(f"arbiter={rep.arbiter_id} items={rep.n_items} labelled={rep.n_truth} runs={rep.n_runs} "
+          f"consistency={rep.consistency:.3f} coverage={rep.coverage:.3f} accuracy={acc} evidence_ok={rep.evidence_ok} "
+          f"sha={rep.sha[:8]}")
+    print(f"report: {cal.report_path(rep.arbiter_id)}")
+    print(f"gate: {detail}")
+    return 0
 
 
 def history_main(argv) -> int:
@@ -170,6 +239,10 @@ def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "history":
         return history_main(argv[1:])
+    if argv and argv[0] == "ambiguities":
+        return ambiguities_main(argv[1:])
+    if argv and argv[0] == "arbiter-eval":
+        return arbiter_eval_main(argv[1:])
     parser = argparse.ArgumentParser(
         prog="analyzer",
         description="Build a project state-graph SQLite DB from a repo.",

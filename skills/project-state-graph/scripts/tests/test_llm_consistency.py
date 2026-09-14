@@ -62,18 +62,36 @@ def load_arbiter() -> history.Arbitrate:
     return getattr(importlib.import_module(mod), fn)
 
 
+class _CallableArbiter:
+    """Wrap a bare `arbitrate` callable (PROVLEDGER_ARBITER=module:function) as a graph_api.Arbiter."""
+
+    def __init__(self, fn, arbiter_id: str):
+        self._fn, self.arbiter_id = fn, arbiter_id
+
+    def arbitrate(self, ambiguities):
+        return self._fn(ambiguities)
+
+
 @pytest.mark.llm_consistency
-def test_arbiter_answers_identically_n_times():
-    amb = history.Ambiguity(layer="struct_sig",
-                            prev=tuple(_row(q, f"nk_{q.rsplit('.', 1)[-1]}") for q in PREV),
-                            cur=tuple(_row(q, "") for q in CUR))
-    arbiter = load_arbiter()
-    answers = []
-    for _ in range(N_RUNS):
-        a = arbiter([amb])
-        assert a, "the arbiter returned nothing"
-        for s in a:
-            assert s.evidence.strip(), "every assertion needs evidence"
-            assert s.cur_qualified_name in CUR and s.chosen_prev_key in {r.node_key for r in amb.prev}
-        answers.append(sorted((s.cur_qualified_name, s.chosen_prev_key) for s in a))
-    assert all(x == answers[0] for x in answers), f"inconsistent arbitration across {N_RUNS} runs: {answers}"
+def test_arbiter_answers_identically_n_times(tmp_path):
+    """Phase 7: the same bar the analyzer's gate applies — calibration.run over
+    the scenario's ambiguity, N_RUNS times: consistency must be 1.0, every
+    assertion needs evidence, and every answer must stay inside the ambiguity."""
+    import json
+    from analyzer._host import testing as _testing
+    cal = _testing.calibration
+    row = lambda qn, key: {"qualified_name": qn, "node_key": key, "node_type": "function", "file_path": "pkg/pipeline.py",
+                           "line_start": 1, "line_end": 2, "struct_sig": "same", "dataflow_sig": "same"}
+    calib = tmp_path / "calib.json"
+    calib.write_text(json.dumps({"version": 1, "items": [{"id": "scenario:identity_ambiguous", "truth": None, "labelled_by": None,
+                                                           "ambiguity": {"layer": "struct_sig",
+                                                                         "prev": [row(q, f"nk_{q.rsplit('.', 1)[-1]}") for q in PREV],
+                                                                         "cur": [row(q, "") for q in CUR]}}]}))
+    fn = load_arbiter()
+    arbiter = _CallableArbiter(fn, os.environ.get("PROVLEDGER_ARBITER") or "stub")
+    rep = cal.run(arbiter, calib, n_runs=N_RUNS, out_dir=tmp_path / "eval")
+    assert rep.consistency == 1.0, f"inconsistent arbitration across {N_RUNS} runs: {rep.items}"
+    assert rep.evidence_ok, "every assertion needs evidence"
+    assert rep.coverage == 1.0, "the arbiter returned nothing"
+    for prev_qn, cur_qn in rep.items[0]["answer"]:
+        assert cur_qn in CUR and prev_qn in PREV

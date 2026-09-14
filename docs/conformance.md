@@ -171,3 +171,14 @@ enabled, priority, degraded, observations, elapsed_s}`; `selfcheck` warns
 `providers_degraded` when any of them degraded. Snapshot rows carry
 `type_id` and `schema_version` in their attrs, so a node can always be traced
 back to the provider (and its schema) that observed it.
+
+## Arbiters
+
+Identity **arbitration** (linking two nodes the deterministic matcher left
+`identity_ambiguous`) has its own bar, documented in
+[`docs/arbitration.md`](arbitration.md): a `graph_api.Arbiter` is evaluated
+with `provledger.testing.calibration.run` on a hand-labelled calibration
+file (`analyzer ambiguities <db> --export`), and the analyzer wires it only
+when the report shows consistency 1.0 and accuracy ≥ 0.9 on ≥ 10 labelled
+items for the calibration file in use. `provledger.testing.heuristic_arbiter`
+is the reference implementation.

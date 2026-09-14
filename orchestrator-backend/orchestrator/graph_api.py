@@ -191,6 +191,18 @@ class MatchOutcome:
 Arbitrate = Callable[[list[Ambiguity]], list[Assertion]]
 
 
+@runtime_checkable
+class Arbiter(Protocol):
+    """Phase 7: something that may link ambiguous identities. The analyzer
+    calls arbitrate() only after provledger.testing.calibration's gate has
+    passed for `arbiter_id` (consistency 1.0, accuracy >= 0.9 on >= 10
+    labelled items, report sha == calibration file); every Assertion must
+    carry non-empty evidence or the resolver refuses it."""
+    arbiter_id: str
+
+    def arbitrate(self, ambiguities: list[Ambiguity]) -> list[Assertion]: ...
+
+
 def _changed(p: Row, c: Row) -> tuple[str, ...]:
     return tuple(f for f in ("qualified_name", "file_path", "struct_sig", "dataflow_sig")
                  if getattr(p, f) != getattr(c, f))

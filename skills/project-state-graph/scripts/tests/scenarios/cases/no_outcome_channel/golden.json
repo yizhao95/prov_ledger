@@ -267,14 +267,16 @@
    "kind": "none_available",
    "plan": "t1",
    "plans": null,
-   "reason": "no metric channel registered for 'latency'",
+   "reason": "no metric 'latency' observed before the expectation",
    "signal": null,
-   "source": "metric",
+   "source": "metrics",
    "target": "latency",
    "tier": "none",
    "type": "outcome",
    "value": {
-    "channel": "metric:latency"
+    "after_rows": 0,
+    "before_rows": 0,
+    "name": "latency"
    }
   },
   {

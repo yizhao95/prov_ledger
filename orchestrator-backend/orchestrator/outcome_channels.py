@@ -67,7 +67,7 @@ class MetricChannel:
             missing = "before" if not befores else "after"
             return ("none_available", {"name": name, "before_rows": len(befores), "after_rows": len(afters)},
                     "metrics", "none",
-                    f"no metric {name!r} observed {missing} the expectation ({created})")
+                    f"no metric {name!r} observed {missing} the expectation")
         b, a = befores[-1], afters[0]
         delta = a["value"] - b["value"]
         pct = round(100.0 * delta / abs(b["value"]), 4) if b["value"] else None

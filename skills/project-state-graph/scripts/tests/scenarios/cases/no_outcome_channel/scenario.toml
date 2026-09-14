@@ -1,4 +1,4 @@
-# An expectation on a channel nobody can observe (metric:latency): the close
+# An expectation on a metric nobody ever recorded (metric:latency): the close
 # records none_available with the honest reason, never a fake observation.
 [scenario]
 name = "no_outcome_channel"
@@ -24,7 +24,7 @@ reasons = "stub"
 events = [
   { plan = "t1", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
   { plan = "t1", type = "expectation", target = "latency", channel = "metric:latency" },
-  { plan = "t1", type = "outcome", kind = "none_available", tier = "none", backfilled_by = "t2", reason_contains = "no metric channel" },
+  { plan = "t1", type = "outcome", kind = "none_available", tier = "none", backfilled_by = "t2", reason_contains = "no metric 'latency' observed" },
   { plan = "t2", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
 ]
 must_not = [
