@@ -138,8 +138,62 @@ def _module_from_path(path: str | None) -> str | None:
     return p.replace("\\", "/").replace("/", ".")
 
 
+def re_exported_symbols(repo: str, head: str, symbols: list[str]) -> set[str]:
+    """FL-034: the subset of `symbols` (qualified `module.name`) whose module, at
+    `head`, still binds `name` at module level through an import or an
+    assignment — i.e. the definition moved elsewhere but the old import path
+    keeps resolving (`from .b import f`, `import x as f`, `f = other.f`).
+
+    Read from `git show head:path`, so the working tree is irrelevant. A
+    module that no longer exists, does not parse, or binds the name via a
+    star-import (not followed) re-exports nothing.
+    """
+    out: set[str] = set()
+    cache: dict[str, set[str] | None] = {}
+    for sym in symbols:
+        if "." not in sym:
+            continue
+        mod, name = sym.rsplit(".", 1)
+        if mod not in cache:
+            cache[mod] = _module_level_bindings(repo, head, mod)
+        bound = cache[mod]
+        if bound and name in bound:
+            out.add(sym)
+    return out
+
+
+def _module_level_bindings(repo: str, head: str, module: str) -> set[str] | None:
+    """Names bound at module level by imports/assignments in `module` at `head`
+    (None when the module is not readable there). Definitions (def/class) are
+    deliberately NOT included: a def that still exists is not a removal."""
+    import ast
+    rel = module.replace(".", "/")
+    for path in (f"{rel}.py", f"{rel}/__init__.py"):
+        try:
+            src = _git(repo, "show", f"{head}:{path}")
+        except subprocess.CalledProcessError:
+            continue
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            return None
+        names: set[str] = set()
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom):
+                names.update(a.asname or a.name for a in node.names if a.name != "*")
+            elif isinstance(node, ast.Import):
+                names.update(a.asname or a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.Assign):
+                names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+                names.add(node.target.id)
+        return names
+    return None
+
+
 def stale_references(db_path: str, removed_symbols: list[str],
-                     changed_files: set[str] | None = None) -> list[dict]:
+                     changed_files: set[str] | None = None,
+                     re_exported: set[str] | None = None) -> list[dict]:
     """Find call edges in the deep graph whose destination is a removed/renamed
     symbol. `removed_symbols` are QUALIFIED names (`module.name`, as report()
     derives them from changed_symbols' file); a bare name still works but can
@@ -150,11 +204,15 @@ def stale_references(db_path: str, removed_symbols: list[str],
         confidence decides: high/NULL -> "fail", inferred -> "warning";
       match "bare_name"       — no qualified hit at all, dst.name == last segment:
         a guess, always "warning".
+      match "re_exported"     — qualified hit, but the symbol is in `re_exported`
+        (FL-034: its module still binds the name at HEAD, see
+        re_exported_symbols) -> the old import path resolves -> "warning".
     FL-023: a caller whose file is in `changed_files` is a warning either way.
     """
     if not removed_symbols:
         return []
     changed_files = set(changed_files or ())
+    re_exported = set(re_exported or ())
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     has_conf = "confidence" in {r[1] for r in conn.execute("PRAGMA table_info(edge)")}
@@ -182,30 +240,37 @@ def stale_references(db_path: str, removed_symbols: list[str],
             match = "bare_name"
         for r in rows:
             conf = r["confidence"] or "high"
-            if match == "bare_name" or conf != "high" or r["file"] in changed_files:
+            how = match
+            if match == "qualified_name" and sym in re_exported:
+                how = "re_exported"                                   # FL-034
+            if how != "qualified_name" or conf != "high" or r["file"] in changed_files:
                 severity = "warning"
             else:
                 severity = "fail"
             out.append({"caller": r["caller"], "callee": r["callee"], "file": r["file"],
-                        "severity": severity, "match": match, "confidence": conf, "symbol": sym})
+                        "severity": severity, "match": how, "confidence": conf, "symbol": sym})
     conn.close()
     return out
 
 
-def report(db_path: str, changed: list[dict], changed_files: set[str] | None = None) -> dict:
+def report(db_path: str, changed: list[dict], changed_files: set[str] | None = None,
+           repo: str | None = None, head: str = "HEAD") -> dict:
     """Assemble a stale-reference verdict from a list of changed-symbol dicts.
 
     changed: items shaped like changed_symbols() output (need 'old_name'/'kind').
     changed_files: the diff's file paths (FL-023) — hits whose caller lives in one
-    of them are warnings. Returns {ok: bool, gaps: [...], text: str}; gaps carries
-    every hit (each with its severity), ok=False iff a "fail" hit exists.
+    of them are warnings. repo/head (FL-034): when given, a removed symbol whose
+    module still binds the name at `head` (re-export) only warns. Returns
+    {ok: bool, gaps: [...], text: str}; gaps carries every hit (each with its
+    severity), ok=False iff a "fail" hit exists.
     """
     removed = []
     for c in changed:
         if c.get("kind") in ("removed", "renamed") and c.get("old_name"):
             mod = _module_from_path(c.get("file"))
             removed.append(f"{mod}.{c['old_name']}" if mod else c["old_name"])   # FL-029: qualified
-    hits = stale_references(db_path, removed, changed_files=changed_files)
+    re_exp = re_exported_symbols(repo, head, removed) if repo else set()
+    hits = stale_references(db_path, removed, changed_files=changed_files, re_exported=re_exp)
     if not hits:
         return {
             "ok": True,
@@ -218,6 +283,8 @@ def report(db_path: str, changed: list[dict], changed_files: set[str] | None = N
     for h in hits:
         if h.get("match") == "bare_name":
             note = " [warning: bare-name match only — the qualified symbol is not in the graph]"
+        elif h.get("match") == "re_exported":
+            note = f" [warning: {h['symbol']} is still bound at HEAD (re-export) — the old import path resolves]"
         elif h.get("confidence", "high") != "high":
             note = f" [warning: {h['confidence']} call edge — a guess, not evidence]"
         elif h["severity"] == "warning":
@@ -226,7 +293,7 @@ def report(db_path: str, changed: list[dict], changed_files: set[str] | None = N
             note = ""
         lines.append(f"  - {h['caller']} ({h['file']}) still calls {h['callee']}{note}")
     if not fails:
-        lines.append("  all hits are warnings (bare-name / inferred / edited in the same diff) — not blocking")
+        lines.append("  all hits are warnings (bare-name / inferred / re-exported / edited in the same diff) — not blocking")
     return {"ok": not fails, "gaps": hits, "text": "\n".join(lines)}
 
 
@@ -350,7 +417,7 @@ def full_verdict(
     head_sha = _git(repo, "rev-parse", "HEAD").strip()
     range_nonempty = not (registered_sha and head_sha != registered_sha and not files)
 
-    stale = report(db_path, changed, changed_files=files)   # FL-023
+    stale = report(db_path, changed, changed_files=files, repo=repo, head=head)   # FL-023 / FL-034
     drift = data_drift(db_path, removed_columns=removed_columns,
                        dtype_changes=dtype_changes,
                        removed_datasets=removed_datasets)

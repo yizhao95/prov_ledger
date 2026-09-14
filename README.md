@@ -379,6 +379,14 @@ cd prov_ledger
 bash scripts/bootstrap.sh
 PY=~/skill-workspace/.venv/bin/python
 
+# 2b. The state-graph analyzer runs in its OWN uv environment (init_project.sh
+#     calls `uv run python -m analyzer`). It depends on the `provledger` package
+#     as an editable path source ([tool.uv.sources] in scripts/pyproject.toml),
+#     so third-party NodeTypeProviders can import provledger.graph_api there.
+#     `uv.lock` is not committed — sync once per clone (and after pulling a
+#     change to orchestrator-backend's version):
+(cd skills/project-state-graph/scripts && uv sync)
+
 # 3. Run the test suites to confirm a healthy install (run each separately —
 #    each suite has its own pyproject/pythonpath; one combined invocation breaks)
 $PY -m pytest scripts/tests -q                                    #   5 passed

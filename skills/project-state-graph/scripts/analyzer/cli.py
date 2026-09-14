@@ -67,7 +67,7 @@ def git_info(repo_path: str) -> dict:
 
 def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
         plan_id: Optional[str] = None, step_id: Optional[str] = None,
-        trigger: str = "manual") -> str:
+        trigger: str = "manual", isolate: str = "thread") -> str:
     info = git_info(repo_path)
     if info["dirty"]:
         print(
@@ -109,7 +109,8 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
         # run, assign node_keys and append events.
         prov_report: dict = {}
         history.snapshot_run(conn, repo_path, run_id, providers=plist, report=prov_report, file_map=file_map,
-                             timeout_s=max([r.get("timeout_s") or 30.0 for r in prov_records] + [30.0]))
+                             timeout_s=max([r.get("timeout_s") or 30.0 for r in prov_records] + [30.0]),
+                             isolate=isolate)
         # Phase 6: the provider set behind this run — declared, loaded or degraded —
         # with what each one produced, next to the extensions fingerprint.
         for r in prov_records:                      # never silent: a degraded provider is said out loud
@@ -183,11 +184,14 @@ def main(argv=None) -> int:
     parser.add_argument("--plan-id", default=None, help="orchestrator plan that caused this run")
     parser.add_argument("--step-id", default=None, help="orchestrator step that caused this run")
     parser.add_argument("--trigger", default="manual", help="manual | review | update | ...")
+    parser.add_argument("--isolate", default="thread", choices=list(_providers.ISOLATE_MODES),
+                        help="how each provider's extract() is isolated: thread (default; a timed-out "
+                             "provider is abandoned) or subprocess (forked and killed on timeout)")
     args = parser.parse_args(argv)
 
     db_path = _resolve_db_path(args.project, args.db_path, args.out_dir)
     out = run(args.repo_path, args.project, db_path, build_cards=not args.no_cards,
-              plan_id=args.plan_id, step_id=args.step_id, trigger=args.trigger)
+              plan_id=args.plan_id, step_id=args.step_id, trigger=args.trigger, isolate=args.isolate)
     print(f"state-graph written to {out}")
     return 0
 

@@ -224,6 +224,7 @@ keeps the six contracts, is in [`docs/conformance.md`](conformance.md).
 | `enabled` | default `true`; `false` disables — the only way to switch a built-in off |
 | `priority` | integer, larger runs first (built-ins are 0) |
 | `timeout_s` | budget per extraction (default 30); over budget → degraded |
+| *(host flag)* `analyzer --isolate thread\|subprocess` | how the host isolates `extract()`: a thread (default; a timed-out provider is abandoned) or a forked subprocess that is killed on timeout (`PROVLEDGER_ISOLATE=subprocess` for `init_project.sh`; observations must be picklable) |
 
 Nothing here raises at analysis time: an import that fails, a class that is
 not a `NodeTypeProvider`, a `type_id` that differs from the declared id, a

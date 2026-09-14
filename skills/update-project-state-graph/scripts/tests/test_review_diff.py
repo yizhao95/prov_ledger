@@ -497,3 +497,91 @@ def test_fl029_bare_name_fallback_is_only_a_warning(tmp_path):
     assert {h["callee"] for h in hits} == {"get"}
     rep = review_diff.report(str(db), [{"file": "pkg/zzz.py", "kind": "removed", "old_name": "get"}])
     assert rep["ok"] is True and "bare" in rep["text"].lower()
+
+
+# ── FL-034: a symbol moved elsewhere and re-exported from its old module ─────────
+
+def _build_graph_reexport(db_path: Path):
+    """pkg.c.direct --calls(high)--> pkg.a.f; the diff moves f to pkg/b.py and
+    leaves `from .b import f` in pkg/a.py, so `pkg.a.f` is still importable."""
+    c = sqlite3.connect(str(db_path))
+    c.executescript("""
+        CREATE TABLE node_type (id INTEGER PRIMARY KEY, name TEXT UNIQUE, description TEXT);
+        CREATE TABLE node (id INTEGER PRIMARY KEY, node_type_id INTEGER, name TEXT,
+                           qualified_name TEXT, file_path TEXT, line_start INTEGER,
+                           line_end INTEGER, metadata_json TEXT);
+        CREATE TABLE edge_type (id INTEGER PRIMARY KEY, name TEXT UNIQUE, description TEXT);
+        CREATE TABLE edge (id INTEGER PRIMARY KEY, edge_type_id INTEGER, src_node_id INTEGER,
+                           dst_node_id INTEGER, metadata_json TEXT, confidence TEXT);
+        INSERT INTO node_type (id, name) VALUES (1, 'function');
+        INSERT INTO edge_type (id, name) VALUES (1, 'calls');
+        INSERT INTO node (id, node_type_id, name, qualified_name, file_path) VALUES
+          (1, 1, 'f', 'pkg.a.f', 'pkg/a.py'),
+          (2, 1, 'direct', 'pkg.c.direct', 'pkg/c.py');
+        INSERT INTO edge (id, edge_type_id, src_node_id, dst_node_id, confidence) VALUES (1, 1, 2, 1, 'high');
+    """)
+    c.commit()
+    c.close()
+
+
+def _repo_with_reexport(tmp_path: Path) -> tuple[Path, str]:
+    repo = tmp_path / "r"
+    (repo / "pkg").mkdir(parents=True)
+    (repo / "pkg" / "__init__.py").write_text("")
+    (repo / "pkg" / "a.py").write_text("def f():\n    return 1\n")
+    (repo / "pkg" / "c.py").write_text("from .a import f\n\ndef direct():\n    return f()\n")
+    _git(repo, "init", "-q")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "add", ".")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base")
+    sha0 = _git(repo, "rev-parse", "HEAD")
+    (repo / "pkg" / "b.py").write_text("def f():\n    return 1\n")
+    (repo / "pkg" / "a.py").write_text("from .b import f  # re-exported: pkg.a.f still resolves\n")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "add", ".")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "move f to pkg.b, re-export from pkg.a")
+    return repo, sha0
+
+
+def test_fl034_re_exported_symbols(tmp_path):
+    repo, sha0 = _repo_with_reexport(tmp_path)
+    assert review_diff.re_exported_symbols(str(repo), "HEAD", ["pkg.a.f"]) == {"pkg.a.f"}
+    # not bound at HEAD any more -> not re-exported
+    (repo / "pkg" / "a.py").write_text("")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", "drop the re-export")
+    assert review_diff.re_exported_symbols(str(repo), "HEAD", ["pkg.a.f"]) == set()
+    # a deleted module can re-export nothing
+    assert review_diff.re_exported_symbols(str(repo), "HEAD", ["pkg.gone.f"]) == set()
+
+
+def test_fl034_stale_hit_on_a_re_exported_symbol_is_a_warning(tmp_path):
+    db = tmp_path / "g.db"
+    _build_graph_reexport(db)
+    hits = review_diff.stale_references(str(db), ["pkg.a.f"], changed_files={"pkg/a.py", "pkg/b.py"},
+                                        re_exported={"pkg.a.f"})
+    assert len(hits) == 1
+    assert hits[0]["severity"] == "warning" and hits[0]["match"] == "re_exported"
+    # without the knowledge the same hit still fails (unchanged behaviour)
+    hits0 = review_diff.stale_references(str(db), ["pkg.a.f"], changed_files={"pkg/a.py", "pkg/b.py"})
+    assert hits0[0]["severity"] == "fail" and hits0[0]["match"] == "qualified_name"
+
+
+def test_fl034_report_and_full_verdict_consult_head(tmp_path):
+    """Move pkg.a.f -> pkg.b.f with `from .b import f` left behind: changed_symbols
+    reports f removed from pkg/a.py, the graph still has pkg.c.direct -> pkg.a.f,
+    and pkg/c.py is NOT in the diff — yet the gate passes: 0 fails, one
+    re_exported warning that names the re-export in its text."""
+    repo, sha0 = _repo_with_reexport(tmp_path)
+    db = tmp_path / "g.db"
+    _build_graph_reexport(db)
+    changed = review_diff.changed_symbols(str(repo), sha0, "HEAD")
+    assert any(c.get("kind") == "removed" and c.get("old_name") == "f" and c.get("file") == "pkg/a.py"
+               for c in changed), changed
+    rep = review_diff.report(str(db), changed, changed_files={"pkg/a.py", "pkg/b.py"}, repo=str(repo), head="HEAD")
+    assert rep["ok"] is True, rep["text"]
+    assert [g["severity"] for g in rep["gaps"]] == ["warning"] and rep["gaps"][0]["match"] == "re_exported"
+    assert "re-export" in rep["text"].lower()
+    v = review_diff.full_verdict(str(db), str(repo), sha0, "HEAD", changed=changed, registered_sha=sha0)
+    assert v["gates"]["stale_references"] is True, v["text"]
+    assert [g["match"] for g in v["gaps"]["stale_references"]] == ["re_exported"]
+    # the pre-FL-034 call shape (no repo) is unchanged: the hit fails
+    rep0 = review_diff.report(str(db), changed, changed_files={"pkg/a.py", "pkg/b.py"})
+    assert rep0["ok"] is False

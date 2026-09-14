@@ -38,7 +38,8 @@
 | FL-031 | phase5 | DEFERRED | 扩展只读一份文件（三处取第一个存在的）：团队级 + 仓库级需要合并时没有办法；需要定义合并规则（同 id 冲突、priority 跨文件）后再开放多文件 | 阶段 6+ |
 | FL-032 | phase5 | DEFERRED | `provledger-extensions.json` 只有 `version: 1`，没有 schema 迁移路径；`analysis_run.extensions_json` 记录的指纹形状也无版本号 | 阶段 6+ |
 | FL-033 | phase5 | DEFERRED | `ledger_cli import` 只会新增/跳过，没有撤销：从扩展文件里删掉一条约束不会让已导入的条目失效（需要 `import --prune` 或 `revoke` 走 supersede） | 阶段 6+ |
-| FL-034 | phase6 | DEFERRED | dogfood：解析器不跟 import——定义 git mv 到别处再由壳模块 re-export（`from x import y` / `globals().update`）后，未改动的调用方对旧限定名全部报 stale（Task 2 的 review 25 处 fail），只能用 `--accept-stale` 人判；`_resolve.Index` 应把 `from pkg.mod import name` 记成别名并按别名解析限定名 | 阶段 7 |
+| FL-034 | phase6 | DONE（阶段 7 Task 0：`review_diff.re_exported_symbols` 读 HEAD 源码，旧模块仍在模块级绑定该名（import/赋值）的命中降为 warning，`match=re_exported`；解析器本身仍不跟 import）| dogfood：解析器不跟 import——定义 git mv 到别处再由壳模块 re-export（`from x import y` / `globals().update`）后，未改动的调用方对旧限定名全部报 stale（Task 2 的 review 25 处 fail），只能用 `--accept-stale` 人判；`_resolve.Index` 应把 `from pkg.mod import name` 记成别名并按别名解析限定名 | 阶段 7 |
 | FL-035 | phase6 | DEFERRED | provider 的 `schema_version` 只被记录（node_snapshot.attrs、extensions_json.providers），没有投影迁移钩子：同一 type_id 的 schema 升级后旧快照的 attrs 不会被转换，跨版本匹配也不做区分 | 阶段 7 |
 | FL-036 | phase6 | DEFERRED | provider 自定义签名层（`x-…`）被 schema 接受但不参与匹配：`graph_api.match` 只认 qualname/struct/dataflow/owner 四层；要让第三方类型有自己的结构层，需要按层声明（是否 1:1、是否 trivial）并进 `_LAYERS` | 阶段 7 |
 | FL-037 | phase6 | DEFERRED | 一致性套件对需要真图的第三方 provider（用 `ctx.node_rows`/`conn_ro` 读图的）只能在 PSG 侧注入 `context_factory` 跑；包内默认上下文是空图，`provledger.testing` 独立跑时这类 provider 的 `stability_matches_declaration` 只能覆盖纯源码 provider | 阶段 7 |
+| FL-038 | phase7 | DEFERRED | `run_provider(isolate="subprocess")` 用 fork：子进程继承 ctx（含只读 sqlite 连接），观测 pickle 回传；没有 fork 的平台降级为 degraded，也没有内存/CPU 限额与 spawn 式干净环境——完整的子进程隔离（spawn + 按 `module:Class` 重新导入 provider + 重建上下文 + rlimit）留待需要时做 | 阶段 8+ |
