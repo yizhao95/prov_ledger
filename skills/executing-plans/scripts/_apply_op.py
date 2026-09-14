@@ -423,6 +423,50 @@ def _op_reason_fill(conn, data: dict) -> dict:
     return r
 
 
+def _op_record_metric(conn, data: dict) -> dict:
+    """One numeric observation into metrics (migration 017): {name, value,
+    unit?, plan_id?, step_id?, project?}. project defaults to the plan's
+    Plans.project (FL-014; step_id resolves its plan). value MUST be a number
+    (a JSON number or a strictly numeric string) — a model cannot write a
+    metric in words. Nothing is written on any refusal."""
+    import math
+    _require(data, "name", "value")
+    raw = data["value"]
+    if isinstance(raw, bool) or raw is None:
+        _die(f"'value' must be a number, got {raw!r}")
+    if isinstance(raw, str):
+        try:
+            raw = float(raw.strip())
+        except ValueError:
+            _die(f"'value' must be a number, got {data['value']!r}")
+    if not isinstance(raw, (int, float)) or not math.isfinite(raw):
+        _die(f"'value' must be a finite number, got {data['value']!r}")
+    plan_id = data.get("plan_id")
+    step_id = data.get("step_id")
+    if step_id and not plan_id:
+        step = db.get_step(conn, step_id)
+        if not step:
+            _die(f"unknown step_id {step_id!r}")
+        plan_id = step["plan_id"]
+    project = data.get("project")
+    if not project and plan_id:
+        plan = db.get_plan(conn, plan_id)
+        if not plan:
+            _die(f"unknown plan_id {plan_id!r}")
+        project = plan.get("project")
+        if project == "none":
+            project = None
+    if not project:
+        _die("'project' is required (none given, and the plan has no project attribution)")
+    unit = data.get("unit")
+    if unit is not None and not isinstance(unit, str):
+        _die("'unit' must be a string")
+    mid = db.insert_metric(conn, project=project, name=str(data["name"]), value=float(raw), unit=unit,
+                           plan_id=plan_id, step_id=step_id, source=data.get("source") or "record-metric")
+    return {"recorded": True, "metric_id": mid, "project": project, "name": data["name"], "value": float(raw),
+            "unit": unit, "plan_id": plan_id, "step_id": step_id}
+
+
 OPS = {
     "start-step":   _op_start_step,
     "complete-step": _op_complete_step,
@@ -434,6 +478,7 @@ OPS = {
     "agent-review-close": _op_agent_review_close,
     "reason-slots": _op_reason_slots,
     "reason-fill":  _op_reason_fill,
+    "record-metric": _op_record_metric,
 }
 
 

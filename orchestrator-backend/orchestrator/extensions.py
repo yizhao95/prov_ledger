@@ -79,6 +79,16 @@ class ProviderDecl:
 
 
 @dataclass(frozen=True)
+class ChannelDecl:
+    """One outcome channel (phase 7): a built-in id (profile_drift / metric —
+    only to disable it) or a namespaced third-party id with a module path."""
+    id: str
+    module: str | None = None
+    enabled: bool = True
+    priority: int = 0
+
+
+@dataclass(frozen=True)
 class Extensions:
     path: str | None
     sha256: str | None
@@ -86,6 +96,7 @@ class Extensions:
     namesets: tuple[NameSet, ...]
     constraints: tuple[ConstraintDecl, ...]
     providers: tuple[ProviderDecl, ...] = ()
+    outcome_channels: tuple[ChannelDecl, ...] = ()
 
     def fingerprint(self) -> dict | None:
         """The shape written to analysis_run.extensions_json; None without a file."""
@@ -97,7 +108,8 @@ class Extensions:
         return {"path": self.path, "sha256": self.sha256,
                 "drift_kinds": [k.id for k in sorted(self.drift_kinds, key=lambda k: (-k.priority, k.id))],
                 "namesets": sets, "constraints": len(self.constraints),
-                "providers": [d.id for d in sorted(self.providers, key=lambda d: (-d.priority, d.id))]}
+                "providers": [d.id for d in sorted(self.providers, key=lambda d: (-d.priority, d.id))],
+                "outcome_channels": [d.id for d in sorted(self.outcome_channels, key=lambda d: (-d.priority, d.id))]}
 
 
 EMPTY = Extensions(None, None, (), (), ())
@@ -223,6 +235,30 @@ def _provider(i: int, obj: Any) -> ProviderDecl:
                         timeout_s=float(timeout))
 
 
+BUILTIN_CHANNEL_IDS = ("profile_drift", "metric")
+
+
+def _channel(i: int, obj: Any) -> ChannelDecl:
+    where = f"outcome_channels[{i}]"
+    if not isinstance(obj, dict):
+        raise _err(where, "must be an object")
+    cid = obj.get("id")
+    if not isinstance(cid, str) or not (ID_RE.match(cid) or cid in BUILTIN_CHANNEL_IDS):
+        raise _err(where, f"id must be namespaced vendor.name ({ID_RE.pattern}) or a built-in id {BUILTIN_CHANNEL_IDS}, got {cid!r}")
+    where = f"outcome_channels[{i}] {cid}"
+    module = obj.get("module")
+    if cid in BUILTIN_CHANNEL_IDS and module is not None:
+        raise _err(where, "a built-in channel cannot be re-pointed (module); declare enabled=false to disable it")
+    if module is None and cid not in BUILTIN_CHANNEL_IDS:
+        raise _err(where, "module is required (an import path like pkg.mod:Class); only a built-in id may omit it")
+    if module is not None and (not isinstance(module, str) or not MODULE_RE.match(module)):
+        raise _err(where, f"module must be an import path like pkg.mod:Class, got {module!r}")
+    enabled = obj.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise _err(where, "enabled must be true/false")
+    return ChannelDecl(id=cid, module=module, enabled=enabled, priority=_int(where, obj, "priority"))
+
+
 def _check_conflicts(kinds: tuple[DriftKind, ...], sets: tuple[NameSet, ...], provs: tuple[ProviderDecl, ...] = ()) -> None:
     seen_p: set[str] = set()
     for d in provs:
@@ -268,16 +304,22 @@ def load(path: str | None) -> Extensions:
     version = data.get("version", VERSION)
     if version != VERSION:
         raise ExtensionsError(f"{path}: version {version!r} is not supported (this reader understands version {VERSION})")
-    for key in ("drift_kinds", "namesets", "constraints", "providers"):
+    for key in ("drift_kinds", "namesets", "constraints", "providers", "outcome_channels"):
         if key in data and not isinstance(data[key], list):
             raise ExtensionsError(f"{path}: {key} must be a list")
     kinds = tuple(_drift_kind(i, o) for i, o in enumerate(data.get("drift_kinds", [])))
     sets = tuple(_nameset(i, o) for i, o in enumerate(data.get("namesets", [])))
     cons = tuple(_constraint(i, o) for i, o in enumerate(data.get("constraints", [])))
     provs = tuple(_provider(i, o) for i, o in enumerate(data.get("providers", [])))
+    chans = tuple(_channel(i, o) for i, o in enumerate(data.get("outcome_channels", [])))
     _check_conflicts(kinds, sets, provs)
+    seen_c: set[str] = set()
+    for c in chans:
+        if c.id in seen_c:
+            raise ExtensionsError(f"duplicate id {c.id!r} in outcome_channels — ids are never silently overridden")
+        seen_c.add(c.id)
     return Extensions(path=path, sha256=hashlib.sha256(raw).hexdigest(), drift_kinds=kinds, namesets=sets,
-                      constraints=cons, providers=provs)
+                      constraints=cons, providers=provs, outcome_channels=chans)
 
 
 def current(repo_root: str | None = None) -> Extensions:

@@ -50,7 +50,7 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
             "skills": [], "completed": 0, "failed": 0, "total_steps": 0,
             "progress_pct": 0, "has_failure": False, "current_step": None,
             "deviations": [], "data_profiles": [], "data_decisions": [],
-            "node_reasons": [], "unstated": {"slots": 0, "unstated": 0, "pct": 0},
+            "node_reasons": [], "unstated": {"slots": 0, "unstated": 0, "pct": 0}, "outcomes": [],
             "total_plans": 0, "db_size_kb": 0, "viewing_plan_id": plan_id,
         }
 
@@ -88,6 +88,8 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         # Phase 3: close-time reasons (read-only) + the unstated gap.
         node_reasons = queries.get_node_reasons(conn, plan["plan_id"]) if plan else []
         unstated = queries.get_unstated(conn, plan["plan_id"]) if plan else {"slots": 0, "unstated": 0, "pct": 0}
+        # Phase 7: what the plan's expectations turned into (read-only).
+        plan_outcomes = queries.get_outcomes(conn, plan["plan_id"]) if plan else []
         total_plans = queries.count_total_plans(conn)
         db_size_kb = queries.get_db_size_kb()
     except sqlite3.Error as e:
@@ -111,6 +113,7 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         "data_decisions": data_decisions,
         "node_reasons": node_reasons,
         "unstated": unstated,
+        "outcomes": plan_outcomes,
         "total_steps": len(steps),
         "progress_pct": int(100 * completed / len(steps)) if steps else 0,
         "total_plans": total_plans,

@@ -186,6 +186,16 @@ def main() -> int:
                            target=DATASET, target_kind="dataset",
                            claim="promo_discount stays present in the checkout-orders feed",
                            channel="profile_drift")
+    # Phase 7: the number itself is a claim too. Last week's rollup is the
+    # baseline metric (source "demo"), the expectation says it moves less than
+    # 5% WoW; the rollup step below records this week's value, and the next
+    # plan's close turns the pair into an observed outcome (delta_pct).
+    odb.insert_metric(conn, project=PROJECT, name="mean_net_revenue", value=baseline_net, unit="usd",
+                      plan_id=plan_id, step_id=s_rollup, source="demo")
+    odb.insert_expectation(conn, plan_id=plan_id, step_id=s_rollup, project=PROJECT,
+                           target="mean_net_revenue", target_kind="metric",
+                           claim="revenue stays within ±5% WoW",
+                           channel="metric:mean_net_revenue")
     print(f"  plan published: {plan_id} — 5 steps {yellow('PENDING')}")
     _beat(2.5)  # hold the freshly-published PENDING plan (recording opens here)
 
@@ -235,6 +245,8 @@ def main() -> int:
     pytest_tail, tests_green = run_rollup_tests()
     api.append_log(conn, s_rollup,
                    out_v1 + f"\nunit tests: {pytest_tail}")
+    odb.insert_metric(conn, project=PROJECT, name="mean_net_revenue", value=net_v1, unit="usd",
+                      plan_id=plan_id, step_id=s_rollup, source="demo")     # phase 7: measured, recorded
     api.complete_step(conn, s_rollup)
     print(f"  D rollup    {green('COMPLETED')}  mean net revenue "
           f"${net_v1:.2f}/order ({delta_v1:+.1f}% vs last week). exit_code=0")

@@ -561,6 +561,48 @@ def insert_outcome(conn: sqlite3.Connection, *, expectation_id: int, kind: str, 
     return int(cur.lastrowid)
 
 
+def insert_metric(conn: sqlite3.Connection, *, project: str, name: str, value, unit: str | None = None,
+                  plan_id: str | None = None, step_id: str | None = None, source: str = "record-metric",
+                  observed_at: str | None = None, commit: bool = True) -> int:
+    """One numeric observation (migration 017). value must be a finite real
+    number — never a string, bool or NaN: metrics are measured, not written.
+    observed_at (optional 'YYYY-MM-DD HH:MM:SS') is for observations made
+    earlier than they are recorded; the table is append-only, so it cannot be
+    fixed afterwards."""
+    import math
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"metric value must be a number, got {type(value).__name__}")
+    if not math.isfinite(value):
+        raise ValueError(f"metric value must be finite, got {value!r}")
+    if not project or not name:
+        raise ValueError("project and name are required")
+    if observed_at is None:
+        cur = conn.execute(
+            "INSERT INTO metrics (project, plan_id, step_id, name, value, unit, source) VALUES (?,?,?,?,?,?,?)",
+            (project, plan_id, step_id, name, float(value), unit, source))
+    else:
+        cur = conn.execute(
+            "INSERT INTO metrics (project, plan_id, step_id, name, value, unit, source, observed_at) VALUES (?,?,?,?,?,?,?,?)",
+            (project, plan_id, step_id, name, float(value), unit, source, observed_at))
+    if commit:
+        conn.commit()
+    return int(cur.lastrowid)
+
+
+def get_metrics(conn: sqlite3.Connection, project: str, name: str, *, before: str | None = None,
+                after: str | None = None) -> list[dict]:
+    """Metric rows of (project, name) oldest first; `before` keeps rows observed
+    at or before that timestamp, `after` rows observed strictly after it."""
+    sql = "SELECT * FROM metrics WHERE project = ? AND name = ?"
+    args: list = [project, name]
+    if before is not None:
+        sql += " AND observed_at <= ?"; args.append(before)
+    if after is not None:
+        sql += " AND observed_at > ?"; args.append(after)
+    sql += " ORDER BY observed_at, id"
+    return [dict(r) for r in conn.execute(sql, args)]
+
+
 def get_outcomes(conn: sqlite3.Connection, expectation_id: int) -> list[dict]:
     return [dict(r) for r in conn.execute(
         "SELECT * FROM outcomes WHERE expectation_id = ? ORDER BY id", (expectation_id,))]

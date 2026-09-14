@@ -15,7 +15,24 @@
         "type":          {"enum": ["THINKING","ANALYSIS","CODE","COMMAND","DOCUMENTATION","SUB_AGENT"]},
         "command":       {"type": "string", "minLength": 1, "description": "Passed verbatim to `bash -c $command`. Heredocs/pipes/&&/|| all allowed."},
         "summary":       {"type": "string", "description": "Optional ONE-line curated summary. Defaults to 'run-step: <command-truncated-80>'."},
-        "allow_nonzero": {"type": "boolean", "description": "Reserved for future use. v1 must be false or absent — non-zero always auto-fail-steps."}
+        "allow_nonzero": {"type": "boolean", "description": "Reserved for future use. v1 must be false or absent — non-zero always auto-fail-steps."},
+        "metrics_from_stdout": {"type": "boolean", "description": "Phase 7: record every captured line `metric name=<x> value=<v> [unit=<u>]` through the record-metric op (project = the step's plan's project). Non-numeric values are skipped with a stderr note."}
+      }
+    },
+    {
+      "title": "record-metric",
+      "description": "Phase 7: one NUMERIC observation into the append-only metrics table (migration 017). The metric outcome channel judges an expectation `metric:<name>` against the nearest row before and after it. value must be a number — a model cannot write a metric in words.",
+      "type": "object",
+      "required": ["name", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "name":    {"type": "string", "minLength": 1},
+        "value":   {"type": ["number", "string"], "description": "A JSON number (or a strictly numeric string); anything else exits non-zero and writes nothing."},
+        "unit":    {"type": "string"},
+        "project": {"type": "string", "description": "Defaults to the plan's Plans.project (via plan_id, or step_id -> its plan). Required when neither resolves."},
+        "plan_id": {"type": "string"},
+        "step_id": {"type": "string"},
+        "source":  {"type": "string", "description": "Defaults to 'record-metric'; run-step's stdout capture writes 'run-step'."}
       }
     },
     {

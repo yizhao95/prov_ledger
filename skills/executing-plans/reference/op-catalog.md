@@ -168,6 +168,25 @@ Output: pretty-printed JSON to stdout. Errors: `❌ apply_op: <msg>` to stderr, 
 
 ---
 
+## 8. `record-metric.sh` — INSERT into metrics (phase 7)
+
+```json
+{"step_id": "my-plan-D", "name": "mean_net_revenue", "value": 64.33, "unit": "usd"}
+```
+
+One NUMERIC observation. `project` defaults to the plan's `Plans.project`
+(`plan_id`, or `step_id` → its plan); `value` must be a JSON number or a
+strictly numeric string — `"high"`, `null`, `true`, `"nan"` exit non-zero and
+write nothing. The metric outcome channel (`orchestrator/outcome_channels.py`)
+later judges an expectation `metric:<name>` against the nearest row before
+and after the expectation. `run-step.sh` records the same thing for you when
+the input carries `"metrics_from_stdout": true` and the command prints
+`metric name=<x> value=<v> [unit=<u>]` lines (source `run-step`).
+
+Common mistakes: recording a metric the command did not print (write it where
+it is measured, not where it is remembered); forgetting `project` on a plan
+that has no attribution (exit non-zero: `'project' is required`).
+
 ## State machine summary
 
 ```

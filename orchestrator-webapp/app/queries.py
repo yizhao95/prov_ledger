@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import json
 import sqlite3
 from pathlib import Path
 
@@ -649,6 +650,55 @@ def get_node_reasons(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
         d["display_tier"] = "unstated" if d["text"] is None else d["tier"]
         out.append(d)
     return out
+
+
+def get_outcomes(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
+    """The plan's expectations with every outcome recorded against them
+    (migration 014 / phase 7 channels), oldest first; an expectation with no
+    outcome yet is one row with kind 'pending'. Adds `delta_pct` (metric
+    channel) and a one-line `summary`. Read-only; [] on an older DB."""
+    try:
+        rows = conn.execute(
+            "SELECT e.id AS expectation_id, e.target, e.target_kind, e.claim, e.channel, e.created_at AS claimed_at, "
+            "       o.id AS outcome_id, o.kind, o.value_json, o.source, o.tier, o.reason, o.backfilled_by_plan, o.observed_at "
+            "FROM expectations e LEFT JOIN outcomes o ON o.expectation_id = e.id "
+            "WHERE e.plan_id = ? ORDER BY e.id, o.id", (plan_id,)).fetchall()
+    except sqlite3.Error:
+        return []
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            value = json.loads(d["value_json"]) if d["value_json"] else {}
+        except ValueError:
+            value = {}
+        if d["kind"] is None:
+            d["kind"], d["tier"], d["source"] = "pending", "none", "—"
+        d["value"] = value
+        d["delta_pct"] = value.get("delta_pct") if d["kind"] == "observed" and isinstance(value, dict) else None
+        d["summary"] = _outcome_summary(d["kind"], value, d.get("reason"))
+        out.append(d)
+    return out
+
+
+def _outcome_summary(kind: str, value, reason: str | None) -> str:
+    if kind == "pending":
+        return "no outcome recorded yet — the next reviewed close of another plan backfills it"
+    if kind == "none_available":
+        return reason or "nothing to observe"
+    if not isinstance(value, dict):
+        return str(value)
+    if "before" in value and "after" in value:                     # metric channel
+        pct = value.get("delta_pct")
+        unit = f" {value['unit']}" if value.get("unit") else ""
+        pct_s = f" ({pct:+.1f}%)" if isinstance(pct, (int, float)) else ""
+        return f"{value['before']}{unit} → {value['after']}{unit}{pct_s}"
+    if "kinds" in value:                                           # profile_drift channel
+        return ("drift: " + ", ".join(value["kinds"])) if value["kinds"] else "no drift between the two snapshots"
+    if "signal" in value:                                          # survival
+        plans = value.get("plans") or value.get("changed_by") or []
+        return f"{value['signal']}" + (f" by {', '.join(plans)}" if plans else "")
+    return json.dumps(value, sort_keys=True)[:160]
 
 
 def get_unstated(conn: sqlite3.Connection, plan_id: str) -> dict:

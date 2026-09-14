@@ -294,3 +294,32 @@ def test_plan_card_shows_project_attribution(client):
 def test_plan_card_shows_unattributed_when_null(client):
     r = client.get("/api/dashboard")
     assert 'data-project-source="none"' in r.text and "unattributed" in r.text
+
+
+# ── phase 7 Task 1: the plan's outcomes (metric delta) are read-only visible ────
+
+def test_outcomes_panel_shows_metric_delta(client):
+    conn = odb.open_db(client._db)
+    pid = client._seeded["plan_id"]
+    eid = odb.insert_expectation(conn, plan_id=pid, step_id=None, project="demo", target="mean_net_revenue",
+                                 target_kind="metric", claim="revenue stays within ±5% WoW", channel="metric:mean_net_revenue")
+    odb.insert_outcome(conn, expectation_id=eid, kind="observed",
+                       value={"name": "mean_net_revenue", "before": 43.6, "after": 53.72, "delta": 10.12, "delta_pct": 23.2,
+                              "unit": "usd", "before_at": "2026-09-11 00:30:00", "after_at": "2026-09-11 02:00:00"},
+                       source="metrics", tier="observed", backfilled_by_plan="PU2")
+    e2 = odb.insert_expectation(conn, plan_id=pid, step_id=None, project="demo", target="orders", target_kind="dataset",
+                                claim="promo_discount stays", channel="profile_drift")
+    odb.insert_outcome(conn, expectation_id=e2, kind="none_available", value={}, source="data_profile", tier="none",
+                       reason="no data_profile snapshot before and after the expectation", backfilled_by_plan="PU2")
+    conn.close()
+    r = client.get("/api/dashboard")
+    assert r.status_code == 200 and "🎯 Outcomes" in r.text
+    assert "+23.2%" in r.text and "43.6" in r.text and "53.72" in r.text and "mean_net_revenue" in r.text
+    assert "revenue stays within ±5% WoW" in r.text and 'data-tier="observed"' in r.text
+    assert "no data_profile snapshot" in r.text and 'data-tier="none"' in r.text
+    from app import queries
+    conn = odb.open_db(client._db)
+    rows = queries.get_outcomes(conn, pid)
+    conn.close()
+    assert [x["channel"] for x in rows] == ["metric:mean_net_revenue", "profile_drift"]
+    assert rows[0]["delta_pct"] == 23.2 and rows[0]["summary"].startswith("43.6") and rows[1]["delta_pct"] is None
