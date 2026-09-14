@@ -11,7 +11,11 @@ from analyzer._host import testing as _testing
 
 _harness = _importlib.import_module(f"{_testing.__name__}.harness")
 globals().update({k: v for k, v in vars(_harness).items() if not k.startswith("__")})
-default_corpus = _harness.default_corpus
+# explicit names (the analyzer follows attribute access, not globals().update)
+NodeObs, Pair, MatchResult, Case = _harness.NodeObs, _harness.Pair, _harness.MatchResult, _harness.Case
+check, load_case, iter_cases, run_case, default_corpus = (
+    _harness.check, _harness.load_case, _harness.iter_cases, _harness.run_case, _harness.default_corpus)
+IDENTITY, SEMANTIC = _harness.IDENTITY, _harness.SEMANTIC
 
 
 # ── adapters to the real analyzer (Task 12) ──────────────────────────────────
@@ -36,7 +40,7 @@ def analyzer_extractor(repo: Path) -> list[NodeObs]:
         history.snapshot_run(conn, str(repo), run_id)
         rows = history._rows(conn, run_id)
         conn.close()
-    return [NodeObs(r.node_type, r.qualified_name, r.file_path, r.struct_sig, r.dataflow_sig, r.dataflow_trivial)
+    return [_harness.NodeObs(r.node_type, r.qualified_name, r.file_path, r.struct_sig, r.dataflow_sig, r.dataflow_trivial)
             for r in rows if r.node_type in history.SYMBOL_TYPES]
 
 
@@ -55,8 +59,8 @@ def analyzer_matcher(prev: list[NodeObs], cur: list[NodeObs]) -> MatchResult:
     p_rows, p_back = rows(prev, 1, True)
     c_rows, c_back = rows(cur, len(p_rows) + 1, False)
     out = history.match(p_rows, c_rows)
-    return MatchResult(
-        [Pair(p_back[p.prev.snapshot_id], c_back[p.cur.snapshot_id], p.via, p.changed) for p in out.pairs],
+    return _harness.MatchResult(
+        [_harness.Pair(p_back[p.prev.snapshot_id], c_back[p.cur.snapshot_id], p.via, p.changed) for p in out.pairs],
         [p_back[r.snapshot_id] for r in out.removed],
         [c_back[r.snapshot_id] for r in out.added],
         [([p_back[r.snapshot_id] for r in a.prev], [c_back[r.snapshot_id] for r in a.cur]) for a in out.ambiguous],
