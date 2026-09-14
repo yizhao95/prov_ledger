@@ -66,7 +66,7 @@ def test_corpus_struct_sig_symbols_are_alpha_equal():
     side, and swap_two_similar's pair must be equal on the before side — so the
     corpus and signatures.py cannot drift apart."""
     from tests.corpus.harness import iter_cases
-    cases = iter_cases(Path(__file__).parent / "corpus" / "cases")
+    cases = iter_cases()                       # phase 6: the package corpus
     assert cases
     checked = 0
     for case in cases:

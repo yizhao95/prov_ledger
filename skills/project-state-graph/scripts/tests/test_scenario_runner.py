@@ -15,7 +15,9 @@ import pytest
 
 from tests.scenarios import runner
 
-CORPUS_BASE = Path(__file__).resolve().parent / "corpus" / "cases" / "basic_pipeline" / "base"
+from tests.corpus.harness import default_corpus
+
+CORPUS_BASE = default_corpus() / "basic_pipeline" / "base"     # phase 6: the corpus ships in provledger.testing
 REAL_HOME = Path(os.path.expanduser("~")).resolve()
 
 

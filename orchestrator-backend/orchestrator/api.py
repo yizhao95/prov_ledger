@@ -6,6 +6,7 @@ helpers that wrap state_machine + circuit_breakers + telemetry.
 from __future__ import annotations
 
 import json
+import subprocess
 import os
 import re
 import sqlite3
@@ -464,6 +465,43 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
     `reopened` (FL-019): the review had FAILED and its child recovered."""
     project, _why, project_source = _project_for_review(conn, plan_id, registry_path)
     psg_db = _usable_graph(project, registry_path)
+    if reopened and project:
+        # FL-030: a recovery sub-step completing is not evidence that the graph
+        # was refreshed. Refuse to close while the registry is behind HEAD, and
+        # put the reason-slot checklist on the record before the backstop.
+        reg_path = _resolve_registry_path(registry_path)
+        registered = psg_bridge.registered_sha_for(project, reg_path)
+        repo = psg_bridge.repo_for(project, reg_path)
+        head = _git_head(repo)
+        if registered and head and registered != head:
+            telemetry.append_step_log(
+                conn, review_step_id,
+                f"[REVIEW REOPENED] registry behind HEAD ({registered[:10]} != {head[:10]}): refresh first "
+                "(review_run.py --as-recovery <sub-step>) — not closing (FL-030)")
+            plan_row = db.get_plan(conn, plan_id) or {}
+            return {
+                "ready": False,
+                "needs_agent_review": True,
+                "project": project,
+                "project_source": project_source,
+                "plan_status": plan_row.get("status"),
+                "review_step_id": review_step_id,
+                "review_child_step_id": child["step_id"],
+                "review_status": "FAILED",
+                "reopened": True,
+                "reason": "registry behind HEAD: refresh (review_run.py --as-recovery) before closing",
+            }
+        if not (registered and head):
+            telemetry.append_step_log(
+                conn, review_step_id,
+                f"[REVIEW REOPENED] sha check skipped: registry sha={registered!r}, repo HEAD={head!r} "
+                f"(repo {repo!r}) — cannot verify the refresh (FL-030)")
+        slots = reasons.slots_for_plan(conn, project, plan_id, psg_db) if psg_db else []
+        telemetry.append_step_log(
+            conn, review_step_id,
+            f"[REASON SLOTS] {len(slots)} open before the reopened close"
+            + (": " + reasons.checklist_text(slots) if slots else
+               ("" if psg_db else " (state graph unavailable)")))
     with db.transaction(conn):
         n_unstated = reasons.backstop_unstated(
             conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
@@ -512,6 +550,17 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         "constraints_bypassed": n_bypassed,
         "outcomes_backfilled": backfilled,
     }
+
+
+def _git_head(repo: str | None) -> str | None:
+    """HEAD of a git checkout, None when there is none to ask."""
+    if not repo or not os.path.isdir(repo):
+        return None
+    try:
+        r = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() or None if r.returncode == 0 else None
 
 
 def _usable_graph(project: str | None, registry_path) -> str | None:

@@ -1,6 +1,6 @@
 # 🧾 provLedger
 
-![tests](https://img.shields.io/badge/tests-897%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-950%20passing-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -313,7 +313,8 @@ This README is the high-level entry point. What's in the repo today:
 | [`examples/silent-class-drop/`](examples/silent-class-drop/) | the demo: how it works, the 5-step plan, regenerating the GIF/screenshots |
 | [`docs/benchmark-silent-class-drop.md`](docs/benchmark-silent-class-drop.md) | the mini-benchmark writeup (0.31 → 0.91) |
 | Each skill's `SKILL.md` + `reference/` | the iron-law workflows (writing-plans, executing-plans, project-state-graph, update-project-state-graph) |
-| [`docs/extensions.md`](docs/extensions.md) | register constraints, analyzer name sets and drift kinds in `provledger-extensions.json` without touching source; discovery, priorities, reproducibility |
+| [`docs/extensions.md`](docs/extensions.md) | register constraints, analyzer name sets, drift kinds and node-type providers in `provledger-extensions.json` without touching source; discovery, priorities, reproducibility |
+| [`docs/conformance.md`](docs/conformance.md) | write your own node-type provider against `provledger.graph_api` and prove it keeps the six contracts with `provledger.testing.conformance` |
 | [`skills/project-state-graph/scripts/tests/scenarios/README.md`](skills/project-state-graph/scripts/tests/scenarios/README.md) | the timeline-scenario suite: what changing a node triggers, asserted as an event stream with `must_not`, golden per scenario, fully isolated |
 
 A deeper architecture/reference documentation tree exists as maintainer
@@ -381,12 +382,13 @@ PY=~/skill-workspace/.venv/bin/python
 # 3. Run the test suites to confirm a healthy install (run each separately —
 #    each suite has its own pyproject/pythonpath; one combined invocation breaks)
 $PY -m pytest scripts/tests -q                                    #   5 passed
-$PY -m pytest orchestrator-backend -q                             # 254 passed
+$PY -m pytest orchestrator-backend -q                             # 288 passed
 $PY -m pytest orchestrator-webapp  -q                             #  29 passed
 $PY -m pytest skills/writing-plans/tests -q                       #  87 passed
 $PY -m pytest skills/executing-plans -q                           #  69 passed
-(cd skills/project-state-graph/scripts && $PY -m pytest tests -q) # 372 passed, 1 skipped, 1 deselected (llm_consistency; >10 min — split it, see INSTALL.md)
-$PY -m pytest skills/update-project-state-graph/scripts/tests -q  #  81 passed
+(cd skills/project-state-graph/scripts && $PY -m pytest tests -q) # 385 passed, 1 skipped, 1 deselected (llm_consistency; >10 min — split it, see INSTALL.md)
+$PY -m pytest skills/update-project-state-graph/scripts/tests -q  #  87 passed
+bash scripts/test_packaging.sh                                    # wheel + sdist: provledger.graph_api / providers / testing (+ corpus) importable
 
 # 4. Launch the dashboard
 PROVLEDGER_WEBAPP_DIR=orchestrator-webapp bash orchestrator-webapp/launch_dashboard.sh
@@ -398,7 +400,7 @@ PROVLEDGER_WEBAPP_DIR=orchestrator-webapp bash orchestrator-webapp/launch_dashbo
 | Level | Command | Expect |
 |---|---|---|
 | Quickest — end-to-end demo | `make demo` | the MISMATCH → VERIFIED arc, purity 0.31 → 0.91, `SELF-CHECK OK`, exit 0 |
-| Full — all test suites | the seven `pytest` commands above, **run separately** | **897 passed, 1 skipped** total (the 9 timeline scenarios run inside the project-state-graph suite, ≤ 11 s each) |
+| Full — all test suites | the seven `pytest` commands above, **run separately** | **950 passed, 1 skipped** total (the 9 timeline scenarios run inside the project-state-graph suite, ≤ 11 s each) |
 | Packaging — pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
 
 The dashboard reads the orchestrator database **read-only**. Point it at any

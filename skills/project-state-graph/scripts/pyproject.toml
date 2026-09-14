@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "provledger",
     "pytest>=9.0.3",
     "tree-sitter>=0.25.2",
     "tree-sitter-css>=0.25.0",
@@ -21,3 +22,9 @@ addopts = "-m 'not llm_consistency'"
 # scenario fixtures are synthetic projects with their own tests/ package —
 # collecting them would shadow this suite's `tests` package
 norecursedirs = [".*", "*.egg", "build", "dist", "node_modules", "venv", ".venv", "__pycache__", "fixtures"]
+
+[tool.uv.sources]
+# The host API (graph_api / providers / testing) lives in the provledger package;
+# the analyzer's own environment carries it editable so `uv run python -m analyzer`
+# can import third-party providers that import provledger (phase 6, acceptance C).
+provledger = { path = "../../../orchestrator-backend", editable = true }

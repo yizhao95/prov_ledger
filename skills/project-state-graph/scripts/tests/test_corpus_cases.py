@@ -16,9 +16,9 @@ from pathlib import Path
 import pytest
 
 from tests.corpus import mutate
-from tests.corpus.harness import IDENTITY, SEMANTIC, iter_cases
+from tests.corpus.harness import IDENTITY, SEMANTIC, default_corpus, iter_cases
 
-CASES = Path(__file__).parent / "corpus" / "cases"
+CASES = default_corpus()          # phase 6: the corpus ships inside provledger.testing
 ALL_CASES = iter_cases(CASES) if CASES.exists() else []
 IDS = [c.name for c in ALL_CASES]
 

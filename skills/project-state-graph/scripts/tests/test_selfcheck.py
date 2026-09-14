@@ -164,7 +164,7 @@ def test_dtype_consistency_e2e_hard_fails_on_mismatch(tmp_path):
     dv = store.add_node(conn, dv_t, name="prod:return", qualified_name="prod:return",
                         file_path="pkg/m.py", metadata={"dtype": "int"})
     store.add_edge(conn, produces_e, prod, dv, metadata={"type": "int"})
-    store.add_edge(conn, consumes_e, dv, cons, metadata={"type": "str"})
+    store.add_edge(conn, consumes_e, dv, cons, metadata={"type": "int", "expected_type": "str"})   # the CONSUMER declares str (FL-029: only expected_type is asserted)
     cards.build_symbol_cards(conn)
     conn.commit()
     conn.close()

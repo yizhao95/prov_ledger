@@ -8,137 +8,70 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import importlib as _importlib
 import json
 import os
 from dataclasses import dataclass, field
 from typing import Callable
 
-from . import signatures, store
+from . import store
+from ._host import providers as _providers
 
-SYMBOL_TYPES = ("function", "method", "class")
-NAME_ONLY_TYPES = ("sql_table", "bq_dataset", "api_source", "dataset")
+# The type sets are the reference providers' (phase 6): one source.
+_bs = _importlib.import_module(f"{_providers.__name__}.builtin_symbols")
+_bo = _importlib.import_module(f"{_providers.__name__}.builtin_owned")
+SYMBOL_TYPES = _bs.SYMBOL_TYPES
+NAME_ONLY_TYPES = _bs.NAME_ONLY_TYPES
 # Owned nodes (spec §2.2, E0/D1): identity = owner identity + local name.
 # dataframe qualified_name = "<fn_qn>:<var>", column = "<owner_qn>.<column>".
-OWNED_TYPES = ("dataframe", "column")
+OWNED_TYPES = _bo.OWNED_TYPES
 EVENT_ORDER = ("node_matched", "node_renamed", "node_moved", "node_changed",
                "node_added", "node_removed", "identity_ambiguous", "identity_asserted")
 
 
-@dataclass(frozen=True)
-class Row:
-    """One node_snapshot row (the matcher's only input)."""
-    snapshot_id: int
-    node_id: int | None
-    node_key: str
-    node_type: str
-    qualified_name: str
-    file_path: str | None
-    line_start: int | None
-    line_end: int | None
-    struct_sig: str | None
-    dataflow_sig: str | None
-    dataflow_trivial: bool
-    owner_qn: str | None = None   # OWNED_TYPES only: the owner's qualified_name
-    name: str | None = None       # OWNED_TYPES only: the local name (var / column)
+# The host-owned matching contract (Row/Pair/Ambiguity/Assertion/MatchOutcome,
+# match) lives in the package (graph_api, phase 6); re-exported here so the
+# analyzer and its tests keep their names.
+from ._host import graph_api as _g  # noqa: E402
 
-
-@dataclass(frozen=True)
-class Pair:
-    prev: Row
-    cur: Row
-    via: str
-    changed: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class Ambiguity:
-    layer: str
-    prev: tuple[Row, ...]
-    cur: tuple[Row, ...]
-
-
-@dataclass(frozen=True)
-class Assertion:
-    cur_qualified_name: str
-    chosen_prev_key: str
-    evidence: str
-    arbiter: str
-
-
-@dataclass
-class MatchOutcome:
-    pairs: list[Pair]
-    removed: list[Row]
-    added: list[Row]
-    ambiguous: list[Ambiguity] = field(default_factory=list)
-
-
-Arbitrate = Callable[[list[Ambiguity]], list[Assertion]]
+Row, Pair, Ambiguity, Assertion, MatchOutcome, Arbitrate = (
+    _g.Row, _g.Pair, _g.Ambiguity, _g.Assertion, _g.MatchOutcome, _g.Arbitrate)
+_changed, _group, _LAYERS, match = _g._changed, _g._group, _g._LAYERS, _g.match
 
 
 # ── snapshot ─────────────────────────────────────────────────────────────────
-def _defs_of(tree: ast.Module) -> list[ast.AST]:
-    return [n for n in ast.walk(tree)
-            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
-
-
-def _find_def(defs: list[ast.AST], line_start: int | None, name: str | None):
-    """The def recorded by py_ast: same start line, else the unique def of that
-    name (decorators can shift the recorded line by one or two)."""
-    if line_start is not None:
-        for d in defs:
-            if d.lineno == line_start:
-                return d
-    if name:
-        named = [d for d in defs if d.name == name]
-        if len(named) == 1:
-            return named[0]
-        if line_start is not None and named:
-            return min(named, key=lambda d: abs(d.lineno - line_start))
-    return None
-
-
-def _owner_fn(fn_spans: list[tuple[int, int | None, str]], line: int | None) -> str | None:
-    """Innermost function/method (by start line) whose span contains `line`."""
-    if line is None:
-        return None
-    best = None
-    for ls, le, qn in fn_spans:
-        if ls <= line and (le is None or line <= le) and (best is None or ls > best[0]):
-            best = (ls, qn)
-    return best[1] if best else None
-
-
-def snapshot_run(conn, repo_root: str, run_id: int) -> int:
-    """Write this run's node_snapshot rows (node_key '' placeholder). Must run
-    BEFORE store.stamp_run: it selects the rebuild's rows by run_id IS NULL.
-
-    Symbols get struct_sig (source AST) + dataflow_sig (edges); name-only data
-    nodes carry their qualified_name; dataframes are keyed to the function that
-    binds them and columns to their has_column owner (spec §2.2)."""
-    types = SYMBOL_TYPES + NAME_ONLY_TYPES + OWNED_TYPES
-    rows = conn.execute(
-        f"""SELECT n.id, t.name, n.qualified_name, n.name, n.file_path, n.line_start, n.line_end, n.dtype
-            FROM node n JOIN node_type t ON n.node_type_id=t.id
-            WHERE t.name IN ({','.join('?' * len(types))}) AND n.run_id IS NULL""", types).fetchall()
-    by_type: dict[str, list] = {}
-    for r in rows:
-        by_type.setdefault(r[1], []).append(r)
-    fn_spans: dict[str, list[tuple[int, int | None, str]]] = {}
-    for ntype in ("function", "method"):
-        for nid, _t, qn, name, path, ls, le, _d in by_type.get(ntype, []):
-            if path and ls:
-                fn_spans.setdefault(path, []).append((ls, le, qn or name))
-    owner_of_col = {dst: src for src, dst in conn.execute(
-        """SELECT e.src_node_id, e.dst_node_id FROM edge e JOIN edge_type t ON e.edge_type_id=t.id
-           WHERE t.name='has_column'""")}
+def snapshot_run(conn, repo_root: str, run_id: int, providers=None, report: dict | None = None,
+                 timeout_s: float = 30.0, file_map=None) -> int:
+    """Write this run's node_snapshot rows (node_key '' placeholder) from the
+    providers' observations. Must run BEFORE store.stamp_run: providers see the
+    rebuild's rows by run_id IS NULL. Phase 6: the built-in symbol/owned
+    identities are providers too; every provider runs through
+    providers.run_provider (exception / timeout / schema -> degraded, empty).
+    `report` (optional dict) receives {type_id: {degraded, observations, elapsed_s}}."""
+    plist = list(providers) if providers is not None else _providers.builtin_providers()
+    conn.commit()                                   # the read-only view must see the rebuild
+    db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    ctx = _providers.make_context(db_path, repo_root, run_id, file_map)
     node_qn: dict[int, str] = {}   # node id -> snapshot qualified_name (owners resolve through this)
-    trees: dict[str, list[ast.AST]] = {}
     seen: dict[tuple[str, str], int] = {}
     n = 0
 
-    def emit(nid, ntype, qn, path, ls, le, struct, df_sig, trivial, attrs):
+    def emit(obs):
         nonlocal n
+        ntype, qn = obs.node_type, obs.qualified_name
+        attrs = dict(obs.attrs)
+        if ntype == "column":
+            # the owner's SNAPSHOT name (may carry a #2 suffix) wins over the provider's guess
+            oid = attrs.pop("owner_node_id", None)
+            owner = node_qn.get(oid) if oid is not None else None
+            if owner is not None:
+                qn = f"{owner}.{obs.name}"
+                attrs["owner_qn"] = owner
+            else:
+                attrs["owner_qn"] = obs.owner_qn
+            attrs["name"] = obs.name
+        elif obs.owner_qn is not None:
+            attrs["owner_qn"], attrs["name"] = obs.owner_qn, obs.name
         # The graph may hold several nodes with one (type, qualified_name) — e.g.
         # `df = read(); df = df.dropna()` binds two dataframe nodes to `df` in one
         # function. Suffix repeats (#2, #3 ...) in the deterministic emit order so
@@ -146,41 +79,27 @@ def snapshot_run(conn, repo_root: str, run_id: int) -> int:
         seen[(ntype, qn)] = seen.get((ntype, qn), 0) + 1
         if seen[(ntype, qn)] > 1:
             qn = f"{qn}#{seen[(ntype, qn)]}"
-        node_qn[nid] = qn
-        store.add_node_snapshot(conn, run_id, node_type=ntype, qualified_name=qn, file_path=path,
-                                line_start=ls, line_end=le, struct_sig=struct, dataflow_sig=df_sig,
-                                dataflow_trivial=trivial, attrs={"node_id": nid, **attrs})
+        if obs.node_id is not None:
+            node_qn[obs.node_id] = qn
+        st, df = obs.signature("struct"), obs.signature("dataflow")
+        store.add_node_snapshot(conn, run_id, node_type=ntype, qualified_name=qn, file_path=obs.file_path,
+                                line_start=obs.line_start, line_end=obs.line_end,
+                                struct_sig=st.value if st else None, dataflow_sig=df.value if df else None,
+                                dataflow_trivial=bool(df.trivial) if df else True,
+                                attrs={"node_id": obs.node_id, **attrs, "type_id": obs.type_id,
+                                       "schema_version": obs.schema_version})
         n += 1
 
-    for ntype in SYMBOL_TYPES + NAME_ONLY_TYPES:
-        for nid, _t, qn, name, path, ls, le, _d in sorted(by_type.get(ntype, []), key=lambda r: (r[2] or r[3], r[0])):
-            struct = df_sig = None
-            trivial, attrs = True, {}
-            if ntype in SYMBOL_TYPES and path:
-                if path not in trees:
-                    try:
-                        src = open(os.path.join(repo_root, path), encoding="utf-8").read()
-                        trees[path] = _defs_of(ast.parse(src))
-                    except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
-                        trees[path] = []
-                node = _find_def(trees[path], ls, name)
-                if node is not None:
-                    struct = signatures.struct_sig(node)
-                df_sig, trivial, attrs = signatures.dataflow_sig(conn, nid)
-            emit(nid, ntype, qn or name, path, ls, le, struct, df_sig, trivial, attrs)
-    for nid, _t, _qn, name, path, ls, le, _d in sorted(by_type.get("dataframe", []), key=lambda r: (r[4] or "", r[5] or 0, r[0])):
-        owner = _owner_fn(fn_spans.get(path, []), ls) or (path or "?")
-        emit(nid, "dataframe", f"{owner}:{name}", path, ls, le, None, None, True,
-             {"owner_qn": owner, "name": name})
-    for nid, _t, _qn, name, path, ls, le, dtype in sorted(by_type.get("column", []), key=lambda r: (r[0],)):
-        oid = owner_of_col.get(nid)
-        owner = node_qn.get(oid) if oid is not None else None
-        if owner is None and oid is not None:
-            row = conn.execute("SELECT qualified_name, name FROM node WHERE id=?", (oid,)).fetchone()
-            owner = (row[0] or row[1]) if row else None
-        owner = owner or (path or "?")
-        emit(nid, "column", f"{owner}.{name}", path, ls, le, None, None, True,
-             {"owner_qn": owner, "name": name, "dtype": dtype or "unknown"})
+    try:
+        for p in plist:
+            obs, degraded, elapsed = _providers.run_provider(p, ctx, timeout_s=timeout_s)
+            if report is not None:
+                report[p.type_id] = {"degraded": degraded, "observations": len(obs), "elapsed_s": round(elapsed, 3),
+                                     "schema_version": getattr(p, "schema_version", 1)}
+            for o in obs:
+                emit(o)
+    finally:
+        ctx.conn_ro.close()
     conn.commit()
     return n
 
@@ -201,80 +120,6 @@ def _rows(conn, run_id: int, *, keyed_only: bool = False) -> list[Row]:
 
 
 # ── matching (pure) ──────────────────────────────────────────────────────────
-def _changed(p: Row, c: Row) -> tuple[str, ...]:
-    return tuple(f for f in ("qualified_name", "file_path", "struct_sig", "dataflow_sig")
-                 if getattr(p, f) != getattr(c, f))
-
-
-def _group(rows: list[Row], key) -> dict:
-    g: dict = {}
-    for r in rows:
-        k = key(r)
-        if k is not None:
-            g.setdefault(k, []).append(r)
-    return g
-
-
-_LAYERS = (
-    ("struct_sig", lambda r: (r.node_type, r.struct_sig) if r.struct_sig else None),
-    ("dataflow_sig", lambda r: (r.node_type, r.dataflow_sig)
-     if r.dataflow_sig and not r.dataflow_trivial else None),
-)
-
-
-def match(prev: list[Row], cur: list[Row]) -> MatchOutcome:
-    """Layer 1 exact (node_type, qualified_name); layer 2 struct_sig groups that
-    are exactly 1:1; layer 3 non-trivial dataflow_sig groups 1:1; then the owner
-    layer for OWNED_TYPES (same local name, owners paired in this match — to a
-    fixpoint, so function -> dataframe -> column chains resolve). Any signature
-    group larger than 1:1 is an Ambiguity — recorded, never linked. Pure:
-    inputs are not mutated."""
-    pairs: list[Pair] = []
-    ambiguous: list[Ambiguity] = []
-    cur_by_qn = {(r.node_type, r.qualified_name): r for r in cur}
-    used_cur: set[int] = set()
-    rest_prev: list[Row] = []
-    for p in prev:
-        c = cur_by_qn.get((p.node_type, p.qualified_name))
-        if c is not None and c.snapshot_id not in used_cur:
-            pairs.append(Pair(p, c, "qualname", _changed(p, c)))
-            used_cur.add(c.snapshot_id)
-        else:
-            rest_prev.append(p)
-    rest_cur = [c for c in cur if c.snapshot_id not in used_cur]
-    for layer, key in _LAYERS:
-        gp, gc = _group(rest_prev, key), _group(rest_cur, key)
-        for k in sorted(set(gp) & set(gc), key=str):
-            ps, cs = gp[k], gc[k]
-            if len(ps) == 1 and len(cs) == 1:
-                pairs.append(Pair(ps[0], cs[0], layer, _changed(ps[0], cs[0])))
-            else:
-                ambiguous.append(Ambiguity(layer, tuple(ps), tuple(cs)))
-            for r in ps:
-                rest_prev.remove(r)
-            for r in cs:
-                rest_cur.remove(r)
-    # owner inheritance (E0): a dataframe/column follows its owner's identity.
-    cur_of_prev_qn = {p.prev.qualified_name: p.cur.qualified_name for p in pairs}
-    progress = True
-    while progress:
-        progress = False
-        cur_by_owner = {(r.node_type, r.owner_qn, r.name): r for r in rest_cur if r.owner_qn}
-        for p in list(rest_prev):
-            if not p.owner_qn:
-                continue
-            cur_owner = cur_of_prev_qn.get(p.owner_qn)
-            c = cur_by_owner.get((p.node_type, cur_owner, p.name)) if cur_owner else None
-            if c is None:
-                continue
-            pairs.append(Pair(p, c, "owner", _changed(p, c)))
-            rest_prev.remove(p)
-            rest_cur.remove(c)
-            cur_of_prev_qn[p.qualified_name] = c.qualified_name
-            progress = True
-    return MatchOutcome(pairs, rest_prev, rest_cur, ambiguous)
-
-
 # ── resolve: keys + events ───────────────────────────────────────────────────
 def _new_key(run_id: int, r: Row) -> str:
     return "nk_" + hashlib.sha1(f"{run_id}:{r.node_type}:{r.qualified_name}".encode()).hexdigest()[:12]

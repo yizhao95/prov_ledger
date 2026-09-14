@@ -187,7 +187,7 @@ def test_stale_references_none_when_clean(tmp_path):
 def test_report_not_ok_with_gaps(tmp_path):
     db = tmp_path / "graph.db"
     _build_graph(db)
-    rep = review_diff.report(str(db), [{"old_name": "old_name", "kind": "removed"}])
+    rep = review_diff.report(str(db), [{"file": "pipeline.py", "old_name": "old_name", "kind": "removed"}])
     assert rep["ok"] is False
     assert rep["gaps"]
     assert "old_name" in rep["text"]
@@ -196,7 +196,7 @@ def test_report_not_ok_with_gaps(tmp_path):
 def test_report_ok_when_clean(tmp_path):
     db = tmp_path / "graph.db"
     _build_graph(db)
-    rep = review_diff.report(str(db), [{"old_name": "nonexistent", "kind": "removed"}])
+    rep = review_diff.report(str(db), [{"file": "pipeline.py", "old_name": "nonexistent", "kind": "removed"}])
     assert rep["ok"] is True
     assert rep["gaps"] == []
 
@@ -415,13 +415,13 @@ def test_fl023_stale_reference_in_changed_file_is_a_warning(tmp_path):
 def test_fl023_stale_reference_outside_the_diff_still_fails(tmp_path):
     db = tmp_path / "graph.db"
     _build_graph(db)
-    hits = review_diff.stale_references(str(db), ["old_name"], changed_files={"other.py"})
+    hits = review_diff.stale_references(str(db), ["pipeline.old_name"], changed_files={"other.py"})
     assert [h["severity"] for h in hits] == ["fail"]
-    rep = review_diff.report(str(db), [{"old_name": "old_name", "kind": "removed"}],
+    rep = review_diff.report(str(db), [{"file": "pipeline.py", "old_name": "old_name", "kind": "removed"}],
                              changed_files={"other.py"})
     assert rep["ok"] is False
-    # and the pre-FL-023 call shape (no changed_files) is unchanged: every hit fails
-    rep0 = review_diff.report(str(db), [{"old_name": "old_name", "kind": "removed"}])
+    # and the pre-FL-023 call shape (no changed_files) is unchanged: every qualified hit fails
+    rep0 = review_diff.report(str(db), [{"file": "pipeline.py", "old_name": "old_name", "kind": "removed"}])
     assert rep0["ok"] is False and rep0["gaps"][0]["severity"] == "fail"
 
 
@@ -439,3 +439,61 @@ def test_fl023_full_verdict_passes_diff_files_to_the_stale_gate(repo, tmp_path):
     v = review_diff.full_verdict(str(db), str(repo), sha0, "HEAD", changed=changed, registered_sha=sha0)
     assert v["gates"]["stale_references"] is True, v["text"]
     assert [g["severity"] for g in v["gaps"]["stale_references"]] == ["warning"]
+
+
+# ── FL-029: the stale gate links by qualified name; bare-name hits are warnings ──
+
+def _build_graph_modules(db_path: Path):
+    """pkg.a.get (the removed symbol); pkg.c.direct calls it at high confidence;
+    pkg.b.use has an INFERRED call edge to it (a `d.get()` attribute call that the
+    builder could only match by bare name)."""
+    c = sqlite3.connect(str(db_path))
+    c.executescript("""
+        CREATE TABLE node_type (id INTEGER PRIMARY KEY, name TEXT UNIQUE, description TEXT);
+        CREATE TABLE node (id INTEGER PRIMARY KEY, node_type_id INTEGER, name TEXT,
+                           qualified_name TEXT, file_path TEXT, line_start INTEGER,
+                           line_end INTEGER, metadata_json TEXT);
+        CREATE TABLE edge_type (id INTEGER PRIMARY KEY, name TEXT UNIQUE, description TEXT);
+        CREATE TABLE edge (id INTEGER PRIMARY KEY, edge_type_id INTEGER, src_node_id INTEGER,
+                           dst_node_id INTEGER, metadata_json TEXT, confidence TEXT);
+        INSERT INTO node_type (id, name) VALUES (1, 'function');
+        INSERT INTO edge_type (id, name) VALUES (1, 'calls');
+        INSERT INTO node (id, node_type_id, name, qualified_name, file_path) VALUES
+          (1, 1, 'get', 'pkg.a.get', 'pkg/a.py'),
+          (2, 1, 'use', 'pkg.b.use', 'pkg/b.py'),
+          (3, 1, 'direct', 'pkg.c.direct', 'pkg/c.py'),
+          (4, 1, 'get', 'other.cache.get', 'other/cache.py');
+        INSERT INTO edge (id, edge_type_id, src_node_id, dst_node_id, confidence) VALUES
+          (1, 1, 2, 1, 'inferred'),
+          (2, 1, 3, 1, 'high');
+    """)
+    c.commit()
+    c.close()
+
+
+def test_fl029_qualified_name_match_uses_edge_confidence(tmp_path):
+    db = tmp_path / "g.db"
+    _build_graph_modules(db)
+    hits = review_diff.stale_references(str(db), ["pkg.a.get"], changed_files=set())
+    by_caller = {h["caller"]: h for h in hits}
+    assert set(by_caller) == {"direct", "use"}
+    assert by_caller["direct"]["severity"] == "fail" and by_caller["direct"]["match"] == "qualified_name"
+    assert by_caller["use"]["severity"] == "warning" and by_caller["use"]["confidence"] == "inferred"
+    rep = review_diff.report(str(db), [{"file": "pkg/a.py", "kind": "removed", "old_name": "get"}], changed_files={"pkg/a.py"})
+    assert rep["ok"] is False and [g["caller"] for g in rep["gaps"] if g["severity"] == "fail"] == ["direct"]
+    # the direct caller edited in the same diff -> warning (FL-023) -> nothing blocks
+    rep2 = review_diff.report(str(db), [{"file": "pkg/a.py", "kind": "removed", "old_name": "get"}], changed_files={"pkg/a.py", "pkg/c.py"})
+    assert rep2["ok"] is True and len(rep2["gaps"]) == 2
+
+
+def test_fl029_bare_name_fallback_is_only_a_warning(tmp_path):
+    """A removed symbol whose qualified name is not in the graph (e.g. the graph
+    predates the module) falls back to the bare name — every hit is a warning
+    tagged match=bare_name, never a fail."""
+    db = tmp_path / "g.db"
+    _build_graph_modules(db)
+    hits = review_diff.stale_references(str(db), ["pkg.zzz.get"], changed_files=set())
+    assert hits and all(h["severity"] == "warning" and h["match"] == "bare_name" for h in hits)
+    assert {h["callee"] for h in hits} == {"get"}
+    rep = review_diff.report(str(db), [{"file": "pkg/zzz.py", "kind": "removed", "old_name": "get"}])
+    assert rep["ok"] is True and "bare" in rep["text"].lower()

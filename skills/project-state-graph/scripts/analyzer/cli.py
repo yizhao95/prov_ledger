@@ -14,6 +14,7 @@ import subprocess
 import sys
 from typing import Optional
 
+from ._host import providers as _providers  # noqa: E402
 from . import (
     api_refs,
     cards,
@@ -78,6 +79,8 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
     # name sets — configured here, read by the analyzers via namesets.get().
     namesets.configure(repo_path)
     ext_fp = namesets.extensions_fingerprint(repo_path)
+    ext_obj = namesets.current_extensions(repo_path)
+    plist, prov_records = _providers.load_providers(ext_obj)
     conn = store.init_db(db_path)
     run_id = store.start_run(conn, project_name=project, commit_sha=info["commit_sha"],
                              plan_id=plan_id, step_id=step_id, trigger=trigger,
@@ -104,7 +107,20 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
         # History layer (spec §2.5): snapshot this rebuild's rows (selected by
         # run_id IS NULL, hence BEFORE stamp_run), match against the previous
         # run, assign node_keys and append events.
-        history.snapshot_run(conn, repo_path, run_id)
+        prov_report: dict = {}
+        history.snapshot_run(conn, repo_path, run_id, providers=plist, report=prov_report, file_map=file_map,
+                             timeout_s=max([r.get("timeout_s") or 30.0 for r in prov_records] + [30.0]))
+        # Phase 6: the provider set behind this run — declared, loaded or degraded —
+        # with what each one produced, next to the extensions fingerprint.
+        for r in prov_records:                      # never silent: a degraded provider is said out loud
+            reason = r.get("degraded") or prov_report.get(r["id"], {}).get("degraded")
+            if reason:
+                print(f"WARNING: provider {r['id']} degraded: {reason}", file=sys.stderr)
+        if ext_fp is not None:
+            ext_fp["providers"] = [{**r, **{k: v for k, v in prov_report.get(r["id"], {}).items() if k != "schema_version"},
+                                    "observations": prov_report.get(r["id"], {}).get("observations", 0)}
+                                   for r in prov_records]
+            store.set_run_extensions(conn, run_id, json.dumps(ext_fp, sort_keys=True))
         history.resolve(conn, run_id)
         if build_cards:
             cards.attach_history(conn)  # symbol_card gains node_key + recent history

@@ -36,12 +36,18 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-sys.path.insert(0, str(REPO / "orchestrator-backend"))
-
-from orchestrator import api, db as odb                    # noqa: E402
-from orchestrator.data_loop import run_data_decision_loop  # noqa: E402
-from orchestrator.drift import detect_drift                # noqa: E402
-from orchestrator.profiler import profile_records          # noqa: E402
+try:                                                       # the installed package (FL-006) ...
+    from provledger import api, db as odb                  # noqa: E402
+    from provledger.data_loop import run_data_decision_loop  # noqa: E402
+    from provledger.drift import detect_drift              # noqa: E402
+    from provledger.profiler import profile_records        # noqa: E402
+except ImportError:                                        # ... or the bundled source tree
+    BACKEND = REPO / "orchestrator-backend"
+    sys.path.insert(0, str(BACKEND))
+    from orchestrator import api, db as odb                    # noqa: E402
+    from orchestrator.data_loop import run_data_decision_loop  # noqa: E402
+    from orchestrator.drift import detect_drift                # noqa: E402
+    from orchestrator.profiler import profile_records          # noqa: E402
 
 PROJECT = "phantom-uplift"
 DATASET = "checkout_orders"

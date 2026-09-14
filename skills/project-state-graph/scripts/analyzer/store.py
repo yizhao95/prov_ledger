@@ -298,6 +298,13 @@ def start_run(
     return int(cur.lastrowid)
 
 
+def set_run_extensions(conn: sqlite3.Connection, run_id: int, extensions_json: Optional[str]) -> None:
+    """Rewrite a run's extensions_json (phase 6: the provider set + their
+    degradations are known only after the snapshot)."""
+    conn.execute("UPDATE analysis_run SET extensions_json=? WHERE id=?", (extensions_json, run_id))
+    conn.commit()
+
+
 def finish_run(conn: sqlite3.Connection, run_id: int) -> None:
     conn.execute(
         "UPDATE analysis_run SET finished_at=? WHERE id=?",

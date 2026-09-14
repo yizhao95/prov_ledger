@@ -8,6 +8,7 @@ three kinds of things that used to require editing the source:
 | **constraints** anchored to data points | surfaced at plan time, checked at close (a change to an anchored node that never read the constraint is recorded as `constraint_bypassed`) | "clean() must keep dropping zero-quantity rows" |
 | **name sets** the code analyzer recognises | which calls count as a train/test split, a model fit, an evaluation, a validator, a DataFrame constructor, an HTTP verb | your `my_split()` becomes a split node |
 | **drift kinds** over profile snapshots | `detect_drift` reports them next to the built-in kinds | "null fraction rose by 0.1 or more" |
+| **node-type providers** (phase 6) | the graph builder runs your `NodeTypeProvider` next to the built-in ones; `docs/conformance.md` proves it behaves | `# @dataset:` comments become `dataset` nodes |
 
 Everything is **explicit**: nothing is auto-discovered from installed packages,
 and only one file applies at a time. Every analysis records which file (and
@@ -200,7 +201,45 @@ cd <provledger checkout>/skills/project-state-graph/scripts && uv run python -m 
 #   run=1 seq=2 node_added [observed] plan=- step=- trigger=manual sha=3627ed9 ext=c62894c8 at=… payload=…
 ```
 
-## 7 · Error messages
+## 7 · Providers (node types)
+
+A third-party **node-type provider** registers here too — the graph builder
+runs it next to the built-in ones. How to write one, and how to prove it
+keeps the six contracts, is in [`docs/conformance.md`](conformance.md).
+
+```json
+{
+  "version": 1,
+  "providers": [
+    {"id": "acme.dataset_comments", "module": "acme_provider:DatasetComments", "enabled": true, "priority": 5, "timeout_s": 30},
+    {"id": "provledger.owned", "enabled": false}
+  ]
+}
+```
+
+| field | meaning |
+|---|---|
+| `id` | `vendor.name`; must equal the class's `type_id`; a duplicate id fails the load |
+| `module` | import path `pkg.mod:Class`. The interpreter that runs the analyzer must be able to import it — put the module's directory on `PYTHONPATH` (`PYTHONPATH=/path/to/module_dir uv run python -m analyzer …`); the analyzer's own `uv run` environment already carries `provledger`, so `from provledger.graph_api import …` inside your module works there. A built-in id (`provledger.symbol`, `provledger.owned`) may omit it |
+| `enabled` | default `true`; `false` disables — the only way to switch a built-in off |
+| `priority` | integer, larger runs first (built-ins are 0) |
+| `timeout_s` | budget per extraction (default 30); over budget → degraded |
+
+Nothing here raises at analysis time: an import that fails, a class that is
+not a `NodeTypeProvider`, a `type_id` that differs from the declared id, a
+required capability the host does not offer (`requires`), an exception, a
+timeout or a schema violation each become a **degradation record** — the run
+continues without that provider, the analyzer prints
+`WARNING: provider <id> degraded: <reason>` on stderr,
+`analysis_run.extensions_json.providers` says what happened
+(`SELECT extensions_json FROM analysis_run`), and `selfcheck` warns
+`providers_degraded`:
+
+```bash
+cd <provledger checkout>/skills/project-state-graph/scripts && uv run python selfcheck.py /tmp/myproj.db
+```
+
+## 9 · Error messages
 
 | message | cause |
 |---|---|
@@ -214,5 +253,9 @@ cd <provledger checkout>/skills/project-state-graph/scripts && uv run python -m 
 | `constraints[0] declares project 'other' but --project is 'myproj'` | import into the wrong project |
 | `version 2 is not supported` | this reader understands version 1 |
 | `not valid JSON` | trailing commas / comments — JSON, not JSON5 |
+| `providers[0] acme.x: module must be an import path like pkg.mod:Class` | registration without `pkg.mod:Class` |
+| `providers[0]: module is required (...)` | a non-built-in id without a module |
+| `duplicate id 'acme.x' in providers` | the same provider id twice |
+| (run record) `import failed: ModuleNotFoundError: ...` / `capability 'llm' unavailable on this host` | a provider that could not be loaded — recorded, never raised |
 
 Errors are raised by the loader before anything is applied.

@@ -12,3 +12,5 @@ tree-sitter-css>=0.25.0
 tree-sitter-html>=0.23.2
 tree-sitter-javascript>=0.25.0
 tree-sitter-python>=0.25.0
+# the backend itself, editable: `import provledger` works in the unified venv (FL-006)
+-e ./orchestrator-backend

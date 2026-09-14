@@ -15,13 +15,13 @@ from analyzer import cards, cli, history
 ROOT = Path(__file__).resolve().parents[4]          # tests -> scripts -> project-state-graph -> skills -> repo root
 REPOS = {
     "phantom-uplift": ROOT / "examples" / "phantom-uplift",
-    "corpus-basic_pipeline": Path(__file__).parent / "corpus" / "cases" / "basic_pipeline" / "base",
+    "corpus-basic_pipeline": __import__("tests.corpus.harness", fromlist=["default_corpus"]).default_corpus() / "basic_pipeline" / "base",
 }
 
 
 def _build(repo: Path, db: Path, monkeypatch=None) -> None:
     if monkeypatch is not None:
-        monkeypatch.setattr(history, "snapshot_run", lambda conn, root, run_id: 0)
+        monkeypatch.setattr(history, "snapshot_run", lambda conn, root, run_id, **kw: 0)   # phase 6: providers=, report=, file_map=
         monkeypatch.setattr(history, "resolve", lambda conn, run_id, arbitrate=None: {})
         monkeypatch.setattr(cards, "attach_history", lambda conn, limit=10: 0)
     cli.run(str(repo), "iso", str(db))

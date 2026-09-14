@@ -3,6 +3,8 @@ analyzer name sets and anchored constraints from ONE JSON file without
 touching source — `provledger-extensions.json`.
 
 Rules (spec §4, v2 C.2/C.5.3):
+- providers (phase 6): third-party NodeTypeProviders are registered here too
+  ({id, module "pkg.mod:Class", enabled, priority, timeout_s}); never discovered.
 - explicit, never auto-discovered from packages: exactly one file is read —
   `<repo>/provledger-extensions.json`, else `$PROVLEDGER_EXTENSIONS`, else
   `~/skill-workspace/provledger-extensions.json`; never merged.
@@ -66,12 +68,24 @@ class ConstraintDecl:
 
 
 @dataclass(frozen=True)
+class ProviderDecl:
+    """A registered NodeTypeProvider: `module` is an import path `pkg.mod:Class`
+    (optional for a built-in id, which only needs enabled/priority)."""
+    id: str
+    module: str | None = None
+    enabled: bool = True
+    priority: int = 0
+    timeout_s: float = 30.0
+
+
+@dataclass(frozen=True)
 class Extensions:
     path: str | None
     sha256: str | None
     drift_kinds: tuple[DriftKind, ...]
     namesets: tuple[NameSet, ...]
     constraints: tuple[ConstraintDecl, ...]
+    providers: tuple[ProviderDecl, ...] = ()
 
     def fingerprint(self) -> dict | None:
         """The shape written to analysis_run.extensions_json; None without a file."""
@@ -82,7 +96,8 @@ class Extensions:
             sets.setdefault(ns.set, []).extend([*ns.add, *("-" + r for r in ns.remove)])
         return {"path": self.path, "sha256": self.sha256,
                 "drift_kinds": [k.id for k in sorted(self.drift_kinds, key=lambda k: (-k.priority, k.id))],
-                "namesets": sets, "constraints": len(self.constraints)}
+                "namesets": sets, "constraints": len(self.constraints),
+                "providers": [d.id for d in sorted(self.providers, key=lambda d: (-d.priority, d.id))]}
 
 
 EMPTY = Extensions(None, None, (), (), ())
@@ -181,7 +196,39 @@ def _constraint(i: int, obj: Any) -> ConstraintDecl:
                           keywords=_strs(where, obj, "keywords"), why_ref=why_ref, why_visibility=vis)
 
 
-def _check_conflicts(kinds: tuple[DriftKind, ...], sets: tuple[NameSet, ...]) -> None:
+MODULE_RE = re.compile(r"^[A-Za-z_][\w.]*:[A-Za-z_]\w*$")
+BUILTIN_PROVIDER_IDS = ("provledger.symbol", "provledger.owned")
+
+
+def _provider(i: int, obj: Any) -> ProviderDecl:
+    where = f"providers[{i}]"
+    if not isinstance(obj, dict):
+        raise _err(where, "must be an object")
+    pid = obj.get("id")
+    if not isinstance(pid, str) or not ID_RE.match(pid):
+        raise _err(where, f"id must be namespaced vendor.name ({ID_RE.pattern}), got {pid!r}")
+    where = f"providers[{i}] {pid}"
+    module = obj.get("module")
+    if module is None and pid not in BUILTIN_PROVIDER_IDS:
+        raise _err(where, "module is required (an import path like pkg.mod:Class); only a built-in id may omit it")
+    if module is not None and (not isinstance(module, str) or not MODULE_RE.match(module)):
+        raise _err(where, f"module must be an import path like pkg.mod:Class, got {module!r}")
+    enabled = obj.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise _err(where, "enabled must be true/false")
+    timeout = obj.get("timeout_s", 30.0)
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+        raise _err(where, f"timeout_s must be a positive number (got {timeout!r})")
+    return ProviderDecl(id=pid, module=module, enabled=enabled, priority=_int(where, obj, "priority"),
+                        timeout_s=float(timeout))
+
+
+def _check_conflicts(kinds: tuple[DriftKind, ...], sets: tuple[NameSet, ...], provs: tuple[ProviderDecl, ...] = ()) -> None:
+    seen_p: set[str] = set()
+    for d in provs:
+        if d.id in seen_p:
+            raise ExtensionsError(f"duplicate id {d.id!r} in providers — ids are never silently overridden")
+        seen_p.add(d.id)
     seen: dict[str, int] = {}
     for k in kinds:
         if k.id in seen:
@@ -221,15 +268,16 @@ def load(path: str | None) -> Extensions:
     version = data.get("version", VERSION)
     if version != VERSION:
         raise ExtensionsError(f"{path}: version {version!r} is not supported (this reader understands version {VERSION})")
-    for key in ("drift_kinds", "namesets", "constraints"):
+    for key in ("drift_kinds", "namesets", "constraints", "providers"):
         if key in data and not isinstance(data[key], list):
             raise ExtensionsError(f"{path}: {key} must be a list")
     kinds = tuple(_drift_kind(i, o) for i, o in enumerate(data.get("drift_kinds", [])))
     sets = tuple(_nameset(i, o) for i, o in enumerate(data.get("namesets", [])))
     cons = tuple(_constraint(i, o) for i, o in enumerate(data.get("constraints", [])))
-    _check_conflicts(kinds, sets)
+    provs = tuple(_provider(i, o) for i, o in enumerate(data.get("providers", [])))
+    _check_conflicts(kinds, sets, provs)
     return Extensions(path=path, sha256=hashlib.sha256(raw).hexdigest(), drift_kinds=kinds, namesets=sets,
-                      constraints=cons)
+                      constraints=cons, providers=provs)
 
 
 def current(repo_root: str | None = None) -> Extensions:

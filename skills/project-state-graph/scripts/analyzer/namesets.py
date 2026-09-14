@@ -12,9 +12,6 @@ priority, so the highest priority lands last and wins.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 DEFAULTS: dict[str, frozenset[str]] = {
     "split_funcs": frozenset({"train_test_split"}),
     "fit_methods": frozenset({"fit", "train"}),
@@ -28,20 +25,10 @@ DEFAULTS: dict[str, frozenset[str]] = {
     "http_libs": frozenset({"requests", "httpx", "aiohttp", "session", "client"}),
 }
 
-# The loader lives in the backend package (one file format, one validator).
-_BUNDLED_ORCH = Path(__file__).resolve().parents[4] / "orchestrator-backend"
-_DEV_ORCH = Path.home() / "skill-workspace" / "orchestrator"
-for _root in (_BUNDLED_ORCH, _DEV_ORCH):
-    if (_root / "orchestrator" / "extensions.py").exists() and str(_root) not in sys.path:
-        sys.path.insert(0, str(_root))
-try:
-    from orchestrator import extensions as _ext
-    ExtensionsError = _ext.ExtensionsError
-except ImportError:  # standalone checkout without the backend: defaults only
-    _ext = None
+# The loader lives in the backend package, reached through the one shim (FL-006).
+from ._host import extensions as _ext  # noqa: E402
 
-    class ExtensionsError(ValueError):
-        """The extensions file is malformed or ambiguous; nothing is applied."""
+ExtensionsError = _ext.ExtensionsError
 
 _ACTIVE: dict[str, frozenset[str]] | None = None
 
@@ -51,11 +38,6 @@ def configure(repo_root: str | None) -> dict | None:
     fragment {path, sha256, namesets} or None when no file applies. Any error
     leaves the previous configuration untouched."""
     global _ACTIVE
-    if _ext is None:
-        if repo_root and (Path(repo_root) / "provledger-extensions.json").exists():
-            raise ExtensionsError("provledger-extensions.json found but the orchestrator package (its loader) is not importable")
-        _ACTIVE = None
-        return None
     ext = _ext.current(repo_root)
     if ext.path is None:
         _ACTIVE = None
@@ -70,12 +52,15 @@ def configure(repo_root: str | None) -> dict | None:
     return {"path": ext.path, "sha256": ext.sha256, "namesets": ext.fingerprint()["namesets"]}
 
 
+def current_extensions(repo_root: str | None):
+    """The Extensions object in force for `repo_root` (EMPTY without a file)."""
+    return _ext.current(repo_root)
+
+
 def extensions_fingerprint(repo_root: str | None) -> dict | None:
     """The full fingerprint of the extensions file in force for `repo_root`
     (drift kinds, namesets, constraints, sha256) — what analysis_run records.
     None without a file (or without the loader)."""
-    if _ext is None:
-        return None
     return _ext.current(repo_root).fingerprint()
 
 
