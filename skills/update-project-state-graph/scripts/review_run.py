@@ -11,6 +11,7 @@ chooses the test command, decides a signature override and supplies reasons.
         [--tests "<command>"]                   # 4b re-test, run in the repo; absent -> logged as skipped
         [--accept-signature "<reason>"]         # may override ONLY the signature gate; reason is logged
         [--allow-dirty]                         # refresh despite uncommitted tracked changes (traced); default: FAIL
+        [--as-recovery <plan>-REVIEW.1.k]       # REVIEW.1 FAILED: run 1–4c as that PENDING recovery sub-step
         [--dry-run]                             # steps 0–3 only, nothing written
         [--json]                                # machine-readable result on stdout (last line)
 
@@ -146,6 +147,18 @@ class Driver:
         registered_sha = entry.get("commit_sha") or ""
         repo = entry["repo"]
         db_path = entry.get("db_path")
+        if a.as_recovery:
+            # FL-030: REVIEW.1 FAILED, the agent hung a recovery sub-step under it —
+            # run 1–4c AS that sub-step (start/complete it); the FL-019 close then
+            # sees a refreshed registry and stated reasons.
+            sub = self.read("SELECT status, parent_step_id FROM Steps WHERE step_id = ?", a.as_recovery)
+            parent_status = self.read("SELECT status FROM Steps WHERE step_id = ?", self.child)
+            if not sub or sub[0][1] != self.child or not parent_status or parent_status[0][0] != "FAILED" \
+                    or sub[0][0] != "PENDING":
+                _die(f"--as-recovery {a.as_recovery}: must be a PENDING sub-step of {self.child}, which must be FAILED "
+                     f"(got sub={sub[0][0] if sub else None}, parent={parent_status[0][0] if parent_status else None})", 6)
+            self.child = a.as_recovery
+            self.say(f"[recovery] running the review as {self.child}")
         rows = self.read("SELECT status FROM Steps WHERE step_id = ?", self.child)
         child_status = rows[0][0] if rows else None
         if child_status is None:
@@ -170,10 +183,12 @@ class Driver:
         self.say(lock)
         if not a.dry_run and not resumed:
             self.op("append-log", {"step_id": self.review_step, "text": lock})
-            self.op("start-step", {"step_id": self.child, "type": "SUB_AGENT",
-                                   "agent_input": f"review_run.py --plan-id {self.plan} --project {self.project}"
-                                                  f" --reasons {a.reasons} --tests {a.tests!r}",
-                                   "log_context": lock})
+            start = {"step_id": self.child, "log_context": lock,
+                     "agent_input": f"review_run.py --plan-id {self.plan} --project {self.project}"
+                                    f" --reasons {a.reasons} --tests {a.tests!r}"}
+            if not a.as_recovery:
+                start["type"] = "SUB_AGENT"        # a recovery sub-step keeps its declared type
+            self.op("start-step", start)
         if not db_path or not os.path.exists(db_path):
             reason = f"no deep graph for {self.project!r} (db_path={db_path}) — run project-state-graph first"
             if a.dry_run:
@@ -315,6 +330,8 @@ def main() -> None:
     ap.add_argument("--reasons", default="unstated", help="stub | unstated | ask | <file.json>")
     ap.add_argument("--tests", default=None)
     ap.add_argument("--accept-signature", default=None, metavar="REASON")
+    ap.add_argument("--as-recovery", default=None, metavar="STEP_ID",
+                    help="run the review as this PENDING sub-step of a FAILED REVIEW.1 (FL-030)")
     ap.add_argument("--allow-dirty", action="store_true",
                     help="refresh even with uncommitted tracked changes (traced as a manual verdict)")
     ap.add_argument("--dry-run", action="store_true")

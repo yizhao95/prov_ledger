@@ -39,6 +39,22 @@ def db_path_for(project: str, registry_path: str | None = None) -> str | None:
     return None
 
 
+def registered_sha_for(project: str, registry_path: str | None = None) -> str | None:
+    """projects.json -> commit_sha the project's graph was built at."""
+    path = registry_path or os.environ.get("PSG_REGISTRY_PATH", DEFAULT_REGISTRY_PATH)
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            reg = json.load(f)
+    except (OSError, ValueError):
+        return None
+    for p in (reg.get("projects", []) if isinstance(reg, dict) else []):
+        if p.get("name") == project:
+            return p.get("commit_sha") or None
+    return None
+
+
 def repo_for(project: str, registry_path: str | None = None) -> str | None:
     """projects.json -> repo path of `project` (the extensions file lives there)."""
     path = registry_path or os.environ.get("PSG_REGISTRY_PATH", DEFAULT_REGISTRY_PATH)

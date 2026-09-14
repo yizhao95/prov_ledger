@@ -299,3 +299,32 @@ def test_untracked_files_are_not_dirty(ws):
     assert p.returncode == 0, p.stdout + p.stderr
     assert ws.plan(plan_id) == ("COMPLETED", "reviewed")
     assert "[MANUAL VERDICT]" not in ws.step(f"{plan_id}-REVIEW.1")[1]
+
+
+# ── FL-030: --as-recovery re-runs 1–4c under a recovery sub-step ─────────────
+
+def test_as_recovery_reruns_the_review_under_a_recovery_sub_step(ws):
+    head = ws.change(BODY_CHANGE)
+    plan_id = ws.needs_review_plan()
+    p = ws.review_run(plan_id, "--reasons", "stub", "--tests", "false")     # 4b fails -> plan FAILED
+    assert p.returncode == 1 and ws.plan(plan_id)[0] == "FAILED"
+    child = f"{plan_id}-REVIEW.1"
+    ws.op("deviate", {"parent_step_id": child, "justification": "tests command was wrong; re-run the review",
+                      "sub_steps": [{"description": "ANALYSIS: re-run the review as recovery", "type": "ANALYSIS"}]})
+    runs_before = ws.runs()
+    p = ws.review_run(plan_id, "--reasons", "stub", "--as-recovery", f"{child}.1")
+    assert p.returncode == 0, p.stdout + p.stderr
+    out = _json_tail(p)
+    assert out["closed"] == "COMPLETED" and out["slots"] == 1 and out["filled"] == 1
+    assert ws.runs() == runs_before + 1 and ws.registered_sha() == head
+    assert ws.plan(plan_id) == ("COMPLETED", "reviewed")
+    assert ws.step(f"{child}.1")[0] == "COMPLETED" and ws.step(child)[0] == "FAILED"
+    assert [t for _, t in ws.reasons(plan_id)] and all(t for _, t in ws.reasons(plan_id))   # stated, not backstopped
+    assert "[REVIEW LOCK]" in ws.step(f"{child}.1")[1]
+
+
+def test_as_recovery_requires_a_pending_sub_step_of_a_failed_review(ws):
+    ws.change(BODY_CHANGE)
+    plan_id = ws.needs_review_plan()
+    p = ws.review_run(plan_id, "--reasons", "stub", "--as-recovery", f"{plan_id}-REVIEW.1.9")
+    assert p.returncode == 6 and "REVIEW.1.9" in (p.stdout + p.stderr)
