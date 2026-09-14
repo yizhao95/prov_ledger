@@ -40,7 +40,40 @@ not something inferred from the goal text (FL-014, phase 3.5).
 - Registry: `~/skill-workspace/project-graphs/projects.json` →
   the project's `repo`, `db_path` (deep graph), and `commit_sha`.
 
-## The Flow
+## Run it: `scripts/review_run.py` (phase 4)
+
+The flow below is **executed by a script**, not walked by hand. The agent's job
+shrinks to three decisions: which test command to re-run, whether a `signature`
+gap is acceptable, and what the reasons are.
+
+```bash
+PY=~/skill-workspace/.venv/bin/python
+# 1. look before writing anything (steps 0–3 only; exit 1 = the gates would fail)
+$PY skills/update-project-state-graph/scripts/review_run.py --plan-id <plan> --project <name> --dry-run
+# 2. run it: lock -> gates -> refresh (PROVLEDGER_* attribution) -> tests -> selfcheck -> checklist
+$PY .../review_run.py --plan-id <plan> --project <name> --tests "<suite command>" --reasons ask
+#    exit 6 + the closed checklist; REVIEW.1 stays IN_PROGRESS
+# 3. answer every slot in one sentence ("unstated" when you do not know), then resume at 4c
+$PY .../review_run.py --plan-id <plan> --project <name> --reasons reasons.json     # -> complete-step REVIEW.1
+```
+
+| Flag | Meaning |
+|---|---|
+| `--reasons stub\|unstated\|ask\|<file.json>` | `stub` = "scenario: <event_types>" per slot (scenario tests only); `unstated` = every slot NULL; `ask` = print the checklist and stop (exit 6, resumable); file = `[{qualified_name\|node_key, text}]`, an unknown key exits 6 and writes nothing |
+| `--tests "<cmd>"` | the 4b re-test, run inside the repo; omitted = logged as *tests skipped*, never silent |
+| `--accept-signature "<reason>"` | may override the `signature` gate **only** (FL-018 additive kwargs); the reason is written into the REVIEW.1 log and summary; any other failing gate still fails |
+| `--dry-run` | steps 0–3, nothing written (no lock line, no start-step, no refresh) |
+| `--json` | machine-readable result as the last stdout line: `{verdict, gates, range, refreshed_sha, slots, filled, unstated, closed}` |
+| `--registry <projects.json>` | isolated registry (tests / scenarios); defaults to `PSG_REGISTRY_PATH` or `~/skill-workspace/project-graphs/projects.json` |
+
+Exit codes: `0` closed COMPLETED · `1` closed FAILED (4a gaps, refresh / tests /
+selfcheck failure) · `5` a write script failed · `6` bad input. Every write
+still goes through the executing-plans scripts (`append-log`, `start-step`,
+`reason-slots`, `reason-fill`, `complete-step` / `fail-step`) — the driver adds
+no second write path. If `REVIEW.1` is already `IN_PROGRESS` the driver resumes
+at 4c (no second refresh).
+
+## The Flow (what the driver does)
 
 ```
 0. LOCK the registered sha         registered_sha = registry["commit_sha"]  (read it FIRST,
@@ -162,6 +195,7 @@ philosophy as the rest of the reviewer: **report and FAIL, never auto-fix**.
 | Run graph gates (undefined=HARD, isolated=warn) | `selfcheck.run(db_path)` (also run by `init_project.sh` [4/4]) |
 | Refresh the deep graph | `project-state-graph/scripts/init_project.sh` |
 | Close the plan (drive the child step) | `executing-plans/scripts/complete-step.sh` / `fail-step.sh` on `<plan>-REVIEW.1` |
+| The whole flow, deterministically | `scripts/review_run.py --plan-id P --project X [--tests ...] [--reasons ...]` |
 
 Run the helpers with the project-state-graph venv:
 `~/skill-workspace/orchestrator/.venv/bin/python` (stdlib-only module).
@@ -192,6 +226,8 @@ Run the helpers with the project-state-graph venv:
 | Closing COMPLETED without refreshing the graph | A clean review MUST refresh the graph + re-run tests first. |
 | Building the graph from scratch here | Wrong skill — that's `project-state-graph`. |
 | Skipping the close | The plan stays stuck in NEEDS_REVIEW. Always finalize the child step (`complete-step`/`fail-step` on `<plan>-REVIEW.1`). |
+| Walking steps 0–4c by hand | Use `review_run.py`; hand-driving skips the lock line, the attribution env or the checklist sooner or later (phase 2–3.5 dogfood). |
+| Overriding any gate but `signature` | `--accept-signature` covers exactly one gate; a stale reference or data drift is a real gap — fix the code or FAIL. |
 
 ## When the project has no deep graph yet
 
