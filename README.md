@@ -313,6 +313,7 @@ This README is the high-level entry point. What's in the repo today:
 | [`examples/silent-class-drop/`](examples/silent-class-drop/) | the demo: how it works, the 5-step plan, regenerating the GIF/screenshots |
 | [`docs/benchmark-silent-class-drop.md`](docs/benchmark-silent-class-drop.md) | the mini-benchmark writeup (0.31 → 0.91) |
 | Each skill's `SKILL.md` + `reference/` | the iron-law workflows (writing-plans, executing-plans, project-state-graph, update-project-state-graph) |
+| [`docs/extensions.md`](docs/extensions.md) | register constraints, analyzer name sets and drift kinds in `provledger-extensions.json` without touching source; discovery, priorities, reproducibility |
 | [`skills/project-state-graph/scripts/tests/scenarios/README.md`](skills/project-state-graph/scripts/tests/scenarios/README.md) | the timeline-scenario suite: what changing a node triggers, asserted as an event stream with `must_not`, golden per scenario, fully isolated |
 
 A deeper architecture/reference documentation tree exists as maintainer
@@ -409,9 +410,12 @@ orchestrator DB with the `ORCH_DB` environment variable (defaults to
 ## 🤝 Contributing
 
 Issues and PRs welcome. Good first contributions: run `make demo` and report
-anything that doesn't reproduce; add a drift kind to `orchestrator/drift.py`
-(with a test); extend the demo with a second silent-failure scenario; improve
-dtype coverage of an analyzer in `skills/project-state-graph/`.
+anything that doesn't reproduce; register a drift kind, a name set or a
+constraint in `provledger-extensions.json` for your own project (see
+[`docs/extensions.md`](docs/extensions.md) — no source changes needed; PRs
+for new built-ins are still welcome); extend the demo with a second
+silent-failure scenario; improve dtype coverage of an analyzer in
+`skills/project-state-graph/`.
 
 ## 📫 Contact
 
