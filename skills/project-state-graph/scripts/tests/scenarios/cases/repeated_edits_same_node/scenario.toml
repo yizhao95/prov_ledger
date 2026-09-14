@@ -1,0 +1,54 @@
+# The same node edited by plan after plan: the expectation hung on it by the
+# first edit is judged at the NEXT close (outcomes are backfilled once, by the
+# first other plan that closes) as churned, with both plans in evidence; the
+# later edits do not re-judge it.
+[scenario]
+name = "repeated_edits_same_node"
+fixture = "pipeline_repo"
+
+[[tasks]]
+name = "t1"
+goal = "loosen the qty filter"
+declared_targets = ["pkg.pipeline.clean"]
+change = { replace = { "pkg/pipeline.py" = [['r["qty"] > MIN_QTY', 'r["qty"] >= MIN_QTY']] } }
+expectations = [ { target = "pkg.pipeline.clean", target_kind = "node", claim = "the filter settles here", channel = "graph" } ]
+reasons = { "pkg.pipeline.clean" = "first pass at the filter" }
+
+[[tasks]]
+name = "t2"
+goal = "require a positive price too"
+declared_targets = ["pkg.pipeline.clean"]
+change = { replace = { "pkg/pipeline.py" = [['    df = [r for r in df if r.get("label")]', '    df = [r for r in df if r.get("label") and r["price"] > 0]']] } }
+reasons = { "pkg.pipeline.clean" = "second pass: negative prices are refunds" }
+
+[[tasks]]
+name = "t3"
+goal = "tighten the qty filter again"
+declared_targets = ["pkg.pipeline.clean"]
+change = { replace = { "pkg/pipeline.py" = [['r["qty"] >= MIN_QTY', 'r["qty"] > MIN_QTY + 1']] } }
+reasons = { "pkg.pipeline.clean" = "third pass: single-item orders are samples" }
+
+[[tasks]]
+name = "t4"
+goal = "annotate the functions"
+declared_targets = ["pkg.pipeline.main"]
+change = { generated = "add_comments" }
+reasons = "stub"
+
+[expect]
+events = [
+  { plan = "t1", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
+  { plan = "t2", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
+  { plan = "t3", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
+  { plan = "t1", type = "outcome", target = "pkg.pipeline.clean", kind = "survival", signal = "churned", backfilled_by = "t2", plans = ["t1", "t2"] },
+  { plan = "t4", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
+]
+must_not = [
+  { plan = "t1", type = "outcome", signal = "untouched" },
+  { plan = "t1", type = "outcome", signal = "untouched_consumed" },
+  { plan = "t1", type = "outcome", backfilled_by = "t3" },      # judged once, at the first close after it
+  { plan = "t1", type = "outcome", backfilled_by = "t4" },
+  { type = "node_removed" },
+  { type = "identity_ambiguous" },
+  { type = "plan", closed = "FAILED" },
+]
