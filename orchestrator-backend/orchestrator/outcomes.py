@@ -8,6 +8,8 @@ Never blocks a close: any failure becomes a none_available with the error.
 """
 from __future__ import annotations
 
+import json
+
 from . import db, drift, psg_bridge, survival
 
 
@@ -41,17 +43,41 @@ def _observed(conn, e: dict, closing_plan_id: str) -> tuple[str, dict, str, str,
     return ("none_available", {"channel": ch}, ch, "none", f"unknown channel {ch!r}")
 
 
+def _verdict_key(sig: dict) -> tuple:
+    """What makes two survival verdicts 'the same': the signal and the plans
+    behind it (churned by three plans is news after churned by two)."""
+    return (sig.get("signal"), tuple(sig.get("plans") or sig.get("changed_by") or ()))
+
+
+def _latest_survival_key(conn, expectation_id: int) -> tuple | None:
+    """The verdict key of the expectation's latest survival-path outcome (a
+    survival row, or a none_available written by the survival path)."""
+    rows = [o for o in db.get_outcomes(conn, expectation_id)
+            if o["kind"] == "survival" or (o["kind"] == "none_available" and o["source"] == "state_graph")]
+    if not rows:
+        return None
+    try:
+        value = json.loads(rows[-1]["value_json"] or "{}")
+    except ValueError:
+        value = {}
+    return _verdict_key(value) if rows[-1]["kind"] == "survival" else ("unknown", ())
+
+
 def backfill(conn, project: str, psg_db_path: str | None, closing_plan_id: str) -> dict:
     """Produce the missing outcomes for `project`'s pending expectations.
     Returns counts per kind plus errors (recorded as none_available)."""
     counts = {"observed": 0, "survival": 0, "none_available": 0, "skipped_graph_channel": 0, "errors": 0}
-    # survival: node expectations (target_kind node, or channel graph)
+    # survival: node/column expectations, RE-JUDGED at every close (phase 5):
+    # a new outcome is appended only when the verdict (signal + the plans
+    # behind it) differs from the expectation's latest survival outcome.
     for e in db.get_pending_expectations(conn, project, exclude_plan_id=closing_plan_id, kind="survival"):
-        if e["target_kind"] != "node" and e["channel"] != "graph":
+        if e["target_kind"] not in ("node", "column") and e["channel"] != "graph":
             continue
         try:
             consumers = psg_bridge.output_consumers(psg_db_path, e["target"])
             sig = survival.derive(psg_db_path, e["target"], e["created_at"], consumers=consumers)
+            if _verdict_key(sig) == _latest_survival_key(conn, e["id"]):
+                continue                                   # same verdict as last time: nothing new to record
             if sig["signal"] == "unknown":
                 db.insert_outcome(conn, expectation_id=e["id"], kind="none_available", value=sig, source="state_graph",
                                   tier="none", reason=sig.get("reason"), backfilled_by_plan=closing_plan_id)

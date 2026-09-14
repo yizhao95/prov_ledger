@@ -1,7 +1,7 @@
 # The same node edited by plan after plan: the expectation hung on it by the
-# first edit is judged at the NEXT close (outcomes are backfilled once, by the
-# first other plan that closes) as churned, with both plans in evidence; the
-# later edits do not re-judge it.
+# first edit is judged churned at the next close (t2, plans t1+t2) and
+# re-judged at every later close — a new outcome is appended only when the
+# verdict changes (t3 adds a plan: appended; t4 changes nothing: silent).
 [scenario]
 name = "repeated_edits_same_node"
 fixture = "pipeline_repo"
@@ -41,13 +41,13 @@ events = [
   { plan = "t2", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
   { plan = "t3", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
   { plan = "t1", type = "outcome", target = "pkg.pipeline.clean", kind = "survival", signal = "churned", backfilled_by = "t2", plans = ["t1", "t2"] },
+  { plan = "t1", type = "outcome", target = "pkg.pipeline.clean", kind = "survival", signal = "churned", backfilled_by = "t3", plans = ["t1", "t2", "t3"] },
   { plan = "t4", type = "plan", closed = "COMPLETED", review_state = "reviewed" },
 ]
 must_not = [
   { plan = "t1", type = "outcome", signal = "untouched" },
   { plan = "t1", type = "outcome", signal = "untouched_consumed" },
-  { plan = "t1", type = "outcome", backfilled_by = "t3" },      # judged once, at the first close after it
-  { plan = "t1", type = "outcome", backfilled_by = "t4" },
+  { plan = "t1", type = "outcome", backfilled_by = "t4" },      # t4 changed nothing: the verdict did not move, nothing appended
   { type = "node_removed" },
   { type = "identity_ambiguous" },
   { type = "plan", closed = "FAILED" },
