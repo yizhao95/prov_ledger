@@ -26,7 +26,7 @@ class DatasetComments:
                 continue
             mod = rel[:-3].replace("/", ".")
             for n, line in enumerate(open(f"{ctx.repo_root}/{rel}", encoding="utf-8"), 1):
-                if line.startswith("# @dataset:"):
+                if line.strip().startswith("# @dataset:"):
                     name = line.split(":", 1)[1].strip()
                     qn = f"{mod}:{name}"
                     out.append(NodeObservation(
@@ -40,7 +40,10 @@ class DatasetComments:
         return {"required": ["source"], "types": {"source": "str"}}   # "tier" is always forbidden
 
     def declared_stability(self):
-        return {m: "preserved" for m in MUTATIONS}                     # what each mutation does to YOUR nodes
+        d = {m: "preserved" for m in MUTATIONS}                        # what each mutation does to YOUR nodes
+        d["strip_comments"] = d["reformat"] = "broken"                 # both drop comments (reformat re-emits the AST)
+        d["move_file"] = "broken"                                      # the module path is part of a dataset's name
+        return d
 ```
 
 - `ctx.conn_ro` is a **read-only** connection to the graph being built (this
@@ -65,7 +68,7 @@ result that violates your schema / claims another `type_id` / uses an
 unknown layer → the **whole** result set is rejected. Partial results never
 reach the graph.
 
-Register it in `provledger-extensions.json` (see `docs/extensions.md` §8):
+Register it in `provledger-extensions.json` (see `docs/extensions.md` §7):
 
 ```json
 {"version": 1,
@@ -80,6 +83,39 @@ report = conformance.run(DatasetComments())        # the shipped mutation corpus
 print(report.text()); assert report.ok
 ```
 
+The shipped corpus contains plain Python functions and classes. If your
+provider extracts something the corpus does not contain (say `# @dataset:`
+comments), `stability_matches_declaration` has nothing to check: the report
+says `[WARN] … no observation of this provider … pass corpus=` and that is
+**not** evidence. Pass your own corpus:
+
+```python
+report = conformance.run(DatasetComments(), corpus=Path("my_corpus/cases"))
+```
+
+`corpus` is the directory that holds one sub-directory per case, laid out as
+`<case>/base/` (the repository), `<case>/expect.toml` and
+`<case>/variants/<mutation>/` (a full copy of the repository after a
+hand-written mutation). `expect.toml` declares the symbols and which
+mutations apply:
+
+```toml
+[case]
+name = "dataset_comments"
+symbols = ["etl.jobs:orders"]
+
+[generated]                                # applied by the stdlib mutators: rename_variable,
+rename_variable = { identity = "preserved" }   # rename_function, strip_comments, add_comments, reformat
+strip_comments  = { identity = "broken" }
+reformat        = { identity = "broken" }
+
+[variants]                                 # one table per variants/<mutation>/ directory
+move_file       = { identity = "broken" }
+```
+
+Only the ten `MUTATIONS` count; a corpus root without case directories has
+zero cases and produces the same warning.
+
 Six contracts, each a line of the report:
 
 | check | what it demands | what a failure looks like |
@@ -92,7 +128,9 @@ Six contracts, each a line of the report:
 | `performance_budget` | the slowest base extraction stays inside `timeout_s` (warning) | `slowest base extraction 41.20s vs budget 30.0s — over budget` |
 
 **Honesty, not stability.** A provider whose identity breaks on
-`rename_variable` passes as long as it *says* so. The built-in owned
+`rename_variable` passes as long as it *says* so. `reformat` re-emits the
+AST and therefore drops comments — a comment-based provider must declare it
+`broken`, exactly like `strip_comments`. The built-in owned
 provider declares `rename_variable: broken` — renaming the variable that
 holds a dataframe is a new data node by design. A corpus case a mutation
 never reaches is no evidence either way. What fails is the lie: the package
@@ -107,6 +145,23 @@ observations join the match so owned nodes can inherit identity:
 ```python
 conformance.run(BuiltinOwnedProvider(), context_factory=build_graph, companions=[BuiltinSymbolProvider()])
 ```
+
+## Running the analyzer with your provider
+
+The analyzer's own environment (`uv run python -m analyzer …` from
+`skills/project-state-graph/scripts`) carries `provledger`, so a provider that
+imports `provledger.graph_api` loads there; your module itself must be on the
+interpreter's path — put its directory on `PYTHONPATH`:
+
+```bash
+cd <provledger checkout>/skills/project-state-graph/scripts
+PYTHONPATH=/path/to/your/module_dir uv run python -m analyzer /path/to/repo --project myproj --db-path /tmp/myproj.db
+uv run python selfcheck.py /tmp/myproj.db          # [WARN] providers_degraded: … when something did not load
+```
+
+A provider that cannot be loaded or that fails never stops the run: the
+analyzer prints `WARNING: provider <id> degraded: <reason>` on stderr, the run
+record says the same, and `selfcheck` warns.
 
 ## What the run records
 

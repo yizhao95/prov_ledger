@@ -220,7 +220,7 @@ keeps the six contracts, is in [`docs/conformance.md`](conformance.md).
 | field | meaning |
 |---|---|
 | `id` | `vendor.name`; must equal the class's `type_id`; a duplicate id fails the load |
-| `module` | import path `pkg.mod:Class` (the module must be importable in the venv that runs the analyzer); a built-in id (`provledger.symbol`, `provledger.owned`) may omit it |
+| `module` | import path `pkg.mod:Class`. The interpreter that runs the analyzer must be able to import it — put the module's directory on `PYTHONPATH` (`PYTHONPATH=/path/to/module_dir uv run python -m analyzer …`); the analyzer's own `uv run` environment already carries `provledger`, so `from provledger.graph_api import …` inside your module works there. A built-in id (`provledger.symbol`, `provledger.owned`) may omit it |
 | `enabled` | default `true`; `false` disables — the only way to switch a built-in off |
 | `priority` | integer, larger runs first (built-ins are 0) |
 | `timeout_s` | budget per extraction (default 30); over budget → degraded |
@@ -229,8 +229,15 @@ Nothing here raises at analysis time: an import that fails, a class that is
 not a `NodeTypeProvider`, a `type_id` that differs from the declared id, a
 required capability the host does not offer (`requires`), an exception, a
 timeout or a schema violation each become a **degradation record** — the run
-continues without that provider, `analysis_run.extensions_json.providers`
-says what happened, and `selfcheck` warns `providers_degraded`.
+continues without that provider, the analyzer prints
+`WARNING: provider <id> degraded: <reason>` on stderr,
+`analysis_run.extensions_json.providers` says what happened
+(`SELECT extensions_json FROM analysis_run`), and `selfcheck` warns
+`providers_degraded`:
+
+```bash
+cd <provledger checkout>/skills/project-state-graph/scripts && uv run python selfcheck.py /tmp/myproj.db
+```
 
 ## 9 · Error messages
 
