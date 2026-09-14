@@ -188,10 +188,10 @@ class Driver:
             failing = [g for g, v in verdict["gates"].items() if not v]
             if failing == ["signature"]:
                 ok = True
-                self.manual = f"[manual verdict] signature gate overridden: {a.accept_signature}"
+                self.manual = f"[MANUAL VERDICT] signature gate overridden: {a.accept_signature}"
                 self.say(self.manual)
             else:
-                self.say(f"[manual verdict] --accept-signature ignored: failing gates {failing} are not just signature")
+                self.say(f"[MANUAL VERDICT] --accept-signature ignored: failing gates {failing} are not just signature")
         self.result["verdict"] = ok
         if a.dry_run:
             self.say(f"[dry-run] verdict {'PASS' if ok else 'FAIL'}; nothing written")
