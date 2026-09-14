@@ -24,56 +24,14 @@ EVENT_ORDER = ("node_matched", "node_renamed", "node_moved", "node_changed",
                "node_added", "node_removed", "identity_ambiguous", "identity_asserted")
 
 
-@dataclass(frozen=True)
-class Row:
-    """One node_snapshot row (the matcher's only input)."""
-    snapshot_id: int
-    node_id: int | None
-    node_key: str
-    node_type: str
-    qualified_name: str
-    file_path: str | None
-    line_start: int | None
-    line_end: int | None
-    struct_sig: str | None
-    dataflow_sig: str | None
-    dataflow_trivial: bool
-    owner_qn: str | None = None   # OWNED_TYPES only: the owner's qualified_name
-    name: str | None = None       # OWNED_TYPES only: the local name (var / column)
+# The host-owned matching contract (Row/Pair/Ambiguity/Assertion/MatchOutcome,
+# match) lives in the package (graph_api, phase 6); re-exported here so the
+# analyzer and its tests keep their names.
+from ._host import graph_api as _g  # noqa: E402
 
-
-@dataclass(frozen=True)
-class Pair:
-    prev: Row
-    cur: Row
-    via: str
-    changed: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class Ambiguity:
-    layer: str
-    prev: tuple[Row, ...]
-    cur: tuple[Row, ...]
-
-
-@dataclass(frozen=True)
-class Assertion:
-    cur_qualified_name: str
-    chosen_prev_key: str
-    evidence: str
-    arbiter: str
-
-
-@dataclass
-class MatchOutcome:
-    pairs: list[Pair]
-    removed: list[Row]
-    added: list[Row]
-    ambiguous: list[Ambiguity] = field(default_factory=list)
-
-
-Arbitrate = Callable[[list[Ambiguity]], list[Assertion]]
+Row, Pair, Ambiguity, Assertion, MatchOutcome, Arbitrate = (
+    _g.Row, _g.Pair, _g.Ambiguity, _g.Assertion, _g.MatchOutcome, _g.Arbitrate)
+_changed, _group, _LAYERS, match = _g._changed, _g._group, _g._LAYERS, _g.match
 
 
 # ── snapshot ─────────────────────────────────────────────────────────────────
@@ -201,80 +159,6 @@ def _rows(conn, run_id: int, *, keyed_only: bool = False) -> list[Row]:
 
 
 # ── matching (pure) ──────────────────────────────────────────────────────────
-def _changed(p: Row, c: Row) -> tuple[str, ...]:
-    return tuple(f for f in ("qualified_name", "file_path", "struct_sig", "dataflow_sig")
-                 if getattr(p, f) != getattr(c, f))
-
-
-def _group(rows: list[Row], key) -> dict:
-    g: dict = {}
-    for r in rows:
-        k = key(r)
-        if k is not None:
-            g.setdefault(k, []).append(r)
-    return g
-
-
-_LAYERS = (
-    ("struct_sig", lambda r: (r.node_type, r.struct_sig) if r.struct_sig else None),
-    ("dataflow_sig", lambda r: (r.node_type, r.dataflow_sig)
-     if r.dataflow_sig and not r.dataflow_trivial else None),
-)
-
-
-def match(prev: list[Row], cur: list[Row]) -> MatchOutcome:
-    """Layer 1 exact (node_type, qualified_name); layer 2 struct_sig groups that
-    are exactly 1:1; layer 3 non-trivial dataflow_sig groups 1:1; then the owner
-    layer for OWNED_TYPES (same local name, owners paired in this match — to a
-    fixpoint, so function -> dataframe -> column chains resolve). Any signature
-    group larger than 1:1 is an Ambiguity — recorded, never linked. Pure:
-    inputs are not mutated."""
-    pairs: list[Pair] = []
-    ambiguous: list[Ambiguity] = []
-    cur_by_qn = {(r.node_type, r.qualified_name): r for r in cur}
-    used_cur: set[int] = set()
-    rest_prev: list[Row] = []
-    for p in prev:
-        c = cur_by_qn.get((p.node_type, p.qualified_name))
-        if c is not None and c.snapshot_id not in used_cur:
-            pairs.append(Pair(p, c, "qualname", _changed(p, c)))
-            used_cur.add(c.snapshot_id)
-        else:
-            rest_prev.append(p)
-    rest_cur = [c for c in cur if c.snapshot_id not in used_cur]
-    for layer, key in _LAYERS:
-        gp, gc = _group(rest_prev, key), _group(rest_cur, key)
-        for k in sorted(set(gp) & set(gc), key=str):
-            ps, cs = gp[k], gc[k]
-            if len(ps) == 1 and len(cs) == 1:
-                pairs.append(Pair(ps[0], cs[0], layer, _changed(ps[0], cs[0])))
-            else:
-                ambiguous.append(Ambiguity(layer, tuple(ps), tuple(cs)))
-            for r in ps:
-                rest_prev.remove(r)
-            for r in cs:
-                rest_cur.remove(r)
-    # owner inheritance (E0): a dataframe/column follows its owner's identity.
-    cur_of_prev_qn = {p.prev.qualified_name: p.cur.qualified_name for p in pairs}
-    progress = True
-    while progress:
-        progress = False
-        cur_by_owner = {(r.node_type, r.owner_qn, r.name): r for r in rest_cur if r.owner_qn}
-        for p in list(rest_prev):
-            if not p.owner_qn:
-                continue
-            cur_owner = cur_of_prev_qn.get(p.owner_qn)
-            c = cur_by_owner.get((p.node_type, cur_owner, p.name)) if cur_owner else None
-            if c is None:
-                continue
-            pairs.append(Pair(p, c, "owner", _changed(p, c)))
-            rest_prev.remove(p)
-            rest_cur.remove(c)
-            cur_of_prev_qn[p.qualified_name] = c.qualified_name
-            progress = True
-    return MatchOutcome(pairs, rest_prev, rest_cur, ambiguous)
-
-
 # ── resolve: keys + events ───────────────────────────────────────────────────
 def _new_key(run_id: int, r: Row) -> str:
     return "nk_" + hashlib.sha1(f"{run_id}:{r.node_type}:{r.qualified_name}".encode()).hexdigest()[:12]

@@ -15,7 +15,7 @@ from analyzer import cards, cli, history
 ROOT = Path(__file__).resolve().parents[4]          # tests -> scripts -> project-state-graph -> skills -> repo root
 REPOS = {
     "phantom-uplift": ROOT / "examples" / "phantom-uplift",
-    "corpus-basic_pipeline": Path(__file__).parent / "corpus" / "cases" / "basic_pipeline" / "base",
+    "corpus-basic_pipeline": __import__("tests.corpus.harness", fromlist=["default_corpus"]).default_corpus() / "basic_pipeline" / "base",
 }
 
 
