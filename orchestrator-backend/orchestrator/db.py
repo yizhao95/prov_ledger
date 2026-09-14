@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -86,7 +87,17 @@ def run_migrations(conn: sqlite3.Connection) -> int:
         except sqlite3.OperationalError:
             pass  # Table doesn't exist yet — will be created by 001
         sql = sql_file.read_text()
-        conn.executescript(sql)
+        # Phase 4 / 对账自愈: each file runs inside its own SAVEPOINT. A file the
+        # bookkeeping lost (one row too few) re-runs and dies on "duplicate
+        # column name" / "already exists" — roll it back, record it as applied
+        # and carry on. Anything else rolls back and re-raises unchanged.
+        try:
+            _apply_in_savepoint(conn, sql)
+        except sqlite3.OperationalError as e:
+            msg = str(e).lower()
+            if "duplicate column name" not in msg and "already exists" not in msg:
+                raise
+            print(f"reconciled {fname}: already applied", file=sys.stderr)
         # Second bootstrap pass: 001 itself CREATES schema_version (without
         # migration_file). If we don't ALTER again here, 001 itself never gets
         # recorded → next run re-applies it. Cheap PRAGMA + idempotent ALTER.
@@ -111,6 +122,60 @@ def run_migrations(conn: sqlite3.Connection) -> int:
         applied += 1
     conn.commit()
     return applied
+
+
+_SAVEPOINT = "provledger_migration"
+
+
+def _split_statements(sql: str) -> list[str]:
+    """Split a script into complete statements (sqlite3.complete_statement keeps
+    trigger bodies whole); comment-only tails are dropped."""
+    out, buf = [], ""
+    for line in sql.splitlines(keepends=True):
+        buf += line
+        if sqlite3.complete_statement(buf):
+            out.append(buf)
+            buf = ""
+    if buf.strip() and sqlite3.complete_statement(buf + ";"):
+        out.append(buf)
+    return out
+
+
+def _is_pragma(stmt: str) -> bool:
+    body = [ln for ln in stmt.splitlines() if ln.strip() and not ln.lstrip().startswith("--")]
+    return bool(body) and body[0].lstrip().upper().startswith("PRAGMA")
+
+
+def _apply_in_savepoint(conn: sqlite3.Connection, sql: str) -> None:
+    """Run one migration script with its body inside a SAVEPOINT so a failure
+    leaves nothing of it behind. executescript() cannot be used: it COMMITs
+    first, which would release the savepoint. A file's leading / trailing PRAGMA
+    run (007 toggles foreign_keys + legacy_alter_table around a table rebuild)
+    executes OUTSIDE the savepoint, after a commit, exactly as executescript did
+    — PRAGMA foreign_keys is a silent no-op inside a transaction."""
+    stmts = _split_statements(sql)
+    head = 0
+    while head < len(stmts) and _is_pragma(stmts[head]):
+        head += 1
+    tail = len(stmts)
+    while tail > head and _is_pragma(stmts[tail - 1]):
+        tail -= 1
+    conn.commit()                      # PRAGMAs only take effect outside a transaction
+    for st in stmts[:head]:
+        conn.execute(st)
+    conn.execute(f"SAVEPOINT {_SAVEPOINT}")
+    try:
+        for st in stmts[head:tail]:
+            conn.execute(st)
+    except Exception:
+        conn.execute(f"ROLLBACK TO {_SAVEPOINT}")
+        conn.execute(f"RELEASE {_SAVEPOINT}")
+        for st in stmts[tail:]:
+            conn.execute(st)           # restore the connection state (foreign_keys back ON)
+        raise
+    conn.execute(f"RELEASE {_SAVEPOINT}")
+    for st in stmts[tail:]:
+        conn.execute(st)
 
 
 def _now() -> str:

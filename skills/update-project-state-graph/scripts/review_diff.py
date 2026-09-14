@@ -11,7 +11,7 @@ project-state-graph deep sqlite graph, this module:
   2. changed_symbols(repo, base, head) -> [{file, kind, old_name, new_name}]
      Parses `git diff` for removed/renamed top-level def/class symbols.
 
-  3. stale_references(db_path, removed_symbols) -> [{caller, callee, file}]
+  3. stale_references(db_path, removed_symbols, changed_files=None) -> [{caller, callee, file, severity}]
      Queries the deep graph for edges whose destination node is a removed/renamed
      symbol — i.e. callers that still point at something that no longer exists.
 
@@ -131,14 +131,20 @@ def changed_symbols(repo: str, base: str, head: str) -> list[dict]:
     return results
 
 
-def stale_references(db_path: str, removed_symbols: list[str]) -> list[dict]:
+def stale_references(db_path: str, removed_symbols: list[str],
+                     changed_files: set[str] | None = None) -> list[dict]:
     """Find edges in the deep graph whose destination is a removed/renamed symbol.
 
-    Returns [{caller, callee, file}] — callers that still reference a symbol that
-    no longer exists after the diff. Matches dst node by name OR qualified_name.
+    Returns [{caller, callee, file, severity}] — callers that still reference a
+    symbol that no longer exists after the diff. Matches dst node by name OR
+    qualified_name. FL-023: the graph describes the BASE commit, so a caller whose
+    file is in `changed_files` was edited in the same diff (very likely dropping
+    the call) — severity "warning"; a caller outside the diff is a real gap —
+    severity "fail". Without `changed_files` every hit is a fail (old behaviour).
     """
     if not removed_symbols:
         return []
+    changed_files = set(changed_files or ())
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     placeholders = ",".join("?" for _ in removed_symbols)
@@ -157,22 +163,25 @@ def stale_references(db_path: str, removed_symbols: list[str]) -> list[dict]:
     ).fetchall()
     conn.close()
     return [
-        {"caller": r["caller"], "callee": r["callee"], "file": r["file"]}
+        {"caller": r["caller"], "callee": r["callee"], "file": r["file"],
+         "severity": "warning" if r["file"] in changed_files else "fail"}
         for r in rows
     ]
 
 
-def report(db_path: str, changed: list[dict]) -> dict:
+def report(db_path: str, changed: list[dict], changed_files: set[str] | None = None) -> dict:
     """Assemble a stale-reference verdict from a list of changed-symbol dicts.
 
     changed: items shaped like changed_symbols() output (need 'old_name'/'kind').
-    Returns {ok: bool, gaps: [...], text: str}. ok=False iff gaps were found.
+    changed_files: the diff's file paths (FL-023) — hits whose caller lives in one
+    of them are warnings. Returns {ok: bool, gaps: [...], text: str}; gaps carries
+    every hit (each with its severity), ok=False iff a "fail" hit exists.
     """
     removed = [
         c["old_name"] for c in changed
         if c.get("kind") in ("removed", "renamed") and c.get("old_name")
     ]
-    hits = stale_references(db_path, removed)
+    hits = stale_references(db_path, removed, changed_files=changed_files)
     if not hits:
         return {
             "ok": True,
@@ -180,10 +189,15 @@ def report(db_path: str, changed: list[dict]) -> dict:
             "text": "No stale references found — the deep graph has no callers "
                     "pointing at removed/renamed symbols.",
         }
+    fails = [h for h in hits if h["severity"] == "fail"]
     lines = ["Stale references found (callers still target removed/renamed symbols):"]
     for h in hits:
-        lines.append(f"  - {h['caller']} ({h['file']}) still calls {h['callee']}")
-    return {"ok": False, "gaps": hits, "text": "\n".join(lines)}
+        note = (" [warning: caller's file is in this diff — confirm the call was dropped]"
+                if h["severity"] == "warning" else "")
+        lines.append(f"  - {h['caller']} ({h['file']}) still calls {h['callee']}{note}")
+    if not fails:
+        lines.append("  all hits are warnings (callers edited in the same diff) — not blocking")
+    return {"ok": not fails, "gaps": hits, "text": "\n".join(lines)}
 
 
 def data_drift(
@@ -306,7 +320,7 @@ def full_verdict(
     head_sha = _git(repo, "rev-parse", "HEAD").strip()
     range_nonempty = not (registered_sha and head_sha != registered_sha and not files)
 
-    stale = report(db_path, changed)
+    stale = report(db_path, changed, changed_files=files)   # FL-023
     drift = data_drift(db_path, removed_columns=removed_columns,
                        dtype_changes=dtype_changes,
                        removed_datasets=removed_datasets)
