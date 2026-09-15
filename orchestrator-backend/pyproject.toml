@@ -14,6 +14,9 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 
+[project.scripts]
+provledger = "provledger.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/yizhao95/prov_ledger"
 Documentation = "https://github.com/yizhao95/prov_ledger#readme"

@@ -20,6 +20,10 @@ print(f"import ok — provledger {provledger.__version__} "
       f"from {Path(provledger.__file__).parent}")
 assert "site-packages" in provledger.__file__, "not running from the wheel!"
 assert provledger.__version__ == "0.2.0", f"wheel version {provledger.__version__} != 0.2.0 (release prep, phase 8)"
+import subprocess as _sp
+_exe = Path(sys.executable).parent / "provledger"          # the console entry point of the venv that installed the wheel
+_help = _sp.run([str(_exe), "--help"], capture_output=True, text=True)
+assert _help.returncode == 0 and "note" in _help.stdout, f"provledger --help failed: {_help.stderr[-300:]}"
 
 with tempfile.TemporaryDirectory() as td:
     conn = db.open_db(Path(td) / "orch.db")

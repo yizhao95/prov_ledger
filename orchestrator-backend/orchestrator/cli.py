@@ -3,6 +3,8 @@ in the repo, `provledger ...` once installed.
 
   metrics plan <id>                       what one plan cost in tool calls
   metrics baseline [--since] [--write F]  median / p90 over completed plans
+  note "<words>" --at <when> [...]        record something that was said, after the fact
+  reasons reclass-status                  the state of the legacy-reason migration
 """
 from __future__ import annotations
 
@@ -39,6 +41,82 @@ def _metrics(args) -> int:
         conn.close()
 
 
+# ── note: the after-the-fact entry point (DP phase 1, Task 6) ─────────────────
+
+def _parse_ref(spec: str) -> dict:
+    """kind=email label="re: weeks" uri=mail:1  →  {kind, label, uri}. Quotes are the shell's job."""
+    out: dict = {}
+    for part in spec.split(","):
+        k, sep, v = part.strip().partition("=")
+        if not sep:
+            raise SystemExit(f"--ref needs key=value pairs (kind=…,label=…[,uri=…]), got {part!r}")
+        out[k.strip()] = v.strip()
+    if "kind" not in out or "label" not in out:
+        raise SystemExit("--ref needs at least kind=… and label=…")
+    return out
+
+
+def _check_at(value: str) -> str:
+    """An ISO-ish timestamp for occurred_at (YYYY-MM-DD[ HH:MM[:SS]]); the record time is the DB's."""
+    from datetime import datetime
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(value, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    raise SystemExit(f"--at must be a date/time like 2026-09-15 14:30, got {value!r}")
+
+
+def _note(args) -> int:
+    from . import provenance, psg_bridge
+    text = args.text.strip()
+    if not text:
+        raise SystemExit("note needs the words that were said")
+    at = _check_at(args.at)
+    conn = _open()
+    try:
+        project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+        with db.transaction(conn):
+            uid = provenance.insert_utterance(conn, session_id=args.session or "note", project=project, plan_id=args.plan,
+                                              text=text, occurred_at=at, commit=False)
+            refs = []
+            for spec in args.ref or ():
+                r = _parse_ref(spec)
+                refs.append(provenance.insert_reference(conn, project=project or "-", kind=r["kind"], label=r["label"],
+                                                        occurred_at=at, uri=r.get("uri") or None, commit=False))
+            reason_id = None
+            if args.node:
+                if not project:
+                    raise SystemExit("--node needs a project (--project, or run inside a registered repo)")
+                key = args.node if args.node.startswith("nk_") else (psg_bridge.node_key_of(psg_bridge.db_path_for(project), args.node) or args.node)
+                reason_id = provenance.insert_reason(conn, project=project, plan_id=args.plan or "note", node_key=key,
+                                                     kind=args.kind, verbatim=(uid, 0, len(text)), refs=refs,
+                                                     recorded_by="human", occurred_at=at, commit=False)
+        out = {"utterance_id": uid, "project": project, "plan_id": args.plan, "occurred_at": at, "reference_ids": refs,
+               "reason_id": reason_id}
+        if reason_id is not None:
+            out["evidence_level"] = provenance.get_reason(conn, reason_id)["evidence_level"]
+        print(json.dumps(out, indent=1, sort_keys=True))
+        return 0
+    finally:
+        conn.close()
+
+
+def _reasons_cmd(args) -> int:
+    conn = _open()
+    try:
+        if args.sub == "reclass-status":
+            row = conn.execute("SELECT value, at FROM migration_state WHERE key='dp_reclass'").fetchone()
+            counts = dict(conn.execute("SELECT tier, COUNT(*) FROM change_reason GROUP BY tier").fetchall())
+            print(json.dumps({"dp_reclass": (row[0] if row else None), "at": (row[1] if row else None),
+                              "change_reason_by_tier": counts,
+                              "node_reason_rows": conn.execute("SELECT COUNT(*) FROM node_reason").fetchone()[0]}, indent=1, sort_keys=True))
+            return 0
+        return 2
+    finally:
+        conn.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="provledger",
                                 description="provLedger decision provenance: what changed, why, and where the why came from.")
@@ -50,6 +128,19 @@ def build_parser() -> argparse.ArgumentParser:
     mb = ms.add_parser("baseline", help="median / p90 over completed plans")
     mb.add_argument("--since", default=None, help="only plans created at or after this timestamp")
     mb.add_argument("--write", default=None, metavar="FILE", help="also write the baseline JSON here")
+    n = sub.add_parser("note", help="record something that was said (a verbal decision), with the time it happened")
+    n.add_argument("text", help="the words, verbatim")
+    n.add_argument("--at", required=True, help="when it was said (YYYY-MM-DD HH:MM[:SS]); the record time is the database's")
+    n.add_argument("--project", default=None, help="registered project (default: the one whose repo contains the cwd)")
+    n.add_argument("--plan", default=None, help="plan id to attribute the words to")
+    n.add_argument("--node", default=None, help="qualified name or node_key: also record a stated reason for it spanning the whole note")
+    n.add_argument("--kind", default="organizational", choices=["technical", "organizational", "mixed"])
+    n.add_argument("--ref", action="append", default=[], metavar="kind=…,label=…[,uri=…]",
+                   help="a source to register and link (email, meeting, chat, ticket, doc, commit, verbal, other); repeatable")
+    n.add_argument("--session", default=None, help=argparse.SUPPRESS)
+    r = sub.add_parser("reasons", help="the reasons ledger")
+    rs = r.add_subparsers(dest="sub", required=True)
+    rs.add_parser("reclass-status", help="whether the legacy node_reason / ledger rows were migrated into change_reason, and the tier counts")
     return p
 
 
@@ -57,6 +148,10 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     if args.cmd == "metrics":
         return _metrics(args)
+    if args.cmd == "note":
+        return _note(args)
+    if args.cmd == "reasons":
+        return _reasons_cmd(args)
     return 2
 
 
