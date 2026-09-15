@@ -1,0 +1,23 @@
+{
+ "calls_per_step": {
+  "median": null,
+  "n": 0,
+  "p90": null
+ },
+ "generated_at": "2026-09-15T16:21:34Z",
+ "n_measured": 0,
+ "n_plans": 66,
+ "n_proxy": 66,
+ "plans": {},
+ "proxy_calls_per_step": {
+  "median": 1.8452,
+  "n": 66,
+  "p90": 2.1292
+ },
+ "since": null,
+ "wall_per_step": {
+  "median": null,
+  "n": 0,
+  "p90": null
+ }
+}
