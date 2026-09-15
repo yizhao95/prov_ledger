@@ -19,4 +19,6 @@ change_attr      = { identity = "preserved", semantic_diff = "expected" }
 delete_function  = { identity = "broken", broken = ["pkg.sources.read_customers"] }
 # sources.py -> inputs.py: both readers change qualified name, bodies intact.
 rename_module    = { identity = "preserved", semantic_diff = "none", via = "struct_sig", symbols = ["pkg.sources.read_orders", "pkg.sources.read_customers"] }
-swap_two_similar = { identity = "ambiguous", symbols = ["pkg.sources.parse_a", "pkg.sources.parse_b"] }
+# truth: declared by the author of the variant — the swap was applied by hand, so the
+# answer is known by construction (phase 8 calibration set, FL-041).
+swap_two_similar = { identity = "ambiguous", symbols = ["pkg.sources.parse_a", "pkg.sources.parse_b"], truth = { "pkg.sources.parse_a" = "pkg.sources.load_x", "pkg.sources.parse_b" = "pkg.sources.load_y" } }

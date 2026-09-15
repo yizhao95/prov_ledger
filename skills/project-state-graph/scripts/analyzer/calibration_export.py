@@ -64,6 +64,7 @@ def export(conn, out_path, repo: str | None = None) -> dict:
            WHERE e.event_type='identity_ambiguous' AND COALESCE(a.aborted, 0)=0 ORDER BY e.run_id, e.seq""").fetchall()
     items = []
     cache: dict[tuple, list[str] | None] = {}
+    db_name = Path(conn.execute("PRAGMA database_list").fetchone()[2] or "").name or "graph.db"
     for event_id, run_id, payload_json in events:
         payload = json.loads(payload_json)
         prev_run = store.previous_run_id(conn, run_id)
@@ -83,7 +84,7 @@ def export(conn, out_path, repo: str | None = None) -> dict:
                 snap["context"] = _context(cache[k], snap.get("line_start"), snap.get("line_end"))
                 rows.append(snap)
             sides[side] = rows
-        items.append({"id": f"e{event_id}",
+        items.append({"id": f"e{event_id}", "source": f"live:{db_name}",
                       "ambiguity": {"layer": payload.get("layer"), "run_id": run_id, "prev_run_id": prev_run,
                                     "commit_sha": runs.get(run_id), "prev_commit_sha": runs.get(prev_run),
                                     "same_struct_sig": payload.get("same_struct_sig"),

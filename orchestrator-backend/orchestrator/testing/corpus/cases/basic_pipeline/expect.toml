@@ -18,4 +18,6 @@ change_attr      = { identity = "preserved", semantic_diff = "expected" }
 delete_function  = { identity = "broken", broken = ["pkg.pipeline.clean"] }
 # Two body-identical helpers renamed at once: qualname layer misses, structural
 # layer is 2:2 — the matcher MUST report ambiguity instead of guessing.
-swap_two_similar = { identity = "ambiguous", symbols = ["pkg.pipeline.norm_a", "pkg.pipeline.norm_b"] }
+# truth: declared by the author of the variant — the swap was applied by hand, so the
+# answer is known by construction (phase 8 calibration set, FL-041).
+swap_two_similar = { identity = "ambiguous", symbols = ["pkg.pipeline.norm_a", "pkg.pipeline.norm_b"], truth = { "pkg.pipeline.norm_a" = "pkg.pipeline.scale_x", "pkg.pipeline.norm_b" = "pkg.pipeline.scale_y" } }

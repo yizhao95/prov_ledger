@@ -129,6 +129,20 @@ def load_case(case_dir: Path) -> Case:
     declared = set(expect.get("variants", {}))
     if set(dirs) != declared:
         raise ValueError(f"{case_dir.name}: variants dirs {sorted(dirs)} != expect {sorted(declared)}")
+    symbols = expect["case"]["symbols"]
+    for vname, spec in expect.get("variants", {}).items():
+        truth = spec.get("truth")
+        if truth is None:
+            continue
+        # phase 8: a variant's truth mapping (prev qualified name -> cur) is
+        # declared BY THE AUTHOR next to the mutation — its keys must be the
+        # variant's own symbols and its values distinct.
+        allowed = set(spec.get("symbols", symbols))
+        bad = [k for k in truth if k not in allowed]
+        if not isinstance(truth, dict) or bad or len(set(truth.values())) != len(truth) \
+                or not all(isinstance(v, str) and v for v in truth.values()):
+            raise ValueError(f"{case_dir.name}/{vname}: truth must map the variant's symbols to distinct "
+                             f"qualified names (unknown keys: {bad})")
     return Case(expect["case"]["name"], case_dir, case_dir / "base", expect, dirs)
 
 
