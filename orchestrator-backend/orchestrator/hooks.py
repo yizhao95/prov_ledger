@@ -61,12 +61,41 @@ def record_tool_call(conn, data: dict) -> int:
     return int(cur.lastrowid)
 
 
+def _current_plan_id(conn, project: str | None) -> str | None:
+    """The project's most recent IN_PROGRESS plan (None without a project or a plan)."""
+    if not project:
+        return None
+    r = conn.execute("SELECT plan_id FROM Plans WHERE project = ? AND status = 'IN_PROGRESS' "
+                     "ORDER BY created_at DESC, plan_id DESC LIMIT 1", (project,)).fetchone()
+    return r[0] if r else None
+
+
+def record_utterance(conn, data: dict) -> int | None:
+    """UserPromptSubmit → one utterance row with the prompt VERBATIM. An empty
+    prompt or a slash command is not a decision and is not recorded."""
+    from . import provenance, psg_bridge
+    prompt = data.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip() or prompt.lstrip().startswith("/"):
+        return None
+    project = psg_bridge.project_for_cwd(data.get("cwd"))
+    plan_id = _current_plan_id(conn, project)
+    occurred_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return provenance.insert_utterance(conn, session_id=str(data.get("session_id") or ""), project=project,
+                                       plan_id=plan_id, text=prompt, occurred_at=occurred_at)
+
+
 def handle(event: str, data: dict) -> None:
     """Dispatch one hook payload. Unknown events are ignored on purpose."""
     if event == "PostToolUse":
         conn = _open()
         try:
             record_tool_call(conn, data)
+        finally:
+            conn.close()
+    elif event == "UserPromptSubmit":
+        conn = _open()
+        try:
+            record_utterance(conn, data)
         finally:
             conn.close()
 

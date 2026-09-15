@@ -197,3 +197,29 @@ def latest_qualified_name(psg_db_path: str | None, node_key: str) -> str | None:
     rows = _query(psg_db_path,
                   "SELECT qualified_name FROM node_snapshot WHERE node_key = ? ORDER BY run_id DESC, id DESC LIMIT 1", (node_key,))
     return rows[0]["qualified_name"] if rows else None
+
+
+def project_for_cwd(cwd: str | None, registry_path: str | None = None) -> str | None:
+    """The registered project whose repo contains `cwd` (longest repo prefix
+    wins); None when cwd is empty or outside every registered repo."""
+    if not cwd:
+        return None
+    path = registry_path or os.environ.get("PSG_REGISTRY_PATH", DEFAULT_REGISTRY_PATH)
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            reg = json.load(f)
+    except (OSError, ValueError):
+        return None
+    cwd = os.path.abspath(cwd).rstrip("/") or "/"
+    best: tuple[int, str] | None = None
+    for p in (reg.get("projects", []) if isinstance(reg, dict) else []):
+        repo = (p.get("repo") or "").rstrip("/")
+        name = p.get("name")
+        if not repo or not name:
+            continue
+        if cwd == repo or cwd.startswith(repo + "/"):
+            if best is None or len(repo) > best[0]:
+                best = (len(repo), name)
+    return best[1] if best else None

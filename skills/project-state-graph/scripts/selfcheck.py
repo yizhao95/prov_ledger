@@ -517,6 +517,23 @@ def _check_arbiter_gate(conn) -> Dict[str, Any]:
     return {"name": "arbiter_gate", "ok": False, "severity": "warning", "detail": f"{arb.get('id')}: {gate}"}
 
 
+def _check_hook_failures(conn) -> Dict[str, Any]:
+    """DP phase 1: the Claude Code hooks (utterance / tool-call) never fail
+    loudly — they write one line per failure to the error log. Count them so
+    a silent hook is still a visible number."""
+    import os
+    path = os.environ.get("PROVLEDGER_HOOK_ERRORS") or os.path.expanduser("~/skill-workspace/hook-errors.log")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            lines = [ln for ln in f if ln.strip()]
+    except OSError:
+        return {"name": "hook_failures", "ok": True, "severity": "warning", "detail": "no hook error log (0 failures)"}
+    if not lines:
+        return {"name": "hook_failures", "ok": True, "severity": "warning", "detail": "0 hook failures"}
+    return {"name": "hook_failures", "ok": False, "severity": "warning",
+            "detail": f"{len(lines)} hook failure(s) in {path}; last: {lines[-1].strip()[:160]}"}
+
+
 _CHECKS = [
     _check_node_types_nonempty,
     _check_no_dangling_edges,
@@ -539,6 +556,7 @@ _CHECKS = [
     _check_aborted_runs,
     _check_providers_degraded,
     _check_arbiter_gate,
+    _check_hook_failures,
 ]
 
 
