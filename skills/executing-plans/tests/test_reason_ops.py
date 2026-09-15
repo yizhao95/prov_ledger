@@ -47,27 +47,58 @@ def test_reason_slots_prints_closed_checklist(seeded_plan, tmp_db, run_script_fn
     assert json.loads(r.stdout.splitlines()[-1])["ok"] is True
 
 
-def test_reason_fill_unstated_string_becomes_null(seeded_plan, tmp_db, run_script_fn, psg_registry):
+def test_reason_fill_three_shapes_and_the_old_text_shape_exits_2(seeded_plan, tmp_db, run_script_fn, psg_registry):
     pid = seeded_plan["plan_id"]
+    c = sqlite3.connect(str(tmp_db))
+    c.execute("INSERT INTO utterance (session_id, project, plan_id, text, occurred_at, hash) VALUES ('s', 'demo', ?, 'keep the weekly grain for load', '2026-09-15 10:00:00', 'h')", (pid,))
+    c.commit(); uid = c.execute("SELECT id FROM utterance").fetchone()[0]; c.close()
     r = run_script_fn("reason-fill", {"plan_id": pid, "project": "demo", "run_id": 2,
-                                      "reasons": [{"node_key": "nk_a", "text": "weekly grain"}, {"node_key": "nk_b", "text": "unstated"}]},
+                                      "reasons": [{"node_key": "nk_a", "text": "weekly grain"}]}, tmp_db, env_extra=psg_registry)
+    assert r.returncode == 2 and '"text" is not accepted' in (r.stdout + r.stderr)
+    assert sqlite3.connect(str(tmp_db)).execute("SELECT COUNT(*) FROM change_reason").fetchone()[0] == 0
+    r = run_script_fn("reason-fill", {"plan_id": pid, "project": "demo", "run_id": 2,
+                                      "reasons": [{"node_key": "nk_a", "utterance_id": uid, "span": [0, 21]},
+                                                  {"node_key": "nk_b", "unstated": True}]},
                       tmp_db, env_extra=psg_registry)
     assert r.returncode == 0, r.stderr
-    assert _payload(r) == {"filled": 1, "unstated": 1, "unknown_keys": []}
+    assert _payload(r) == {"filled": 1, "stated": 1, "asserted": 0, "unstated": 1, "unknown_keys": []}
     rows = sqlite3.connect(str(tmp_db)).execute(
-        "SELECT node_key, text, source, tier FROM node_reason WHERE plan_id=? ORDER BY id", (pid,)).fetchall()
-    assert rows == [("nk_a", "weekly grain", "agent", "stated"), ("nk_b", None, "agent", "stated")]
-    # the filled slots leave the checklist
+        "SELECT node_key, tier, recorded_by, verbatim_utterance_id, verbatim_end FROM change_reason WHERE plan_id=? ORDER BY id", (pid,)).fetchall()
+    assert rows == [("nk_a", "stated", "agent", uid, 21), ("nk_b", "unstated", "agent", None, None)]
     r2 = run_script_fn("reason-slots", {"plan_id": pid, "project": "demo"}, tmp_db, env_extra=psg_registry)
     assert _payload(r2)["slots"] == []
+
+
+def test_reason_fill_interpretation_is_asserted_even_from_a_human(seeded_plan, tmp_db, run_script_fn, psg_registry):
+    pid = seeded_plan["plan_id"]
+    r = run_script_fn("reason-fill", {"plan_id": pid, "project": "demo", "run_id": 2, "source": "human",
+                                      "reasons": [{"node_key": "nk_a", "interpretation": "finance reconciles weekly"},
+                                                  {"node_key": "nk_b", "interpretation": "new column for the rollup"}]},
+                      tmp_db, env_extra=psg_registry)
+    assert r.returncode == 0, r.stderr
+    rows = sqlite3.connect(str(tmp_db)).execute("SELECT node_key, tier, recorded_by, interpretation FROM change_reason ORDER BY id").fetchall()
+    assert rows == [("nk_a", "asserted", "human", "finance reconciles weekly"), ("nk_b", "asserted", "human", "new column for the rollup")]
+
+
+def test_reason_slots_draft_proposes_spans(seeded_plan, tmp_db, run_script_fn, psg_registry):
+    pid = seeded_plan["plan_id"]
+    c = sqlite3.connect(str(tmp_db))
+    c.execute("INSERT INTO utterance (session_id, project, plan_id, text, occurred_at, hash) VALUES ('s', 'demo', ?, 'load must keep paid orders only', '2026-09-15 10:00:00', 'h')", (pid,))
+    c.commit(); c.close()
+    r = run_script_fn("reason-slots", {"plan_id": pid, "project": "demo", "draft": True}, tmp_db, env_extra=psg_registry)
+    assert r.returncode == 0, r.stderr
+    p = _payload(r)
+    by_key = {d["node_key"]: d["candidates"] for d in p["draft"]}
+    assert by_key["nk_a"] and by_key["nk_a"][0]["span"] == [0, 31] and by_key["nk_a"][0]["preview"].startswith("load must")
+    assert p["auto_filled"] == []
 
 
 def test_reason_fill_unknown_key_exits_6(seeded_plan, tmp_db, run_script_fn, psg_registry):
     pid = seeded_plan["plan_id"]
     r = run_script_fn("reason-fill", {"plan_id": pid, "project": "demo", "run_id": 2,
-                                      "reasons": [{"node_key": "nk_zzz", "text": "x"}]}, tmp_db, env_extra=psg_registry)
+                                      "reasons": [{"node_key": "nk_zzz", "interpretation": "x"}]}, tmp_db, env_extra=psg_registry)
     assert r.returncode == 6 and "nk_zzz" in (r.stdout + r.stderr)
-    assert sqlite3.connect(str(tmp_db)).execute("SELECT COUNT(*) FROM node_reason").fetchone()[0] == 0
+    assert sqlite3.connect(str(tmp_db)).execute("SELECT COUNT(*) FROM change_reason").fetchone()[0] == 0
 
 
 def test_reason_slots_without_graph_exits_6(seeded_plan, tmp_db, run_script_fn, tmp_path):

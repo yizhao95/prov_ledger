@@ -204,6 +204,7 @@
         <span class="font-mono text-xs">{{ r.node_key or '—' }}</span>
         {% endif %}
         <span class="text-sm text-gray-800">{{ r.text if r.text is not none else '— unstated —' }}</span>
+        <span class="text-[11px] text-brand-muted" data-source-level="{{ r.evidence_level }}">{{ r.source_level }}{% if r.rule_id %} · 规则 {{ r.rule_id }}{% endif %}</span>
       </div>
       {% endfor %}
     </div>

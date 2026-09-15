@@ -263,7 +263,7 @@
    "source": "agent",
    "text": "scenario: node_added",
    "text_is": "stated",
-   "tier": "stated",
+   "tier": "asserted",
    "type": "reason"
   },
   {
@@ -273,7 +273,7 @@
    "source": "agent",
    "text": "scenario: node_added",
    "text_is": "stated",
-   "tier": "stated",
+   "tier": "asserted",
    "type": "reason"
   },
   {

@@ -423,7 +423,7 @@
    "source": "agent",
    "text": "loosened for Q3",
    "text_is": "stated",
-   "tier": "stated",
+   "tier": "asserted",
    "type": "reason"
   },
   {
@@ -433,7 +433,7 @@
    "source": "agent",
    "text": "Q3 returns are handled upstream now; back to the baseline filter",
    "text_is": "stated",
-   "tier": "stated",
+   "tier": "asserted",
    "type": "reason"
   },
   {

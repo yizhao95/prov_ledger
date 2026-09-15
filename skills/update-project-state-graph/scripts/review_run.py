@@ -293,16 +293,20 @@ class Driver:
         self.finish(0)
 
     def answers(self, slots: list[dict]) -> list[dict]:
+        """Answers for reason-fill. `stub` / `unstated` are the deterministic
+        modes of the tests; a file holds [{node_key|qualified_name, interpretation
+        | utterance_id+span | unstated}] — the legacy `text` key is accepted here
+        and sent as interpretation (asserted), never as stated."""
         mode = self.a.reasons
         if mode == "stub":
-            return [{"node_key": s["node_key"], "text": f"scenario: {'/'.join(s['event_types'])}"} for s in slots]
+            return [{"node_key": s["node_key"], "interpretation": f"scenario: {'/'.join(s['event_types'])}"} for s in slots]
         if mode == "unstated":
-            return [{"node_key": s["node_key"], "text": "unstated"} for s in slots]
+            return [{"node_key": s["node_key"], "unstated": True} for s in slots]
         if mode == "ask":
             # the agent wants to see the closed checklist before answering: stop
             # here with REVIEW.1 IN_PROGRESS; the next run resumes at 4c.
             _die("--reasons ask: answer these slots in a JSON file of "
-                 "[{qualified_name|node_key, text}] and re-run with --reasons <file>\n"
+                 "[{qualified_name|node_key, interpretation | utterance_id+span | unstated}] and re-run with --reasons <file>\n"
                  + "\n".join(f"  {s['qualified_name']} ({'/'.join(s['event_types'])}) [{s['node_key']}]" for s in slots)
                  + f"\n{self.child} left IN_PROGRESS, no second refresh", 6)
         try:
@@ -310,7 +314,7 @@ class Driver:
         except (OSError, ValueError) as e:
             _die(f"--reasons must be stub, unstated or a JSON file: {e}", 6)
         if not isinstance(items, list):
-            _die("--reasons file must hold a list of {node_key|qualified_name, text}", 6)
+            _die("--reasons file must hold a list of {node_key|qualified_name, interpretation|utterance_id+span|unstated}", 6)
         by_key = {s["node_key"]: s for s in slots}
         by_qn = {s["qualified_name"]: s for s in slots}
         out, unknown = [], []
@@ -319,7 +323,15 @@ class Driver:
             if key not in by_key:
                 unknown.append(it.get("node_key") or it.get("qualified_name"))
                 continue
-            out.append({"node_key": key, "text": it.get("text", "unstated")})
+            if it.get("utterance_id") is not None and it.get("span"):
+                out.append({"node_key": key, "utterance_id": it["utterance_id"], "span": list(it["span"])})
+            elif it.get("unstated") or str(it.get("interpretation", it.get("text", ""))).strip().lower() in ("", "unstated", "unknown"):
+                out.append({"node_key": key, "unstated": True})
+            else:
+                ans = {"node_key": key, "interpretation": str(it.get("interpretation") or it.get("text")).strip()}
+                if it.get("refs"):
+                    ans["refs"] = list(it["refs"])
+                out.append(ans)
         if unknown:
             _die(f"unknown reason key(s) {unknown} — only this plan's open slots are accepted:\n"
                  + "\n".join(f"  {s['qualified_name']} [{s['node_key']}]" for s in slots)

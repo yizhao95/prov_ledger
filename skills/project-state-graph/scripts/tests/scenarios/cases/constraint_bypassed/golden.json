@@ -179,7 +179,17 @@
    "source": "agent",
    "text": "zero-quantity rows are returns; kept for the report",
    "text_is": "stated",
-   "tier": "stated",
+   "tier": "asserted",
+   "type": "reason"
+  },
+  {
+   "node": "pkg.pipeline.clean",
+   "plan": "t1",
+   "run": 2,
+   "source": "system",
+   "text": "covered by active constraint #1: clean() must keep dropping zero-quantity rows",
+   "text_is": "stated",
+   "tier": "derived",
    "type": "reason"
   },
   {

@@ -64,7 +64,26 @@ def add_entry(conn: sqlite3.Connection, *, project: str, kind: str,
         (project, kind, json.dumps(subjects or []), json.dumps(keywords or []),
          statement, rationale, source, plan_id, why_ref, why_visibility))
     conn.commit()
+    if kind == "constraint":
+        _mirror_constraint(conn, project=project, subjects=subjects or [], statement=statement, rationale=rationale,
+                           plan_id=plan_id, why_ref=why_ref, why_visibility=why_visibility)
     return int(cur.lastrowid)
+
+
+def _mirror_constraint(conn, *, project, subjects, statement, rationale, plan_id, why_ref, why_visibility) -> None:
+    """DP phase 1 (Task 7): the readers moved to change_reason, so a new ledger
+    constraint is written there too (orchestrator.constraints.record_constraint);
+    LedgerEntries keeps its row until the next phase stops writing it."""
+    try:
+        from orchestrator import constraints as _constraints
+    except ImportError:
+        return
+    try:
+        _constraints.record_constraint(conn, project=project, subjects=subjects, statement=statement, rationale=rationale,
+                                       plan_id=plan_id, why_ref=why_ref, why_visibility=why_visibility)
+    except Exception as exc:          # a DB without 018: the ledger row still exists
+        import sys
+        print(f"warning: constraint not mirrored into change_reason: {exc}", file=sys.stderr)
 
 
 def constraints_for(conn: sqlite3.Connection, project: str,
@@ -72,7 +91,8 @@ def constraints_for(conn: sqlite3.Connection, project: str,
     """Active constraint entries whose subjects contain ANY of `node_keys` or
     `qualified_names` — exact match on the anchor (a node_key, a qualified name
     or an owner.column), never lexical. A restricted entry comes back with
-    rationale=None: only why_ref leaves the ledger."""
+    rationale=None: only why_ref leaves the ledger. (The ledger row; its
+    change_reason twin is what orchestrator.constraints reads at close time.)"""
     keys = [k for k in (*(node_keys or []), *(qualified_names or [])) if k]
     if not keys:
         return []

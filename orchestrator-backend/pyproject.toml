@@ -14,6 +14,9 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 
+[project.scripts]
+provledger = "provledger.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/yizhao95/prov_ledger"
 Documentation = "https://github.com/yizhao95/prov_ledger#readme"
@@ -45,3 +48,6 @@ dev = ["pytest>=7"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-v"
+markers = [
+    "veto: an acceptance item whose failure fails the whole suite (decision provenance §12); never skipped",
+]

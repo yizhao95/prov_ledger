@@ -50,5 +50,13 @@
 | FL-043 | phase8 | DEFERRED | `ClaudeArbiter` 的原始 prompt / 回答只在进程内存（`exchanges`），`arbiter-eval` 不落盘，事后只能从报告的 answer / answers_distinct / correct 反推；需要 `--dump DIR` 把每次交换写下来，才能分析摇摆的具体证据 | 阶段 9 |
 | FL-044 | phase8 | DEFERRED | 构造式校准集的 dataflow 层用的是包内的轻量替身（函数体里 `read_*()` 的字面量目标），不是分析器由图推出的 `dataflow_sig`；6 条 dataflow 项能让匹配器的 dataflow 层触发，但与真图的签名不是同一个函数——要么让 PSG 侧用 `analyzer_extractor` 重新生成这几条，要么在包里复刻真实签名 | 阶段 9 |
 | FL-045 | phase8 | DEFERRED | 阶段 7 导出的 19 条 live 校准项没有 `source` 字段（`stats` 显示 `unknown=19`）；`--merge` 应给缺 source 的项补 `live:<db>`，或导出格式加版本迁移 | 阶段 9 |
-| FL-046 | phase8 | DEFERRED | 节点履历页的约束查询在 `app/queries.py` 里直接写 SQL（`LedgerEntries` + `json_each`、restricted → rationale 置空），与 `orchestrator.constraints.anchored_constraints` 逻辑重复；webapp 只经 `provledger.psg_bridge` 读 PSG，但 orchestrator 侧的规则也该走一个入口 | 阶段 9 |
+| FL-046 | phase8 | DONE（DP 0/1 期 Task 7：`/node` 页与 `constraints.anchored_constraints` 都读 `change_reason(role=constraint)`，同一条规则、同一份数据；restricted 的 rationale 仍不出页面） | 节点履历页的约束查询在 `app/queries.py` 里直接写 SQL（`LedgerEntries` + `json_each`、restricted → rationale 置空），与 `orchestrator.constraints.anchored_constraints` 逻辑重复；webapp 只经 `provledger.psg_bridge` 读 PSG，但 orchestrator 侧的规则也该走一个入口 | 阶段 9 |
 | FL-047 | phase8 | DEFERRED | consistency_card 的 `callers` / `output_consumers` 是裸名（`pkg.m.main`），节点页把它们当限定名链接，裸名会落到 "not in the state graph"；card 应记限定名（PSG-C2 给 profiles 做过同样的事） | 阶段 9 |
+| FL-048 | dp-phase0/1 | DEFERRED | `LedgerEntries` 与 `node_reason` 仍在写（约束经 `ledger_store.add_entry` 双写、`insert_node_reason` 留给迁移与测试）；下一期停写旧表，`node_reason_v` / 视图只留一个版本（0.3.x）后删除 | DP 2 期 |
+| FL-049 | dp-phase0/1 | DEFERRED | `read_hit` / `influence`（展示过 / 采用过）、plan headline、`why` 查询、PreToolUse 钩子、`because:[reason_id]`——spec §5/§6 的 2 期内容；本期 `reason-fill` 不接受 `because` | DP 2 期 |
+| FL-050 | dp-phase0/1 | DEFERRED | `reason-fill` 对旧 `{node_key, text}` 形状退出 2 并说明；0.4 起连错误提示也删掉（直接按未知键处理） | 0.4 |
+| FL-051 | dp-phase0/1 | DEFERRED | 钩子在会话启动时加载：安装本插件的那个会话本身不计 tool call、不记 utterance——本 PR 的 `docs/perf-baseline.json` 只有 66 个历史 plan 的代理量，measured 为空；下一个会话跑一次 `metrics baseline --write` 才有真实计数 | 下一会话 |
+| FL-052 | dp-phase0/1 | DEFERRED | R2（响应 gate 失败）读的是上一个 plan 的 REVIEW 步骤日志里的 `[fail]` 行，不是 PSG 侧的结构化 gate 结果（`analysis_run.extensions_json` 不存 gate）；review_run 应把 gate 结果写成结构化记录供规则读 | DP 2 期 |
+| FL-053 | dp-phase0/1 | DEFERRED | 构造 `change_reason` 时同一个约束按 subject 拆成多行（`anchored_constraints` 按 statement 去重）；spec 的 `change_reason` 只有单个 `node_key`，多主体约束需要 `reason_anchor` 一类的从表 | DP 2 期 |
+| FL-054 | dp-phase0/1 | DEFERRED | 场景 golden 在本期改了两次（12 行 tier stated→asserted；constraint_bypassed 多一条 R5 derived 理由）——都是有意的语义变化，但"golden 不变"不再是本期的验收句；下一期应把 reasons 的 golden 段与事件流的 golden 段分开钉 | DP 2 期 |
+| FL-055 | dp-phase0/1 | DEFERRED | `provledger note --ref` 用逗号分隔 key=value，label 里不能含逗号（本期 dogfood 第一次就撞上）；应改成可重复的 `--ref-kind/--ref-label/--ref-uri` 或用不常见的分隔符 | DP 2 期 |

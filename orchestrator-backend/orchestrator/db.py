@@ -18,13 +18,39 @@ DEFAULT_DB_PATH = Path.home() / "skill-workspace" / "orchestrator.db"
 
 
 def open_db(path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    """Open SQLite connection with foreign keys + Row factory enabled."""
+    """Open SQLite connection with foreign keys + Row factory enabled. On a DB
+    that already carries migration 018, the one-time reclass of the legacy
+    reasons / constraints into change_reason runs here (DP phase 1, Task 7);
+    a fresh DB gets it from run_migrations' caller on its next open."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    _reclass_once(conn)
     return conn
+
+
+def _reclass_once(conn: sqlite3.Connection) -> None:
+    """provenance_migrate.run when 018 is applied and the reclass has not run.
+    Never raises and never waits long: the probe uses a 500 ms busy timeout
+    (a hook on a locked DB must not stall here), then the connection's
+    default timeout is restored; a locked or read-only DB is retried on the
+    next open, silently."""
+    try:
+        conn.execute("PRAGMA busy_timeout=500")
+        try:
+            have = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('migration_state', 'change_reason', 'node_reason')")}
+            if len(have) < 3:
+                return
+            if conn.execute("SELECT 1 FROM migration_state WHERE key='dp_reclass'").fetchone():
+                return
+            from . import provenance_migrate
+            provenance_migrate.run(conn)
+        finally:
+            conn.execute("PRAGMA busy_timeout=5000")
+    except sqlite3.Error:
+        pass
 
 
 def run_migrations(conn: sqlite3.Connection) -> int:
@@ -484,7 +510,9 @@ def insert_node_reason(
     step_id: str | None = None,
     commit: bool = True,
 ) -> int:
-    """Append one reason row keyed by PSG node_key (survives renames). Raises
+    """DEPRECATED (DP phase 1): the writer is provenance.insert_reason into
+    change_reason; this stays for tests and the Task 7 migration only.
+    Append one reason row keyed by PSG node_key (survives renames). Raises
     ValueError on a bad kind/source/tier before touching the DB; the table's
     CHECK rejects an unanchored row unless kind == 'rejected_path'."""
     if kind not in VALID_REASON_KINDS or source not in VALID_REASON_SOURCES or tier not in VALID_REASON_TIERS:

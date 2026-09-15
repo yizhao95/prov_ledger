@@ -448,8 +448,9 @@ def _orch(tmp_path, visibility="shared"):
     import ledger_store
     c = orch_db.open_db(tmp_path / "orch.db")
     orch_db.run_migrations(c)
-    orch_db.insert_node_reason(c, node_key="nk_a", project="proj", run_id=2, plan_id="P0b", kind="reason",
-                               text="fiscal weeks", source="agent", tier="stated")
+    from orchestrator import provenance
+    provenance.insert_reason(c, project="proj", plan_id="P0b", node_key="nk_a", kind="technical", run_id=2,
+                             interpretation="fiscal weeks", recorded_by="agent")          # DP phase 1: readers use change_reason_v
     ledger_store.add_entry(c, project="proj", kind="constraint", statement="exclude region X from the rollup",
                            rationale="legal hold on region X", subjects=["nk_a"], keywords=["zzz"],
                            why_ref="https://wiki/decisions/42", why_visibility=visibility)
@@ -566,8 +567,9 @@ def test_e2_3_five_targets_stay_under_four_thousand_tokens(graph_db_with_history
                          "VALUES (2, ?, 'node_changed', ?, 'observed', '{\"changed\": [\"struct_sig\"], \"struct_sig\": {\"from\": \"aaaaaaaaaaaaaaaa\", \"to\": \"bbbbbbbbbbbbbbbb\"}, \"span\": {\"from\": [1, 9], \"to\": [1, 12]}}', ?)",
                          (100 + i * 10 + seq, f"nk_{i}", f"2026-09-11T02:00:{seq:02d}+00:00"))
         for j in range(3):
-            orch_db.execute("INSERT INTO node_reason (node_key, project, run_id, plan_id, kind, text, source, tier) "
-                            "VALUES (?, 'proj', 2, 'P0b', 'reason', ?, 'agent', 'stated')", (f"nk_{i}", f"reason {j} for fn{i}: kept the weekly grain"))
+            from orchestrator import provenance as _pv
+            _pv.insert_reason(orch_db, project="proj", plan_id="P0b", node_key=f"nk_{i}", kind="technical", run_id=2,
+                              interpretation=f"reason {j} for fn{i}: kept the weekly grain", recorded_by="agent", commit=False)
     conn.commit(); orch_db.commit(); conn.close()
     ctx = impact_preflight.compute_impact_context(graph_db_with_history, "tweak", [f"pipeline.fn{i}" for i in range(5)],
                                                   project="proj", orch_conn=orch_db)
@@ -588,3 +590,16 @@ def test_ledger_matches_does_not_tokenise_anchors(ledger_db):
     assert cid not in [m["id"] for m in same_module]
     by_keyword = impact_preflight.ledger_matches(ledger_db, "proj", "a scope-change of the filter", ["pkg.pipeline.split"])
     assert cid in [m["id"] for m in by_keyword]                     # keywords still match lexically
+
+
+def test_dp_reasons_carry_evidence_level(tmp_path, monkeypatch):
+    """DP phase 1 Task 7: impact_preflight reads change_reason_v — every reason
+    row of a target carries its computed source level."""
+    from orchestrator import provenance as pv
+    orch_db = _orch(tmp_path)
+    u = pv.insert_utterance(orch_db, session_id="s", project="proj", plan_id="P0b", text="fiscal weeks please", occurred_at="2026-09-15 10:00:00")
+    pv.insert_reason(orch_db, project="proj", plan_id="P0b", node_key="nk_a", kind="technical", verbatim=(u, 0, 12), recorded_by="agent")
+    pv.insert_reason(orch_db, project="proj", plan_id="P0c", node_key="nk_a", kind="technical", interpretation="finance asked", recorded_by="agent")
+    rows = impact_preflight._reasons(orch_db, "nk_a")[-2:]          # after the fixture's own asserted reason
+    assert [r["evidence_level"] for r in rows] == ["verbal", "task_context"]
+    assert rows[0]["tier"] == "stated" and rows[0]["text"] is None and rows[1]["text"] == "finance asked"
