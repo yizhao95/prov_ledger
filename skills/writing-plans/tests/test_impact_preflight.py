@@ -488,10 +488,11 @@ def test_e2_2_constraint_hit_by_node_key_not_lexical(graph_db_with_history, orch
                                                   project="proj", orch_conn=orch_db)
     assert ctx["ledger_reminders"] == []                                   # lexical route found nothing
     assert len(ctx["symbols"][0]["constraints"]) == 1                      # node_key route did
-    assert orch_db.execute("SELECT hit_count FROM LedgerEntries").fetchone()[0] == 1
+    assert orch_db.execute("SELECT COUNT(*) FROM read_hit WHERE moment='plan'").fetchone()[0] == 1     # shown once
+    assert orch_db.execute("SELECT hit_count FROM LedgerEntries").fetchone()[0] == 0                   # DP phase 2: hit_count is frozen
     impact_preflight.compute_impact_context(graph_db_with_history, "tweak process", ["pipeline.process"],
                                             project="proj", orch_conn=orch_db)
-    assert orch_db.execute("SELECT hit_count FROM LedgerEntries").fetchone()[0] == 2
+    assert orch_db.execute("SELECT COUNT(*) FROM read_hit WHERE moment='plan'").fetchone()[0] == 2
     # a symbol without a key gets no constraints; the plan-less call gets nothing from the ledger
     sym = next(s for s in impact_preflight.compute_impact_context(graph_db_with_history, "", ["mod.alpha"],
                                                                   project="proj", orch_conn=orch_db)["symbols"])
