@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # _hook.sh <event> — shared body of the provLedger Claude Code hooks (toolcall.sh,
-# utterance.sh). Runs `python -m orchestrator.hooks <event>` with the hook's JSON
+# utterance.sh, anchor_check.sh). Runs `python -m orchestrator.hooks <event>` with the hook's JSON
 # on stdin. Contract: stdout is ALWAYS empty (a UserPromptSubmit hook's stdout is
-# injected as context), exit is ALWAYS 0; problems go to the error log.
+# injected as context) — except PreToolUse, which prints the hook JSON or nothing —
+# exit is ALWAYS 0; problems go to the error log.
 set -uo pipefail
 EVENT="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,6 +20,12 @@ if [[ -z "${PYBIN:-}" ]]; then
     echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) ${EVENT:--} NoInterpreter: no python found for the hook" >> "${ERRLOG}" 2>/dev/null
     exit 0
 fi
-PYTHONPATH="${PLUGIN_ROOT}/orchestrator-backend${PYTHONPATH:+:${PYTHONPATH}}" \
-    "${PYBIN}" -m orchestrator.hooks "${EVENT}" >/dev/null 2>>"${ERRLOG}" || true
+if [[ "${EVENT}" == "PreToolUse" ]]; then
+    # the one event whose stdout matters: the hook JSON (additionalContext) or nothing at all
+    PYTHONPATH="${PLUGIN_ROOT}/orchestrator-backend${PYTHONPATH:+:${PYTHONPATH}}" \
+        "${PYBIN}" -m orchestrator.hooks "${EVENT}" 2>>"${ERRLOG}" || true
+else
+    PYTHONPATH="${PLUGIN_ROOT}/orchestrator-backend${PYTHONPATH:+:${PYTHONPATH}}" \
+        "${PYBIN}" -m orchestrator.hooks "${EVENT}" >/dev/null 2>>"${ERRLOG}" || true
+fi
 exit 0
