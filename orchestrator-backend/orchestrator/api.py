@@ -13,7 +13,7 @@ import sqlite3
 import string
 from datetime import datetime, timezone
 
-from . import circuit_breakers, constraints, db, outcomes, psg_bridge, reasons, state_machine, telemetry
+from . import circuit_breakers, constraints, db, outcomes, psg_bridge, reasons, state_machine, telemetry, triggers
 from .circuit_breakers import HardStop, SoftStop  # noqa: F401  re-export
 from .state_machine import InvalidTransitionError, StepStatus  # noqa: F401
 
@@ -504,6 +504,11 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
                ("" if psg_db else " (state graph unavailable)")))
     close_mode = _close_mode(project, registry_path)
     with db.transaction(conn):
+        # DP phase 1 (Task 5): the deterministic rules first — a node a rule
+        # recognises gets a derived reason and is never asked about (C1); the
+        # rest of the changed nodes are logged as ask / silent (C2, C4).
+        triggered = triggers.evaluate(conn, project=project, plan_id=plan_id, psg_db_path=psg_db,
+                                      ask=(close_mode != "pending"), commit=False) if psg_db else {}
         n_unstated = reasons.backstop_unstated(
             conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False,
             state="unknown" if close_mode == "pending" else "active") if psg_db else 0
@@ -549,6 +554,7 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         "project_source": project_source,
         "unstated_backstopped": n_unstated,
         "close_mode": close_mode,
+        "triggers": triggered,
         "rejected_paths": n_rejected,
         "constraints_bypassed": n_bypassed,
         "outcomes_backfilled": backfilled,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator import api, db, psg_bridge, reasons
+from orchestrator import api, db, provenance as pv, psg_bridge, reasons
 
 sys.path.insert(0, str(Path(__file__).parent))
 import _psg_schema as ps  # noqa: E402
@@ -113,17 +113,18 @@ def test_e1_2_deviation_justification_lands_on_changed_node(conn, psg_with_plan,
     plan_id, review = _seed_registered_plan(conn, "P1", steps=("CODE: rewrite load_orders filter",), registry=registry,
                                             deviation=("TimeSeriesSplit leaked future rows", "use GroupKFold"))
     _close(conn, plan_id, registry)
-    rp = [r for r in db.get_node_reasons(conn, plan_id=plan_id) if r["kind"] == "rejected_path"]
+    rp = [r for r in pv.reasons_for_plan(conn, plan_id, role="rejected_path")]
     assert len(rp) == 1 and rp[0]["node_key"] == "nk_a"              # nk_a's qualified_name ends with load_orders
-    assert rp[0]["tier"] == "asserted" and "TimeSeriesSplit" in rp[0]["text"] and rp[0]["step_id"] == f"{plan_id}-A"
+    assert rp[0]["tier"] == "derived" and rp[0]["rule_id"] == "R6"     # DP phase 1: rule R6, not an agent assertion
+    assert "TimeSeriesSplit" in rp[0]["interpretation"] and rp[0]["step_id"] == f"{plan_id}-A"
 
 
 def test_rejected_path_without_anchor_is_kept_unanchored(conn, psg_with_plan, registry):
     plan_id, _ = _seed_registered_plan(conn, "P1", steps=("CODE: tidy the notebook",), registry=registry,
                                        deviation=("the notebook kernel kept dying", "restart"))
     _close(conn, plan_id, registry)
-    rp = [r for r in db.get_node_reasons(conn, plan_id=plan_id) if r["kind"] == "rejected_path"]
-    assert len(rp) == 1 and rp[0]["node_key"] is None and "kernel" in rp[0]["text"]
+    rp = [r for r in pv.reasons_for_plan(conn, plan_id, role="rejected_path")]
+    assert len(rp) == 1 and rp[0]["node_key"] is None and "kernel" in rp[0]["interpretation"]
 
 
 def test_e1_3_reason_survives_rename(conn, psg_with_plan):

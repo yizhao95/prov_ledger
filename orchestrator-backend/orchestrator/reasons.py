@@ -190,45 +190,13 @@ def backstop_unstated(conn, *, project: str, plan_id: str, psg_db_path: str | No
     return n
 
 
-def _anchor(text: str | None, changed: list[dict]) -> str | None:
-    """The changed node whose local name appears in `text` (first match in
-    change-set order); None when the text names none of them."""
-    toks = _tokens(text)
-    for c in changed:
-        tail = (c.get("qualified_name") or "").split(".")[-1].split(":")[-1].split("#")[0].lower()
-        if tail and tail in toks:
-            return c["node_key"]
-    return None
-
-
 def rejected_paths(conn, *, project: str, plan_id: str, psg_db_path: str | None,
                    commit: bool = False) -> int:
-    """Deviation justifications and unrecovered failure reasons of the plan
-    become rejected_path rows (tier asserted — the anchor is inferred from the
-    step description / justification, not stated by the author). Idempotent
-    per (plan, text)."""
-    changed = psg_bridge.changed_node_keys(psg_db_path, plan_id)
-    existing = {r["text"] for r in db.get_node_reasons(conn, plan_id=plan_id) if r["kind"] == "rejected_path"}
-    run_id = max((c["run_id"] for c in changed), default=None)
-    n = 0
-    candidates: list[tuple[str, str | None, str]] = []      # (text, step_id, anchor_text)
-    for d in db.get_deviations(conn, plan_id):
-        step = db.get_step(conn, d["target_step_id"]) if d.get("target_step_id") else None
-        anchor_text = " ".join(filter(None, [step.get("description") if step else "", d.get("justification")]))
-        candidates.append((d["justification"], d.get("target_step_id"), anchor_text))
-    for s in db.get_steps(conn, plan_id):
-        if s["status"] == "FAILED" and s.get("failure_reason") and not s.get("is_review"):
-            candidates.append((s["failure_reason"], s["step_id"],
-                               " ".join(filter(None, [s.get("description"), s["failure_reason"]]))))
-    for text, step_id, anchor_text in candidates:
-        if not text or text in existing:
-            continue
-        db.insert_node_reason(conn, node_key=_anchor(anchor_text, changed), project=project, run_id=run_id,
-                              plan_id=plan_id, step_id=step_id, kind="rejected_path", text=text,
-                              source="agent", tier="asserted", commit=commit)
-        existing.add(text)
-        n += 1
-    return n
+    """Deviation justifications and failed steps become rejected_path rows —
+    since DP phase 1 through rule R6 (tier derived, rule_id R6, the failed
+    command + the error tail), anchored to the changed node they name."""
+    from . import triggers
+    return triggers.rejected_paths(conn, project=project, plan_id=plan_id, psg_db_path=psg_db_path, commit=commit)
 
 
 def unstated_ratio(conn, project: str, plan_id: str) -> dict:
@@ -249,6 +217,5 @@ def unstated_ratio(conn, project: str, plan_id: str) -> dict:
 
 def auto_filled(conn, plan_id: str) -> list[dict]:
     """Reasons a rule filled for the plan (rule_id + basis) — shown in the checklist."""
-    return [dict(r) for r in conn.execute(
-        "SELECT node_key, rule_id, interpretation AS basis FROM change_reason WHERE plan_id = ? AND role = 'reason' "
-        "AND tier = 'derived' AND rule_id IS NOT NULL ORDER BY id", (plan_id,))]
+    from . import triggers
+    return triggers.auto_filled(conn, plan_id)
