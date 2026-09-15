@@ -5,6 +5,7 @@ in the repo, `provledger ...` once installed.
   metrics baseline [--since] [--write F]  median / p90 over completed plans
   note "<words>" --at <when> [...]        record something that was said, after the fact
   reasons reclass-status                  the state of the legacy-reason migration
+  headline show|respond|ack <plan> …      the plan headline and its answers
 """
 from __future__ import annotations
 
@@ -123,6 +124,28 @@ def _ask_basis(conn, since: str | None) -> dict:
     return {"since": since, "asks": len(rows), "groups": [groups[k] for k in sorted(groups)]}
 
 
+def _headline_cmd(args) -> int:
+    from . import checks
+    conn = _open()
+    try:
+        if args.sub == "show":
+            doc = checks.latest(conn, plan_id=args.plan_id)
+            if doc is None:
+                print(f"no headline for plan {args.plan_id}")
+                return 1
+            print(checks.render(doc))
+            return 0
+        by = "human" if args.sub == "ack" else args.by
+        action = "proceed" if args.sub == "ack" else args.action
+        rid = checks.respond(conn, plan_id=args.plan_id, finding_id=args.finding_id, action=action,
+                             rationale=args.rationale, by=by, cites=args.cite)
+        print(json.dumps({"response_id": rid, "plan_id": args.plan_id, "finding_id": args.finding_id, "action": action, "by": by,
+                          "adopted": len(set(args.cite))}, indent=1))
+        return 0
+    finally:
+        conn.close()
+
+
 def _reasons_cmd(args) -> int:
     conn = _open()
     try:
@@ -162,6 +185,15 @@ def build_parser() -> argparse.ArgumentParser:
     n.add_argument("--ref", action="append", default=[], metavar="kind=…,label=…[,uri=…]",
                    help="a source to register and link (email, meeting, chat, ticket, doc, commit, verbal, other); repeatable")
     n.add_argument("--session", default=None, help=argparse.SUPPRESS)
+    h = sub.add_parser("headline", help="the plan headline: what the two-layer check found, and how it was answered")
+    hs = h.add_subparsers(dest="sub", required=True)
+    hshow = hs.add_parser("show", help="print a plan's latest headline"); hshow.add_argument("plan_id")
+    hr = hs.add_parser("respond", help="answer one finding (revise | proceed) with a rationale; cited records become adopted")
+    hr.add_argument("plan_id"); hr.add_argument("finding_id")
+    hr.add_argument("--action", required=True, choices=["revise", "proceed"]); hr.add_argument("--rationale", default=None)
+    hr.add_argument("--by", default="agent", choices=["agent", "human"]); hr.add_argument("--cite", action="append", type=int, default=[], metavar="REASON_ID")
+    ha = hs.add_parser("ack", help="a person proceeds past a finding (by human)"); ha.add_argument("plan_id"); ha.add_argument("finding_id")
+    ha.add_argument("--rationale", default=None); ha.add_argument("--cite", action="append", type=int, default=[], metavar="REASON_ID")
     r = sub.add_parser("reasons", help="the reasons ledger")
     rs = r.add_subparsers(dest="sub", required=True)
     rs.add_parser("reclass-status", help="whether the legacy node_reason / ledger rows were migrated into change_reason, and the tier counts")
@@ -178,6 +210,8 @@ def main(argv=None) -> int:
         return _note(args)
     if args.cmd == "reasons":
         return _reasons_cmd(args)
+    if args.cmd == "headline":
+        return _headline_cmd(args)
     return 2
 
 

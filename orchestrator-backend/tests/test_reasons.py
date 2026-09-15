@@ -89,7 +89,7 @@ def test_e1_1_close_creates_one_reason_slot_per_changed_node_and_records_unstate
     plan_id, review = _seed_registered_plan(conn, "P1", registry=registry)
     r = reasons.fill(conn, project="proj", plan_id=plan_id, run_id=2, psg_db_path=psg_with_plan,
                      reasons=[{"node_key": "nk_a", "interpretation": "financial weeks"}, {"node_key": "nk_b", "unstated": True}])
-    assert r == {"filled": 1, "stated": 0, "asserted": 1, "unstated": 1, "unknown_keys": []}
+    assert r == {"filled": 1, "stated": 0, "asserted": 1, "unstated": 1, "adopted": 0, "unknown_keys": []}
     out = _close(conn, plan_id, registry)
     from orchestrator import provenance as pv
     rows = [x for x in pv.reasons_for_plan(conn, plan_id) if x["role"] == "reason"]
@@ -105,7 +105,7 @@ def test_e1_1_close_creates_one_reason_slot_per_changed_node_and_records_unstate
 def test_fill_rejects_keys_outside_the_change_set(conn, psg_with_plan):
     r = reasons.fill(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg_with_plan,
                      reasons=[{"node_key": "nk_a", "interpretation": "ok"}, {"node_key": "nk_zzz", "interpretation": "x"}])
-    assert r == {"filled": 0, "stated": 0, "asserted": 0, "unstated": 0, "unknown_keys": ["nk_zzz"]}
+    assert r == {"filled": 0, "stated": 0, "asserted": 0, "unstated": 0, "adopted": 0, "unknown_keys": ["nk_zzz"]}
     assert conn.execute("SELECT COUNT(*) FROM change_reason").fetchone()[0] == 0           # all-or-nothing
 
 
@@ -168,7 +168,7 @@ def test_fill_three_shapes_one_tier_each(conn, psg_with_plan):
         {"node_key": "nk_b", "interpretation": "finance wants weekly grain", "refs": [ref]},
         {"node_key": "nk_c", "unstated": True},
     ])
-    assert r == {"filled": 2, "stated": 1, "asserted": 1, "unstated": 1, "unknown_keys": []}
+    assert r == {"filled": 2, "stated": 1, "asserted": 1, "unstated": 1, "adopted": 0, "unknown_keys": []}
     rows = {x["node_key"]: x for x in pv.reasons_for_plan(conn, "P1")}
     assert rows["nk_a"]["tier"] == "stated" and rows["nk_a"]["evidence_level"] == "verbal" and rows["nk_a"]["recorded_by"] == "human"
     assert rows["nk_b"]["tier"] == "asserted" and rows["nk_b"]["evidence_level"] == "verbal"       # a human interpretation is still asserted

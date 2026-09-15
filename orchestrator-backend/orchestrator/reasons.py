@@ -91,6 +91,9 @@ def _answer_kind(item: dict) -> str:
     has_unstated = bool(item.get("unstated"))
     if sum((has_span, has_interp, has_unstated)) != 1:
         raise FillInputError("an answer is exactly one of {utterance_id, span} (stated) | {interpretation, refs?} (asserted) | {unstated: true}")
+    because = item.get("because")
+    if because is not None and not (isinstance(because, (list, tuple)) and all(isinstance(x, int) for x in because)):
+        raise FillInputError("because must be a list of reason ids")
     if has_span:
         span = item.get("span")
         if item.get("utterance_id") is None or not (isinstance(span, (list, tuple)) and len(span) == 2):
@@ -109,6 +112,8 @@ def fill(conn, *, project: str, plan_id: str, run_id: int | None, reasons: list[
       {node_key, utterance_id, span:[s,e]}        -> stated   (a span of the user's recorded words)
       {node_key, interpretation, refs?:[ref_id]}  -> asserted (the agent's or a person's reading)
       {node_key, unstated: true}                  -> unstated (an explicit gap)
+    Any shape may add because: [reason_id, ...] — the records this change
+    leaned on — which become influence rows (via reason_because).
     The old {node_key, text} shape is refused (FillInputError, exit 2) — free
     text can no longer become stated, whoever sends it (A2/A4). Keys outside
     the plan's change set are refused all-or-nothing; the shapes are checked
@@ -118,7 +123,7 @@ def fill(conn, *, project: str, plan_id: str, run_id: int | None, reasons: list[
     changed = {c["node_key"] for c in psg_bridge.changed_node_keys(psg, plan_id)}
     unknown = [r.get("node_key") for r in reasons if r.get("node_key") not in changed]
     if unknown:
-        return {"filled": 0, "stated": 0, "asserted": 0, "unstated": 0, "unknown_keys": unknown}
+        return {"filled": 0, "stated": 0, "asserted": 0, "unstated": 0, "adopted": 0, "unknown_keys": unknown}
     recorded_by = source if source in provenance.RECORDED_BY else "agent"
     counts = {"stated": 0, "asserted": 0, "unstated": 0}
     with db.transaction(conn):
@@ -134,7 +139,13 @@ def fill(conn, *, project: str, plan_id: str, run_id: int | None, reasons: list[
             else:
                 provenance.insert_reason(conn, **common)
             counts[kind] += 1
-    return {"filled": counts["stated"] + counts["asserted"], **counts, "unknown_keys": []}
+            for cited in r.get("because") or ():
+                if provenance.get_reason(conn, int(cited)) is None:
+                    raise FillInputError(f"because: reason {cited} does not exist")
+                conn.execute("INSERT INTO influence (reason_id, project, plan_id, step_id, node_key, via, by) VALUES (?, ?, ?, ?, ?, 'reason_because', ?)",
+                             (int(cited), project, plan_id, step_id, r["node_key"], "human" if recorded_by == "human" else "agent"))
+                counts["adopted"] = counts.get("adopted", 0) + 1
+    return {"filled": counts["stated"] + counts["asserted"], **{k: counts.get(k, 0) for k in ("stated", "asserted", "unstated", "adopted")}, "unknown_keys": []}
 
 
 PREVIEW_CHARS = 120

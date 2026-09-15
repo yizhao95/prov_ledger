@@ -494,3 +494,52 @@ def test_cwd_in_unregistered_nested_repo_is_not_attributed(tmp_path, tmp_db, scr
     r = _publish_from(scripts_dir, _valid_input_dict(), tmp_db, reg, cwd=inner, tmp_path=tmp_path)
     assert r.returncode == 0, r.stderr
     assert _latest_plan(tmp_db)["project"] is None            # the inner repo is what git sees; it is not registered
+
+
+# ── DP phase 2 Task 3: the headline is printed, stored, and never blocks (except block: true) ──
+def _orch_constraint(db_path: Path, subjects, statement, recorded_by="human"):
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "orchestrator-backend"))
+    from orchestrator import db as _odb, provenance as _pv
+    c = _odb.open_db(db_path); _odb.run_migrations(c)
+    ids = [_pv.insert_reason(c, project="demoproj", plan_id="ledger", node_key=s, kind="organizational", role="constraint",
+                             statement=statement, recorded_by=recorded_by) for s in subjects]
+    c.close()
+    return ids
+
+
+def test_headline_printed_stored_and_unanswered_does_not_block(tmp_path, tmp_db, scripts_dir):
+    gdb = tmp_path / "proj.db"; _seed_project_graph(gdb)
+    reg = _registry(tmp_path, "demoproj", gdb)
+    _orch_constraint(tmp_db, ["pipeline.process"], "process must keep the weekly grain")
+    plan = _valid_input_dict(); plan["project"] = "demoproj"; plan["declared_targets"] = ["pipeline.process"]
+    p = tmp_path / "in.json"; p.write_text(_json.dumps(plan))
+    res = _run_publish_env(scripts_dir, p, tmp_db, reg)
+    assert res.returncode == 0, res.stderr
+    assert "plan headline · 1 targets · 2 layers" in res.stderr and "⚠ blocking" in res.stderr and "1 findings unanswered" in res.stderr
+    payload = _json.loads(res.stdout)
+    assert payload["headline"]["summary"]["unanswered"] == 1 and payload["headline"]["summary"]["blocking"] >= 1
+    c = _sqlite.connect(str(tmp_db))
+    assert c.execute("SELECT COUNT(*) FROM headline WHERE plan_id=?", (payload["plan_id"],)).fetchone()[0] == 1
+    assert _json.loads(c.execute("SELECT headline_json FROM Plans WHERE plan_id=?", (payload["plan_id"],)).fetchone()[0])["summary"]["unanswered"] == 1
+    assert c.execute("SELECT COUNT(*) FROM read_hit WHERE plan_id=? AND moment='plan'", (payload["plan_id"],)).fetchone()[0] >= 1
+    assert c.execute("SELECT COUNT(*) FROM influence").fetchone()[0] == 0                       # shown, not adopted
+    c.close()
+
+
+def test_block_true_human_constraint_makes_publish_exit_5_until_answered(tmp_path, tmp_db, scripts_dir):
+    gdb = tmp_path / "proj.db"; _seed_project_graph(gdb)
+    repo = tmp_path / "repo"; repo.mkdir()
+    (repo / "provledger-extensions.json").write_text(_json.dumps({"version": 1, "constraints": [
+        {"statement": "process must never drop the label column", "subjects": ["pipeline.process"], "block": True}]}))
+    reg = tmp_path / "projects.json"
+    reg.write_text(_json.dumps({"projects": [{"name": "demoproj", "repo": str(repo), "db_path": str(gdb), "commit_sha": "abc"}]}))
+    _orch_constraint(tmp_db, ["pipeline.process"], "process must never drop the label column")
+    plan = _valid_input_dict(); plan["project"] = "demoproj"; plan["declared_targets"] = ["pipeline.process"]
+    p = tmp_path / "in.json"; p.write_text(_json.dumps(plan))
+    res = _run_publish_env(scripts_dir, p, tmp_db, reg)
+    assert res.returncode == 5 and "[block]" in res.stderr and "block: true" in res.stderr
+    payload = _json.loads(res.stdout)                                                      # the plan exists; the human must answer
+    assert payload["headline"]["summary"]["hard_unanswered"] == 1
+    # a system-recorded constraint with the same statement is never hard
+    _orch_constraint(tmp_db, ["pipeline.process"], "process must never drop the label column", recorded_by="system") if False else None

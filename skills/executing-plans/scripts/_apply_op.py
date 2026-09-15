@@ -436,6 +436,25 @@ def _op_reason_fill(conn, data: dict) -> dict:
     return r
 
 
+def _op_headline_respond(conn, data: dict) -> dict:
+    """Answer one finding of the plan's latest headline: {plan_id, finding_id,
+    action: revise|proceed, rationale?, cites?: [reason_id], by?: agent|human}.
+    The finding's record and every cited record become influence rows
+    (adopted); a second answer to the same finding is refused (exit 2) — a
+    changed answer is a recomputed headline."""
+    _require(data, "plan_id", "finding_id", "action")
+    from orchestrator import checks
+    try:
+        rid = checks.respond(conn, plan_id=data["plan_id"], finding_id=data["finding_id"], action=data["action"],
+                             rationale=data.get("rationale"), by=data.get("by", "agent"), cites=data.get("cites") or [])
+    except ValueError as e:
+        _die(str(e), code=2)
+    except Exception as e:                       # sqlite UNIQUE: already answered on this headline
+        _die(f"finding {data['finding_id']} already answered on the latest headline of {data['plan_id']} ({e})", code=2)
+    doc = checks.latest(conn, plan_id=data["plan_id"])
+    return {"response_id": rid, "plan_id": data["plan_id"], "finding_id": data["finding_id"], "summary": doc["summary"] if doc else None}
+
+
 def _op_record_metric(conn, data: dict) -> dict:
     """One numeric observation into metrics (migration 017): {name, value,
     unit?, plan_id?, step_id?, project?}. project defaults to the plan's
@@ -492,6 +511,7 @@ OPS = {
     "reason-slots": _op_reason_slots,
     "reason-fill":  _op_reason_fill,
     "record-metric": _op_record_metric,
+    "headline-respond": _op_headline_respond,
 }
 
 

@@ -50,6 +50,7 @@ class TargetPack:
     dtype_map: dict = field(default_factory=dict)
     lineage_downstream: list[str] = field(default_factory=list)
     upstream_assumptions: list[dict] = field(default_factory=list)
+    removed_upstream: list[dict] = field(default_factory=list)   # callees / upstream whose latest event is node_removed
     counts: dict = field(default_factory=dict)   # totals before any cap / trim (minor folded reasons included)
 
 
@@ -68,6 +69,15 @@ class Pack:
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "Pack":
+        """Rebuild a Pack from its stored dict (Plans.impact_context.pack)."""
+        keys = {f for f in cls.__dataclass_fields__}
+        tkeys = {f for f in TargetPack.__dataclass_fields__}
+        pack = cls(**{k: v for k, v in d.items() if k in keys and k != "targets"})
+        pack.targets = [TargetPack(**{k: v for k, v in t.items() if k in tkeys}) for t in d.get("targets", [])]
+        return pack
 
 
 def _now() -> str:
@@ -114,8 +124,17 @@ def _card(psg, qn: str) -> dict:
 
 
 def _node_key(psg, qn: str) -> str | None:
+    """Exact qualified name first; otherwise a unique dotted-suffix match
+    (a plan declares `orchestrator.reasons.fill`, the graph knows it as
+    `orchestrator-backend.orchestrator.reasons.fill`). Ambiguous → None."""
     rows = _psg_rows(psg, "SELECT node_key FROM node_snapshot WHERE qualified_name = ? AND node_key <> '' ORDER BY run_id DESC, id DESC LIMIT 1", (qn,))
-    return rows[0][0] if rows else None
+    if rows:
+        return rows[0][0]
+    if not qn or "." not in qn:
+        return None
+    rows = _psg_rows(psg, "SELECT DISTINCT node_key FROM node_snapshot WHERE qualified_name LIKE ? AND node_key <> '' "
+                          "AND run_id = (SELECT MAX(run_id) FROM node_snapshot x WHERE x.node_key = node_snapshot.node_key)", ("%." + qn,))
+    return rows[0][0] if len(rows) == 1 else None
 
 
 def _records(conn, project: str, anchors: list[str]) -> list[dict]:
@@ -204,6 +223,13 @@ def build(conn, *, project: str, targets: list[str], psg_db_path: str | None = N
             tp.dtype_map = dict(card.get("dtype_map") or {})
             tp.lineage_downstream = list(card.get("lineage_downstream") or [])
             tp.upstream_assumptions = [{"table": x} for x in (card.get("reads") or [])]
+            for up in list(card.get("callees") or []) + list(card.get("lineage_upstream") or []):
+                uk = _node_key(psg, up)
+                if not uk:
+                    continue
+                last = _psg_rows(psg, "SELECT id, event_type, run_id FROM node_event WHERE node_key = ? ORDER BY run_id DESC, seq DESC LIMIT 1", (uk,))
+                if last and last[0][1] == "node_removed":
+                    tp.removed_upstream.append({"qualified_name": up, "node_key": uk, "event_id": last[0][0], "run_id": last[0][2]})
             for nb in tp.output_consumers:
                 if nb in pack.neighbors_counts:
                     continue
