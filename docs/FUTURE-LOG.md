@@ -13,7 +13,7 @@
 | FL-006 | phase6 | DONE | host API（NodeTypeProvider / provledger.testing）放 pip 包还是 skills/ | 阶段 6 前拍板 |
 | FL-007 | phase1 | DONE（阶段 7 Task 1：migration 017 `metrics` + `record-metric` / `metrics_from_stdout` + `MetricChannel`，demo 的 +23.2% 成为 observed outcome） | eval metric outcome 通道（当前无表，demo 指标只在日志） | 阶段 7 |
 | FL-008 | phase1 | DEFERRED | 与 superpowers 同名 skill 的长期方案（现为项目级禁用 + bootstrap 提示） | 阶段 5 |
-| FL-009 | phase1 | DEFERRED | dashboard 展示 node 历史与 outcome | 阶段 4 后 |
+| FL-009 | phase1 | DONE（阶段 8 Task 4：`GET /node/{project}/{qualified_name}`——上下游（consistency card）、按 run 分组的履历事件（plan 链接、tier 文字标签、`identity_asserted` 带 evidence）、理由与锚定约束（restricted 只给 why_ref）一次查询，页脚 approx_tokens；Reasons 面板的 node_key 变链接；outcome 视图见 FL-042） | dashboard 展示 node 历史与 outcome | 阶段 8 |
 | FL-010 | phase1 | DEFERRED | 数据流签名依赖 dtype 覆盖率（unknown 偏多 → trivial 签名不参与匹配） | 持续 |
 | FL-011 | #36 | DONE | dogfood：`deviate.sh` 在 api 返回 `accepted:false`（immutability 断路器）时仍打印 `ok:true` 并 exit 0；且 COMPLETED 步骤无任何脚本能插入重试子步骤 | 阶段 2 前 |
 | FL-012 | #36 | DONE | dogfood：`ensure-dashboard.sh` 指向 `~/skill-workspace/orchestrator-webapp/launch_dashboard.sh`（不存在）；SKILL.md 调用路径仍为 `~/.code_puppy/skills/...` | 阶段 2 前 |
@@ -43,3 +43,12 @@
 | FL-036 | phase6 | DEFERRED | provider 自定义签名层（`x-…`）被 schema 接受但不参与匹配：`graph_api.match` 只认 qualname/struct/dataflow/owner 四层；要让第三方类型有自己的结构层，需要按层声明（是否 1:1、是否 trivial）并进 `_LAYERS` | 阶段 7 |
 | FL-037 | phase6 | DEFERRED | 一致性套件对需要真图的第三方 provider（用 `ctx.node_rows`/`conn_ro` 读图的）只能在 PSG 侧注入 `context_factory` 跑；包内默认上下文是空图，`provledger.testing` 独立跑时这类 provider 的 `stability_matches_declaration` 只能覆盖纯源码 provider | 阶段 7 |
 | FL-038 | phase7 | DEFERRED | `run_provider(isolate="subprocess")` 用 fork：子进程继承 ctx（含只读 sqlite 连接），观测 pickle 回传；没有 fork 的平台降级为 degraded，也没有内存/CPU 限额与 spawn 式干净环境——完整的子进程隔离（spawn + 按 `module:Class` 重新导入 provider + 重建上下文 + rlimit）留待需要时做 | 阶段 8+ |
+| FL-039 | phase7 | DEFERRED | metric 通道没有聚合窗口：`MetricChannel` 取期望前后最近的一条观测（nearest-before/after），不做窗口均值；周期性指标的噪声会被当成后果 | 阶段 8+ |
+| FL-040 | phase7 | WIP（阶段 8 Task 2：`provledger.testing.claude_arbiter.ClaudeArbiter`（无头 `claude -p`，注入 runner 的离线测试 14 个）已接到门槛前；对 67 条校准集 `--n-runs 3` 真实跑过一次：consistency 0.701 / coverage 0.433 / accuracy 0.552 / evidence_ok → **拒绝**（consistency < 1.0），未接入。主因是一致性：20 条在"给出正确 pairs"与"弃权"之间摇摆，201 次调用 0 次错连；16 条负例全部正确弃权，19 条 live 项 17 对。下一步：把"调用点同步改名"写成显式判据、让模型先列证据再判；门槛不放宽） | 没有任何真实模型仲裁器跑过门槛；`identity_asserted` 从未在真实图上出现过 | 阶段 8 |
+| FL-041 | phase7 | DONE（阶段 8 Task 1：`calibration.generate_from_corpus / generate_negatives / generate_swaps / merge / stats`，`analyzer calibration generate|stats`，语料 swap 变体在 expect.toml 声明 truth 并由 harness 校验；48 条按构造：pairs 16 / none 16 / partial 16，struct 42 / dataflow 6） | 校准集一边倒：19 条全是 struct 层目录移动、truth 全 pairs、无负例——门槛拒绝说的是"样本考不出东西"而不是仲裁器的上限 | 阶段 8 |
+| FL-042 | phase7 | DONE（阶段 8 Task 3：`GET /outcomes[?project=]`，`queries.get_expectations_with_latest_outcome` + `outcome_stats`） | dashboard 没有跨 plan 的 outcome 视图：只能在单个 plan 页看它自己的期望 | 阶段 8 |
+| FL-043 | phase8 | DEFERRED | `ClaudeArbiter` 的原始 prompt / 回答只在进程内存（`exchanges`），`arbiter-eval` 不落盘，事后只能从报告的 answer / answers_distinct / correct 反推；需要 `--dump DIR` 把每次交换写下来，才能分析摇摆的具体证据 | 阶段 9 |
+| FL-044 | phase8 | DEFERRED | 构造式校准集的 dataflow 层用的是包内的轻量替身（函数体里 `read_*()` 的字面量目标），不是分析器由图推出的 `dataflow_sig`；6 条 dataflow 项能让匹配器的 dataflow 层触发，但与真图的签名不是同一个函数——要么让 PSG 侧用 `analyzer_extractor` 重新生成这几条，要么在包里复刻真实签名 | 阶段 9 |
+| FL-045 | phase8 | DEFERRED | 阶段 7 导出的 19 条 live 校准项没有 `source` 字段（`stats` 显示 `unknown=19`）；`--merge` 应给缺 source 的项补 `live:<db>`，或导出格式加版本迁移 | 阶段 9 |
+| FL-046 | phase8 | DEFERRED | 节点履历页的约束查询在 `app/queries.py` 里直接写 SQL（`LedgerEntries` + `json_each`、restricted → rationale 置空），与 `orchestrator.constraints.anchored_constraints` 逻辑重复；webapp 只经 `provledger.psg_bridge` 读 PSG，但 orchestrator 侧的规则也该走一个入口 | 阶段 9 |
+| FL-047 | phase8 | DEFERRED | consistency_card 的 `callers` / `output_consumers` 是裸名（`pkg.m.main`），节点页把它们当限定名链接，裸名会落到 "not in the state graph"；card 应记限定名（PSG-C2 给 profiles 做过同样的事） | 阶段 9 |
