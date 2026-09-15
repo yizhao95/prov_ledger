@@ -323,3 +323,65 @@ def test_outcomes_panel_shows_metric_delta(client):
     conn.close()
     assert [x["channel"] for x in rows] == ["metric:mean_net_revenue", "profile_drift"]
     assert rows[0]["delta_pct"] == 23.2 and rows[0]["summary"].startswith("43.6") and rows[1]["delta_pct"] is None
+
+
+def _seed_expectations(db, pid):
+    conn = odb.open_db(db)
+    r2 = api.initialize_plan(conn, "Second plan — reprice promo", ["one"], plan_id_prefix="second")
+    pid2 = r2["plan_id"]
+    e1 = odb.insert_expectation(conn, plan_id=pid, step_id=None, project="demo", target="mean_net_revenue",
+                                target_kind="metric", claim="revenue stays within ±5% WoW", channel="metric:mean_net_revenue")
+    odb.insert_outcome(conn, expectation_id=e1, kind="observed",
+                       value={"name": "mean_net_revenue", "before": 43.6, "after": 53.72, "delta": 10.12, "delta_pct": 23.2, "unit": "usd"},
+                       source="metrics", tier="observed", backfilled_by_plan=pid2)
+    e2 = odb.insert_expectation(conn, plan_id=pid2, step_id=None, project="other", target="orders", target_kind="dataset",
+                                claim="promo_discount column stays", channel="profile_drift")
+    odb.insert_outcome(conn, expectation_id=e2, kind="none_available", value={}, source="data_profile", tier="none",
+                       reason="no data_profile snapshot before and after the expectation", backfilled_by_plan=pid)
+    e3 = odb.insert_expectation(conn, plan_id=pid2, step_id=None, project="other", target="pkg.m.load", target_kind="node",
+                                claim="load keeps its callers", channel="survival")
+    conn.close()
+    return pid2, (e1, e2, e3)
+
+
+def test_outcomes_page_lists_every_claim_with_its_latest_outcome(client):
+    pid = client._seeded["plan_id"]
+    pid2, (e1, e2, e3) = _seed_expectations(client._db, pid)
+    r = client.get("/outcomes")
+    assert r.status_code == 200
+    assert "revenue stays within ±5% WoW" in r.text and "promo_discount column stays" in r.text and "load keeps its callers" in r.text
+    assert 'data-tier="observed"' in r.text and 'data-tier="none"' in r.text and 'data-tier="pending"' in r.text
+    assert "+23.2%" in r.text and "metric:mean_net_revenue" in r.text and "profile_drift" in r.text
+    assert f"/plan/{pid2}" in r.text and "Second plan" in r.text     # the owning plan and who backfilled
+    for key in ("observed", "none_available", "pending"):                   # the stat strip: one labelled tile per kind
+        assert f'data-stat="{key}">1<' in r.text, key
+    assert 'data-stat="n">3<' in r.text and 'data-stat="survival">0<' in r.text
+    from app import queries
+    conn = odb.open_db(client._db)
+    rows = queries.get_expectations_with_latest_outcome(conn)
+    conn.close()
+    assert [x["expectation_id"] for x in rows] == [e3, e2, e1]          # created_at DESC, id DESC
+    assert rows[0]["kind"] == "pending" and rows[2]["latest"]["delta_pct"] == 23.2 and rows[2]["plan_title"]
+
+
+def test_outcomes_page_filters_by_project(client):
+    pid = client._seeded["plan_id"]
+    _seed_expectations(client._db, pid)
+    r = client.get("/outcomes?project=other")
+    assert r.status_code == 200 and "promo_discount column stays" in r.text and "revenue stays within" not in r.text
+    r = client.get("/outcomes?project=nope")
+    assert r.status_code == 200 and "no expectations" in r.text.lower()
+
+
+def test_outcomes_page_is_empty_but_200_on_an_old_db(tmp_path, monkeypatch):
+    db = tmp_path / "old.db"
+    c = sqlite3.connect(db)
+    c.execute("CREATE TABLE Plans (plan_id TEXT PRIMARY KEY, original_goal TEXT, status TEXT, revision_count INTEGER, "
+              "max_revisions INTEGER, created_at TEXT, completed_at TEXT)")
+    c.commit(); c.close()
+    monkeypatch.setenv("ORCH_DB", str(db))
+    from app import queries, main
+    importlib.reload(queries); importlib.reload(main)
+    from fastapi.testclient import TestClient
+    r = TestClient(main.app).get("/outcomes")
+    assert r.status_code == 200 and "no expectations" in r.text.lower()

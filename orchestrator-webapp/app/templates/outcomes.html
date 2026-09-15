@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Outcomes — provLedger{% endblock %}
+{% block content %}
+  <div class="mb-4 flex items-center justify-between gap-3 flex-wrap">
+    <div class="flex items-center gap-2">
+      <a href="/" class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue rounded-lg shadow-sm hover:bg-brand-bg text-sm font-semibold transition">🏠 Home</a>
+      <a href="/history" class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue rounded-lg shadow-sm hover:bg-brand-bg text-sm font-semibold transition">📚 History</a>
+    </div>
+    <span class="text-xs text-brand-muted italic">🎯 every claim, across plans, with its latest outcome · read-only</span>
+  </div>
+
+  {% if error %}
+  <div class="bg-surface rounded-xl border border-hairline p-5 text-sm text-brand-red">{{ error }}</div>
+  {% endif %}
+
+  {# stat strip: counts by latest kind — a LABEL per tile, never colour alone #}
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+    {% for key, label in [("n", "claims"), ("observed", "observed"), ("survival", "survival"), ("none_available", "none_available"), ("pending", "pending")] %}
+    <div class="bg-surface rounded-xl border border-hairline px-4 py-3">
+      <div class="text-[11px] uppercase tracking-wide text-brand-muted">{{ label }}</div>
+      <div class="text-xl font-semibold tnum" data-stat="{{ key }}">{{ stats[key] }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="text-xs text-brand-muted mb-3">
+    pending ratio <span class="tnum" data-stat="pending_ratio">{{ '%.0f' % (stats.pending_ratio * 100) }}%</span>
+    — claims no reviewed close of another plan has observed yet ·
+    project filter:
+    <a href="/outcomes" class="{{ 'font-semibold text-gray-900' if not project else 'text-brand-blue' }}">all</a>
+    {% for p in stats.projects %} · <a href="/outcomes?project={{ p }}" class="{{ 'font-semibold text-gray-900' if p == project else 'text-brand-blue' }}">{{ p }}</a>{% endfor %}
+    {% if project and project not in stats.projects %} · <span class="font-semibold">{{ project }}</span>{% endif %}
+  </div>
+
+  {% if not rows %}
+  <div class="bg-surface rounded-xl border border-hairline p-6 text-sm text-brand-gray">
+    No expectations recorded{% if project %} for project <span class="font-mono">{{ project }}</span>{% endif %} — a plan states a claim with an outcome channel (see docs/outcomes.md) and the next reviewed close of another plan backfills it.
+  </div>
+  {% else %}
+  <div class="bg-surface rounded-xl shadow-sm border border-hairline overflow-x-auto">
+    <table class="min-w-full text-sm">
+      <thead class="text-[11px] uppercase tracking-wide text-brand-muted border-b border-hairline">
+        <tr>
+          <th class="text-left px-4 py-2">claim</th>
+          <th class="text-left px-4 py-2">target</th>
+          <th class="text-left px-4 py-2">channel</th>
+          <th class="text-left px-4 py-2">latest outcome</th>
+          <th class="text-left px-4 py-2">delta / signal</th>
+          <th class="text-left px-4 py-2">stated by</th>
+          <th class="text-left px-4 py-2">backfilled by</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        {% set tb = tier_badge(r.latest.tier) if r.latest.tier != 'pending' else ('pending', 'bg-brand-gray/10 text-brand-gray') %}
+        <tr class="border-b border-hairline align-top" data-expectation="{{ r.expectation_id }}">
+          <td class="px-4 py-2 text-gray-900">{{ r.claim }}
+            <div class="text-[11px] text-brand-muted">{{ relative_time(r.claimed_at) }} · {{ r.project }}</div></td>
+          <td class="px-4 py-2 font-mono text-xs">{{ r.target }} <span class="text-brand-muted">({{ r.target_kind }})</span></td>
+          <td class="px-4 py-2 font-mono text-xs">{{ r.channel }}</td>
+          <td class="px-4 py-2">
+            <span data-tier="{{ r.latest.tier }}" class="text-xs px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
+            <span class="text-xs text-brand-muted ml-1">{{ r.latest.kind }}</span>
+            <div class="text-xs text-gray-800 mt-0.5">{{ r.latest.summary }}</div>
+          </td>
+          <td class="px-4 py-2 tnum text-xs">
+            {% if r.latest.delta_pct is not none %}<span class="font-semibold">{{ '%+.1f' % r.latest.delta_pct }}%</span>
+            {% elif r.latest.signal %}{{ r.latest.signal }}{% else %}—{% endif %}
+          </td>
+          <td class="px-4 py-2 text-xs"><a href="/plan/{{ r.plan_id }}" class="text-brand-blue">{{ r.plan_title }}</a></td>
+          <td class="px-4 py-2 text-xs">
+            {% if r.latest.backfilled_by_plan %}<a href="/plan/{{ r.latest.backfilled_by_plan }}" class="text-brand-blue font-mono">{{ r.latest.backfilled_by_plan }}</a>
+            <div class="text-[11px] text-brand-muted">{{ relative_time(r.latest.observed_at) }}</div>{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+{% endblock %}

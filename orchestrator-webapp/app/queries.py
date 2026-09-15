@@ -711,3 +711,58 @@ def get_unstated(conn: sqlite3.Connection, plan_id: str) -> dict:
     slots = len(stated)
     unstated = sum(1 for v in stated.values() if not v)
     return {"slots": slots, "unstated": unstated, "pct": int(100 * unstated / slots) if slots else 0}
+
+
+# ── Phase 8 Task 3: every claim with its latest outcome, across plans (FL-042) ──
+def get_expectations_with_latest_outcome(conn: sqlite3.Connection, project: str | None = None,
+                                         limit: int = 200) -> list[dict]:
+    """One row per expectation — the claim, its channel, the owning plan's
+    title, and the LATEST outcome recorded against it (kind / tier / value
+    summary / backfilled_by_plan / observed_at); an expectation with no
+    outcome yet is kind 'pending', tier 'pending'. Newest claims first.
+    Read-only; [] on a DB that predates migration 014."""
+    sql = ("SELECT e.id AS expectation_id, e.plan_id, e.step_id, e.project, e.target, e.target_kind, e.claim, e.channel, "
+           "       e.created_at AS claimed_at, p.original_goal, p.user_query, p.status AS plan_status, "
+           "       o.id AS outcome_id, o.kind, o.value_json, o.source, o.tier, o.reason, o.backfilled_by_plan, o.observed_at "
+           "FROM expectations e "
+           "LEFT JOIN Plans p ON p.plan_id = e.plan_id "
+           "LEFT JOIN outcomes o ON o.id = (SELECT id FROM outcomes WHERE expectation_id = e.id ORDER BY observed_at DESC, id DESC LIMIT 1) ")
+    params: list = []
+    if project:
+        sql += "WHERE e.project = ? "
+        params.append(project)
+    sql += "ORDER BY e.created_at DESC, e.id DESC LIMIT ?"
+    params.append(limit)
+    try:
+        rows = conn.execute(sql, params).fetchall()
+    except sqlite3.Error:
+        return []
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            value = json.loads(d["value_json"]) if d["value_json"] else {}
+        except ValueError:
+            value = {}
+        if d["kind"] is None:
+            d["kind"], d["tier"], d["source"] = "pending", "pending", "—"
+        # title: the user's query first, else the plan's goal, else the id (short_title only knows user_query)
+        d["plan_title"] = short_title({"plan_id": d["plan_id"], "user_query": d.get("user_query") or d.get("original_goal")})
+        d["latest"] = {"kind": d["kind"], "tier": d["tier"], "value": value, "source": d["source"], "reason": d.get("reason"),
+                       "backfilled_by_plan": d.get("backfilled_by_plan"), "observed_at": d.get("observed_at"),
+                       "delta_pct": value.get("delta_pct") if d["kind"] == "observed" and isinstance(value, dict) else None,
+                       "signal": value.get("signal") if isinstance(value, dict) else None,
+                       "summary": _outcome_summary(d["kind"], value, d.get("reason"))}
+        out.append(d)
+    return out
+
+
+def outcome_stats(rows: list[dict]) -> dict:
+    """Counts by latest kind + the share of claims still pending (unstated_ratio
+    of the outcome side: claims nobody has observed yet)."""
+    counts = {"observed": 0, "survival": 0, "none_available": 0, "pending": 0}
+    for r in rows:
+        counts[r["kind"]] = counts.get(r["kind"], 0) + 1
+    n = len(rows)
+    return {"n": n, **counts, "pending_ratio": round(counts["pending"] / n, 4) if n else 0.0,
+            "projects": sorted({r["project"] for r in rows if r.get("project")})}

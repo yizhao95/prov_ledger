@@ -4,6 +4,7 @@ Routes:
   GET /                 — full dashboard page (initial load)
   GET /api/dashboard    — HTMX partial (auto-refresh target every 2s)
   GET /api/health       — JSON ping for uptime monitoring
+  GET /outcomes         — every claim across plans with its latest outcome (phase 8, FL-042)
 
 Read-only access to ~/skill-workspace/orchestrator.db. Never mutates.
 """
@@ -219,3 +220,27 @@ def health():
         return JSONResponse({"ok": False, "error": "orchestrator.db not found"}, status_code=503)
     except sqlite3.Error as e:  # DASH-BUG2: locked/corrupt DB → structured 503
         return JSONResponse({"ok": False, "error": f"database error: {e}"}, status_code=503)
+
+
+@app.get("/outcomes", response_class=HTMLResponse)
+def outcomes(request: Request, project: str | None = None):
+    """Phase 8 (FL-042): every expectation across plans with its latest
+    outcome — a claim ledger. Read-only; an old DB renders an empty page."""
+    ctx = {"request": request, "error": None, "rows": [], "stats": queries.outcome_stats([]), "project": project}
+    try:
+        conn = queries.open_db_readonly()
+    except FileNotFoundError as e:
+        ctx["error"] = f"orchestrator.db not found: {e}"
+        return TEMPLATES.TemplateResponse(request, "outcomes.html", ctx)
+    try:
+        rows = queries.get_expectations_with_latest_outcome(conn, project=project)
+        all_rows = rows if not project else queries.get_expectations_with_latest_outcome(conn)
+    except sqlite3.Error as e:
+        ctx["error"] = f"database error: {e}"
+        return TEMPLATES.TemplateResponse(request, "outcomes.html", ctx)
+    finally:
+        conn.close()
+    stats = queries.outcome_stats(rows)
+    stats["projects"] = queries.outcome_stats(all_rows)["projects"]
+    ctx.update(rows=rows, stats=stats)
+    return TEMPLATES.TemplateResponse(request, "outcomes.html", ctx)

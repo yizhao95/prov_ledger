@@ -23,11 +23,18 @@
     {% else %}
       {# Default: latest plan — show Show History button #}
       <span class="text-sm font-semibold text-brand-gray">📍 Latest Plan</span>
-      <a href="/history"
-         class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue
-                rounded-lg shadow-sm hover:bg-brand-bg active:bg-hairline text-sm font-semibold transition">
-        📚 Show History →
-      </a>
+      <div class="flex items-center gap-2">
+        <a href="/outcomes"
+           class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue
+                  rounded-lg shadow-sm hover:bg-brand-bg active:bg-hairline text-sm font-semibold transition">
+          🎯 Outcomes
+        </a>
+        <a href="/history"
+           class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue
+                  rounded-lg shadow-sm hover:bg-brand-bg active:bg-hairline text-sm font-semibold transition">
+          📚 Show History →
+        </a>
+      </div>
     {% endif %}
   </div>
 
