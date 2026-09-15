@@ -130,7 +130,7 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
                                    for r in prov_records]
             store.set_run_extensions(conn, run_id, json.dumps(ext_fp, sort_keys=True))
         # Phase 7: an arbiter is wired ONLY through the calibration gate.
-        arbitrate, arb_record = _arbiter_gate()
+        arbitrate, arb_record = _arbiter_gate(repo_path)
         if arb_record is not None:
             ext_fp = ext_fp or {}
             ext_fp["arbiter"] = arb_record
@@ -147,7 +147,7 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
     return db_path
 
 
-def _arbiter_gate():
+def _arbiter_gate(repo_path: str | None = None):
     """-> (arbitrate or None, record or None). PROVLEDGER_ARBITER=pkg.mod:Class
     names a graph_api.Arbiter; it is handed to history.resolve only when its
     evaluation report (calibration.run, under PROVLEDGER_ARBITER_EVAL_DIR or
@@ -164,6 +164,9 @@ def _arbiter_gate():
         return None, {"id": spec, "gate": f"refused: cannot load arbiter ({type(exc).__name__}: {exc})", "calibration": calib}
     ok, detail = cal.gate(arbiter.arbiter_id, calib)
     record = {"id": arbiter.arbiter_id, "spec": spec, "gate": detail, "calibration": calib}
+    bind = getattr(arbiter, "bind_repo", None)
+    if ok and callable(bind) and repo_path:
+        bind(str(repo_path))         # phase 8: an arbiter that reads context lines is told where the tree is
     return (arbiter.arbitrate if ok else None), record
 
 

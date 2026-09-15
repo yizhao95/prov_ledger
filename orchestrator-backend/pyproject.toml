@@ -36,7 +36,7 @@ package-dir = { "provledger" = "orchestrator", "provledger.providers" = "orchest
 # Migrations live inside the package so run_migrations works from a wheel;
 # the mutation corpus ships with provledger.testing (phase 6).
 provledger = ["migrations/*.sql"]
-"provledger.testing" = ["corpus/**/*", "corpus/**/.gitignore"]
+"provledger.testing" = ["corpus/**/*", "corpus/**/.gitignore", "prompts/*.md"]
 
 [dependency-groups]
 dev = ["pytest>=7"]

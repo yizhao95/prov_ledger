@@ -177,3 +177,28 @@ def test_unset_env_means_no_arbiter_and_no_record(twins_repo, tmp_path, monkeypa
     ext = _latest_ext(conn)
     assert ext is None or "arbiter" not in ext
     assert not _events(conn, "identity_asserted")
+
+
+def test_gate_binds_the_repo_to_an_arbiter_that_asks(twins_repo, tmp_path, monkeypatch):
+    """Phase 8: an arbiter exposing bind_repo(repo) is told where the working
+    tree is, so it can read context lines for live rows (ClaudeArbiter does)."""
+    import textwrap
+    mod = tmp_path / "bindarb.py"
+    mod.write_text(textwrap.dedent('''
+        from provledger.testing.heuristic_arbiter import HeuristicArbiter
+        class BindingArbiter(HeuristicArbiter):
+            arbiter_id = "provledger.heuristic"
+            bound = None
+            def bind_repo(self, repo):
+                BindingArbiter.bound = repo
+        '''))
+    monkeypatch.syspath_prepend(str(tmp_path))
+    ed = tmp_path / "eval"
+    calib = _synthetic_calib(tmp_path / "calib.json")
+    monkeypatch.setenv("PROVLEDGER_ARBITER_EVAL_DIR", str(ed))
+    monkeypatch.setenv("PROVLEDGER_ARBITER_CALIB", str(calib))
+    assert cal.run(cal.load_arbiter(HEUR), calib, n_runs=3, out_dir=ed).ok
+    conn = _run_twice(twins_repo, tmp_path / "g.db", {"PROVLEDGER_ARBITER": "bindarb:BindingArbiter"}, monkeypatch)
+    import bindarb
+    assert bindarb.BindingArbiter.bound == str(twins_repo)
+    assert conn.execute("SELECT COUNT(*) FROM node_event WHERE event_type='identity_asserted'").fetchone()[0] == 2
