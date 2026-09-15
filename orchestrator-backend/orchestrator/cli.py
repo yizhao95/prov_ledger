@@ -102,9 +102,33 @@ def _note(args) -> int:
         conn.close()
 
 
+def _ask_basis(conn, since: str | None) -> dict:
+    from . import psg_bridge
+    sql = "SELECT project, plan_id, node_key, basis FROM trigger_log WHERE verdict = 'ask'"
+    params: list = []
+    if since:
+        sql += " AND at >= ?"
+        params.append(since)
+    rows = conn.execute(sql + " ORDER BY id", params).fetchall()
+    groups: dict = {}
+    dbs: dict = {}
+    for project, plan_id, node_key, basis in rows:
+        db_path = dbs.setdefault(project, psg_bridge.db_path_for(project))
+        nt = psg_bridge._query(db_path, "SELECT node_type FROM node_snapshot WHERE node_key = ? ORDER BY run_id DESC, id DESC LIMIT 1", (node_key,))
+        node_type = nt[0][0] if nt else "?"
+        g = groups.setdefault((plan_id, project, node_type), {"plan_id": plan_id, "project": project, "node_type": node_type, "asks": 0, "basis": []})
+        g["asks"] += 1
+        if basis and basis not in g["basis"]:
+            g["basis"].append(basis)
+    return {"since": since, "asks": len(rows), "groups": [groups[k] for k in sorted(groups)]}
+
+
 def _reasons_cmd(args) -> int:
     conn = _open()
     try:
+        if args.sub == "ask-basis":
+            print(json.dumps(_ask_basis(conn, args.since), indent=1, sort_keys=True))
+            return 0
         if args.sub == "reclass-status":
             row = conn.execute("SELECT value, at FROM migration_state WHERE key='dp_reclass'").fetchone()
             counts = dict(conn.execute("SELECT tier, COUNT(*) FROM change_reason GROUP BY tier").fetchall())
@@ -141,6 +165,8 @@ def build_parser() -> argparse.ArgumentParser:
     r = sub.add_parser("reasons", help="the reasons ledger")
     rs = r.add_subparsers(dest="sub", required=True)
     rs.add_parser("reclass-status", help="whether the legacy node_reason / ledger rows were migrated into change_reason, and the tier counts")
+    ab = rs.add_parser("ask-basis", help="the close-time questions (trigger_log verdict ask) grouped by plan and node type — what the rules did not recognise")
+    ab.add_argument("--since", default=None, help="only verdicts at or after this timestamp")
     return p
 
 

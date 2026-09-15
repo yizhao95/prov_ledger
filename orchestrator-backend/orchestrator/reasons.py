@@ -141,27 +141,33 @@ PREVIEW_CHARS = 120
 
 
 def draft(conn, project: str, plan_id: str, psg_db_path: str | None, per_slot: int = 2) -> list[dict]:
-    """For every open slot, the utterances of the plan window that share tokens
-    with the node's local name / file — deterministic, scored, top `per_slot`.
-    Each candidate is ready to be sent back as a stated answer: {utterance_id,
-    span: [0, len], score, preview}."""
-    plan = db.get_plan(conn, plan_id) or {}
-    created = plan.get("created_at") or "0000-00-00 00:00:00"
-    completed = plan.get("completed_at") or "9999-12-31 23:59:59"
-    utts = [dict(r) for r in conn.execute(
-        "SELECT id, text FROM utterance WHERE (plan_id = ? OR (project = ? AND occurred_at BETWEEN ? AND ?)) ORDER BY id",
-        (plan_id, project, created, completed))]
+    """For every open slot, the candidate utterances (plan window + session): an
+    R0 literal hit scores 10 and proposes that sentence as the span; plain
+    token overlap proposes the whole utterance. Deterministic, top `per_slot`;
+    each candidate is ready to be sent back as a stated answer."""
+    from . import triggers
+    ctx = triggers._ctx(conn, project, plan_id, psg_db_path)
+    utts = triggers.candidate_utterances(ctx)
     out = []
     for slot in slots_for_plan(conn, project, plan_id, psg_db_path):
         qn = slot.get("qualified_name") or ""
+        node = ctx.touched.get(slot["node_key"]) or {"node_key": slot["node_key"], "qualified_name": qn, "file_path": None}
         local = qn.split(".")[-1].split(":")[-1]
         keys = _tokens(local, local.replace("_", " "), qn.split(".")[-2] if "." in qn else "")
+        pats = [triggers._literal(n) for n in triggers.r0_names(node)]
         cands = []
         for u in utts:
-            score = len(keys & _tokens(u["text"]))
+            # R0 first: a sentence that names the node literally is the answer, scored above any token overlap
+            r0 = None
+            for s, e in triggers.sentences(u["text"]):
+                if any(p.search(u["text"][s:e]) for p in pats):
+                    r0 = (s, e)
+                    break
+            score = len(keys & _tokens(u["text"])) + (10 if r0 else 0)
             if score:
-                cands.append({"utterance_id": u["id"], "span": [0, len(u["text"])], "score": score,
-                              "preview": u["text"][:PREVIEW_CHARS]})
+                span = list(r0) if r0 else [0, len(u["text"])]
+                cands.append({"utterance_id": u["id"], "span": span, "score": score, "kind": "r0" if r0 else "overlap",
+                              "preview": u["text"][span[0]:span[0] + PREVIEW_CHARS]})
         cands.sort(key=lambda c: (-c["score"], c["utterance_id"]))
         out.append({"node_key": slot["node_key"], "qualified_name": qn, "candidates": cands[:per_slot]})
     return out
