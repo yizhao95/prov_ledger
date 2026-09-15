@@ -11,6 +11,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/toolcall.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
