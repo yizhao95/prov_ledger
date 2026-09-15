@@ -145,16 +145,20 @@ Run each test suite **separately** (each has its own pyproject/pythonpath —
 one combined invocation breaks). A healthy install passes all of them:
 
 ```bash
-python3 -m pytest scripts/tests                         -q   #   3 passed
-python3 -m pytest orchestrator-backend                  -q   # 152 passed
-python3 -m pytest orchestrator-webapp                   -q   #  23 passed
-python3 -m pytest skills/writing-plans/tests            -q   #  46 passed, 2 skipped
-python3 -m pytest skills/executing-plans                -q   #  52 passed
-python3 -m pytest skills/project-state-graph/scripts/tests     -q   # 232 passed, 1 skipped
-python3 -m pytest skills/update-project-state-graph/scripts/tests -q   #  55 passed
+python3 -m pytest scripts/tests                         -q   #   5 passed
+python3 -m pytest orchestrator-backend                  -q   # 348 passed
+python3 -m pytest orchestrator-webapp                   -q   #  36 passed
+python3 -m pytest skills/writing-plans/tests            -q   #  87 passed
+python3 -m pytest skills/executing-plans                -q   #  73 passed
+(cd skills/project-state-graph/scripts && python3 -m pytest tests -q)   # 409 passed, 1 skipped, 1 deselected
+python3 -m pytest skills/update-project-state-graph/scripts/tests -q   #  90 passed
 ```
 
-Total: **563 passed, 3 skipped**.
+Total: **1048 passed, 1 skipped** (0.2.0). The project-state-graph suite is
+the long one (~8 min); run it in three segments if you want to see progress —
+scenarios + runner, the corpus, and the rest (see the phase-8 PR for the
+exact commands). The `llm_consistency` marker is deselected by default and
+never runs in CI.
 
 The quickest end-to-end check is the demo — one command, deterministic,
 self-verifying:
