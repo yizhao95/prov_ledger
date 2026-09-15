@@ -205,6 +205,28 @@ sqlite3 ~/skill-workspace/orchestrator.db "SELECT * FROM Plans WHERE status='IN_
 
 The dashboard at http://localhost:8765 is the visual equivalent.
 
+### 🧭 Close-time reasons: answer WHY, point at the words (DP phase 1)
+
+When a registered-project plan closes, `reason-slots.sh` lists the data
+points the plan changed. For **each node answer two questions: why not the
+other way? who asked for it?** — not what the step did. Three answer shapes,
+and the tier is decided by the shape, never by you:
+
+| you send | tier | when |
+|---|---|---|
+| `{"node_key": "nk_…", "utterance_id": 42, "span": [0, 31]}` | **stated** | the user's recorded words say it — point at them (`reason-slots.sh` with `"draft": true` proposes spans) |
+| `{"node_key": "nk_…", "interpretation": "…", "refs": [7]}` | **asserted** | your reading of it; `refs` are `reference` ids (an email, a ticket, a verbal exchange registered with `provledger note`) |
+| `{"node_key": "nk_…", "unstated": true}` | **unstated** | you do not know — say so; never invent |
+
+The old `{"node_key", "text"}` shape is refused (exit 2): free text cannot
+become *stated*, whoever sends it. Ask ONCE for all slots; the user pressing
+enter accepts the draft. `provledger-extensions.json` → `reasons.close_mode`
+= `ask` (default) or `pending` (slots are recorded as unstated/unknown for a
+later `provledger why --pending`).
+
+- ✅ good: `{"node_key": "nk_1a2b", "utterance_id": 42, "span": [0, 41]}` where utterance 42 reads *"please keep fiscal weeks, finance reconciles weekly"* — the reason IS the user's sentence.
+- ❌ bad: `{"node_key": "nk_1a2b", "interpretation": "changed load_orders to group by fiscal week"}` — that describes the change, not why it beat calendar weeks or who wanted it.
+
 ## 📚 Reference index
 
 - [`reference/op-catalog.md`](reference/op-catalog.md) — full per-op reference (state transitions + common mistakes)

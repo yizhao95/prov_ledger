@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 
-from . import db, psg_bridge, telemetry
+from . import db, provenance, psg_bridge, telemetry
 
 
 def _row_to_dict(row) -> dict:
@@ -70,7 +70,9 @@ def bypassed_at_close(conn, *, project: str, plan_id: str, psg_db_path: str | No
         seen = set(json.loads(plan.get("impact_context") or "{}").get("constraint_ids", []))
     except ValueError:
         seen = set()
-    already = {r["text"] for r in db.get_node_reasons(conn, plan_id=plan_id) if r["kind"] == "constraint_ref"}
+    already = {r[0] for r in conn.execute(
+        "SELECT interpretation FROM change_reason WHERE plan_id = ? AND role = 'constraint' AND rule_id = 'constraint_bypassed'", (plan_id,))}
+    already |= {r["text"] for r in db.get_node_reasons(conn, plan_id=plan_id) if r["kind"] == "constraint_ref"}
     run_id = max((c["run_id"] for c in changed), default=None)
     n = 0
     for c in hit:
@@ -79,10 +81,15 @@ def bypassed_at_close(conn, *, project: str, plan_id: str, psg_db_path: str | No
         text = f"constraint_bypassed:{c['id']}: {c['statement']}"
         for k in keys:
             if (k in c["subjects"] or qn_of.get(k) in c["subjects"]) and text not in already:
-                db.insert_node_reason(conn, node_key=k, project=project, run_id=run_id, plan_id=plan_id,
-                                      kind="constraint_ref", text=text, source="system", tier="derived",
-                                      commit=commit)
+                # DP phase 1: a derived constraint row (rule constraint_bypassed) in change_reason;
+                # node_reason_v shows it with the old shape (kind constraint_ref, tier derived)
+                provenance.insert_reason(conn, project=project, plan_id=plan_id, node_key=k, kind="organizational",
+                                         role="constraint", run_id=run_id, interpretation=text,
+                                         rule_id="constraint_bypassed", recorded_by="system", commit=False)
+                already.add(text)
                 n += 1
+    if n and commit:
+        conn.commit()
     if n:
         telemetry.append_step_log(
             conn, review_step_id,

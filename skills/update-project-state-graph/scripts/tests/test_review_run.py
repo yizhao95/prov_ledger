@@ -99,7 +99,7 @@ class WS:
         return self.q("SELECT status, COALESCE(log_context,'') FROM Steps WHERE step_id=?", step_id)[0]
 
     def reasons(self, plan_id):
-        return self.q("SELECT node_key, text FROM node_reason WHERE plan_id=? AND kind='reason'", plan_id)
+        return self.q("SELECT node_key, text FROM node_reason_v WHERE plan_id=? AND kind='reason'", plan_id)
 
     def runs(self) -> int:
         db = next(p for p in json.loads(self.registry.read_text())["projects"] if p["name"] == PROJECT)["db_path"]

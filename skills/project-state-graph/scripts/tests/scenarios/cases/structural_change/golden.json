@@ -189,7 +189,7 @@
    "source": "agent",
    "text": "new step: duplicate ids double-counted revenue",
    "text_is": "stated",
-   "tier": "stated",
+   "tier": "asserted",
    "type": "reason"
   },
   {
@@ -199,7 +199,7 @@
    "source": "agent",
    "text": "wires dedupe between clean and split",
    "text_is": "stated",
-   "tier": "stated",
+   "tier": "asserted",
    "type": "reason"
   },
   {

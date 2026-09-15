@@ -228,7 +228,9 @@ def close(ws: Workspace, plan_id: str, task: dict) -> dict:
     reasons = task.get("reasons", "unstated")
     if isinstance(reasons, dict):
         f = ws.root / f"reasons-{task['name']}.json"
-        f.write_text(json.dumps([{"qualified_name": k, "text": v} for k, v in reasons.items()], ensure_ascii=False))
+        # DP phase 1: a scenario author's sentence is an interpretation (asserted) — only a
+        # recorded utterance span could be stated, and no scenario speaks as the user
+        f.write_text(json.dumps([{"qualified_name": k, "interpretation": v} for k, v in reasons.items()], ensure_ascii=False))
         reasons = str(f)
     cmd = [sys.executable, str(REVIEW_RUN), "--plan-id", plan_id, "--project", ws.project, "--json",
            "--reasons", reasons]
@@ -283,7 +285,7 @@ def collect(ws: Workspace, plan_ids: list[str]) -> dict:
     plans = ws.read_orch(f"SELECT plan_id, status, review_state, project, project_source, review_skip_reason, "
                          f"created_at, updated_at FROM Plans WHERE plan_id IN ({ph}) ORDER BY created_at, plan_id", *plan_ids)
     reasons = ws.read_orch(f"SELECT id, plan_id, node_key, kind, text, source, tier, run_id, created_at "
-                           f"FROM node_reason WHERE plan_id IN ({ph}) ORDER BY id", *plan_ids)
+                           f"FROM node_reason_v WHERE plan_id IN ({ph}) ORDER BY id", *plan_ids)   # DP phase 1: the old shape over change_reason
     expectations = ws.read_orch(f"SELECT id, plan_id, target, target_kind, claim, channel, created_at "
                                 f"FROM expectations WHERE plan_id IN ({ph}) ORDER BY id", *plan_ids)
     eph = ",".join("?" for _ in expectations) or "''"

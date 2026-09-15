@@ -484,7 +484,9 @@ def insert_node_reason(
     step_id: str | None = None,
     commit: bool = True,
 ) -> int:
-    """Append one reason row keyed by PSG node_key (survives renames). Raises
+    """DEPRECATED (DP phase 1): the writer is provenance.insert_reason into
+    change_reason; this stays for tests and the Task 7 migration only.
+    Append one reason row keyed by PSG node_key (survives renames). Raises
     ValueError on a bad kind/source/tier before touching the DB; the table's
     CHECK rejects an unanchored row unless kind == 'rejected_path'."""
     if kind not in VALID_REASON_KINDS or source not in VALID_REASON_SOURCES or tier not in VALID_REASON_TIERS:

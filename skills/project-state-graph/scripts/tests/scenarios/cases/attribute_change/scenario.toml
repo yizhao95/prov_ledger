@@ -23,7 +23,7 @@ reasons = "stub"
 [expect]
 events = [
   { plan = "t1", type = "node_changed", node = "pkg.pipeline.clean", changed = ["struct_sig"] },
-  { plan = "t1", type = "reason", node = "pkg.pipeline.clean", text_is = "stated", source = "agent", tier = "stated" },
+  { plan = "t1", type = "reason", node = "pkg.pipeline.clean", text_is = "stated", source = "agent", tier = "asserted" },   # DP phase 1: an agent sentence is asserted
   { plan = "t1", type = "expectation", target = "pkg.pipeline.clean", channel = "graph" },
   { plan = "t1", type = "outcome", target = "pkg.pipeline.clean", kind = "survival", signal = "untouched_consumed", backfilled_by = "t2", tier = "derived" },
   { plan = "t1", type = "plan", closed = "COMPLETED", review_state = "reviewed" },

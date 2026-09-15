@@ -451,7 +451,7 @@
    "source": "agent",
    "text": "first pass at the filter",
    "text_is": "stated",
-   "tier": "stated",
+   "tier": "asserted",
    "type": "reason"
   },
   {
@@ -461,7 +461,7 @@
    "source": "agent",
    "text": "second pass: negative prices are refunds",
    "text_is": "stated",
-   "tier": "stated",
+   "tier": "asserted",
    "type": "reason"
   },
   {
@@ -471,7 +471,7 @@
    "source": "agent",
    "text": "third pass: single-item orders are samples",
    "text_is": "stated",
-   "tier": "stated",
+   "tier": "asserted",
    "type": "reason"
   },
   {

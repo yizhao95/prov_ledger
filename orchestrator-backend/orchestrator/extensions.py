@@ -97,6 +97,7 @@ class Extensions:
     constraints: tuple[ConstraintDecl, ...]
     providers: tuple[ProviderDecl, ...] = ()
     outcome_channels: tuple[ChannelDecl, ...] = ()
+    reasons_close_mode: str = "ask"        # DP phase 1: ask (default) | pending
 
     def fingerprint(self) -> dict | None:
         """The shape written to analysis_run.extensions_json; None without a file."""
@@ -318,8 +319,14 @@ def load(path: str | None) -> Extensions:
         if c.id in seen_c:
             raise ExtensionsError(f"duplicate id {c.id!r} in outcome_channels — ids are never silently overridden")
         seen_c.add(c.id)
+    reasons_cfg = data.get("reasons", {})
+    if not isinstance(reasons_cfg, dict):
+        raise ExtensionsError(f"{path}: reasons must be an object")
+    close_mode = reasons_cfg.get("close_mode", "ask")
+    if close_mode not in ("ask", "pending"):
+        raise ExtensionsError(f"{path}: reasons.close_mode must be ask or pending, got {close_mode!r}")
     return Extensions(path=path, sha256=hashlib.sha256(raw).hexdigest(), drift_kinds=kinds, namesets=sets,
-                      constraints=cons, providers=provs, outcome_channels=chans)
+                      constraints=cons, providers=provs, outcome_channels=chans, reasons_close_mode=close_mode)
 
 
 def current(repo_root: str | None = None) -> Extensions:

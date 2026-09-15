@@ -502,9 +502,11 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
             f"[REASON SLOTS] {len(slots)} open before the reopened close"
             + (": " + reasons.checklist_text(slots) if slots else
                ("" if psg_db else " (state graph unavailable)")))
+    close_mode = _close_mode(project, registry_path)
     with db.transaction(conn):
         n_unstated = reasons.backstop_unstated(
-            conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
+            conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False,
+            state="unknown" if close_mode == "pending" else "active") if psg_db else 0
         n_rejected = reasons.rejected_paths(
             conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
         n_bypassed = constraints.bypassed_at_close(
@@ -546,10 +548,24 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         "project": project,
         "project_source": project_source,
         "unstated_backstopped": n_unstated,
+        "close_mode": close_mode,
         "rejected_paths": n_rejected,
         "constraints_bypassed": n_bypassed,
         "outcomes_backfilled": backfilled,
     }
+
+
+def _close_mode(project: str | None, registry_path) -> str:
+    """provledger-extensions.json → reasons.close_mode (ask | pending) of the project's repo."""
+    if not project:
+        return "ask"
+    try:
+        from . import extensions
+        repo = psg_bridge.repo_for(project, _resolve_registry_path(registry_path))
+        path = extensions.discover(repo) if repo else None
+        return extensions.load(path).reasons_close_mode if path else "ask"
+    except Exception:
+        return "ask"
 
 
 def _git_head(repo: str | None) -> str | None:

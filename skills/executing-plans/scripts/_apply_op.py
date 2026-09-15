@@ -393,30 +393,43 @@ def _op_finish_plan(conn, data: dict) -> dict:
 
 def _op_reason_slots(conn, data: dict) -> dict:
     """The closed-form checklist for a plan under review (spec §2.8): the nodes
-    its runs changed that have no reason yet. Exit 6 when the project has no
-    usable state graph — the agent must know it cannot fill anything."""
+    its runs changed that have no reason yet, plus what the rules already
+    filled (rule_id + basis) so the agent sees it. `"draft": true` adds, per
+    open slot, the recorded utterances that mention the node — ready to be
+    sent back as stated answers. Exit 6 when the project has no usable state
+    graph — the agent must know it cannot fill anything."""
     _require(data, "plan_id", "project")
     psg_db = psg_bridge.db_path_for(data["project"])
     if not psg_db or not os.path.exists(psg_db):
         _die(f"no state graph registered (or built) for project {data['project']!r}", code=6)
     slots = reasons.slots_for_plan(conn, data["project"], data["plan_id"], psg_db)
-    return {"plan_id": data["plan_id"], "project": data["project"], "slots": slots,
-            "checklist": reasons.checklist_text(slots)}
+    out = {"plan_id": data["plan_id"], "project": data["project"], "slots": slots,
+           "checklist": reasons.checklist_text(slots), "auto_filled": reasons.auto_filled(conn, data["plan_id"])}
+    if data.get("draft"):
+        out["draft"] = reasons.draft(conn, data["project"], data["plan_id"], psg_db)
+    return out
 
 
 def _op_reason_fill(conn, data: dict) -> dict:
-    """Record one answer per changed node: [{node_key, text}] — 'unstated' or
-    empty is stored as NULL. Keys outside the plan's change set are refused
-    (exit 6, nothing written)."""
+    """Record one answer per changed node — each exactly one of
+    {node_key, utterance_id, span:[s,e]} (stated), {node_key, interpretation,
+    refs?} (asserted), {node_key, unstated: true}. The old {node_key, text}
+    shape exits 2 (nothing written): free text cannot become stated. Keys
+    outside the plan's change set are refused (exit 6, nothing written)."""
     _require(data, "plan_id", "project", "run_id", "reasons")
-    if not isinstance(data["reasons"], list) or not all(isinstance(r, dict) and r.get("node_key") for r in data["reasons"]):
-        _die("'reasons' must be a non-empty list of {node_key, text}")
+    if not isinstance(data["reasons"], list) or not data["reasons"]:
+        _die("'reasons' must be a non-empty list of answers")
     psg_db = psg_bridge.db_path_for(data["project"])
     if not psg_db or not os.path.exists(psg_db):
         _die(f"no state graph registered (or built) for project {data['project']!r}", code=6)
-    r = reasons.fill(conn, project=data["project"], plan_id=data["plan_id"], run_id=int(data["run_id"]),
-                     reasons=data["reasons"], source=data.get("source", "agent"),
-                     step_id=data.get("step_id"), psg_db_path=psg_db)
+    try:
+        r = reasons.fill(conn, project=data["project"], plan_id=data["plan_id"], run_id=int(data["run_id"]),
+                         reasons=data["reasons"], source=data.get("source", "agent"),
+                         step_id=data.get("step_id"), psg_db_path=psg_db)
+    except reasons.FillInputError as e:
+        _die(str(e), code=2)
+    except ValueError as e:                      # a span outside its utterance, an unknown utterance / reference
+        _die(str(e), code=2)
     if r["unknown_keys"]:
         print(json.dumps(r, indent=2))
         _die(f"unknown node_key(s) for this plan: {r['unknown_keys']} — only the checklist's keys are accepted", code=6)
