@@ -174,3 +174,26 @@ def output_consumers(psg_db_path: str | None, qualified_name: str) -> list[str]:
         return list(json.loads(rows[0]["card_json"]).get("output_consumers", []))
     except ValueError:
         return []
+
+
+def card_of(psg_db_path: str | None, qualified_name: str) -> dict:
+    """The consistency card of a symbol (callers / callees / output_consumers /
+    reads / writes / dtype_map …) — the SPACE dimension of a node ledger
+    (phase 8, FL-009). {} when the graph, the symbol or the card is missing."""
+    rows = _query(psg_db_path, """
+        SELECT cc.card_json FROM consistency_card cc JOIN node n ON n.id = cc.symbol_id
+        WHERE n.qualified_name = ? ORDER BY n.id DESC LIMIT 1""", (qualified_name,))
+    if not rows or not rows[0]["card_json"]:
+        return {}
+    try:
+        card = json.loads(rows[0]["card_json"])
+    except ValueError:
+        return {}
+    return card if isinstance(card, dict) else {}
+
+
+def latest_qualified_name(psg_db_path: str | None, node_key: str) -> str | None:
+    """The most recent qualified name carried by a node_key."""
+    rows = _query(psg_db_path,
+                  "SELECT qualified_name FROM node_snapshot WHERE node_key = ? ORDER BY run_id DESC, id DESC LIMIT 1", (node_key,))
+    return rows[0]["qualified_name"] if rows else None

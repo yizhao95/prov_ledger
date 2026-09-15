@@ -198,7 +198,11 @@
       <div class="text-sm flex flex-wrap items-baseline gap-x-2 border-l-2 border-hairline pl-3">
         <span data-tier="{{ r.display_tier }}" class="text-xs px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
         <span class="text-[11px] text-brand-muted">{{ r.kind }} · {{ r.source }}</span>
+        {% if r.node_key and plan and plan.project %}
+        <a class="font-mono text-xs text-brand-blue" href="/node/{{ plan.project }}/{{ r.node_key }}" title="node ledger: upstream/downstream, history, reasons">{{ r.node_key }}</a>
+        {% else %}
         <span class="font-mono text-xs">{{ r.node_key or '—' }}</span>
+        {% endif %}
         <span class="text-sm text-gray-800">{{ r.text if r.text is not none else '— unstated —' }}</span>
       </div>
       {% endfor %}

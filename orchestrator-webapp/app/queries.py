@@ -766,3 +766,75 @@ def outcome_stats(rows: list[dict]) -> dict:
     n = len(rows)
     return {"n": n, **counts, "pending_ratio": round(counts["pending"] / n, 4) if n else 0.0,
             "projects": sorted({r["project"] for r in rows if r.get("project")})}
+
+
+# ── Phase 8 Task 4 (FL-009): a node's ledger — space, time and intent in one query ──
+try:                                   # the unified venv has provledger; degrade visibly otherwise
+    from provledger import psg_bridge as _psg
+except Exception:                      # pragma: no cover — "state graph unavailable" on the page
+    _psg = None
+
+
+def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str) -> dict:
+    """Everything the dashboard shows about one node, read in one go:
+    space (the consistency card: callers / output_consumers), time (every
+    history event grouped by analysis run, with plan / tier), and intent (the
+    close-time reasons recorded against its node_key, and the active
+    constraints anchored on it — a restricted constraint keeps its rationale
+    and shows only why_ref). PSG is reached only through provledger.psg_bridge
+    (mode=ro); a missing graph is a visible `available: False`, never a 500.
+    `qualified_name` may also be a node_key (nk_…)."""
+    base = {"project": project, "qualified_name": qualified_name, "node_key": None, "available": False, "found": False,
+            "reason": None, "runs": [], "events": 0, "card": {}, "reasons": [], "constraints": [], "approx_tokens": 0}
+    if _psg is None:
+        base["reason"] = "state graph unavailable: provledger.psg_bridge cannot be imported in this environment"
+        return base
+    db_path = _psg.db_path_for(project)
+    if not db_path or not os.path.exists(db_path):
+        base["reason"] = f"state graph unavailable: project {project!r} is not registered or its graph file is missing"
+        return base
+    base["available"] = True
+    if qualified_name.startswith("nk_"):
+        node_key = qualified_name
+        qn = _psg.latest_qualified_name(db_path, node_key) or qualified_name
+    else:
+        qn = qualified_name
+        node_key = _psg.node_key_of(db_path, qualified_name)
+    if not node_key:
+        base["reason"] = f"{qualified_name} is not in the state graph of {project} (no snapshot carries this name)"
+        return base
+    base.update(found=True, node_key=node_key, qualified_name=qn)
+    # time
+    runs: dict[int, dict] = {}
+    events = _psg.events_of(db_path, node_key)
+    for e in events:
+        g = runs.setdefault(e["run_id"], {"run_id": e["run_id"], "commit_sha": e["commit_sha"], "plan_id": e["plan_id"],
+                                          "step_id": e["step_id"], "trigger": e["trigger"], "events": []})
+        g["events"].append(e)
+    base["runs"] = [runs[k] for k in sorted(runs)]
+    base["events"] = len(events)
+    # space
+    base["card"] = _psg.card_of(db_path, qn)
+    # intent: reasons (all plans) + constraints anchored by node_key or qualified name
+    try:
+        rows = conn.execute("SELECT id, node_key, run_id, plan_id, step_id, kind, text, source, tier, created_at "
+                            "FROM node_reason WHERE node_key = ? ORDER BY id", (node_key,)).fetchall()
+        base["reasons"] = [dict(r, display_tier=("unstated" if r["text"] is None else r["tier"])) for r in rows]
+    except sqlite3.Error:
+        base["reasons"] = []
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT l.id, l.statement, l.rationale, l.why_ref, l.why_visibility, l.status, l.created_at "
+            "FROM LedgerEntries l, json_each(l.subjects) s WHERE l.project = ? AND l.kind = 'constraint' "
+            "AND l.status = 'active' AND s.value IN (?, ?) ORDER BY l.id", (project, node_key, qn)).fetchall()
+        cons = []
+        for r in rows:
+            d = dict(r)
+            if d.get("why_visibility") == "restricted":
+                d["rationale"] = None          # the WHY stays in the ledger; only the pointer leaves
+            cons.append(d)
+        base["constraints"] = cons
+    except sqlite3.Error:
+        base["constraints"] = []
+    base["approx_tokens"] = len(json.dumps(base, default=str)) // 4
+    return base

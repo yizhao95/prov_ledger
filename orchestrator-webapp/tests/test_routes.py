@@ -7,6 +7,7 @@ branch (DASH-BUG1 — no leaked handle / no 500), and read-only enforcement.
 from __future__ import annotations
 
 import importlib
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -385,3 +386,103 @@ def test_outcomes_page_is_empty_but_200_on_an_old_db(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
     r = TestClient(main.app).get("/outcomes")
     assert r.status_code == 200 and "no expectations" in r.text.lower()
+
+
+# ── Phase 8 Task 4 (FL-009): /node/{project}/{qualified_name} ───────────────
+sys.path.insert(0, str(ORCH_BACKEND / "tests"))
+import _psg_schema as ps  # noqa: E402
+
+
+def _seed_state_graph(tmp_path, project="demo"):
+    """A minimal PSG-shaped graph + registry: nk_a added in run 1 (plan P0), renamed
+    and changed in run 2 (plan P1) with an asserted identity event; a card with
+    callers/consumers; two constraints on it (one restricted)."""
+    path = tmp_path / f"{project}-state-graph.db"
+    c = ps.build(path)
+    ps.add_run(c, 1, plan_id="P0", step_id="P0-A", sha="aaaaaaa")
+    ps.add_snapshot(c, 1, "nk_a", "pkg.m.load")
+    ps.add_event(c, 1, 1, "node_added", "nk_a", json.dumps({"qualified_name": "pkg.m.load"}))
+    ps.add_run(c, 2, plan_id="P1", step_id="P1-REVIEW.1", sha="bbbbbbb")
+    ps.add_snapshot(c, 2, "nk_a", "pkg.m.load_orders", struct_sig="s2")
+    ps.add_event(c, 2, 1, "node_matched", "nk_a", '{"via": "struct_sig"}')
+    ps.add_event(c, 2, 2, "node_renamed", "nk_a", '{"from": "pkg.m.load", "to": "pkg.m.load_orders"}')
+    ps.add_event(c, 2, 3, "node_changed", "nk_a", '{"changed": ["struct_sig"]}')
+    c.execute("INSERT INTO node_event (run_id, seq, event_type, node_key, tier, payload_json, created_at) VALUES (2, 4, 'identity_asserted', 'nk_a', 'asserted', ?, '2026-09-11T00:00:00+00:00')",
+              (json.dumps({"cur": "pkg.m.load_orders", "evidence": "main() now calls load_orders (line 12)", "arbiter": "anthropic.claude_headless"}),))
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS consistency_card (symbol_id INTEGER PRIMARY KEY, card_json TEXT NOT NULL);
+        INSERT INTO node_type (id, name) VALUES (1, 'function');
+        INSERT INTO node (id, node_type_id, name, qualified_name, file_path, run_id, node_key) VALUES (7, 1, 'load_orders', 'pkg.m.load_orders', 'pkg/m.py', 2, 'nk_a');
+        INSERT INTO consistency_card (symbol_id, card_json) VALUES (7, '{"callers": ["pkg.m.main"], "callees": ["pd.read_csv"], "output_consumers": ["pkg.m.clean"], "reads": ["orders"], "writes": []}');
+    """)
+    c.commit(); c.close()
+    reg = tmp_path / "projects.json"
+    reg.write_text(json.dumps({"projects": [{"name": project, "repo": str(tmp_path), "db_path": str(path), "commit_sha": "bbbbbbb"}]}))
+    return path, reg
+
+
+def _seed_reasons_and_constraints(db, project="demo"):
+    conn = odb.open_db(db)
+    conn.execute("INSERT INTO node_reason (node_key, project, run_id, plan_id, step_id, kind, text, source, tier) VALUES "
+                 "('nk_a', ?, 2, 'P1', 'P1-REVIEW.1', 'reason', 'renamed so the name says which table it reads', 'agent', 'stated')", (project,))
+    conn.execute("INSERT INTO node_reason (node_key, project, run_id, plan_id, step_id, kind, text, source, tier) VALUES "
+                 "('nk_a', ?, 2, 'P1', NULL, 'reason', NULL, 'system', 'derived')", (project,))
+    conn.execute("INSERT INTO LedgerEntries (project, kind, subjects, keywords, statement, rationale, status, why_ref, why_visibility) VALUES "
+                 "(?, 'constraint', '[\"pkg.m.load_orders\"]', '[]', 'load_orders must keep paid orders only', 'finance reconciles on paid orders', 'active', 'docs/finance.md#paid', 'shared')", (project,))
+    conn.execute("INSERT INTO LedgerEntries (project, kind, subjects, keywords, statement, rationale, status, why_ref, why_visibility) VALUES "
+                 "(?, 'constraint', '[\"nk_a\"]', '[]', 'never read the raw orders table in prod', 'SECRET-RATIONALE-DO-NOT-SHOW', 'active', 'ticket SEC-42', 'restricted')", (project,))
+    conn.commit(); conn.close()
+
+
+def test_node_page_shows_space_time_and_reasons_in_one_query(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path)
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    _seed_reasons_and_constraints(client._db)
+    r = client.get("/node/demo/pkg.m.load_orders")
+    assert r.status_code == 200
+    t = r.text
+    # time: events grouped by run, each with its plan link and tier label
+    for ev in ("node_added", "node_matched", "node_renamed", "node_changed", "identity_asserted"):
+        assert ev in t
+    assert 'data-tier="asserted"' in t and "main() now calls load_orders" in t and "anthropic.claude_headless" in t
+    assert 'href="/plan/P0"' in t and 'href="/plan/P1"' in t and "run 2" in t
+    # space: the card
+    assert "pkg.m.main" in t and "pkg.m.clean" in t
+    # reasons + constraints; the restricted rationale never leaves the ledger
+    assert "renamed so the name says which table it reads" in t and 'data-tier="stated"' in t and 'data-tier="unstated"' in t
+    assert "load_orders must keep paid orders only" in t and "finance reconciles on paid orders" in t
+    assert "never read the raw orders table in prod" in t and "ticket SEC-42" in t and "SECRET-RATIONALE" not in t
+    assert "approx_tokens" in t
+    from app import queries
+    conn = odb.open_db(client._db)
+    ledger = queries.get_node_ledger(conn, "demo", "pkg.m.load_orders")
+    conn.close()
+    assert ledger["available"] and ledger["node_key"] == "nk_a" and [g["run_id"] for g in ledger["runs"]] == [1, 2]
+    assert ledger["card"]["callers"] == ["pkg.m.main"] and len(ledger["reasons"]) == 2 and len(ledger["constraints"]) == 2
+    assert ledger["constraints"][1]["rationale"] is None and ledger["approx_tokens"] > 0
+
+
+def test_node_page_accepts_a_node_key_and_the_reasons_panel_links_to_it(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path)
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    _seed_reasons_and_constraints(client._db)
+    r = client.get("/node/demo/nk_a")
+    assert r.status_code == 200 and "pkg.m.load_orders" in r.text and "node_renamed" in r.text
+    # the plan page's Reasons panel links every node_key to its ledger page
+    conn = odb.open_db(client._db)
+    conn.execute("UPDATE Plans SET project='demo' WHERE plan_id=?", (client._seeded["plan_id"],))
+    conn.execute("INSERT INTO node_reason (node_key, project, run_id, plan_id, step_id, kind, text, source, tier) VALUES "
+                 "('nk_a', 'demo', 2, ?, NULL, 'reason', 'linked', 'agent', 'stated')", (client._seeded["plan_id"],))
+    conn.commit(); conn.close()
+    r = client.get("/")
+    assert 'href="/node/demo/nk_a"' in r.text
+
+
+def test_node_page_says_unavailable_when_the_graph_is_missing(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(tmp_path / "no-registry.json"))
+    r = client.get("/node/demo/pkg.m.load_orders")
+    assert r.status_code == 200 and "state graph unavailable" in r.text
+    _, reg = _seed_state_graph(tmp_path)
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    r = client.get("/node/demo/pkg.m.never_seen")
+    assert r.status_code == 200 and "not in the state graph" in r.text
