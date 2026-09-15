@@ -45,3 +45,6 @@ dev = ["pytest>=7"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-v"
+markers = [
+    "veto: an acceptance item whose failure fails the whole suite (decision provenance §12); never skipped",
+]
