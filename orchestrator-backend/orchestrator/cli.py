@@ -5,6 +5,9 @@ in the repo, `provledger ...` once installed.
   metrics baseline [--since] [--write F]  median / p90 over completed plans
   note "<words>" --at <when> [...]        record something that was said, after the fact
   reasons reclass-status                  the state of the legacy-reason migration
+  why <node|nk_…|file:line> [...]         one bounded read: history, constraints, rejected paths, blast radius
+  export <project> --md DIR               one markdown per node (shareable rows only)
+  init --agents-md                        drop the two verbs into ./AGENTS.md
   headline show|respond|ack <plan> …      the plan headline and its answers
 """
 from __future__ import annotations
@@ -164,6 +167,50 @@ def _reasons_cmd(args) -> int:
         conn.close()
 
 
+def _why_cmd(args) -> int:
+    from . import psg_bridge, why
+    project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+    if not project:
+        print("provledger why: no --project and the cwd is not inside a registered project", file=sys.stderr)
+        return 2
+    conn = _open()
+    try:
+        try:
+            out = why.why(conn, project=project, target=args.target, impact=args.impact, neighbors=args.neighbors,
+                          budget=args.budget, pending_only=args.pending, never_read_only=args.never_read,
+                          all_records=args.all, search_query=args.search, session_id=args.session, plan_id=args.plan)
+        except ValueError as e:
+            print(f"provledger why: {e}", file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(out["doc"], indent=1, ensure_ascii=False, default=str))
+        else:
+            print(out["text"])
+        return 0
+    finally:
+        conn.close()
+
+
+def _export_cmd(args) -> int:
+    from . import why
+    conn = _open()
+    try:
+        out = why.export_md(conn, project=args.project, out_dir=args.md)
+        print(json.dumps({"project": out["project"], "nodes": out["nodes"], "rows": out["rows"], "dir": args.md}, indent=1))
+        return 0
+    finally:
+        conn.close()
+
+
+def _init_cmd(args) -> int:
+    from . import why
+    if not args.agents_md:
+        print("provledger init: nothing to do (pass --agents-md)", file=sys.stderr)
+        return 2
+    print(json.dumps(why.init_agents_md(os.getcwd())))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="provledger",
                                 description="provLedger decision provenance: what changed, why, and where the why came from.")
@@ -194,6 +241,24 @@ def build_parser() -> argparse.ArgumentParser:
     hr.add_argument("--by", default="agent", choices=["agent", "human"]); hr.add_argument("--cite", action="append", type=int, default=[], metavar="REASON_ID")
     ha = hs.add_parser("ack", help="a person proceeds past a finding (by human)"); ha.add_argument("plan_id"); ha.add_argument("finding_id")
     ha.add_argument("--rationale", default=None); ha.add_argument("--cite", action="append", type=int, default=[], metavar="REASON_ID")
+    w = sub.add_parser("why", help="one bounded read of a node: its history, constraints (with 来源等级), rejected paths, prior claims and blast radius; every record shown is counted as shown")
+    w.add_argument("target", nargs="?", default=None, help="qualified name, nk_… node key, or file:line")
+    w.add_argument("--project", default=None, help="registered project (default: the one whose repo contains the cwd)")
+    w.add_argument("--impact", action="store_true", help="expand the blast radius (callers, consumers, lineage)")
+    w.add_argument("--neighbors", action="store_true", help="also list the constraints anchored one hop downstream")
+    w.add_argument("--budget", type=int, default=1500, help="token budget; what is cut appears as a count (default 1500)")
+    w.add_argument("--all", action="store_true", help="lift the caps: every constraint, rejected path and reason")
+    w.add_argument("--pending", action="store_true", help="the unstated slots (of the target, or of the project without a target)")
+    w.add_argument("--never-read", action="store_true", help="active constraints that were never shown to anyone")
+    w.add_argument("--search", default=None, metavar="WORDS", help="full-text search over reasons and constraints (FTS5, LIKE when unavailable)")
+    w.add_argument("--json", action="store_true", help="machine-readable output")
+    w.add_argument("--plan", default=None, help=argparse.SUPPRESS)
+    w.add_argument("--session", default=None, help=argparse.SUPPRESS)
+    e = sub.add_parser("export", help="export a project's shareable records as markdown, one file per node")
+    e.add_argument("project")
+    e.add_argument("--md", required=True, metavar="DIR", help="output directory")
+    i = sub.add_parser("init", help="set a repo up: --agents-md writes the provledger block into ./AGENTS.md")
+    i.add_argument("--agents-md", action="store_true", help="write or refresh the provledger section of ./AGENTS.md")
     r = sub.add_parser("reasons", help="the reasons ledger")
     rs = r.add_subparsers(dest="sub", required=True)
     rs.add_parser("reclass-status", help="whether the legacy node_reason / ledger rows were migrated into change_reason, and the tier counts")
@@ -210,6 +275,12 @@ def main(argv=None) -> int:
         return _note(args)
     if args.cmd == "reasons":
         return _reasons_cmd(args)
+    if args.cmd == "why":
+        return _why_cmd(args)
+    if args.cmd == "export":
+        return _export_cmd(args)
+    if args.cmd == "init":
+        return _init_cmd(args)
     if args.cmd == "headline":
         return _headline_cmd(args)
     return 2

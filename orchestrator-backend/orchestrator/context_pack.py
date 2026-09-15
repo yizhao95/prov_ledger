@@ -282,9 +282,12 @@ def _trim_to_budget(pack: Pack) -> None:
                         dropped = True
                         break
             else:
+                # never cut a kind to zero on a target: the structure alone (cards, identity
+                # chains) can exceed the budget, and then at least one record of each kind
+                # still reaches the reader — approx_tokens reports the overrun honestly
                 for tp in reversed(pack.targets):
                     lst = getattr(tp, kind)
-                    if lst:
+                    if len(lst) > 1:
                         lst.pop()
                         dropped = True
                         break
@@ -295,12 +298,20 @@ def _trim_to_budget(pack: Pack) -> None:
 
 def _hints(pack: Pack) -> list[str]:
     out = []
-    names = pack.targets[0].qualified_name if pack.targets else "<node>"
     labels = {"reasons": "reasons", "rejected_paths": "rejected paths", "neighbor_constraints": "neighbour constraints",
               "constraints": "constraints", "reasons_minor": "minor reasons"}
+    attr = {"reasons": "reasons", "rejected_paths": "rejected_paths", "constraints": "constraints", "reasons_minor": "reasons"}
+
+    def cut_target(kind: str) -> str:
+        """The first target whose records of `kind` were cut — the one `--all` should expand."""
+        for tp in pack.targets:
+            have = len(getattr(tp, attr.get(kind, "reasons"), []))
+            if tp.counts.get(kind, tp.counts.get("reasons", 0) if kind == "reasons_minor" else 0) > have:
+                return tp.qualified_name
+        return pack.targets[0].qualified_name if pack.targets else "<node>"
     for kind, n in pack.truncated.items():
         if n:
-            out.append(f"还有 {n} 条 {labels.get(kind, kind)} 未展开，`provledger why {names} --all`")
+            out.append(f"还有 {n} 条 {labels.get(kind, kind)} 未展开，`provledger why {cut_target(kind)} --all`")
     return out
 
 

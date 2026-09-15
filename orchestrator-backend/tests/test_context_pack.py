@@ -88,9 +88,11 @@ def test_i7_budget_trims_reasons_then_rejected_then_neighbors_then_constraints(c
     assert len(t.reasons) < 3 and len(t.rejected_paths) == 5 and len(t.constraints) == 2      # reasons go first
     tiny = cp.build(conn, project="proj", targets=["pkg.m.load_orders"], psg_db_path=graph, neighbors="constraints", budget_tokens=200, record=False)
     t = tiny.targets[0]
-    assert t.reasons == [] and t.rejected_paths == [] and tiny.neighbors_counts["pkg.m.clean"].get("statements", []) == []
-    assert tiny.truncated["reasons"] >= 3 and tiny.truncated["rejected_paths"] >= 5
-    assert tiny.approx_tokens <= 200 or t.constraints == []                                   # constraints are the last to go
+    # DP phase 2 (Task 4): the trim never cuts a target's kind to zero — the structure alone can exceed
+    # the budget (the Task 4 plan's pack lost all 12 reasons that way); the last record of each kind stays
+    assert len(t.reasons) == 1 and len(t.rejected_paths) == 1 and tiny.neighbors_counts["pkg.m.clean"].get("statements", []) == []
+    assert tiny.truncated["reasons"] >= 2 and tiny.truncated["rejected_paths"] >= 4
+    assert tiny.approx_tokens > 200 and len(t.constraints) == 1                                # constraints are the last to go, and one stays
     assert tiny.hints and all("provledger why" in h for h in tiny.hints)
 
 
