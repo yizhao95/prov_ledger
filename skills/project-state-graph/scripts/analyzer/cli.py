@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 from typing import Optional
 
 from ._host import providers as _providers  # noqa: E402
@@ -129,7 +130,7 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
                                    for r in prov_records]
             store.set_run_extensions(conn, run_id, json.dumps(ext_fp, sort_keys=True))
         # Phase 7: an arbiter is wired ONLY through the calibration gate.
-        arbitrate, arb_record = _arbiter_gate()
+        arbitrate, arb_record = _arbiter_gate(repo_path)
         if arb_record is not None:
             ext_fp = ext_fp or {}
             ext_fp["arbiter"] = arb_record
@@ -146,7 +147,7 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
     return db_path
 
 
-def _arbiter_gate():
+def _arbiter_gate(repo_path: str | None = None):
     """-> (arbitrate or None, record or None). PROVLEDGER_ARBITER=pkg.mod:Class
     names a graph_api.Arbiter; it is handed to history.resolve only when its
     evaluation report (calibration.run, under PROVLEDGER_ARBITER_EVAL_DIR or
@@ -163,6 +164,9 @@ def _arbiter_gate():
         return None, {"id": spec, "gate": f"refused: cannot load arbiter ({type(exc).__name__}: {exc})", "calibration": calib}
     ok, detail = cal.gate(arbiter.arbiter_id, calib)
     record = {"id": arbiter.arbiter_id, "spec": spec, "gate": detail, "calibration": calib}
+    bind = getattr(arbiter, "bind_repo", None)
+    if ok and callable(bind) and repo_path:
+        bind(str(repo_path))         # phase 8: an arbiter that reads context lines is told where the tree is
     return (arbiter.arbitrate if ok else None), record
 
 
@@ -182,6 +186,56 @@ def ambiguities_main(argv) -> int:
         conn.close()
     print(f"{len(doc['items'])} ambiguity item(s) written to {args.export} (truth: null — label by hand)")
     return 0
+
+
+def calibration_main(argv) -> int:
+    """`analyzer calibration generate --out calib.json [--corpus DIR] [--include-live DB [--repo R]] [--merge F ...]`
+    builds a calibration set BY CONSTRUCTION (corpus swaps + negatives + partial
+    links; phase 8, FL-041), optionally merged with a live export (truth null)
+    and with already-labelled files (their truth wins). `analyzer calibration
+    stats calib.json` prints the distribution. No model labels anything."""
+    cal = _testing.calibration
+    sub = argv[0] if argv else ""
+    if sub == "generate":
+        parser = argparse.ArgumentParser(prog="analyzer calibration generate")
+        parser.add_argument("--out", required=True)
+        parser.add_argument("--corpus", default=None, help="corpus cases dir (default: the package's)")
+        parser.add_argument("--include-live", default=None, metavar="DB", help="state-graph DB whose identity_ambiguous events are added unlabelled")
+        parser.add_argument("--repo", default=None, help="repo for the live export's source context")
+        parser.add_argument("--merge", action="append", default=[], metavar="FILE", help="calibration file(s) to merge in (labelled items win)")
+        args = parser.parse_args(argv[1:])
+        corpus = args.corpus
+        # precedence on a collision: a merged (person-labelled) file, then the
+        # constructed items, then the live export (unlabelled never beats labelled)
+        lists = [cal.load_calibration(f)["items"] for f in args.merge]
+        lists += [cal.generate_from_corpus(corpus), cal.generate_negatives(corpus), cal.generate_swaps(corpus)]
+        source = {"corpus": str(corpus or _testing.default_corpus()), "live": args.include_live, "merged": list(args.merge)}
+        if args.include_live:
+            from . import calibration_export
+            import tempfile
+            conn = store.init_db(args.include_live)
+            try:
+                with tempfile.TemporaryDirectory() as td:
+                    lists.append(calibration_export.export(conn, os.path.join(td, "live.json"), repo=args.repo)["items"])
+            finally:
+                conn.close()
+        items = cal.merge(*lists)
+        doc = {"version": cal.VERSION, "source": source, "items": items}
+        Path(args.out).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"{len(items)} calibration item(s) written to {args.out}")
+        print(cal.stats_line(cal.stats(items)))
+        return 0
+    if sub == "stats":
+        parser = argparse.ArgumentParser(prog="analyzer calibration stats")
+        parser.add_argument("calib_path")
+        args = parser.parse_args(argv[1:])
+        items = cal.load_calibration(args.calib_path)["items"]
+        s = cal.stats(items)
+        print(cal.stats_line(s))
+        print(json.dumps(s, indent=1, sort_keys=True))
+        return 0
+    print("usage: analyzer calibration generate --out F [--corpus D] [--include-live DB] [--repo R] [--merge F ...] | stats F", file=sys.stderr)
+    return 2
 
 
 def arbiter_eval_main(argv) -> int:
@@ -279,6 +333,8 @@ def main(argv=None) -> int:
         return ambiguities_main(argv[1:])
     if argv and argv[0] == "arbiter-eval":
         return arbiter_eval_main(argv[1:])
+    if argv and argv[0] == "calibration":
+        return calibration_main(argv[1:])
     if argv and argv[0] == "backfill":
         return backfill_main(argv[1:])
     parser = argparse.ArgumentParser(

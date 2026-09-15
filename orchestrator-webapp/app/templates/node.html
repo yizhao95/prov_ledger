@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ qualified_name }} — node ledger{% endblock %}
+{% block content %}
+  <div class="mb-4 flex items-center justify-between gap-3 flex-wrap">
+    <div class="flex items-center gap-2">
+      <a href="/" class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue rounded-lg shadow-sm hover:bg-brand-bg text-sm font-semibold transition">🏠 Home</a>
+      <a href="/outcomes" class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue rounded-lg shadow-sm hover:bg-brand-bg text-sm font-semibold transition">🎯 Outcomes</a>
+    </div>
+    <span class="text-xs text-brand-muted italic">🧬 node ledger · space / time / intent in one query · read-only</span>
+  </div>
+
+  <div class="bg-surface rounded-xl shadow-sm border border-hairline px-5 py-4 mb-4">
+    <div class="text-[11px] uppercase tracking-wide text-brand-muted">{{ project }}</div>
+    <h1 class="text-lg font-semibold font-mono text-gray-900 break-all">{{ ledger.qualified_name if ledger else qualified_name }}</h1>
+    {% if ledger and ledger.node_key %}<div class="text-xs text-brand-muted font-mono">{{ ledger.node_key }}</div>{% endif %}
+  </div>
+
+  {% if error %}
+  <div class="bg-surface rounded-xl border border-hairline p-5 text-sm text-brand-red">{{ error }}</div>
+  {% elif not ledger.available %}
+  <div class="bg-surface rounded-xl border border-hairline border-l-4 border-l-brand-serious p-5 text-sm text-brand-gray" data-state="unavailable">
+    <span class="font-semibold">state graph unavailable</span> — {{ ledger.reason }}
+  </div>
+  {% elif not ledger.found %}
+  <div class="bg-surface rounded-xl border border-hairline border-l-4 border-l-brand-serious p-5 text-sm text-brand-gray" data-state="not-found">
+    {{ ledger.reason }}
+  </div>
+  {% else %}
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+    {# ── space: who feeds me, whom I feed ── #}
+    <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="space">
+      <h2 class="text-sm font-semibold text-gray-900 mb-2">🧭 Space — upstream / downstream</h2>
+      {% if not ledger.card %}<div class="text-xs text-brand-muted">no consistency card (the graph was built with --no-cards, or the symbol is not a function)</div>{% endif %}
+      {% for key, label in [("callers", "callers"), ("callees", "callees"), ("output_consumers", "output consumers"), ("reads", "reads"), ("writes", "writes"), ("lineage_upstream", "lineage ↑"), ("lineage_downstream", "lineage ↓")] %}
+        {% if ledger.card.get(key) %}
+        <div class="mb-2">
+          <div class="text-[11px] uppercase tracking-wide text-brand-muted">{{ label }}</div>
+          <ul class="text-xs font-mono">
+            {% for name in ledger.card[key] %}<li><a class="text-brand-blue" href="/node/{{ project }}/{{ name }}">{{ name }}</a></li>{% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+      {% endfor %}
+      {% if ledger.card.get("dtype_map") %}
+      <div class="text-[11px] uppercase tracking-wide text-brand-muted">dtypes</div>
+      <div class="text-xs font-mono">{% for k, v in ledger.card.dtype_map.items() %}{{ k }}: {{ v }}<br>{% endfor %}</div>
+      {% endif %}
+    </section>
+
+    {# ── time: every event, grouped by analysis run; tier is a LABEL ── #}
+    <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="time">
+      <h2 class="text-sm font-semibold text-gray-900 mb-2">🕰 Time — {{ ledger.events }} event{{ '' if ledger.events == 1 else 's' }} in {{ ledger.runs|length }} run{{ '' if ledger.runs|length == 1 else 's' }}</h2>
+      {% for run in ledger.runs %}
+      <div class="mb-3 border-l-2 border-hairline pl-3" data-run="{{ run.run_id }}">
+        <div class="text-xs text-brand-gray">
+          <span class="font-semibold">run {{ run.run_id }}</span>
+          · <span class="font-mono">{{ (run.commit_sha or '')[:7] or '-' }}</span>
+          · {{ run.trigger or '-' }}
+          {% if run.plan_id %}· plan <a class="text-brand-blue font-mono" href="/plan/{{ run.plan_id }}">{{ run.plan_id }}</a>{% else %}· plan -{% endif %}
+        </div>
+        {% for e in run.events %}
+        {% set tb = tier_badge(e.tier) %}
+        <div class="text-xs flex flex-wrap items-baseline gap-x-2 mt-1">
+          <span data-tier="{{ e.tier }}" class="px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
+          <span class="font-semibold">{{ e.event_type }}</span>
+          <span class="text-brand-muted font-mono break-all">
+            {%- if e.event_type == 'node_renamed' %}{{ e.payload.get('from') }} → {{ e.payload.get('to') }}
+            {%- elif e.event_type == 'node_moved' %}{{ e.payload.get('from') }} → {{ e.payload.get('to') }}
+            {%- elif e.event_type == 'node_changed' %}changed: {{ e.payload.get('changed')|join(', ') }}
+            {%- elif e.event_type == 'node_matched' %}via {{ e.payload.get('via') }}
+            {%- elif e.event_type == 'identity_asserted' %}{{ e.payload.get('cur') }} — {{ e.payload.get('evidence') }} <span class="not-italic">[{{ e.payload.get('arbiter') }}]</span>
+            {%- else %}{{ e.payload | tojson }}{% endif -%}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </section>
+
+    {# ── intent: reasons and constraints ── #}
+    <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="intent">
+      <h2 class="text-sm font-semibold text-gray-900 mb-2">🧠 Intent — reasons &amp; constraints</h2>
+      <div class="text-[11px] uppercase tracking-wide text-brand-muted">reasons ({{ ledger.reasons|length }})</div>
+      {% if not ledger.reasons %}<div class="text-xs text-brand-muted mb-2">no close-time reason recorded for this node</div>{% endif %}
+      {% for r in ledger.reasons %}
+      {% set tb = tier_badge(r.display_tier) %}
+      <div class="text-xs flex flex-wrap items-baseline gap-x-2 mb-1">
+        <span data-tier="{{ r.display_tier }}" class="px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
+        <span class="text-brand-muted">{{ r.kind }} · {{ r.source }} · <a class="text-brand-blue font-mono" href="/plan/{{ r.plan_id }}">{{ r.plan_id }}</a></span>
+        <span class="text-gray-800">{{ r.text if r.text is not none else '— unstated —' }}</span>
+      </div>
+      {% endfor %}
+      <div class="text-[11px] uppercase tracking-wide text-brand-muted mt-3">constraints ({{ ledger.constraints|length }})</div>
+      {% if not ledger.constraints %}<div class="text-xs text-brand-muted">no active constraint anchored on this node</div>{% endif %}
+      {% for c in ledger.constraints %}
+      <div class="text-xs mb-2 border-l-2 border-hairline pl-2" data-visibility="{{ c.why_visibility }}">
+        <div class="text-gray-900">{{ c.statement }}</div>
+        {% if c.why_visibility == 'restricted' %}
+        <div class="text-brand-muted">why: restricted — see <span class="font-mono">{{ c.why_ref or '(no reference)' }}</span></div>
+        {% else %}
+        <div class="text-brand-muted">why: {{ c.rationale or '—' }}{% if c.why_ref %} · <span class="font-mono">{{ c.why_ref }}</span>{% endif %}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </section>
+  </div>
+  {% endif %}
+
+  <div class="text-[11px] text-brand-muted mt-4 tnum">
+    approx_tokens={{ ledger.approx_tokens if ledger else 0 }} — the whole ledger above, as one JSON, at ~4 chars per token (v2 criterion: one query, small enough to read before deciding)
+  </div>
+{% endblock %}

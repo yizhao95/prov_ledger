@@ -1,6 +1,6 @@
 [project]
 name = "provledger"
-version = "0.1.0"
+version = "0.2.0"
 description = "Data-contract + provenance layer for data-science coding agents: SQLite plan/step orchestrator, runtime data profiling, drift detection, and a never-repeat-a-mistake decision ledger"
 requires-python = ">=3.10"
 dependencies = []  # stdlib only — pandas is optional (profiler.profile_dataframe imports it lazily)
@@ -36,7 +36,7 @@ package-dir = { "provledger" = "orchestrator", "provledger.providers" = "orchest
 # Migrations live inside the package so run_migrations works from a wheel;
 # the mutation corpus ships with provledger.testing (phase 6).
 provledger = ["migrations/*.sql"]
-"provledger.testing" = ["corpus/**/*", "corpus/**/.gitignore"]
+"provledger.testing" = ["corpus/**/*", "corpus/**/.gitignore", "prompts/*.md"]
 
 [dependency-groups]
 dev = ["pytest>=7"]

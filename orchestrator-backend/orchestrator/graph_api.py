@@ -155,6 +155,7 @@ class Row:
     dataflow_trivial: bool
     owner_qn: str | None = None   # OWNED_TYPES only: the owner's qualified_name
     name: str | None = None       # OWNED_TYPES only: the local name (var / column)
+    context: str | None = None    # phase 8: ±10 source lines for an arbiter; never read by match()
 
 
 @dataclass(frozen=True)

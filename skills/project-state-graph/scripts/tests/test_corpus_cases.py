@@ -188,3 +188,14 @@ def test_case_against_analyzer(case):
     fixed to the corpus, never the other way round."""
     fails = run_case(case, analyzer_extractor, analyzer_matcher, generated=mutate.GENERATED)
     assert fails == [], "\n".join(fails)
+
+
+# ── Phase 8 Task 1: the swap variant's truth is declared BY CONSTRUCTION ─────
+@pytest.mark.parametrize("case", iter_cases(CASES), ids=lambda c: c.name)
+def test_swap_truth_maps_the_declared_symbols_onto_the_after_side(case):
+    spec = case.expect["variants"]["swap_two_similar"]
+    truth = spec.get("truth")
+    assert truth, f"{case.name}: swap_two_similar needs a truth mapping (the author knows the answer)"
+    assert set(truth) == set(spec["symbols"])
+    after = {o.qualified_name for o in analyzer_extractor(case.variants["swap_two_similar"] / "after")}
+    assert set(truth.values()) <= after, (case.name, after)

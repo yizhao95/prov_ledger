@@ -107,3 +107,19 @@ def test_latest_run_id(psg):
     assert psg_bridge.latest_run_id(psg) == 2
     assert psg_bridge.latest_run_id(psg, plan_id="P0") == 1
     assert psg_bridge.latest_run_id(psg, plan_id="P9") is None
+
+
+# ── Phase 8 Task 4: the consistency card (space) and a node's constraints ──
+def test_card_of_returns_callers_and_consumers_or_empty(psg):
+    c = sqlite3.connect(psg)
+    c.executescript("""
+        CREATE TABLE IF NOT EXISTS consistency_card (symbol_id INTEGER PRIMARY KEY, card_json TEXT NOT NULL);
+        INSERT INTO node_type (id, name) VALUES (1, 'function');
+        INSERT INTO node (id, node_type_id, name, qualified_name, file_path, run_id, node_key) VALUES (7, 1, 'load_orders', 'pkg.m.load_orders', 'pkg/m.py', 2, 'nk_a');
+        INSERT INTO consistency_card (symbol_id, card_json) VALUES (7, '{"callers": ["pkg.m.main"], "callees": ["pd.read_csv"], "output_consumers": ["pkg.m.clean"], "reads": ["orders"], "writes": [], "dtype_map": {"return": "DataFrame"}}');
+    """)
+    c.commit(); c.close()
+    card = psg_bridge.card_of(psg, "pkg.m.load_orders")
+    assert card["callers"] == ["pkg.m.main"] and card["output_consumers"] == ["pkg.m.clean"] and card["reads"] == ["orders"]
+    assert psg_bridge.card_of(psg, "pkg.m.nope") == {} and psg_bridge.card_of(None, "x") == {}
+    assert psg_bridge.card_of(str(Path(psg).parent / "missing.db"), "x") == {}

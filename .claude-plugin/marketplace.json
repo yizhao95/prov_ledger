@@ -4,6 +4,7 @@
   "plugins": [
     {
       "name": "provledger",
+      "version": "0.2.0",
       "source": "./",
       "description": "Provenance + ledger discipline for data-science coding agents."
     }

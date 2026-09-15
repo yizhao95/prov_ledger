@@ -19,6 +19,7 @@ from provledger import graph_api, providers, testing     # noqa: E402, F401  (ph
 print(f"import ok — provledger {provledger.__version__} "
       f"from {Path(provledger.__file__).parent}")
 assert "site-packages" in provledger.__file__, "not running from the wheel!"
+assert provledger.__version__ == "0.2.0", f"wheel version {provledger.__version__} != 0.2.0 (release prep, phase 8)"
 
 with tempfile.TemporaryDirectory() as td:
     conn = db.open_db(Path(td) / "orch.db")

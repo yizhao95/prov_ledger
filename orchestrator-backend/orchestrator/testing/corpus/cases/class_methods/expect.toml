@@ -17,4 +17,6 @@ rename_class                   = { identity = "preserved", semantic_diff = "none
 # layer can pair it — a break. Locks the boundary on purpose.
 move_method_to_module_function = { identity = "broken", broken = ["pkg.trainer.Trainer.predict"] }
 delete_function                = { identity = "broken", broken = ["pkg.trainer.main"] }
-swap_two_similar               = { identity = "ambiguous", symbols = ["pkg.trainer.Trainer.score_a", "pkg.trainer.Trainer.score_b"] }
+# truth: declared by the author of the variant — the swap was applied by hand, so the
+# answer is known by construction (phase 8 calibration set, FL-041).
+swap_two_similar               = { identity = "ambiguous", symbols = ["pkg.trainer.Trainer.score_a", "pkg.trainer.Trainer.score_b"], truth = { "pkg.trainer.Trainer.score_a" = "pkg.trainer.Trainer.eval_x", "pkg.trainer.Trainer.score_b" = "pkg.trainer.Trainer.eval_y" } }
