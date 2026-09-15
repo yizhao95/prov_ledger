@@ -488,11 +488,12 @@ def test_e2_2_constraint_hit_by_node_key_not_lexical(graph_db_with_history, orch
                                                   project="proj", orch_conn=orch_db)
     assert ctx["ledger_reminders"] == []                                   # lexical route found nothing
     assert len(ctx["symbols"][0]["constraints"]) == 1                      # node_key route did
-    assert orch_db.execute("SELECT COUNT(*) FROM read_hit WHERE moment='plan'").fetchone()[0] == 1     # shown once
+    shown = ctx["pack"]["shown"]                                                             # the constraint + the fixture's reason
+    assert shown == 2 and orch_db.execute("SELECT COUNT(*) FROM read_hit WHERE moment='plan'").fetchone()[0] == shown
     assert orch_db.execute("SELECT hit_count FROM LedgerEntries").fetchone()[0] == 0                   # DP phase 2: hit_count is frozen
     impact_preflight.compute_impact_context(graph_db_with_history, "tweak process", ["pipeline.process"],
                                             project="proj", orch_conn=orch_db)
-    assert orch_db.execute("SELECT COUNT(*) FROM read_hit WHERE moment='plan'").fetchone()[0] == 2
+    assert orch_db.execute("SELECT COUNT(*) FROM read_hit WHERE moment='plan'").fetchone()[0] == 2 * shown   # no plan id: shown again
     # a symbol without a key gets no constraints; the plan-less call gets nothing from the ledger
     sym = next(s for s in impact_preflight.compute_impact_context(graph_db_with_history, "", ["mod.alpha"],
                                                                   project="proj", orch_conn=orch_db)["symbols"])
@@ -604,3 +605,20 @@ def test_dp_reasons_carry_evidence_level(tmp_path, monkeypatch):
     rows = impact_preflight._reasons(orch_db, "nk_a")[-2:]          # after the fixture's own asserted reason
     assert [r["evidence_level"] for r in rows] == ["verbal", "task_context"]
     assert rows[0]["tier"] == "stated" and rows[0]["text"] is None and rows[1]["text"] == "finance asked"
+
+
+def test_dp2_impact_context_carries_the_pack_and_records_hits_under_the_plan(graph_db_with_history, orch_db):
+    """DP phase 2 Task 2: compute_impact_context builds the context pack (the same
+    build `provledger why` uses) and the pack's records are read_hits of the plan."""
+    ctx = impact_preflight.compute_impact_context(graph_db_with_history, "tweak process", ["pipeline.process"],
+                                                  project="proj", orch_conn=orch_db, plan_id="PX")
+    pack = ctx["pack"]
+    assert pack["targets"][0]["qualified_name"] == "pipeline.process" and pack["moment"] == "plan"
+    assert isinstance(pack["approx_tokens"], int) and pack["approx_tokens"] > 0 and "truncated" in pack and "hints" in pack
+    assert pack["targets"][0]["constraints"] and pack["targets"][0]["constraints"][0]["text"].startswith("exclude region X")
+    hits = orch_db.execute("SELECT plan_id, moment, COUNT(*) FROM read_hit GROUP BY 1, 2").fetchall()
+    assert [tuple(h) for h in hits] == [("PX", "plan", pack["shown"])]
+    impact_preflight.compute_impact_context(graph_db_with_history, "tweak process", ["pipeline.process"],
+                                            project="proj", orch_conn=orch_db, plan_id="PX")
+    assert orch_db.execute("SELECT COUNT(*) FROM read_hit").fetchone()[0] == pack["shown"]        # same plan, same moment: not counted twice
+    assert ctx["approx_tokens"] >= pack["approx_tokens"]

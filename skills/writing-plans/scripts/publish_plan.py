@@ -267,13 +267,6 @@ def main() -> None:
                 f"(or set \"project\": \"none\" to opt out of the state-graph review)."
             )
         graph_db = _resolve_project_db(project)
-        impact_context = impact_preflight.compute_impact_context(
-            graph_db, data.get("user_query") or "", declared_targets,
-            project=project, orch_conn=conn)
-        if impact_context.get("degraded"):
-            # FL-020: never silent — the plan publishes, the reader is told.
-            print(f"⚠️  publish-plan: impact analysis degraded ({impact_context['degraded']}): "
-                  f"{impact_context['capability_boundary']}", file=sys.stderr)
 
     skills_activated_input = data.get("skills") or None
     # Translate the user-facing 'name' key to the api's 'skill_name' key.
@@ -305,6 +298,16 @@ def main() -> None:
     # complete_plan when no review row is found.
     review_step_id = db.insert_review_step(conn, result["plan_id"])
     result["review_step_id"] = review_step_id
+    if tracked:
+        # DP phase 2: the impact analysis (and its context pack) runs once the
+        # plan id exists, so every surfaced record is a read_hit of THIS plan.
+        impact_context = impact_preflight.compute_impact_context(
+            graph_db, data.get("user_query") or "", declared_targets,
+            project=project, orch_conn=conn, plan_id=result["plan_id"])
+        if impact_context.get("degraded"):
+            # FL-020: never silent — the plan publishes, the reader is told.
+            print(f"⚠️  publish-plan: impact analysis degraded ({impact_context['degraded']}): "
+                  f"{impact_context['capability_boundary']}", file=sys.stderr)
     # Persist the Phase D impact analysis on the Plan row (atomic with publish).
     if impact_context is not None:
         db.set_plan_impact_context(
