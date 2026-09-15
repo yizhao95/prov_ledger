@@ -4,15 +4,15 @@
   "n": 0,
   "p90": null
  },
- "generated_at": "2026-09-15T16:21:34Z",
+ "generated_at": "2026-09-15T20:05:15Z",
  "n_measured": 0,
- "n_plans": 66,
- "n_proxy": 66,
+ "n_plans": 74,
+ "n_proxy": 74,
  "plans": {},
  "proxy_calls_per_step": {
-  "median": 1.8452,
-  "n": 66,
-  "p90": 2.1292
+  "median": 1.8571,
+  "n": 74,
+  "p90": 2.125
  },
  "since": null,
  "wall_per_step": {
