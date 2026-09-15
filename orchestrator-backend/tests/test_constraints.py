@@ -54,7 +54,7 @@ def test_e4_3_bypass_recorded_visibly_and_close_still_completes(conn, psg_with_p
     plan_id, review = _seed_registered_plan(conn, "P1", registry=registry)        # impact_context: none -> unread
     out = _close(conn, plan_id, registry)
     assert out["plan_status"] == "COMPLETED" and out["constraints_bypassed"] == 1
-    rows = [r for r in db.get_node_reasons(conn, plan_id=plan_id) if r["kind"] == "constraint_ref"]
+    rows = [dict(r) for r in conn.execute("SELECT * FROM node_reason_v WHERE plan_id=? AND kind='constraint_ref'", (plan_id,))]
     assert len(rows) == 1 and rows[0]["node_key"] == "nk_a"
     assert rows[0]["text"] == f"constraint_bypassed:{cid}: exclude region X from the rollup"
     assert rows[0]["source"] == "system" and rows[0]["tier"] == "derived"
@@ -68,7 +68,7 @@ def test_no_bypass_when_surfaced(conn, psg_with_plan, registry):
     db.set_plan_impact_context(conn, plan_id, json.dumps({"constraint_ids": [cid], "symbols": []}))
     out = _close(conn, plan_id, registry)
     assert out["constraints_bypassed"] == 0
-    assert [r for r in db.get_node_reasons(conn, plan_id=plan_id) if r["kind"] == "constraint_ref"] == []
+    assert [dict(r) for r in conn.execute("SELECT * FROM node_reason_v WHERE plan_id=? AND kind='constraint_ref'", (plan_id,))] == []
     assert "[CONSTRAINT BYPASSED]" not in (db.get_step(conn, review)["log_context"] or "")
 
 
@@ -84,7 +84,7 @@ def test_bypass_idempotent(conn, psg_with_plan, registry):
     _close(conn, plan_id, registry)
     n = constraints.bypassed_at_close(conn, project="proj", plan_id=plan_id, psg_db_path=psg_with_plan,
                                       review_step_id=review, commit=True)
-    assert n == 0 and len([r for r in db.get_node_reasons(conn, plan_id=plan_id) if r["kind"] == "constraint_ref"]) == 1
+    assert n == 0 and len([dict(r) for r in conn.execute("SELECT * FROM node_reason_v WHERE plan_id=? AND kind='constraint_ref'", (plan_id,))]) == 1
 
 
 def test_anchored_constraints_match_qualified_names_too(conn):
