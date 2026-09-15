@@ -17,10 +17,15 @@ def _constraint(conn, subjects, **kw):
                 statement="exclude region X from the rollup", rationale="legal hold on region X",
                 why_ref="https://wiki/decisions/42", why_visibility="shared")
     cols.update(kw)
-    cur = conn.execute(f"INSERT INTO LedgerEntries ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
-                       tuple(cols.values()))
+    conn.execute(f"INSERT INTO LedgerEntries ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                 tuple(cols.values()))
     conn.commit()
-    return cur.lastrowid
+    if cols["kind"] != "constraint":
+        return None
+    # DP phase 1: the readers look at change_reason — mirror the way ledger_store.add_entry does
+    return constraints.record_constraint(conn, project=cols["project"], subjects=subjects, statement=cols["statement"],
+                                         rationale=cols["rationale"], why_ref=cols["why_ref"], why_visibility=cols["why_visibility"],
+                                         state=cols.get("status", "active"))
 
 
 @pytest.fixture
@@ -39,7 +44,7 @@ def test_anchored_constraints_exact_match_and_restricted(conn):
     cid = _constraint(conn, ["nk_a", "orders.region"])
     _constraint(conn, ["nk_other"], statement="nk_a must keep the region filter", keywords='["nk_a"]')   # lexical only
     _constraint(conn, ["nk_a"], kind="decision")                                                        # not a constraint
-    sup = _constraint(conn, ["nk_a"]); conn.execute("UPDATE LedgerEntries SET status='superseded' WHERE id=?", (sup,)); conn.commit()
+    _constraint(conn, ["nk_a"], status="superseded")
     rid = _constraint(conn, ["nk_a"], why_visibility="restricted")
     got = constraints.anchored_constraints(conn, "proj", ["nk_a"])
     assert [c["id"] for c in got] == [cid, rid]

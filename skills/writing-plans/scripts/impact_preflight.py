@@ -225,11 +225,11 @@ def _reasons(orch_conn, node_key: Optional[str]) -> List[Dict]:
         return []
     try:
         rows = orch_conn.execute(
-            "SELECT node_key, plan_id, step_id, kind, text, source, tier, created_at FROM node_reason "
-            "WHERE node_key = ? ORDER BY id", (node_key,)).fetchall()
-    except sqlite3.OperationalError:      # orchestrator DB predates migration 014
+            "SELECT node_key, plan_id, step_id, role, COALESCE(interpretation, statement), recorded_by, tier, recorded_at, evidence_level "
+            "FROM change_reason_v WHERE node_key = ? ORDER BY id", (node_key,)).fetchall()
+    except sqlite3.OperationalError:      # orchestrator DB predates migration 018
         return []
-    cols = ("node_key", "plan_id", "step_id", "kind", "text", "source", "tier", "created_at")
+    cols = ("node_key", "plan_id", "step_id", "kind", "text", "source", "tier", "created_at", "evidence_level")
     return [dict(zip(cols, r)) for r in rows]
 
 

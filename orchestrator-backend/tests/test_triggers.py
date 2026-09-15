@@ -143,13 +143,13 @@ def test_r4_pure_refactor_hit_and_miss(conn, tmp_path):
 
 # ── R5 ────────────────────────────────────────────────────────────────────────
 def test_r5_constraint_covered_hit_and_miss(conn, graph):
+    from orchestrator import constraints
     _plan(conn)
-    conn.execute("INSERT INTO LedgerEntries (project, kind, subjects, keywords, statement, rationale, status) VALUES "
-                 "('proj', 'constraint', '[\"nk_a\"]', '[]', 'a_fn keeps paid orders only', 'finance', 'active')")
-    conn.commit()
+    cid = constraints.record_constraint(conn, project="proj", subjects=["nk_a"], statement="a_fn keeps paid orders only", rationale="finance")
     r = _eval(conn, graph)
     assert r["by_rule"]["R5"] == 1 and "keeps paid orders" in pv.reasons_for_plan(conn, PLAN)[0]["interpretation"]
-    conn.execute("UPDATE LedgerEntries SET status='superseded'"); conn.commit()
+    newer = constraints.record_constraint(conn, project="proj", subjects=["nk_other"], statement="moved elsewhere", rationale="x")
+    pv.supersede(conn, cid, newer)                                        # the old constraint no longer covers nk_a
     ctx = triggers._ctx(conn, "proj", PLAN, graph)
     assert triggers.r5_constraint_covered(ctx, {"node_key": "nk_a", "qualified_name": "pkg.m.a_fn"}) is None
 

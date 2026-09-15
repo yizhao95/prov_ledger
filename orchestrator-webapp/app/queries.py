@@ -635,19 +635,28 @@ def tier_badge(tier: str | None) -> tuple[str, str]:
     return TIER_BADGES.get(tier or "unstated", TIER_BADGES["unstated"])
 
 
+# 来源等级 (source level) — the computed evidence_level of change_reason_v, shown as words
+SOURCE_LEVELS = {"linked": "来源等级 linked · 有可核对的引用", "verbal": "来源等级 verbal · 原话或口头来源",
+                 "task_context": "来源等级 task_context · 仅任务脉络", "unstated": "来源等级 unstated · 未说明"}
+
+
 def get_node_reasons(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
     """node_reason rows of a plan (migration 014) + display_tier ('unstated'
     when text is NULL). Degrades to [] on an older DB. Read-only."""
     try:
         rows = conn.execute(
-            "SELECT id, node_key, run_id, step_id, kind, text, source, tier, created_at "
-            "FROM node_reason WHERE plan_id = ? ORDER BY id", (plan_id,)).fetchall()
+            "SELECT r.id, r.node_key, r.run_id, r.step_id, r.role AS kind, "
+            "       COALESCE(r.interpretation, r.statement, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS text, "
+            "       r.recorded_by AS source, r.tier, r.recorded_at AS created_at, r.evidence_level, r.rule_id "
+            "FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
+            "WHERE r.plan_id = ? ORDER BY r.id", (plan_id,)).fetchall()
     except sqlite3.Error:
         return []
     out = []
     for r in rows:
         d = dict(r)
-        d["display_tier"] = "unstated" if d["text"] is None else d["tier"]
+        d["display_tier"] = d["tier"]                     # DP phase 1: unstated is a real tier now
+        d["source_level"] = SOURCE_LEVELS.get(d.get("evidence_level") or "", d.get("evidence_level") or "—")
         out.append(d)
     return out
 
@@ -707,7 +716,7 @@ def get_unstated(conn: sqlite3.Connection, plan_id: str) -> dict:
     for r in get_node_reasons(conn, plan_id):
         if r["kind"] != "reason" or not r["node_key"]:
             continue
-        stated[r["node_key"]] = stated.get(r["node_key"], False) or (r["text"] is not None)
+        stated[r["node_key"]] = stated.get(r["node_key"], False) or (r["tier"] != "unstated")   # DP phase 1: by tier
     slots = len(stated)
     unstated = sum(1 for v in stated.values() if not v)
     return {"slots": slots, "unstated": unstated, "pct": int(100 * unstated / slots) if slots else 0}
@@ -817,21 +826,32 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str)
     base["card"] = _psg.card_of(db_path, qn)
     # intent: reasons (all plans) + constraints anchored by node_key or qualified name
     try:
-        rows = conn.execute("SELECT id, node_key, run_id, plan_id, step_id, kind, text, source, tier, created_at "
-                            "FROM node_reason WHERE node_key = ? ORDER BY id", (node_key,)).fetchall()
-        base["reasons"] = [dict(r, display_tier=("unstated" if r["text"] is None else r["tier"])) for r in rows]
+        rows = conn.execute("SELECT r.id, r.node_key, r.run_id, r.plan_id, r.step_id, r.role AS kind, "
+                            "       COALESCE(r.interpretation, r.statement, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS text, "
+                            "       r.recorded_by AS source, r.tier, r.recorded_at AS created_at, r.evidence_level, r.rule_id "
+                            "FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
+                            "WHERE r.node_key = ? AND r.role <> 'constraint' ORDER BY r.id", (node_key,)).fetchall()
+        base["reasons"] = [dict(r, display_tier=r["tier"], source_level=SOURCE_LEVELS.get(r["evidence_level"] or "", "—")) for r in rows]
     except sqlite3.Error:
         base["reasons"] = []
     try:
+        # DP phase 1 (Task 7, closes FL-046): constraints come from change_reason(role=constraint)
+        # through the same rule as constraints.anchored_constraints — a personal rationale never leaves
         rows = conn.execute(
-            "SELECT DISTINCT l.id, l.statement, l.rationale, l.why_ref, l.why_visibility, l.status, l.created_at "
-            "FROM LedgerEntries l, json_each(l.subjects) s WHERE l.project = ? AND l.kind = 'constraint' "
-            "AND l.status = 'active' AND s.value IN (?, ?) ORDER BY l.id", (project, node_key, qn)).fetchall()
-        cons = []
+            "SELECT r.id, r.statement, r.rationale, r.rationale_visibility, r.state, r.recorded_at AS created_at, r.evidence_level, "
+            "       (SELECT f.label FROM reference_link l JOIN reference f ON f.id = l.reference_id WHERE l.reason_id = r.id ORDER BY f.id LIMIT 1) AS why_ref "
+            "FROM change_reason_v r WHERE r.project = ? AND r.role = 'constraint' AND r.state = 'active' AND r.superseded_by IS NULL "
+            "AND r.rule_id IS NULL AND r.node_key IN (?, ?) ORDER BY r.id", (project, node_key, qn)).fetchall()
+        cons, seen = [], set()
         for r in rows:
             d = dict(r)
-            if d.get("why_visibility") == "restricted":
-                d["rationale"] = None          # the WHY stays in the ledger; only the pointer leaves
+            if d["statement"] in seen:
+                continue
+            seen.add(d["statement"])
+            d["why_visibility"] = "restricted" if d.get("rationale_visibility") == "personal" else "shared"
+            if d["why_visibility"] == "restricted":
+                d["rationale"] = None
+            d["source_level"] = SOURCE_LEVELS.get(d.get("evidence_level") or "", "—")
             cons.append(d)
         base["constraints"] = cons
     except sqlite3.Error:

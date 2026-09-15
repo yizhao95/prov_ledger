@@ -48,12 +48,9 @@ def _normalize_text(text) -> str | None:
 
 
 def _reason_keys(conn, plan_id: str) -> set[str]:
-    """Nodes of the plan that already carry a reason row — in change_reason
-    (any tier, incl. a rule's derived reason) or in the legacy node_reason."""
-    keys = {r["node_key"] for r in conn.execute(
+    """Nodes of the plan that already carry a change_reason row (any tier, incl. a rule's derived reason)."""
+    return {r["node_key"] for r in conn.execute(
         "SELECT node_key FROM change_reason WHERE plan_id = ? AND role = 'reason' AND node_key IS NOT NULL", (plan_id,))}
-    keys |= {r["node_key"] for r in db.get_node_reasons(conn, plan_id=plan_id) if r["kind"] == "reason" and r["node_key"]}
-    return keys
 
 
 # ── the checklist ────────────────────────────────────────────────────────────
@@ -200,16 +197,11 @@ def rejected_paths(conn, *, project: str, plan_id: str, psg_db_path: str | None,
 
 
 def unstated_ratio(conn, project: str, plan_id: str) -> dict:
-    """{slots, unstated, ratio}: a slot is answered when ANY of its reason rows
-    has a tier other than unstated (change_reason; legacy node_reason rows
-    count by text until Task 7 migrates them)."""
+    """{slots, unstated, ratio}: a slot is answered when ANY of its change_reason
+    rows has a tier other than unstated (the legacy rows were migrated in)."""
     stated: dict[str, bool] = {}
     for r in conn.execute("SELECT node_key, tier FROM change_reason WHERE plan_id = ? AND role = 'reason' AND node_key IS NOT NULL", (plan_id,)):
         stated[r["node_key"]] = stated.get(r["node_key"], False) or (r["tier"] != "unstated")
-    for r in db.get_node_reasons(conn, plan_id=plan_id):
-        if r["kind"] != "reason" or not r["node_key"]:
-            continue
-        stated[r["node_key"]] = stated.get(r["node_key"], False) or (r["text"] is not None)
     slots = len(stated)
     unstated = sum(1 for v in stated.values() if not v)
     return {"slots": slots, "unstated": unstated, "ratio": round(unstated / slots, 4) if slots else 0.0}

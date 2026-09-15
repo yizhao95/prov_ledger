@@ -211,15 +211,29 @@ def test_db_is_opened_read_only(client):
 
 # ── 3.7-A: tier badges, reasons panel, unstated tile (E3-1 / E3-2 / E3-3) ──
 
+def _reclass(db_path):
+    """Run the legacy-reason migration on a test DB whose rows were inserted after it first opened."""
+    c = odb.open_db(db_path)
+    c.execute("DELETE FROM migration_state WHERE key='dp_reclass'"); c.commit(); c.close()
+    odb.open_db(db_path).close()
+
+
 def _insert_reasons(db_path, plan_id):
+    """One row per tier: two legacy node_reason rows migrated (derived constraint_ref,
+    asserted rejected_path), then a stated reason pointing at an utterance and an
+    unstated backstop through the new store."""
+    from orchestrator import provenance as pv
     conn = odb.open_db(db_path)
-    rows = [("nk_obs", "constraint_ref", "constraint_bypassed:1: exclude region X", "system", "derived"),
-            ("nk_ast", "rejected_path", "TimeSeriesSplit leaked future rows", "agent", "asserted"),
-            ("nk_sta", "reason", "fiscal weeks", "agent", "stated"),
-            ("nk_uns", "reason", None, "system", "derived")]
-    for key, kind, text, source, tier in rows:
-        odb.insert_node_reason(conn, node_key=key, project="demo", run_id=1, plan_id=plan_id, kind=kind,
-                               text=text, source=source, tier=tier)
+    odb.insert_node_reason(conn, node_key="nk_obs", project="demo", run_id=1, plan_id=plan_id, kind="constraint_ref",
+                           text="constraint_bypassed:1: exclude region X", source="system", tier="derived")
+    odb.insert_node_reason(conn, node_key="nk_ast", project="demo", run_id=1, plan_id=plan_id, kind="rejected_path",
+                           text="TimeSeriesSplit leaked future rows", source="agent", tier="asserted")
+    conn.close()
+    _reclass(db_path)
+    conn = odb.open_db(db_path)
+    u = pv.insert_utterance(conn, session_id="s", project="demo", plan_id=plan_id, text="fiscal weeks", occurred_at="2026-09-15 10:00:00")
+    pv.insert_reason(conn, project="demo", plan_id=plan_id, node_key="nk_sta", kind="technical", run_id=1, verbatim=(u, 0, 12), recorded_by="agent")
+    pv.insert_reason(conn, project="demo", plan_id=plan_id, node_key="nk_uns", kind="technical", run_id=1, recorded_by="system")
     conn.close()
 
 
@@ -229,7 +243,7 @@ def test_e3_1_tier_badges_distinct_without_color(client):
     assert r.status_code == 200 and "🧭 Reasons" in r.text
     for tier in ("derived", "asserted", "stated", "unstated"):
         assert f'data-tier="{tier}"' in r.text and f">{tier}<" in r.text, tier
-    assert "— unstated —" in r.text and "fiscal weeks" in r.text and "nk_uns" in r.text
+    assert "— unstated —" in r.text and "nk_uns" in r.text and 'data-source-level="verbal"' in r.text
     # observed is a known tier even when no row carries it
     from app import queries
     assert queries.tier_badge("observed")[0] == "observed" and queries.tier_badge(None)[0] == "unstated"
@@ -422,15 +436,19 @@ def _seed_state_graph(tmp_path, project="demo"):
 
 
 def _seed_reasons_and_constraints(db, project="demo"):
+    """Through the DP store: a stated reason (utterance span), an unstated backstop,
+    and two constraints (one restricted) mirrored the way ledger_store.add_entry does."""
+    from orchestrator import constraints as oc, provenance as pv
     conn = odb.open_db(db)
-    conn.execute("INSERT INTO node_reason (node_key, project, run_id, plan_id, step_id, kind, text, source, tier) VALUES "
-                 "('nk_a', ?, 2, 'P1', 'P1-REVIEW.1', 'reason', 'renamed so the name says which table it reads', 'agent', 'stated')", (project,))
-    conn.execute("INSERT INTO node_reason (node_key, project, run_id, plan_id, step_id, kind, text, source, tier) VALUES "
-                 "('nk_a', ?, 2, 'P1', NULL, 'reason', NULL, 'system', 'derived')", (project,))
-    conn.execute("INSERT INTO LedgerEntries (project, kind, subjects, keywords, statement, rationale, status, why_ref, why_visibility) VALUES "
-                 "(?, 'constraint', '[\"pkg.m.load_orders\"]', '[]', 'load_orders must keep paid orders only', 'finance reconciles on paid orders', 'active', 'docs/finance.md#paid', 'shared')", (project,))
-    conn.execute("INSERT INTO LedgerEntries (project, kind, subjects, keywords, statement, rationale, status, why_ref, why_visibility) VALUES "
-                 "(?, 'constraint', '[\"nk_a\"]', '[]', 'never read the raw orders table in prod', 'SECRET-RATIONALE-DO-NOT-SHOW', 'active', 'ticket SEC-42', 'restricted')", (project,))
+    u = pv.insert_utterance(conn, session_id="s", project=project, plan_id="P1",
+                            text="renamed so the name says which table it reads", occurred_at="2026-09-15 10:00:00")
+    pv.insert_reason(conn, project=project, plan_id="P1", node_key="nk_a", kind="technical", run_id=2, step_id="P1-REVIEW.1",
+                     verbatim=(u, 0, len("renamed so the name says which table it reads")), recorded_by="agent")
+    pv.insert_reason(conn, project=project, plan_id="P1", node_key="nk_a", kind="technical", run_id=2, recorded_by="system")
+    oc.record_constraint(conn, project=project, subjects=["pkg.m.load_orders"], statement="load_orders must keep paid orders only",
+                         rationale="finance reconciles on paid orders", why_ref="docs/finance.md#paid", why_visibility="shared")
+    oc.record_constraint(conn, project=project, subjects=["nk_a"], statement="never read the raw orders table in prod",
+                         rationale="SECRET-RATIONALE-DO-NOT-SHOW", why_ref="ticket SEC-42", why_visibility="restricted")
     conn.commit(); conn.close()
 
 
@@ -471,8 +489,9 @@ def test_node_page_accepts_a_node_key_and_the_reasons_panel_links_to_it(client, 
     # the plan page's Reasons panel links every node_key to its ledger page
     conn = odb.open_db(client._db)
     conn.execute("UPDATE Plans SET project='demo' WHERE plan_id=?", (client._seeded["plan_id"],))
-    conn.execute("INSERT INTO node_reason (node_key, project, run_id, plan_id, step_id, kind, text, source, tier) VALUES "
-                 "('nk_a', 'demo', 2, ?, NULL, 'reason', 'linked', 'agent', 'stated')", (client._seeded["plan_id"],))
+    from orchestrator import provenance as pv
+    pv.insert_reason(conn, project="demo", plan_id=client._seeded["plan_id"], node_key="nk_a", kind="technical", run_id=2,
+                     interpretation="linked", recorded_by="agent")
     conn.commit(); conn.close()
     r = client.get("/")
     assert 'href="/node/demo/nk_a"' in r.text
@@ -486,3 +505,51 @@ def test_node_page_says_unavailable_when_the_graph_is_missing(client, tmp_path, 
     monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
     r = client.get("/node/demo/pkg.m.never_seen")
     assert r.status_code == 200 and "not in the state graph" in r.text
+
+
+# ── DP phase 1 Task 7: the Reasons panels show the source level (来源等级) ────
+def test_reasons_panel_shows_source_level_for_migrated_and_new_rows(client):
+    pid = client._seeded["plan_id"]
+    conn = odb.open_db(client._db)
+    conn.execute("UPDATE Plans SET project='demo' WHERE plan_id=?", (pid,))
+    odb.insert_node_reason(conn, node_key="nk_old", project="demo", run_id=1, plan_id=pid, kind="reason",
+                           text="legacy sentence written as stated", source="agent", tier="stated")
+    conn.execute("DELETE FROM migration_state WHERE key='dp_reclass'")
+    conn.commit(); conn.close()
+    conn = odb.open_db(client._db)                       # the reclass runs on open
+    from orchestrator import provenance as pv
+    u = pv.insert_utterance(conn, session_id="s", project="demo", plan_id=pid, text="keep paid orders only", occurred_at="2026-09-15 10:00:00")
+    pv.insert_reason(conn, project="demo", plan_id=pid, node_key="nk_new", kind="technical", verbatim=(u, 0, 21), recorded_by="agent")
+    pv.insert_reason(conn, project="demo", plan_id=pid, node_key="nk_gap", kind="technical", recorded_by="system")
+    conn.close()
+    r = client.get("/api/dashboard")
+    assert r.status_code == 200 and "🧭 Reasons" in r.text
+    assert "来源等级" in r.text and "证据等级" not in r.text
+    assert 'data-tier="asserted"' in r.text and "legacy sentence written as stated" in r.text      # migrated: asserted, not stated
+    assert 'data-tier="stated"' in r.text and 'data-source-level="verbal"' in r.text
+    assert 'data-tier="unstated"' in r.text and 'data-source-level="unstated"' in r.text
+    assert 'data-source-level="task_context"' in r.text
+    from app import queries
+    conn = odb.open_db(client._db)
+    rows = {x["node_key"]: x for x in queries.get_node_reasons(conn, pid)}
+    conn.close()
+    assert rows["nk_old"]["tier"] == "asserted" and rows["nk_old"]["evidence_level"] == "task_context"
+    assert rows["nk_new"]["tier"] == "stated" and rows["nk_new"]["source_level"].startswith("来源等级 verbal")
+    assert queries.get_unstated(conn if False else odb.open_db(client._db), pid)["unstated"] == 1
+
+
+def test_node_page_constraints_come_from_change_reason(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path)
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    _seed_reasons_and_constraints(client._db)            # two constraints through the store (one restricted)
+    r = client.get("/node/demo/pkg.m.load_orders")
+    assert r.status_code == 200
+    assert "load_orders must keep paid orders only" in r.text and "finance reconciles on paid orders" in r.text
+    assert "never read the raw orders table in prod" in r.text and "ticket SEC-42" in r.text and "SECRET-RATIONALE" not in r.text
+    assert "来源等级" in r.text
+    from app import queries
+    conn = odb.open_db(client._db)
+    ledger = queries.get_node_ledger(conn, "demo", "pkg.m.load_orders")
+    conn.close()
+    assert len(ledger["constraints"]) == 2 and {c["why_visibility"] for c in ledger["constraints"]} == {"shared", "restricted"}
+    assert all("source_level" in c for c in ledger["constraints"])

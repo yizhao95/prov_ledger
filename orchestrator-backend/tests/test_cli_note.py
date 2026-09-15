@@ -79,4 +79,4 @@ def test_reasons_reclass_status_prints_counts(conn):
     r = _run(conn, "reasons", "reclass-status")
     assert r.returncode == 0, r.stderr
     out = json.loads(r.stdout)
-    assert out["dp_reclass"] is None and out["change_reason_by_tier"] == {} and out["node_reason_rows"] == 0
+    assert out["dp_reclass"] == "done" and out["change_reason_by_tier"] == {} and out["node_reason_rows"] == 0   # reclass ran on open, nothing to move

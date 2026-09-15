@@ -89,6 +89,7 @@
         <span data-tier="{{ r.display_tier }}" class="px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
         <span class="text-brand-muted">{{ r.kind }} · {{ r.source }} · <a class="text-brand-blue font-mono" href="/plan/{{ r.plan_id }}">{{ r.plan_id }}</a></span>
         <span class="text-gray-800">{{ r.text if r.text is not none else '— unstated —' }}</span>
+        <span class="text-brand-muted" data-source-level="{{ r.evidence_level }}">{{ r.source_level }}{% if r.rule_id %} · 规则 {{ r.rule_id }}{% endif %}</span>
       </div>
       {% endfor %}
       <div class="text-[11px] uppercase tracking-wide text-brand-muted mt-3">constraints ({{ ledger.constraints|length }})</div>
@@ -101,6 +102,7 @@
         {% else %}
         <div class="text-brand-muted">why: {{ c.rationale or '—' }}{% if c.why_ref %} · <span class="font-mono">{{ c.why_ref }}</span>{% endif %}</div>
         {% endif %}
+        <div class="text-brand-muted" data-source-level="{{ c.evidence_level }}">{{ c.source_level }}</div>
       </div>
       {% endfor %}
     </section>
