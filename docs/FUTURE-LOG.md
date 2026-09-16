@@ -85,3 +85,5 @@
 | FL-078 | dp-phase2d | DEFERRED | 两桶开销被 `command_head` 的 80 字符截断漏报：`run-step` / `publish-plan` 出现在 `SP=…` 或 `cd … && …` 之后就不进 orchestration 桶（本期 146 次调用只认出 2 次）。`_bucket` 应对整条命令做匹配，或 `command_head` 存更长的前缀 + 单独存"命令里出现的脚本名" | DP 3 期 |
 | FL-079 | dp-phase2d | DEFERRED | 重建表式迁移（019、021 都是为了放宽一个 CHECK）每次都可能漏掉上一版加的枚举值——021 第一稿就丢了 019 的 `ambiguous`，靠 backend 套件抓到。迁移应从一份"枚举清单"生成，或加一条通用测试：重建后所有历史 verdict/tier 值仍可写入 | DP 3 期 |
 | FL-080 | dp-phase2d | DEFERRED | `mode=full` 的 `/graph` 仍是 3.78 MB / 2652 节点：story 与 focus 已经把日常用量降到 260 KB / 66 KB，但"展开全图"这条路本身还需要分页或换渲染（FL-076 的另一半） | DP 3 期 |
+| FL-081 | dp-phase2d | DEFERRED | 脚本自伤：验证脚本里的 `pgrep -f "uvicorn app.main"` 匹配到了**创建该脚本的那个 shell 自己的命令行**（heredoc 把字面量带进了 cmdline），连杀两次步骤（exit 144）。凡是按命令行文本找进程的地方都要排除自身（`pgrep -f … | grep -v $$`）或改按端口/PID 文件定位；run-step 的包装层也可以在执行前把命令写进临时文件、只把路径放进 cmdline | DP 3 期 |
+
