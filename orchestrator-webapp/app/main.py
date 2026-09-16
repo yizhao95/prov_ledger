@@ -6,6 +6,7 @@ Routes:
   GET /api/health       — JSON ping for uptime monitoring
   GET /outcomes         — every claim across plans with its latest outcome (phase 8, FL-042)
   GET /node/{project}/{qualified_name} — one node's space / time / intent ledger (phase 8, FL-009)
+  GET /graph/{project}?focus=&at=&level= — the project as it is, or was at a run (DP phase 2b)
 
 Read-only access to ~/skill-workspace/orchestrator.db. Never mutates.
 """
@@ -253,6 +254,30 @@ def outcomes(request: Request, project: str | None = None):
     stats["projects"] = queries.outcome_stats(all_rows)["projects"]
     ctx.update(rows=rows, stats=stats)
     return TEMPLATES.TemplateResponse(request, "outcomes.html", ctx)
+
+
+@app.get("/graph/{project}", response_class=HTMLResponse)
+def graph_view(request: Request, project: str, focus: str | None = None, at: str | None = None, level: str = "functions"):
+    """DP phase 2b (Task 3): the project as it is (or was, at a run) — nodes with a
+    badge (records with a story) and the tier of their latest event. PSG only
+    through psg_bridge; a missing graph is 200 + "state graph unavailable"."""
+    import json as _json
+    ctx = {"request": request, "error": None, "project": project, "focus": focus or None, "graph": None, "graph_json": "{}"}
+    try:
+        conn = queries.open_db_readonly()
+    except FileNotFoundError as e:
+        ctx["error"] = f"orchestrator.db not found: {e}"
+        ctx["graph"] = {"available": False, "reason": ctx["error"], "nodes": [], "edges": [], "runs": [], "run": None, "level": level, "badged": 0}
+        return TEMPLATES.TemplateResponse(request, "graph.html", ctx)
+    try:
+        ctx["graph"] = queries.get_graph(conn, project, at=at, level=level)
+        ctx["graph_json"] = _json.dumps({"nodes": ctx["graph"]["nodes"], "edges": ctx["graph"]["edges"]}, default=str)
+    except sqlite3.Error as e:
+        ctx["error"] = f"database error: {e}"
+        ctx["graph"] = {"available": False, "reason": ctx["error"], "nodes": [], "edges": [], "runs": [], "run": None, "level": level, "badged": 0}
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse(request, "graph.html", ctx)
 
 
 @app.get("/node/{project}/{qualified_name:path}", response_class=HTMLResponse)

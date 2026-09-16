@@ -265,3 +265,59 @@ def changed_in_file(psg_db_path: str | None, plan_id: str, file_path: str) -> li
             out.append({"node_key": c["node_key"], "qualified_name": c["qualified_name"], "file_path": fp})
     out.sort(key=lambda n: n["node_key"])
     return out
+
+
+# ── DP phase 2b (Task 3): the graph as it is, or as it was at a run ──────────
+
+APP_FUNC_TYPES = ("function", "method", "route")
+FLOW_EDGES = ("calls", "downstream_data_feed")
+
+
+def runs_of(psg_db_path: str | None) -> list[dict]:
+    """Every analysis run, newest first: {run_id, commit_sha, plan_id, started_at, trigger}."""
+    return [{"run_id": r["id"], "commit_sha": r["commit_sha"], "plan_id": r["plan_id"], "started_at": r["started_at"], "trigger": r["trigger"]}
+            for r in _query(psg_db_path, "SELECT id, commit_sha, plan_id, started_at, trigger FROM analysis_run ORDER BY id DESC")]
+
+
+def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "functions") -> dict:
+    """{nodes: [{node_key, qualified_name, node_type, file_path}], edges: [{src_key, dst_key, edge_type}],
+    run_id, edges_from, level}. Nodes come from node_snapshot of `run_id` (the
+    newest run when None). Edges have no run dimension in the graph — they are
+    the latest graph's, mapped through node_key, and the result says so
+    (`edges_from: 'latest'`), never silently. level=functions keeps
+    function / method / route and calls / downstream_data_feed; full keeps all."""
+    if not psg_db_path:
+        return {"nodes": [], "edges": [], "run_id": None, "edges_from": "none", "level": level}
+    latest = _query(psg_db_path, "SELECT MAX(run_id) AS r FROM node_snapshot")
+    latest_run = latest[0]["r"] if latest and latest[0]["r"] is not None else None
+    run = int(run_id) if run_id is not None else latest_run
+    if run is None:
+        return {"nodes": [], "edges": [], "run_id": None, "edges_from": "none", "level": level}
+    type_filter = f"AND node_type IN ({','.join('?' * len(APP_FUNC_TYPES))})" if level == "functions" else ""
+    params: tuple = (run, *APP_FUNC_TYPES) if level == "functions" else (run,)
+    rows = _query(psg_db_path, f"SELECT node_key, qualified_name, node_type, file_path FROM node_snapshot WHERE run_id = ? AND node_key <> '' {type_filter} ORDER BY qualified_name", params)
+    nodes = [{"node_key": r["node_key"], "qualified_name": r["qualified_name"], "node_type": r["node_type"], "file_path": r["file_path"]} for r in rows]
+    keep = {n["node_key"] for n in nodes}
+    edge_filter = f"AND t.name IN ({','.join('?' * len(FLOW_EDGES))})" if level == "functions" else ""
+    erows = _query(psg_db_path,
+                   f"SELECT s.node_key AS src_key, d.node_key AS dst_key, t.name AS edge_type FROM edge e "
+                   f"JOIN edge_type t ON t.id = e.edge_type_id JOIN node s ON s.id = e.src_node_id JOIN node d ON d.id = e.dst_node_id "
+                   f"WHERE s.node_key IS NOT NULL AND d.node_key IS NOT NULL {edge_filter}", FLOW_EDGES if level == "functions" else ())
+    edges = [{"src_key": r["src_key"], "dst_key": r["dst_key"], "edge_type": r["edge_type"]} for r in erows if r["src_key"] in keep and r["dst_key"] in keep]
+    return {"nodes": nodes, "edges": edges, "run_id": run, "edges_from": "latest" if run != latest_run else "run",
+            "latest_run_id": latest_run, "level": level}
+
+
+def latest_tier_of(psg_db_path: str | None, run_id: int | None = None) -> dict[str, str]:
+    """node_key → tier of its latest event (at or before run_id) — the colour rule of the views."""
+    if not psg_db_path:
+        return {}
+    sql = "SELECT node_key, tier FROM node_event WHERE node_key IS NOT NULL"
+    params: tuple = ()
+    if run_id is not None:
+        sql += " AND run_id <= ?"; params = (int(run_id),)
+    sql += " ORDER BY run_id, seq"
+    out: dict[str, str] = {}
+    for r in _query(psg_db_path, sql, params):
+        out[r["node_key"]] = r["tier"]
+    return out

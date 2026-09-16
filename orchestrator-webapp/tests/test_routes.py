@@ -654,3 +654,42 @@ def test_etag_changes_on_a_headline_response(client):
     conn.commit(); conn.close()
     ro = queries.open_db_readonly(client._db); after = queries.compute_etag(ro); ro.close()
     assert before != after
+
+
+# ── DP phase 2b (Task 3): the Graph view ──
+
+def test_graph_page_renders_nodes_with_badge_and_tier_and_links_to_node(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path)
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    _seed_reasons_and_constraints(client._db)
+    html = client.get("/graph/demo").text
+    assert 'data-panel="graph-table"' in html and 'data-node="nk_a"' in html
+    assert 'data-badge="3"' in html                                # 1 stated reason + 2 active constraints (the unstated one has no badge)
+    assert 'data-tier="asserted"' in html                          # the latest event of nk_a is identity_asserted
+    assert 'href="/node/demo/pkg.m.load_orders"' in html and "run 2" in html and "bbbbbbb" in html
+    focused = client.get("/graph/demo?focus=pkg.m.load_orders").text
+    assert 'data-focus="1"' in focused and 'name="focus" value="pkg.m.load_orders"' in focused
+
+
+def test_graph_page_at_a_run_shows_that_runs_nodes_and_says_where_edges_come_from(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path)
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    then = client.get("/graph/demo?at=1").text
+    assert "run 1" in then and "aaaaaaa" in then and "edges_from: latest" in then
+    assert 'href="/node/demo/pkg.m.load?at=1"' in then                 # the name it carried at run 1, and the triple carries at
+    now = client.get("/graph/demo").text
+    assert "pkg.m.load_orders" in now and 'href="/node/demo/pkg.m.load?at=1"' not in now
+
+
+def test_graph_page_without_a_graph_is_200_and_says_so(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(tmp_path / "empty.json")); (tmp_path / "empty.json").write_text('{"projects": []}')
+    r = client.get("/graph/nope")
+    assert r.status_code == 200 and 'data-state="unavailable"' in r.text and "state graph unavailable" in r.text
+
+
+def test_graph_page_full_level_includes_data_nodes_and_old_db_stays_200(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path)
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    conn = odb.open_db(client._db); conn.execute("DROP VIEW node_badge_v"); conn.commit(); conn.close()
+    r = client.get("/graph/demo?level=full")
+    assert r.status_code == 200 and 'data-badge="0"' in r.text                 # no badge view → badges read 0, page still renders

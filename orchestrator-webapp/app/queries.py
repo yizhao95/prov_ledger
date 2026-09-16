@@ -988,3 +988,50 @@ def record_stats(conn: sqlite3.Connection, reason_ids: list[int]) -> dict[int, d
     except sqlite3.Error:
         return {}
     return out
+
+
+# ── DP phase 2b (Task 3): the Graph view ───────────────────────────────────────
+
+def node_badges(conn: sqlite3.Connection, project: str) -> dict[str, dict]:
+    """node_key → {badge, reasons, rejected_paths, constraints, minor, last_at} from node_badge_v (empty on an older DB)."""
+    try:
+        return {r["node_key"]: dict(r) for r in conn.execute(
+            "SELECT node_key, badge, reasons, rejected_paths, constraints, minor, last_at FROM node_badge_v WHERE project = ?", (project,))}
+    except sqlite3.Error:
+        return {}
+
+
+def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = None, level: str = "functions") -> dict:
+    """The project as it is (or was, at run `at`): nodes with their badge (how
+    many records have a story) and the tier of their latest event, edges, the
+    run list for the selector. PSG only through psg_bridge (ro); a missing
+    graph is `available: False`, never a 500."""
+    base = {"project": project, "available": False, "reason": None, "nodes": [], "edges": [], "runs": [], "run": None,
+            "edges_from": "none", "level": level, "badged": 0}
+    if _psg is None:
+        base["reason"] = "state graph unavailable: provledger.psg_bridge cannot be imported in this environment"
+        return base
+    db_path = _psg.db_path_for(project)
+    if not db_path or not os.path.exists(db_path):
+        base["reason"] = f"state graph unavailable: project {project!r} is not registered or its graph file is missing"
+        return base
+    run_id = None
+    if at not in (None, ""):
+        try:
+            run_id = int(at)
+        except (TypeError, ValueError):
+            run_id = None
+    g = _psg.graph_at(db_path, run_id=run_id, level=level if level in ("functions", "full") else "functions")
+    tiers = _psg.latest_tier_of(db_path, run_id=g["run_id"])
+    badges = node_badges(conn, project)
+    nodes = []
+    for n in g["nodes"]:
+        # a record may be anchored by node_key or by qualified name (a constraint declared by name): both count
+        b1 = badges.get(n["node_key"]) or {}; b2 = badges.get(n["qualified_name"]) or {}
+        nodes.append({**n, "badge": int(b1.get("badge") or 0) + int(b2.get("badge") or 0), "minor": int(b1.get("minor") or 0) + int(b2.get("minor") or 0),
+                      "tier": tiers.get(n["node_key"], "observed"), "last_at": max([x for x in (b1.get("last_at"), b2.get("last_at")) if x], default=None)})
+    runs = _psg.runs_of(db_path)
+    run = next((r for r in runs if r["run_id"] == g["run_id"]), None)
+    base.update(available=True, nodes=nodes, edges=g["edges"], runs=runs[:50], run=run, edges_from=g["edges_from"],
+                level=g["level"], badged=sum(1 for n in nodes if n["badge"]), latest_run_id=g.get("latest_run_id"))
+    return base
