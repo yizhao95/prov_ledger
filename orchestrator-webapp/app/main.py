@@ -7,6 +7,7 @@ Routes:
   GET /outcomes         — every claim across plans with its latest outcome (phase 8, FL-042)
   GET /node/{project}/{qualified_name} — one node's space / time / intent ledger (phase 8, FL-009)
   GET /graph/{project}?focus=&at=&level= — the project as it is, or was at a run (DP phase 2b)
+  GET /session/{session_id} — what a session said, cost, changed, published (DP phase 2b)
 
 Read-only access to ~/skill-workspace/orchestrator.db. Never mutates.
 """
@@ -57,6 +58,7 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
             "headline": None, "shown_adopted": {"plan": {"shown": [], "adopted": []}, "steps": {}}, "overhead": None,
             "total_plans": 0, "db_size_kb": 0, "viewing_plan_id": plan_id,
             "focus_node": node, "focus_at": at, "bar": queries.view_bar("task", queries.triple(None, node, at), plan_id),
+            "plan_session": None, "session_plans": [], "recent_sessions": [],
         }
 
     try:
@@ -101,6 +103,10 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
         overhead = queries.get_overhead(conn, plan["plan_id"]) if plan else None
         total_plans = queries.count_total_plans(conn)
         db_size_kb = queries.get_db_size_kb()
+        # DP phase 2b (Task 5): the plan's session and its other plans; the home page's recent sessions
+        plan_session = plan.get("session_id") if plan else None
+        session_plans = [dict(r) for r in conn.execute("SELECT plan_id, status FROM Plans WHERE session_id = ? AND plan_id <> ? ORDER BY created_at", (plan_session, plan["plan_id"]))] if plan_session else []
+        recent_sessions = queries.recent_sessions(conn) if not plan_id else []
     except sqlite3.Error as e:
         return _error_ctx(f"database error: {e}")
     finally:
@@ -135,6 +141,9 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
         "focus_node": node,
         "focus_at": at,
         "bar": queries.view_bar("task", queries.triple(plan.get("project") if plan else None, node, at), plan["plan_id"] if plan else None),
+        "plan_session": plan_session,
+        "session_plans": session_plans,
+        "recent_sessions": recent_sessions,
     }
 
 
@@ -262,6 +271,30 @@ def outcomes(request: Request, project: str | None = None):
     stats["projects"] = queries.outcome_stats(all_rows)["projects"]
     ctx.update(rows=rows, stats=stats)
     return TEMPLATES.TemplateResponse(request, "outcomes.html", ctx)
+
+
+@app.get("/session/{session_id}", response_class=HTMLResponse)
+def session_card(request: Request, session_id: str):
+    """DP phase 2b (Task 5, FL-062): one session — what was said, what it cost,
+    what changed, its headline, the plans it published; a session without a
+    plan is marked 降级. Read-only; an older DB renders empty parts."""
+    ctx = {"request": request, "error": None, "session": None, "bar": queries.view_bar("session", queries.triple(None, None, None))}
+    try:
+        conn = queries.open_db_readonly()
+    except FileNotFoundError as e:
+        ctx["error"] = f"orchestrator.db not found: {e}"
+        ctx["session"] = {"session_id": session_id, "found": False, "degraded": False, "run": None, "utterances": [], "tool_calls": 0, "buckets": {}, "ratios": {}, "changed_nodes": [], "headline": None, "plans": []}
+        return TEMPLATES.TemplateResponse(request, "session.html", ctx)
+    try:
+        ctx["session"] = queries.get_session(conn, session_id)
+        if ctx["session"]["run"] and ctx["session"]["run"].get("project"):
+            ctx["bar"] = queries.view_bar("session", queries.triple(ctx["session"]["run"]["project"], None, None))
+    except sqlite3.Error as e:
+        ctx["error"] = f"database error: {e}"
+        ctx["session"] = {"session_id": session_id, "found": False, "degraded": False, "run": None, "utterances": [], "tool_calls": 0, "buckets": {}, "ratios": {}, "changed_nodes": [], "headline": None, "plans": []}
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse(request, "session.html", ctx)
 
 
 @app.get("/graph/{project}", response_class=HTMLResponse)

@@ -38,6 +38,22 @@
     {% endif %}
   </div>
 
+  {# DP phase 2b (Task 5): recent sessions — with or without a plan #}
+  {% if recent_sessions %}
+  <section class="bg-surface rounded-xl shadow-sm border border-hairline p-4 mb-4" data-panel="recent-sessions">
+    <h2 class="text-sm font-semibold text-gray-900 mb-2">🗂 recent sessions</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+      {% for s in recent_sessions %}
+      <a href="/session/{{ s.session_id }}" class="border border-hairline rounded-lg px-3 py-2 hover:bg-brand-bg" data-session-card="{{ s.session_id }}"{% if s.degraded %} data-degraded="1"{% endif %}>
+        <div class="font-mono text-gray-900">{{ s.session_id[:12] }}…</div>
+        <div class="text-brand-muted">{{ s.utterances }} said · {{ s.calls }} calls · {% if s.plans %}{{ s.plans }} plan{{ '' if s.plans == 1 else 's' }}{% else %}<span class="text-[#8a3416]">降级（无 plan）</span>{% endif %}{% if s.refresh_state %} · refresh {{ s.refresh_state }}{% endif %}</div>
+        <div class="text-[11px] text-brand-muted">{{ s.last_at }}</div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   <!-- Polling div: query param threads through so historical view stays on its plan -->
   <div id="dashboard-content"
        hx-get="/api/dashboard?{% if viewing_plan_id %}plan={{ viewing_plan_id }}&{% endif %}{% if focus_node %}node={{ focus_node }}&{% endif %}{% if focus_at %}at={{ focus_at }}{% endif %}"
