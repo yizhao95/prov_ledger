@@ -181,6 +181,41 @@
      The dashboard only READS these; every row was written by the backbone flow.
      Auto-open when any decision is unresolved/halted — data failures are never
      hidden (same philosophy as DASH-UX3 for failed steps). #}
+  {# DP phase 2 (Task 7): 📰 plan headline — what the two-layer check found at publish, and how it
+     was answered. Severity and tier are labels (data-severity / data-tier), never colour alone.
+     An unanswered blocking finding is counted, not hidden; an agent that proceeded past one is marked. #}
+  {% if headline %}
+  <section class="bg-surface rounded-xl shadow-sm border border-hairline border-l-4 {{ 'border-l-brand-red' if headline.summary.unanswered else 'border-l-brand-blue' }} mb-4 px-5 py-3"
+           data-panel="headline" data-unanswered="{{ headline.summary.unanswered }}" data-findings="{{ headline.findings|length }}">
+    <div class="text-sm font-semibold text-gray-900">
+      📰 plan headline
+      <span class="text-xs text-brand-muted font-normal ml-2">
+        {{ headline.summary.targets }} targets · 2 layers · {{ headline.summary.blocking }} blocking · {{ headline.summary.warning }} warning · {{ headline.summary.info }} info
+        · <span class="{{ 'text-brand-red font-semibold' if headline.summary.unanswered else '' }}">{{ headline.summary.unanswered }} 未回答</span>
+        · {{ shown_adopted.plan.shown|length }} 展示过 · {{ shown_adopted.plan.adopted|length }} 采用了
+      </span>
+    </div>
+    <div class="mt-2 space-y-1">
+      {% for f in headline.findings %}
+      <div class="text-xs flex flex-wrap items-baseline gap-x-2 border-l-2 border-hairline pl-2" data-severity="{{ f.severity }}" data-tier="{{ f.tier }}" data-finding="{{ f.id }}">
+        <span class="font-semibold {{ 'text-brand-red' if f.severity == 'blocking' else 'text-gray-700' }}">{{ '⚠' if f.severity == 'blocking' else '·' }} {{ f.severity }}</span>
+        <span class="px-1.5 py-0.5 rounded bg-brand-bg text-[11px]">{{ f.tier }}</span>
+        <span class="font-mono text-[11px] text-brand-muted">{{ f.id }}</span>
+        <span class="text-gray-800">{{ f.text }}</span>
+        {% if f.response %}
+        <span class="text-[11px] text-brand-muted">→ {{ f.response.action }} ({{ f.response.by }}){% if f.response.rationale %} · {{ f.response.rationale }}{% endif %}</span>
+        {% if f.agent_proceeded %}<span class="text-[11px] px-1.5 rounded bg-[#fab219]/20 text-[#7a5200]" data-agent-proceeded="1">agent 越过</span>{% endif %}
+        {% elif f.severity == 'blocking' %}
+        <span class="text-[11px] text-brand-red" data-unanswered-finding="1">未回答</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% if not headline.findings %}<div class="text-xs text-brand-muted">0 findings — the two layers checked every target and found nothing on record</div>{% endif %}
+      {% for h in headline.hints %}<div class="text-[11px] text-brand-muted">{{ h }}</div>{% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   {# Phase 3: 🧭 Reasons — why each changed data point changed, per node_key.
      Tier is a LABEL (data-tier + text), never colour alone (E3-1). #}
   {% if node_reasons %}
@@ -431,8 +466,23 @@
             </div>
             {% if s.log_context %}
               <pre class="bg-surface border border-hairline rounded-lg p-2 text-xs font-mono whitespace-pre-wrap max-h-64 overflow-auto">{{ get_last_n_log_entries(s.log_context, 10) }}</pre>
+
             {% else %}
               <p class="text-xs text-brand-gray italic">(no raw output captured for this step)</p>
+            {% endif %}
+            {# DP phase 2 (Task 7): what this step was shown and what it adopted — two columns, never derived from each other #}
+            {% set sa = shown_adopted.steps.get(s.step_id) %}
+            {% if sa %}
+            <div class="grid grid-cols-2 gap-3 mt-2 text-[11px]" data-step-records="{{ s.step_id }}">
+              <div data-shown="{{ sa.shown|length }}">
+                <div class="uppercase tracking-wide text-brand-muted">展示过（{{ sa.shown|length }}）</div>
+                {% for r in sa.shown %}<div class="text-gray-700">#{{ r.reason_id }} · {{ r.moment }} · {{ r.text }}</div>{% endfor %}
+              </div>
+              <div data-adopted="{{ sa.adopted|length }}">
+                <div class="uppercase tracking-wide text-brand-muted">采用了（{{ sa.adopted|length }}）</div>
+                {% for r in sa.adopted %}<div class="text-gray-700">{% if plan and plan.project and r.node_key %}<a class="text-brand-blue" href="/node/{{ plan.project }}/{{ r.node_key }}?at={{ r.reason_id }}">#{{ r.reason_id }}</a>{% else %}#{{ r.reason_id }}{% endif %} · {{ r.via }} · {{ r.by }} · {{ r.text }}</div>{% endfor %}
+              </div>
+            </div>
             {% endif %}
           </div>
         </div>
@@ -498,5 +548,12 @@
   <div class="text-xs text-brand-muted mt-4 text-center">
     {{ total_plans }} total plans in DB · {{ db_size_kb }} KB
     · click any step to expand its log (last 10 entries) + sub-agent I/O
+    {# DP phase 2 (Task 6/7): how much of this plan was provledger itself #}
+    {% if overhead %}
+    <br><span data-overhead-ratio="{{ overhead.overhead_ratio if overhead.overhead_ratio is not none else '' }}" data-context-overhead-tokens="{{ overhead.context_overhead_tokens }}">
+      overhead_ratio {{ overhead.overhead_ratio if overhead.overhead_ratio is not none else 'n/a (no tool calls in the window)' }}
+      · context_overhead_tokens {{ overhead.context_overhead_tokens }}
+    </span>
+    {% endif %}
   </div>
 {% endif %}

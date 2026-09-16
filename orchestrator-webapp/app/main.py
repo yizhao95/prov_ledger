@@ -53,6 +53,7 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
             "progress_pct": 0, "has_failure": False, "current_step": None,
             "deviations": [], "data_profiles": [], "data_decisions": [],
             "node_reasons": [], "unstated": {"slots": 0, "unstated": 0, "pct": 0}, "outcomes": [],
+            "headline": None, "shown_adopted": {"plan": {"shown": [], "adopted": []}, "steps": {}}, "overhead": None,
             "total_plans": 0, "db_size_kb": 0, "viewing_plan_id": plan_id,
         }
 
@@ -92,6 +93,10 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         unstated = queries.get_unstated(conn, plan["plan_id"]) if plan else {"slots": 0, "unstated": 0, "pct": 0}
         # Phase 7: what the plan's expectations turned into (read-only).
         plan_outcomes = queries.get_outcomes(conn, plan["plan_id"]) if plan else []
+        # DP phase 2 (Task 7): the plan headline, what was shown / adopted per step, and the overhead numbers.
+        headline = queries.get_headline(conn, plan["plan_id"]) if plan else None
+        shown_adopted = queries.get_shown_adopted(conn, plan["plan_id"]) if plan else {"plan": {"shown": [], "adopted": []}, "steps": {}}
+        overhead = queries.get_overhead(conn, plan["plan_id"]) if plan else None
         total_plans = queries.count_total_plans(conn)
         db_size_kb = queries.get_db_size_kb()
     except sqlite3.Error as e:
@@ -116,6 +121,9 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         "node_reasons": node_reasons,
         "unstated": unstated,
         "outcomes": plan_outcomes,
+        "headline": headline,
+        "shown_adopted": shown_adopted,
+        "overhead": overhead,
         "total_steps": len(steps),
         "progress_pct": int(100 * completed / len(steps)) if steps else 0,
         "total_plans": total_plans,
@@ -251,7 +259,8 @@ def outcomes(request: Request, project: str | None = None):
 def node_ledger(request: Request, project: str, qualified_name: str):
     """Phase 8 (FL-009): one node's upstream/downstream, history and reasons —
     three dimensions in one read-only query (docs/NORTH-STAR essence #2)."""
-    ctx = {"request": request, "error": None, "ledger": None, "project": project, "qualified_name": qualified_name}
+    ctx = {"request": request, "error": None, "ledger": None, "project": project, "qualified_name": qualified_name,
+           "at": request.query_params.get("at")}          # DP phase 2: ?at=<reason_id> highlights one record
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:

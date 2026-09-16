@@ -553,3 +553,104 @@ def test_node_page_constraints_come_from_change_reason(client, tmp_path, monkeyp
     conn.close()
     assert len(ledger["constraints"]) == 2 and {c["why_visibility"] for c in ledger["constraints"]} == {"shared", "restricted"}
     assert all("source_level" in c for c in ledger["constraints"])
+
+
+# ── DP phase 2 (Task 7): headline block, shown / adopted per step, hit counts per record, overhead ──
+
+def _seed_headline(db, pid, step_id):
+    """A headline with one blocking finding answered by the agent (proceed) and one
+    unanswered, the records it showed (read_hit) and adopted (influence) — written
+    through plain SQL the way checks.headline / respond do."""
+    conn = odb.open_db(db)
+    conn.execute("INSERT INTO change_reason (project, plan_id, node_key, kind, role, statement, occurred_at, recorded_by, tier, hash) "
+                 "VALUES ('demo', 'ledger', 'nk_a', 'organizational', 'constraint', 'load_orders must keep paid orders only', '2026-09-01 00:00:00', 'human', 'asserted', 'h1')")
+    cid = conn.execute("SELECT MAX(id) FROM change_reason").fetchone()[0]
+    conn.execute("INSERT INTO change_reason (project, plan_id, node_key, kind, role, interpretation, occurred_at, recorded_by, tier, rule_id, hash) "
+                 "VALUES ('demo', 'P0', 'nk_a', 'technical', 'rejected_path', 'tried dropping nulls first', '2026-09-02 00:00:00', 'system', 'derived', 'R6', 'h2')")
+    rid = conn.execute("SELECT MAX(id) FROM change_reason").fetchone()[0]
+    doc = {"findings": [
+        {"id": "active_constraint:nk_a:1", "layer": "self", "kind": "active_constraint", "tier": "asserted", "severity": "blocking",
+         "text": "load_orders must keep paid orders only (human, 2026-09-01)", "anchor": "pkg.m.load_orders", "evidence": {"reason_id": cid}, "hard": False},
+        {"id": "downstream_break:nk_a:1", "layer": "impact", "kind": "downstream_break", "tier": "derived", "severity": "warning",
+         "text": "1 consumer(s) eat its output: pkg.m.clean", "anchor": "pkg.m.load_orders", "evidence": {"consumers": ["pkg.m.clean"]}, "hard": False},
+        {"id": "active_constraint:nk_a:2", "layer": "self", "kind": "active_constraint", "tier": "stated", "severity": "blocking",
+         "text": "never read the raw orders table in prod", "anchor": "pkg.m.load_orders", "evidence": {"reason_id": cid}, "hard": False}],
+        "summary": {"targets": 1, "layers": 2, "findings": 3, "blocking": 2, "warning": 1, "info": 0, "unanswered": 2, "shown": 2, "adopted": 0}, "hints": ["还有 1 条理由未展开，`provledger why pkg.m.load_orders --all`"]}
+    conn.execute("INSERT INTO headline (project, plan_id, findings_json) VALUES ('demo', ?, ?)", (pid, json.dumps(doc, ensure_ascii=False)))
+    hid = conn.execute("SELECT MAX(id) FROM headline").fetchone()[0]
+    conn.execute("INSERT INTO headline_response (headline_id, finding_id, action, rationale, by, cites_json) VALUES (?, 'active_constraint:nk_a:1', 'proceed', 'the filter moves downstream', 'agent', '[]')", (hid,))
+    conn.execute("INSERT INTO read_hit (reason_id, project, plan_id, moment) VALUES (?, 'demo', ?, 'plan')", (cid, pid))
+    conn.execute("INSERT INTO read_hit (reason_id, project, plan_id, moment) VALUES (?, 'demo', ?, 'plan')", (rid, pid))
+    conn.execute("INSERT INTO read_hit (reason_id, project, plan_id, step_id, moment, injected_chars) VALUES (?, 'demo', ?, ?, 'edit', 240)", (cid, pid, step_id))
+    conn.execute("INSERT INTO influence (reason_id, project, plan_id, step_id, node_key, via, by) VALUES (?, 'demo', ?, ?, 'nk_a', 'headline_response', 'agent')", (cid, pid, step_id))
+    conn.execute("UPDATE Plans SET project='demo', project_source='declared' WHERE plan_id=?", (pid,))
+    conn.commit(); conn.close()
+    return {"cid": cid, "rid": rid, "hid": hid}
+
+
+def test_headline_block_shows_findings_with_severity_and_the_unanswered_count(client):
+    pid = client._seeded["plan_id"]; step = client._seeded["step_ids"][0]
+    _seed_headline(client._db, pid, step)
+    html = client.get("/api/dashboard").text
+    assert 'data-panel="headline"' in html and 'data-unanswered="1"' in html and 'data-findings="3"' in html
+    assert html.count('data-severity="blocking"') == 2 and html.count('data-severity="warning"') == 1
+    assert 'data-tier="stated"' in html and 'data-agent-proceeded="1"' in html and 'data-unanswered-finding="1"' in html
+    assert "→ proceed (agent) · the filter moves downstream" in html and "未回答" in html and "provledger why pkg.m.load_orders --all" in html
+    assert "2 展示过 · 0 采用了" in html                                # plan-level buckets (the step's rows are the step's)
+
+
+def test_step_panel_has_shown_and_adopted_columns(client):
+    pid = client._seeded["plan_id"]; step = client._seeded["step_ids"][0]
+    ids = _seed_headline(client._db, pid, step)
+    html = client.get("/api/dashboard").text
+    assert f'data-step-records="{step}"' in html and 'data-shown="1"' in html and 'data-adopted="1"' in html
+    assert f'href="/node/demo/nk_a?at={ids["cid"]}"' in html               # adopted entries link to the record
+    assert "展示过（1）" in html and "采用了（1）" in html
+
+
+def test_node_page_hit_counts_per_moment_and_the_adopting_plan_backlink(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path)
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    pid = client._seeded["plan_id"]; step = client._seeded["step_ids"][0]
+    ids = _seed_headline(client._db, pid, step)
+    html = client.get("/node/demo/nk_a").text
+    assert f'data-stats="{ids["cid"]}"' in html and "展示 plan 1 · edit 1 · why 0 · 采用 1" in html
+    assert f'href="/plan/{pid}">{pid}</a> 采用' in html                      # 被 <plan> 采用
+    assert f'data-stats="{ids["rid"]}"' in html and "展示 plan 1 · edit 0 · why 0 · 采用 0" in html
+    hi = client.get(f"/node/demo/nk_a?at={ids['cid']}").text
+    assert f'data-record="{ids["cid"]}" data-at="1"' in hi and hi.count('data-at="1"') == 1
+
+
+def test_footer_carries_the_two_overhead_numbers(client):
+    pid = client._seeded["plan_id"]
+    conn = odb.open_db(client._db)
+    created = conn.execute("SELECT created_at FROM Plans WHERE plan_id=?", (pid,)).fetchone()[0]
+    conn.execute("INSERT INTO tool_call_log (session_id, cwd, tool_name, command_head, at) VALUES ('s', '/x', 'Bash', 'bash scripts/run-step.sh a', ?)", (created,))
+    conn.execute("INSERT INTO tool_call_log (session_id, cwd, tool_name, command_head, at) VALUES ('s', '/x', 'Bash', 'pytest -q', ?)", (created,))
+    conn.execute("UPDATE Plans SET impact_context=? WHERE plan_id=?", (json.dumps({"pack": {"approx_tokens": 321}}), pid))
+    conn.commit(); conn.close()
+    html = client.get("/api/dashboard").text
+    assert 'data-overhead-ratio="0.5"' in html and 'data-context-overhead-tokens="321"' in html
+    assert "overhead_ratio 0.5" in html and "context_overhead_tokens 321" in html
+
+
+def test_headline_and_records_degrade_to_200_on_an_old_db(client):
+    conn = odb.open_db(client._db)
+    for t in ("headline_response", "headline", "influence", "read_hit"):
+        conn.execute(f"DROP TABLE {t}")
+    conn.execute("DROP VIEW reason_stats_v"); conn.commit(); conn.close()
+    r = client.get("/api/dashboard")
+    assert r.status_code == 200 and 'data-panel="headline"' not in r.text and "data-step-records" not in r.text
+    assert client.get("/node/demo/nk_a").status_code == 200
+
+
+def test_etag_changes_on_a_headline_response(client):
+    from app import queries
+    pid = client._seeded["plan_id"]; step = client._seeded["step_ids"][0]
+    ids = _seed_headline(client._db, pid, step)
+    ro = queries.open_db_readonly(client._db); before = queries.compute_etag(ro); ro.close()
+    conn = odb.open_db(client._db)
+    conn.execute("INSERT INTO headline_response (headline_id, finding_id, action, rationale, by, cites_json) VALUES (?, 'active_constraint:nk_a:2', 'revise', 'ok', 'human', '[]')", (ids["hid"],))
+    conn.commit(); conn.close()
+    ro = queries.open_db_readonly(client._db); after = queries.compute_etag(ro); ro.close()
+    assert before != after
