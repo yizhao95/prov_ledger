@@ -6,6 +6,8 @@ in the repo, `provledger ...` once installed.
   note "<words>" --at <when> [...]        record something that was said, after the fact
   reasons reclass-status                  the state of the legacy-reason migration
   why <node|nk_…|file:line> [...]         one bounded read: history, constraints, rejected paths, blast radius
+  ask "<question>" [--project] [...]      ask the ledger: fact table, cited summary, scope, evidence card
+  ask feedback <ask_id> wrong|partial|right   a person's word on one answer
   export <project> --md DIR               one markdown per node (shareable rows only)
   init --agents-md                        drop the two verbs into ./AGENTS.md
   reason mark <id> major|minor            a person's word on a reason's significance
@@ -17,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sqlite3
 import sys
 
 from . import db, plan_metrics
@@ -251,6 +254,55 @@ def _why_cmd(args) -> int:
         conn.close()
 
 
+
+# ── ask: the read-only question entry (DP phase 2e, Task 2) ──────────────────
+
+def _ask_runner(args):
+    """(runner, name): the headless-claude runner, a stub, or nothing at all."""
+    if args.no_model:
+        return None, "none"
+    if args.runner == "stub":
+        return (lambda prompt, *, model=None, timeout_s=None: ""), "stub"
+    from .testing.claude_arbiter import default_runner
+    return default_runner, "claude"
+
+
+def _ask_cmd(args) -> int:
+    from . import ask as ask_mod, psg_bridge
+    if args.question == "feedback":
+        if len(args.rest) < 2:
+            print("usage: provledger ask feedback <ask_id> wrong|partial|right [--note …]", file=sys.stderr)
+            return 2
+        conn = _open()
+        try:
+            try:
+                fid = ask_mod.record_feedback(conn, ask_id=int(args.rest[0]), verdict=args.rest[1], note=args.note)
+            except (ValueError, sqlite3.IntegrityError) as e:
+                print(f"provledger ask feedback: {e}", file=sys.stderr)
+                return 2
+            print(json.dumps({"feedback_id": fid, "ask_id": int(args.rest[0]), "verdict": args.rest[1]}))
+            return 0
+        finally:
+            conn.close()
+
+    project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+    if not project:
+        print("provledger ask: no --project and the cwd is not inside a registered project", file=sys.stderr)
+        return 2
+    runner, runner_name = _ask_runner(args)
+    conn = _open()
+    try:
+        doc = ask_mod.run(conn, project=project, question=args.question, runner=runner, model=args.model,
+                          runner_name=runner_name, lang=args.lang)
+        if args.json:
+            print(json.dumps(ask_mod.as_json(doc), indent=1, ensure_ascii=False, default=str))
+        else:
+            print(ask_mod.render_text(doc))
+        return 0
+    finally:
+        conn.close()
+
+
 def _export_cmd(args) -> int:
     from . import why
     conn = _open()
@@ -314,6 +366,16 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--json", action="store_true", help="machine-readable output")
     w.add_argument("--plan", default=None, help=argparse.SUPPRESS)
     w.add_argument("--session", default=None, help=argparse.SUPPRESS)
+    a = sub.add_parser("ask", help="ask the ledger a question: the fact table is computed, the model may only restate it, every sentence cites a record")
+    a.add_argument("question", help='the question, in words — or the word "feedback" (see `ask feedback <ask_id> <verdict>`)')
+    a.add_argument("rest", nargs="*", help=argparse.SUPPRESS)
+    a.add_argument("--project", default=None, help="registered project (default: the one whose repo contains the cwd)")
+    a.add_argument("--json", action="store_true", help="machine-readable answer, fact table included as text")
+    a.add_argument("--no-model", action="store_true", help="no model at all: print the fact table, the absences and the scope")
+    a.add_argument("--model", default=None, help="model for the headless claude runner")
+    a.add_argument("--runner", default="claude", choices=["claude", "stub"], help="stub never calls a model (tests)")
+    a.add_argument("--lang", default="en", choices=["en", "zh"], help="language of the scope line")
+    a.add_argument("--note", default=None, help="feedback only: a sentence saying what was wrong")
     e = sub.add_parser("export", help="export a project's shareable records as markdown, one file per node")
     e.add_argument("project")
     e.add_argument("--md", required=True, metavar="DIR", help="output directory")
@@ -356,6 +418,8 @@ def main(argv=None) -> int:
         return _reason_cmd(args)
     if args.cmd == "significance":
         return _significance_cmd(args)
+    if args.cmd == "ask":
+        return _ask_cmd(args)
     if args.cmd == "export":
         return _export_cmd(args)
     if args.cmd == "init":
