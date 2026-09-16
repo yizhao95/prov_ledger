@@ -1494,26 +1494,6 @@ def _read_hit_counts(conn: sqlite3.Connection, base: dict) -> dict[int, int]:
         return {}
 
 
-TRACE_STRIP_MAX = 8
-
-
-def trace_strip(ledger: dict, limit: int = TRACE_STRIP_MAX) -> list[dict]:
-    """The latest moment of each KIND, newest first — at most one structural
-    change, one stated reason, one asserted reason, one constraint, one outcome.
-
-    Taking the latest N rows instead put the same repeated sentence in every
-    line, which told the reader nothing. Everything past the cut is still in the
-    timeline below: this crops a summary, not the record."""
-    rows = [r for r in (ledger.get("timeline") or []) if r.get("significant", True)]
-    rows.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
-    seen: dict[str, dict] = {}
-    for r in rows:
-        seen.setdefault(_recent_kind(r), r)
-    out = [seen[k] for k in RECENT_KINDS if k in seen]
-    out.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
-    return out[:max(0, min(int(limit), 5))]
-
-
 def mark_span(text: str | None, start: int | None, end: int | None) -> str:
     """The text with [start, end) wrapped in <mark>, HTML-escaped around it.
 
