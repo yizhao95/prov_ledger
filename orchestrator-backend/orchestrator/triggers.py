@@ -92,8 +92,15 @@ def _ordered_steps(ctx: Ctx) -> list[dict]:
 
 # ── R0: the user's own words ─────────────────────────────────────────────────
 # A local name that is too short or too common would hit every second sentence.
-R0_STOPWORDS = frozenset("run main load save test init setup data value item index count name path file".split())
+R0_STOPWORDS = frozenset(
+    "run main load save test init setup data value item index count name path file "
+    # DP phase 2b (Task 0b): the words an instruction is made of — a sentence saying "plan / step /
+    # merge / review" is about the work, not about a function that happens to carry that name
+    "plan plans step steps task tasks merge push pull commit review build check update close open "
+    "start stop list show read write note mark eval apply fill create delete insert select query "
+    "report print parse format render handle process generate collect serve view graph node hint judge".split())
 R0_MIN_LOCAL = 4
+PASSIVE_EVENTS = frozenset({"node_matched", "identity_asserted", "identity_ambiguous"})   # touched, not changed
 R0_MAX_NODES_PER_SENTENCE = 3
 _SENTENCE_END = re.compile(r"(?<=[。！？!?])|(?<=\.)(?=\s|$)|\n")
 
@@ -435,6 +442,11 @@ def evaluate(conn, *, project: str, plan_id: str, psg_db_path: str | None, ask: 
     result = {"auto": 0, "ask": 0, "silent": 0, "by_rule": {r.id: 0 for r in RULES}, "nodes": []}
     for key, node in ctx.touched.items():
         if _has_rule_reason(conn, plan_id, key) or _logged(conn, plan_id, key):
+            continue
+        # DP phase 2b (Task 0b): a node the plan merely matched (or whose identity was
+        # asserted) did not change — it is not a slot and no rule may anchor to it;
+        # dp2b-t1 had R0 pin "plan / step / merge" to methods of that name
+        if not (set(node.get("event_types") or []) - PASSIVE_EVENTS):
             continue
         hit = None
         for rule in RULES:

@@ -109,3 +109,29 @@ def test_plans_session_column_exists_and_session_plan_still_works(conn, tmp_path
     conn.commit()
     ctx = triggers._ctx(conn, "proj", "session:sess-9", g)
     assert ctx.plan["session_id"] == "sess-9"
+
+
+# ── DP phase 2b Task 0b: a rule never anchors to a node the plan merely matched ──
+
+def test_rules_never_anchor_to_a_node_the_plan_only_matched(conn, tmp_path):
+    """dp2b-t1 for real: the user's sentence said 'plan / step / merge' and R0 pinned it to
+    methods named plan / step / merge that the review had merely matched. A node whose
+    only events in the plan's runs are node_matched / identity_asserted is not a slot and
+    gets no reason from any rule."""
+    g = _graph(tmp_path, changed=("nk_a",))                                   # nk_b..nk_f are matched only
+    _plan(conn, session_id="sess-1")
+    pv.insert_utterance(conn, session_id="sess-1", project="proj", plan_id=None,
+                        text="please make weekly_totals sum paid orders; also clean_rows stays as is.", occurred_at="2026-09-16 09:55:00")
+    from orchestrator import constraints
+    constraints.record_constraint(conn, project="proj", subjects=["nk_d"], statement="load_orders keeps paid only")   # R5 would fire on nk_d
+    out = triggers.evaluate(conn, project="proj", plan_id=PLAN, psg_db_path=g, commit=True)
+    keys = {r[0] for r in conn.execute("SELECT node_key FROM change_reason WHERE plan_id=? AND role='reason'", (PLAN,))}
+    assert keys == {"nk_a"} and out["by_rule"]["R0"] == 1 and out["by_rule"]["R5"] == 0
+    assert {r[0] for r in conn.execute("SELECT node_key FROM trigger_log WHERE plan_id=?", (PLAN,))} == {"nk_a"}
+
+
+def test_generic_verbs_and_nouns_are_stopwords_for_the_local_name_rule(conn, tmp_path):
+    for word in ("plan", "plans", "step", "merge", "task", "review", "commit", "push", "check", "update"):
+        assert word in triggers.R0_STOPWORDS, word
+    assert "weekly_totals" not in triggers.R0_STOPWORDS
+    assert triggers.r0_names({"qualified_name": "pkg.m.plan", "file_path": "pkg/m.py"}) == ["pkg.m.plan"]     # only the qualified name survives
