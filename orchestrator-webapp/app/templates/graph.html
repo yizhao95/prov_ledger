@@ -57,6 +57,11 @@
         {% endif %}
       {% endfor %}
     </div>
+    {% if graph.mode != 'full' and graph.available %}
+    <div class="mt-1 text-xs text-brand-gray" data-reduced-notice>
+      这是{{ 'reduced'|say('term', lang) }}：画了 {{ graph.nodes|length }} 个节点，整张图共 {{ graph.total_nodes }} 个。完整图不适合人看，可以展开。
+    </div>
+    {% endif %}
     <div class="mt-1 text-xs text-brand-muted" data-mode-note>
       {% if graph.mode == 'story' %}
         有故事的节点（{{ graph.story_keys }} 个带记录）与它们直接产出/消费的数据节点：画了 {{ graph.nodes|length }} / 选中 {{ graph.mode_total }} / 全图 {{ graph.total_nodes }}{% if graph.nodes|length < graph.mode_total %}——上限 {{ max_nodes }} 个，按记录数从多到少取{% endif %}。
@@ -124,7 +129,7 @@
           <tr class="{{ 'bg-[#fff3d6]' if focus and (focus == n.qualified_name or focus == n.node_key) else '' }}" data-node="{{ n.node_key }}" data-tier="{{ n.tier }}" data-badge="{{ n.badge }}"{% if focus and (focus == n.qualified_name or focus == n.node_key) %} data-focus="1"{% endif %}>
             <td class="pr-3 font-mono"><a class="text-brand-blue" href="/node/{{ project }}/{{ n.qualified_name }}{% if graph.run and graph.run.run_id != graph.latest_run_id %}?at=run:{{ graph.run.run_id }}{% endif %}">{{ n.qualified_name }}</a></td>
             <td class="pr-3">{{ n.node_type }}</td>
-            <td class="pr-3"><span class="type-dot" style="background: {{ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(n.tier, '#898781') }}"></span> {{ n.tier }}</td>
+            <td class="pr-3"><span class="type-dot" style="background: {{ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(n.tier, '#898781') }}"></span> <span title="tier {{ n.tier }}">{{ n.tier|say('tier', lang) }}</span></td>
             <td class="pr-3 tnum">{{ n.badge }}</td>
             <td class="pr-3 tnum text-brand-muted">{{ n.minor }}</td>
             <td class="font-mono text-brand-muted">{{ n.file_path or '' }}</td>

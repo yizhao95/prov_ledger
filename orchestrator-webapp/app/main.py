@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app import queries
+from app import queries, vocab
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -38,11 +38,21 @@ TEMPLATES.env.globals["relative_time"] = queries.relative_time
 TEMPLATES.env.globals["outcome_badge"] = queries.outcome_badge
 TEMPLATES.env.globals["db_path_display"] = queries.db_path_display
 TEMPLATES.env.globals["tier_badge"] = queries.tier_badge
+# DP phase 2d (Task 3d): the reader's words. `|say` translates one of the ledger's
+# tokens for display; every data-* attribute keeps the token itself.
+TEMPLATES.env.filters["say"] = lambda token, kind="term", lang="zh": vocab.say(token, kind=kind, lang=lang)
+TEMPLATES.env.globals["vocab"] = vocab
 
 app = FastAPI(title="provLedger Dashboard", version="0.1.0")
 # DP phase 2d (Task 1): the generated tokens.js the chrome reads. StaticFiles
 # serves GET and HEAD only — the read-only dashboard stays read-only.
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+
+def _lang(request: Request) -> str:
+    """DP phase 2d (Task 3d): `?lang=en` switches the words for this request.
+    An unrecognised value falls back to the default rather than blanking the page."""
+    return vocab.lang_of(request.query_params.get("lang"))
 
 
 def _build_context(request: Request, plan_id: str | None = None, node: str | None = None, at: str | None = None) -> dict:
@@ -60,7 +70,7 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
             "deviations": [], "data_profiles": [], "data_decisions": [],
             "node_reasons": [], "unstated": {"slots": 0, "unstated": 0, "pct": 0}, "outcomes": [],
             "headline": None, "shown_adopted": {"plan": {"shown": [], "adopted": []}, "steps": {}}, "overhead": None,
-            "changed_by_history": [], "shown_total": 0, "marked_query": None, "at_reason": None,
+            "changed_by_history": [], "shown_total": 0, "marked_query": None, "at_reason": None, "lang": _lang(request),
             "total_plans": 0, "db_size_kb": 0, "viewing_plan_id": plan_id,
             "focus_node": node, "focus_at": at, "bar": queries.view_bar("task", queries.triple(None, node, at), plan_id),
             "plan_session": None, "session_plans": [], "recent_sessions": [],
@@ -159,6 +169,7 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
         "shown_total": shown_total,
         "at_reason": at_reason,
         "marked_query": marked_query,
+        "lang": _lang(request),
         "total_steps": len(steps),
         "progress_pct": int(100 * completed / len(steps)) if steps else 0,
         "total_plans": total_plans,
@@ -263,7 +274,8 @@ def search(request: Request, q: str | None = None, project: str | None = None):
     the search degrades to LIKE — which the page states rather than pretending
     the results are complete."""
     ctx = {"request": request, "error": None, "q": q or "", "project": project, "groups": [],
-           "degraded": False, "hits": 0, "bar": queries.view_bar("search", queries.triple(project, None, None))}
+           "degraded": False, "hits": 0, "lang": _lang(request),
+           "bar": queries.view_bar("search", queries.triple(project, None, None))}
     if not (q or "").strip():
         return TEMPLATES.TemplateResponse(request, "search.html", ctx)
     try:
@@ -366,7 +378,7 @@ def graph_view(request: Request, project: str, focus: str | None = None, at: str
              "focus_found": False, "at_reason": None, "at_kind": at_parsed["kind"], "at_id": at_parsed["id"],
              "hops": queries.NEIGHBOURHOOD_HOPS, "edges_from": "none", "story_keys": 0}
     ctx = {"request": request, "error": None, "project": project, "focus": focus or None, "graph": None, "graph_json": "{}",
-           "mode": resolved, "level": level, "max_nodes": queries.MODE_MAX_NODES,
+           "mode": resolved, "level": level, "max_nodes": queries.MODE_MAX_NODES, "lang": _lang(request),
            "bar": queries.view_bar("graph", queries.triple(project, focus, at))}
     try:
         conn = queries.open_db_readonly()
@@ -395,7 +407,7 @@ def node_ledger(request: Request, project: str, qualified_name: str):
     ctx = {"request": request, "error": None, "ledger": None, "project": project, "qualified_name": qualified_name,
            # DP phase 2d: `at` is typed — `reason:<id>` highlights one record, `run:<id>` highlights that run,
            # and a bare number still reads as a run for one version. 2b's untyped `at` highlighted both.
-           "at": t["at"], "at_kind": t["at_kind"], "at_id": t["at_id"], "show": show, "strip": [],
+           "at": t["at"], "at_kind": t["at_kind"], "at_id": t["at_id"], "show": show, "strip": [], "lang": _lang(request),
            "bar": queries.view_bar("node", t)}
     try:
         conn = queries.open_db_readonly()

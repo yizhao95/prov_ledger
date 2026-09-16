@@ -183,7 +183,9 @@ def test_the_constraints_aside_keeps_its_counts(client):
     t = client.get(f"/node/demo/{QN}").text
     assert 'data-panel="constraints"' in t
     assert "load_orders 只保留已付款的订单" in t
-    assert "展示" in t
+    # DP 2d (Task 3d): the counts read as sentences now; the numbers themselves
+    # stayed machine-readable in data-shown-* / data-adopted
+    assert "被看到" in t and 'data-shown-plan="' in t
 
 
 def test_the_recorded_words_ride_with_the_moment_they_explain(client):

@@ -529,7 +529,9 @@ def test_reasons_panel_shows_source_level_for_migrated_and_new_rows(client):
     conn.close()
     r = client.get("/api/dashboard")
     assert r.status_code == 200 and "🧭 Reasons" in r.text
-    assert "来源等级" in r.text and "证据等级" not in r.text
+    # DP 2d (Task 3d): the node page says the level in plain words ("有链接可查"),
+    # the plan panels still print the 来源等级 prefix; both are the same column.
+    assert ("来源等级" in r.text or "有原话" in r.text) and "证据等级" not in r.text
     assert 'data-tier="asserted"' in r.text and "legacy sentence written as stated" in r.text      # migrated: asserted, not stated
     assert 'data-tier="stated"' in r.text and 'data-source-level="verbal"' in r.text
     assert 'data-tier="unstated"' in r.text and 'data-source-level="unstated"' in r.text
@@ -551,7 +553,9 @@ def test_node_page_constraints_come_from_change_reason(client, tmp_path, monkeyp
     assert r.status_code == 200
     assert "load_orders must keep paid orders only" in r.text and "finance reconciles on paid orders" in r.text
     assert "never read the raw orders table in prod" in r.text and "ticket SEC-42" in r.text and "SECRET-RATIONALE" not in r.text
-    assert "来源等级" in r.text
+    # DP 2d (Task 3d): the node page says how checkable the source is in plain
+    # words instead of printing the column name — same column, a reader's phrasing
+    assert ("有链接可查" in r.text or "有原话" in r.text or "只有任务脉络" in r.text or "未说明" in r.text)
     from app import queries
     conn = odb.open_db(client._db)
     ledger = queries.get_node_ledger(conn, "demo", "pkg.m.load_orders")
@@ -619,9 +623,15 @@ def test_node_page_hit_counts_per_moment_and_the_adopting_plan_backlink(client, 
     pid = client._seeded["plan_id"]; step = client._seeded["step_ids"][0]
     ids = _seed_headline(client._db, pid, step)
     html = client.get("/node/demo/nk_a").text
-    assert f'data-stats="{ids["cid"]}"' in html and "展示 plan 1 · edit 1 · why 0 · 采用 1" in html
-    assert f'href="/plan/{pid}?node=pkg.m.load_orders&at=reason:{ids["cid"]}">{pid}</a> 采用' in html    # 被 <plan> 采用, carrying the TYPED triple (DP 2d: a record id, not a run)
-    assert f'data-stats="{ids["rid"]}"' in html and "展示 plan 1 · edit 0 · why 0 · 采用 0" in html
+    # DP 2d (Task 3d): the prose is now plain language; the per-moment counts stay
+    # machine-readable in data-* so the ETag, this suite and any scraper are unaffected
+    assert f'data-stats="{ids["cid"]}" data-shown-plan="1" data-shown-edit="1" data-shown-why="0" data-adopted="1"' in html
+    # DP 2d: the link carries the TYPED triple (a record id, not a run); Task 3d
+    # replaced "被 <plan> 采用" with the sentence a person would say, and moved the
+    # plan id into title= (layout spec 8).
+    assert f'href="/plan/{pid}?node=pkg.m.load_orders&at=reason:{ids["cid"]}" title="{pid}"' in html
+    assert "这条记录改变了" in html and "的计划" in html
+    assert f'data-stats="{ids["rid"]}" data-shown-plan="1" data-shown-edit="0" data-shown-why="0" data-adopted="0"' in html
     hi = client.get(f"/node/demo/nk_a?at=reason:{ids['cid']}").text
     assert f'data-record="{ids["cid"]}" data-at="1"' in hi and hi.count(' data-record="') == hi.count('data-record="') and f'data-record="{ids["rid"]}" data-at="1"' not in hi   # only the asked record (the view bar carries its own data-at, DP 2b)
 

@@ -131,7 +131,7 @@
             {%- elif row.kind == 'constraint' %}规矩
             {%- else %}原因{% endif -%}
           </span>
-          <span data-tier="{{ row.tier }}" class="px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
+          <span data-tier="{{ row.tier }}" title="tier {{ row.tier }}" class="px-2 py-0.5 rounded {{ tb[1] }}">{{ row.tier|say('tier', lang) }}</span>
           {% if row.plan_id %}<a class="text-brand-blue" href="/plan/{{ row.plan_id }}?node={{ ledger.qualified_name }}{% if row.record %}&at=reason:{{ row.record.id }}{% elif row.run_id %}&at=run:{{ row.run_id }}{% endif %}{% if row.step_id %}#step-{{ row.step_id }}{% endif %}">回到当时的任务 →</a>{% endif %}
         </div>
 
@@ -152,10 +152,10 @@
           <span class="text-gray-800">因为：“{{ row.record.text or row.record.statement }}”</span>
           {% if row.tier == 'stated' %}<span data-verbatim="1" class="text-[11px] text-brand-blue">你的原话</span>{% endif %}
           {% else %}<span class="text-brand-muted">当时未说明</span>{% endif %}
-          <span class="text-brand-muted">· {{ row.record.source_level or '' }}</span>
+          <span class="text-brand-muted">· {{ row.record.evidence_level|say('evidence_level', lang) }}</span>
         </div>
         {% if row.record.stats %}
-        <div class="text-[11px] text-brand-muted tnum" data-stats="{{ row.record.id }}">展示 plan {{ row.record.stats.plan }} · edit {{ row.record.stats.edit }} · why {{ row.record.stats.why }} · 采用 {{ row.record.stats.adopted }} · 被看到 {{ (row.record.stats.plan or 0) + (row.record.stats.edit or 0) + (row.record.stats.why or 0) }} 次 · 改变了 {{ row.record.stats.adopted or 0 }} 次计划{% for pid in row.record.stats.adopted_by %} · <a class="text-brand-blue" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at=reason:{{ row.record.id }}">这条记录改变了《{{ pid }}》的计划</a>{% endfor %}</div>
+        <div class="text-[11px] text-brand-muted tnum" data-stats="{{ row.record.id }}" data-shown-plan="{{ row.record.stats.plan }}" data-shown-edit="{{ row.record.stats.edit }}" data-shown-why="{{ row.record.stats.why }}" data-adopted="{{ row.record.stats.adopted }}" title="read_hit plan={{ row.record.stats.plan }} edit={{ row.record.stats.edit }} why={{ row.record.stats.why }} · influence={{ row.record.stats.adopted }}">被看到 {{ (row.record.stats.plan or 0) + (row.record.stats.edit or 0) + (row.record.stats.why or 0) }} 次 · 改变了 {{ row.record.stats.adopted or 0 }} 次计划{% for pid in row.record.stats.adopted_by %} · <a class="text-brand-blue" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at=reason:{{ row.record.id }}">这条记录改变了《{{ pid }}》的计划</a>{% endfor %}</div>
         {% endif %}
         {% endif %}
       </div>
@@ -186,7 +186,7 @@
           {% if c.rationale %}因为 {{ c.rationale }}{% elif c.why_visibility == 'restricted' %}理由是私人的，只留一个出处{% endif %}
           {% if c.why_ref %}· <span title="{{ c.why_ref }}">{{ c.why_ref }}</span>{% endif %}
         </div>
-        {% if c.stats %}<div class="text-brand-muted tnum" data-stats="{{ c.id }}">展示 plan {{ c.stats.plan }} · edit {{ c.stats.edit }} · why {{ c.stats.why }} · 采用 {{ c.stats.adopted }}{% for pid in c.stats.adopted_by %} · 被 <a class="text-brand-blue font-mono" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at=reason:{{ c.id }}">{{ pid }}</a> 采用{% endfor %}</div>{% endif %}
+        {% if c.stats %}<div class="text-brand-muted tnum" data-stats="{{ c.id }}" data-shown-plan="{{ c.stats.plan }}" data-shown-edit="{{ c.stats.edit }}" data-shown-why="{{ c.stats.why }}" data-adopted="{{ c.stats.adopted }}" title="read_hit plan={{ c.stats.plan }} edit={{ c.stats.edit }} why={{ c.stats.why }} · influence={{ c.stats.adopted }}">{{ vocab.shown((c.stats.plan or 0) + (c.stats.edit or 0) + (c.stats.why or 0), lang) }} · {{ vocab.adopted(c.stats.adopted, lang) }}{% for pid in c.stats.adopted_by %} · <a class="text-brand-blue" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at=reason:{{ c.id }}" title="{{ pid }}">{{ vocab.adopted_by(short_title({'plan_id': pid, 'original_goal': None}), lang) }}</a>{% endfor %}</div>{% endif %}
       </div>
       {% endfor %}
     </aside>
