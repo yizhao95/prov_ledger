@@ -638,13 +638,28 @@ def outcome_badge(outcome: str | None) -> tuple[str, str]:
 # The LABEL is the differentiator (E3-1): every tier reads as its own word, the
 # tint only reinforces it. `unstated` is the display tier of a reason row whose
 # text is NULL — an explicit gap, shown as such, never blended into the rest.
-TIER_BADGES = {
-    "observed": ("observed", "bg-brand-green/10 text-brand-green"),
-    "derived":  ("derived",  "bg-brand-blue/10 text-brand-blue"),
-    "asserted": ("asserted", "bg-brand-spark/15 text-[#7a5200]"),
-    "stated":   ("stated",   "bg-brand-gray/10 text-brand-gray"),
-    "unstated": ("unstated", "bg-brand-red/10 text-brand-red"),
-}
+# DP phase 2d (Task 1): the five rows come from app/static/tokens.json, the same
+# file the Jinja chrome and the React library are generated from — a palette kept
+# by hand in two languages drifts, and a drifting tier colour is a drifting claim.
+TOKENS_PATH = Path(__file__).resolve().parent / "static" / "tokens.json"
+
+
+def _load_tokens() -> dict:
+    """Read the token file once at import. A missing or broken file is not a
+    reason to render a blank dashboard, so the five tiers keep a literal
+    fallback — and say, in the returned dict, that it is one."""
+    try:
+        doc = json.loads(TOKENS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"tiers": {t: {"label": t, "classes": "bg-brand-red/10 text-brand-red"}
+                          for t in ("observed", "derived", "asserted", "stated", "unstated")},
+                "colors": {}, "severities": {}, "degraded": True}
+    doc["degraded"] = False
+    return doc
+
+
+TOKENS = _load_tokens()
+TIER_BADGES = {tier: (row["label"], row["classes"]) for tier, row in TOKENS["tiers"].items()}
 
 
 def tier_badge(tier: str | None) -> tuple[str, str]:

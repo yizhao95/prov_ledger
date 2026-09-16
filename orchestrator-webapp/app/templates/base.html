@@ -6,49 +6,34 @@
   <title>{% block title %}provLedger Dashboard{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous"></script>
+  {# DP phase 2d (Task 1): the palette is generated from app/static/tokens.json —
+     the ONE file a human edits. tokens.js defines window.PROVLEDGER_TOKENS and
+     must load before tailwind.config reads it, so both are plain blocking
+     scripts in <head>. No colour literal lives in this template any more. #}
+  <script src="/static/tokens.js"></script>
   <script>
-    /* Design tokens — validated palette (see docs: dataviz reference instance).
-       Chrome is warm-neutral; STATUS colors are fixed and reserved (never reused
-       as series colors); step-TYPE identity uses categorical slots, rendered as
-       a colored dot beside ink text (text never wears the series color). */
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            'brand-blue':   '#2a78d6',   /* categorical slot 1 — links, accents */
-            'brand-spark':  '#fab219',   /* status: warning (in-progress) */
-            'brand-green':  '#0ca30c',   /* status: good (completed) */
-            'brand-red':    '#d03b3b',   /* status: critical (failed) */
-            'brand-serious':'#ec835a',   /* status: serious (needs review) */
-            'brand-gray':   '#52514e',   /* secondary ink */
-            'brand-muted':  '#898781',   /* muted ink (labels, meta) */
-            'brand-bg':     '#f9f9f7',   /* page plane */
-            'surface':      '#fcfcfb',   /* card surface */
-            'hairline':     '#e1e0d9',   /* gridline / card border */
-          },
-        },
-      },
-    };
+    tailwind.config = {theme: {extend: {colors: window.PROVLEDGER_TOKENS.colors}}};
   </script>
   <style>
     /* respect prefers-reduced-motion */
     @media (prefers-reduced-motion: reduce) {
       .animate-pulse, .animate-ping { animation: none !important; }
+      .live-dot { animation: none !important; }
     }
-    /* live-dot indicator (status: good) */
+    /* live-dot indicator (status: good) — colour comes from the tokens below */
     .live-dot {
       display: inline-block;
       width: 0.5rem;
       height: 0.5rem;
       border-radius: 50%;
-      background: #0ca30c;
-      box-shadow: 0 0 0 0 rgba(12, 163, 12, 0.45);
+      background: var(--pl-green);
+      box-shadow: 0 0 0 0 var(--pl-green-halo);
       animation: live-pulse 2.4s infinite;
     }
     @keyframes live-pulse {
-      0%   { box-shadow: 0 0 0 0 rgba(12, 163, 12, 0.45); }
-      70%  { box-shadow: 0 0 0 0.4rem rgba(12, 163, 12, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(12, 163, 12, 0); }
+      0%   { box-shadow: 0 0 0 0 var(--pl-green-halo); }
+      70%  { box-shadow: 0 0 0 0.4rem transparent; }
+      100% { box-shadow: 0 0 0 0 transparent; }
     }
     /* preserve scroll on htmx swap */
     .preserve-scroll { overflow-y: auto; max-height: 16rem; }
@@ -63,6 +48,15 @@
     /* columns of figures align (durations, counts, profile tables) */
     .tnum { font-variant-numeric: tabular-nums; }
   </style>
+  <script>
+    /* the CSS custom properties the style block above reads — same single source */
+    (function () {
+      var t = window.PROVLEDGER_TOKENS, r = document.documentElement.style;
+      Object.keys(t.colors).forEach(function (k) { r.setProperty('--pl-' + k.replace('brand-', ''), t.colors[k]); });
+      r.setProperty('--pl-green-halo', t.colors['brand-green'] + '73');   /* 45% alpha */
+      r.setProperty('--pl-column-max', t.layout.column_max);
+    })();
+  </script>
   <script>
     // Preserve <details> open state across HTMX swaps.
     // Each <details> must have an id attr for keying.

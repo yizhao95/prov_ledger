@@ -18,6 +18,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app import queries
@@ -39,6 +40,9 @@ TEMPLATES.env.globals["db_path_display"] = queries.db_path_display
 TEMPLATES.env.globals["tier_badge"] = queries.tier_badge
 
 app = FastAPI(title="provLedger Dashboard", version="0.1.0")
+# DP phase 2d (Task 1): the generated tokens.js the chrome reads. StaticFiles
+# serves GET and HEAD only — the read-only dashboard stays read-only.
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
 def _build_context(request: Request, plan_id: str | None = None, node: str | None = None, at: str | None = None) -> dict:
