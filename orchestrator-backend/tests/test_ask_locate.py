@@ -123,7 +123,7 @@ def test_ask_log_row_records_candidates_and_the_choice(conn, graph, seeded):
         conn.execute("DELETE FROM ask_log WHERE id = ?", (ask_id,))
 
 
-def test_migration_022_creates_both_tables_with_the_feedback_check(conn):
+def test_migration_023_creates_both_tables_with_the_feedback_check(conn):
     names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert {"ask_log", "ask_feedback"} <= names
     ask_id = ask.record_ask(conn, project="proj", question="q", candidates=[], chosen={"chosen": [], "basis": "b"})

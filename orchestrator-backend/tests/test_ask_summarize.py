@@ -134,7 +134,8 @@ def test_cli_ask_no_model_prints_the_fact_table_the_scope_and_the_records(conn, 
     out = capsys.readouterr().out
     assert rc == 0
     assert SU.NO_MODEL_NOTE in out and "Fact table" in out and "Scope:" in out
-    assert f"#{seeded['constraint']}" in out and "/node/proj/pkg.pipe.build_features?at=" in out
+    assert f"#{seeded['constraint']}" in out
+    assert f"/node/proj/pkg.pipe.build_features?at=reason:{seeded['constraint']}" in out, "2d typed the anchor: at=reason:<id>"
     assert os.environ["ORCH_DB"] == str(db_path)
 
 
@@ -151,4 +152,6 @@ def test_cli_ask_json_carries_everything_the_page_needs(conn, graph, seeded, tmp
     doc = json.loads(capsys.readouterr().out)
     assert {"ask_id", "question", "answer", "cites", "scope", "scope_line", "absences", "facts_text",
             "dropped", "degraded", "note", "candidates", "chosen", "records"} <= set(doc)
-    assert doc["records"][0]["url"].endswith(f"?at={seeded['constraint']}")
+    assert doc["records"][0]["url"].endswith(f"?at=reason:{seeded['constraint']}")
+    change = [r for r in doc["records"] if r["kind"] == "change"]
+    assert not change or "?at=run:" in change[0]["url"], "a change event anchors on its run, not on a reason id"

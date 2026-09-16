@@ -1,4 +1,4 @@
--- 022_ask.sql — DP phase 2e: the read-only question entry (`/ledger`, `provledger ask`).
+-- 023_ask.sql — DP phase 2e: the read-only question entry (`/ledger`, `provledger ask`).
 --
 -- One row per question asked, written once, at the end of the ask: the
 -- candidates the CODE found, the nodes the MODEL picked among them, the sha of

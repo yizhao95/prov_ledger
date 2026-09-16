@@ -113,7 +113,7 @@ def test_h1_threshold():
     """H1: the tool must not silently get slower — the last 5 measured plans of
     this repository stay within 1.5 × the baseline's p90 calls per step."""
     base = plan_metrics.read_baseline(REPO / "docs" / "perf-baseline.json")
-    if base is None or base.get("calls_per_step", {}).get("p90") is None:
+    if base is None:
         pytest.skip("perf baseline not measured yet — run `python -m orchestrator.cli metrics baseline --write docs/perf-baseline.json`")
     live = Path(os.environ.get("ORCH_DB") or (Path.home() / "skill-workspace" / "orchestrator.db"))
     if not live.exists():

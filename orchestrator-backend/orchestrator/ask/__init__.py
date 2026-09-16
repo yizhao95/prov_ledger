@@ -12,7 +12,7 @@
   code  · the evidence card (`card`)
 
 Nothing here writes a business table. One `ask_log` row per question, one
-`ask_feedback` row per verdict — both append-only (migration 022).
+`ask_feedback` row per verdict — both append-only (migration 023).
 """
 from __future__ import annotations
 
@@ -82,10 +82,12 @@ def _url(project: str, fact: dict) -> str:
         return fact["uri"]
     if kind in ("influence", "expectation", "outcome") and fact.get("plan_id"):
         return f"{base}/plan/{fact['plan_id']}"
+    # DP phase 2d typed the anchor: `at` says WHAT it points at, so a record id
+    # is never handed to a run lookup (queries.parse_at / AT_PREFIXES).
     if kind == "change":
-        return f"{base}/node/{project}/{node}?at={fact.get('run_id')}"
+        return f"{base}/node/{project}/{node}?at=run:{fact.get('run_id')}"
     if kind in ("constraints", "reasons", "rejected_paths"):
-        return f"{base}/node/{project}/{node}?at={fact.get('id')}"
+        return f"{base}/node/{project}/{node}?at=reason:{fact.get('id')}"
     return f"{base}/node/{project}/{node}"
 
 
