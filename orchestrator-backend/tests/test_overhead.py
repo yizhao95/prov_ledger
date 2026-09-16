@@ -122,22 +122,36 @@ def test_h1_overhead_ratio(capsys):
 
 
 def test_h4_context_overhead(capsys):
-    """The last 5 completed plans: context_overhead_tokens ≤ 3000 each. Plans without a pack → skip, out loud."""
+    """The last 5 completed plans: context_overhead_tokens ≤ 3000 each, with the pack
+    REBUILT by the current builder over the plan's stored targets (what the software
+    would put in front of the agent today); the stored number is printed next to it
+    as history. Plans without a pack → skip, out loud."""
+    from orchestrator import context_pack
     real = Path.home() / "skill-workspace" / "orchestrator.db"
     if not real.exists():
         print("SKIP-NOTE: H4 — no ~/skill-workspace/orchestrator.db on this machine")
         pytest.skip("no orchestrator.db")
     conn = db.open_db(real)
     try:
-        rows = [plan_metrics.overhead(conn, p) for p in _recent(conn)]
+        rows = []
+        for p in _recent(conn):
+            o = plan_metrics.overhead(conn, p)
+            ic = conn.execute("SELECT impact_context FROM Plans WHERE plan_id = ?", (p,)).fetchone()[0]
+            pack = (json.loads(ic) if ic else {}).get("pack") or {}
+            targets = [t["qualified_name"] for t in pack.get("targets", [])]
+            if not targets:
+                continue
+            now = context_pack.build(conn, project=o["project"], targets=targets, record=False).approx_tokens
+            rows.append({"plan_id": p, "stored": o["context_overhead_tokens"],
+                         "now": now + o["context"]["headline"] + o["context"]["injected"]})
     finally:
         conn.close()
-    with_pack = [r for r in rows if r["context_overhead_tokens"] > 0]
-    if not with_pack:
-        print("SKIP-NOTE: H4 — none of the last 5 completed plans carries a context pack / headline / injection; nothing to assert yet")
+    if not rows:
+        print("SKIP-NOTE: H4 — none of the last 5 completed plans carries a context pack; nothing to assert yet")
         pytest.skip("no context data")
-    for r in with_pack:
-        assert r["context_overhead_tokens"] <= 3000, r
+    for r in rows:
+        print(f"H4 {r['plan_id']}: stored {r['stored']} · rebuilt now {r['now']}")
+        assert r["now"] <= 3000, r
 
 
 def test_baseline_file_has_the_overhead_section_and_the_superpowers_only_reference():

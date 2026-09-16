@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 
 from . import psg_bridge
 
+CAP_CALLERS = 12          # a card's callers list is folded to this many (a hot function has hundreds of test callers)
 CAP_REJECTED = 5
 CAP_REASONS = 3
 CAP_NEIGHBOR_CONSTRAINTS = 2
@@ -218,7 +219,11 @@ def build(conn, *, project: str, targets: list[str], psg_db_path: str | None = N
             tp.reasons = [_slim(r) for r in rea[:CAP_REASONS]]
             tp.prior_outcomes = _prior_outcomes(conn, project, tp.identity_chain)
             card = _card(psg, qn)
-            tp.callers = list(card.get("callers") or [])
+            all_callers = list(card.get("callers") or [])
+            tp.callers = all_callers[:CAP_CALLERS]
+            tp.counts["callers"] = len(all_callers)
+            if len(all_callers) > CAP_CALLERS:
+                pack.truncated["callers"] = pack.truncated.get("callers", 0) + len(all_callers) - CAP_CALLERS
             tp.output_consumers = list(card.get("output_consumers") or [])
             tp.dtype_map = dict(card.get("dtype_map") or {})
             tp.lineage_downstream = list(card.get("lineage_downstream") or [])
@@ -267,8 +272,37 @@ def build(conn, *, project: str, targets: list[str], psg_db_path: str | None = N
     return pack
 
 
+FOLD_CALLERS = 3          # what stays of the callers list once structure has to fold
+
+
+def _fold_structure(pack: Pack) -> bool:
+    """When the record trim (which never cuts a kind to zero) cannot reach the
+    budget, the structure folds into counts: callers down to FOLD_CALLERS,
+    lineage_downstream and dtype_map to their sizes — every fold counted in
+    `truncated` so the hint can say what `--impact` would expand. Returns
+    True when something folded."""
+    folded = False
+    for tp in pack.targets:
+        if len(tp.callers) > FOLD_CALLERS:
+            pack.truncated["callers"] = pack.truncated.get("callers", 0) + len(tp.callers) - FOLD_CALLERS
+            tp.callers = tp.callers[:FOLD_CALLERS]
+            folded = True
+        if tp.lineage_downstream:
+            tp.counts["lineage_downstream"] = len(tp.lineage_downstream)
+            pack.truncated["lineage_downstream"] = pack.truncated.get("lineage_downstream", 0) + len(tp.lineage_downstream)
+            tp.lineage_downstream = []
+            folded = True
+        if tp.dtype_map:
+            tp.counts["dtype_map"] = len(tp.dtype_map)
+            pack.truncated["dtype_map"] = pack.truncated.get("dtype_map", 0) + len(tp.dtype_map)
+            tp.dtype_map = {}
+            folded = True
+    return folded
+
+
 def _trim_to_budget(pack: Pack) -> None:
-    """Drop records in TRIM_ORDER until the pack fits; count each drop."""
+    """Drop records in TRIM_ORDER until the pack fits; count each drop. When the
+    records are at their floor and the pack is still over, fold the structure."""
     def over() -> bool:
         return _tokens(pack.as_dict()) > pack.budget_tokens
 
@@ -294,6 +328,9 @@ def _trim_to_budget(pack: Pack) -> None:
             if not dropped:
                 break
             pack.truncated[kind] = pack.truncated.get(kind, 0) + 1
+    if over():
+        _fold_structure(pack)
+
 
 
 def _hints(pack: Pack) -> list[str]:
@@ -309,9 +346,13 @@ def _hints(pack: Pack) -> list[str]:
             if tp.counts.get(kind, tp.counts.get("reasons", 0) if kind == "reasons_minor" else 0) > have:
                 return tp.qualified_name
         return pack.targets[0].qualified_name if pack.targets else "<node>"
+    structure = {k: pack.truncated.get(k, 0) for k in ("callers", "lineage_downstream", "dtype_map") if pack.truncated.get(k)}
     for kind, n in pack.truncated.items():
-        if n:
+        if n and kind not in structure:
             out.append(f"还有 {n} 条 {labels.get(kind, kind)} 未展开，`provledger why {cut_target(kind)} --all`")
+    if structure:
+        first = pack.targets[0].qualified_name if pack.targets else "<node>"
+        out.append("结构已折叠为计数：" + " · ".join(f"{k} {n}" for k, n in structure.items()) + f"（`provledger why {first} --impact` 展开）")
     return out
 
 

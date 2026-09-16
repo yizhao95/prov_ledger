@@ -1,5 +1,6 @@
 """context_pack.build — one bounded read of a node's history and blast radius (DP phase 2, Task 2; H2, I7)."""
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -59,7 +60,7 @@ def test_layers_caps_identity_chain_and_neighbor_counts(conn, graph):
     t = pack.targets[0]
     assert t.node_key == "nk_a" and t.status == "existing" and t.identity_chain[0] == "pkg.m.load_orders" and "pkg.m.load" in t.identity_chain
     assert [c["id"] for c in t.constraints] == sorted(ids["constraints"], reverse=True) and all(c["role"] == "constraint" for c in t.constraints)
-    assert t.counts == {"constraints": 2, "rejected_paths": 7, "reasons": 7, "reasons_minor": 1}
+    assert t.counts == {"constraints": 2, "rejected_paths": 7, "reasons": 7, "reasons_minor": 1, "callers": 1}
     assert len(t.rejected_paths) == 5 and len(t.reasons) == 3                  # caps: rejected 5, reasons 3
     assert ids["old_name"] in [r["id"] for r in t.reasons] or ids["old_name"] in [r["id"] for r in cp._records(conn, "proj", ["pkg.m.load"])]
     assert all(r.get("significance") != "minor" for r in t.reasons)
@@ -134,3 +135,26 @@ def test_unknown_target_and_missing_graph_degrade_visibly(conn, graph):
     pack2 = cp.build(conn, project="proj", targets=["pkg.m.load_orders"], psg_db_path=str(Path(graph).parent / "missing.db"), record=False)
     assert pack2.targets[0].status == "new" and pack2.targets[0].identity_chain == ["pkg.m.load_orders"]
     assert pack2.approx_tokens > 0 and "generated_at" in pack2.as_dict()
+
+
+def test_structure_folds_into_counts_when_records_alone_cannot_reach_the_budget(conn, graph):
+    """DP phase 2 close-out (H4): a target with hundreds of callers blew a real pack to
+    4351 tokens while the trim only ever cut records. Over budget after the record
+    floor, callers are capped, lineage / dtype_map become counts, and every fold is
+    counted and hinted."""
+    _seed(conn)
+    g = sqlite3.connect(graph)
+    callers = [f"pkg.tests.test_case_{i}.test_load_orders_{i}" for i in range(120)]
+    g.execute("UPDATE consistency_card SET card_json = ? WHERE symbol_id = 7",
+              (json.dumps({"callers": callers, "callees": [], "output_consumers": ["pkg.m.clean"], "dtype_map": {f"col{i}": "int64" for i in range(30)},
+                           "lineage_downstream": [f"pkg.m.report_{i}" for i in range(20)], "reads": []}),))
+    g.commit(); g.close()
+    pack = cp.build(conn, project="proj", targets=["pkg.m.load_orders"], psg_db_path=graph, budget_tokens=300, record=False)
+    t = pack.targets[0]
+    assert len(t.callers) == cp.FOLD_CALLERS and t.counts["callers"] == 120 and pack.truncated["callers"] == 120 - len(t.callers)
+    assert t.dtype_map == {} and t.counts["dtype_map"] == 30 and t.lineage_downstream == [] and t.counts["lineage_downstream"] == 20
+    assert any("结构" in h or "callers" in h for h in pack.hints)
+    assert pack.approx_tokens < 1800                                   # not necessarily under 900: the floor keeps one record per kind
+    big = cp.build(conn, project="proj", targets=["pkg.m.load_orders"], psg_db_path=graph, budget_tokens=100000, record=False)
+    assert len(big.targets[0].callers) == cp.CAP_CALLERS and big.targets[0].counts["callers"] == 120        # callers are always capped
+    assert big.targets[0].dtype_map and big.targets[0].lineage_downstream                                  # nothing else folds under a large budget

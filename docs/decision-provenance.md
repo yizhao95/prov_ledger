@@ -115,8 +115,8 @@ state.
 ## 6 · Honest boundaries
 
 - The system can record that something was **shown** (a reason listed in a
-  checklist or a page) and that something was **adopted** (a reason pointed
-  at as `because`, next phase). It cannot record that anyone **read** it,
+  checklist, a page, a headline or a hook's injection — `read_hit`) and that
+  something was **adopted** (a reason cited by id — `influence`, phase 2). It cannot record that anyone **read** it,
   and it will not pretend a display count is a reading.
 - *Recorded at X* is not *happened at Y*: `occurred_at` is what a person
   claims, `recorded_at` is what the database saw. Both are kept; neither
@@ -133,3 +133,76 @@ Every tool call is one `tool_call_log` row; `provledger metrics plan <id>`
 and `metrics baseline --write docs/perf-baseline.json` turn that into per-plan
 numbers, and `test_h1_threshold` fails when the last measured plans exceed
 1.5 × the baseline's p90 calls per step.
+
+## 8 · Phase 2 — the value points: shown, adopted, asked
+
+Phase 0/1 recorded reasons; phase 2 is where they are taken out again. Four
+places, and only four (NORTH-STAR: 不过度干涉):
+
+| moment | what happens | what is written |
+|---|---|---|
+| **publish** | `context_pack.build` — one bounded read per target (identity chain, constraints, rejected paths, reasons, prior claims, the card) trimmed to a token budget in a fixed order (reasons → rejected paths → neighbour constraints → constraints), cuts shown as counts; `checks.headline` — the two-layer check printed as the plan headline, stored as a new `headline` row every time | `read_hit(moment='plan')` per record shown |
+| **edit** (PreToolUse: Edit / Write / MultiEdit) | the active constraints anchored on the lines about to change and one hop downstream, injected as `additionalContext` (statements only, ≤ 600 chars, ending with `provledger why <qn>`); not one byte when nothing anchors there; nothing opened for a file outside every registered repo | `read_hit(moment='edit', injected_chars)` |
+| **close** | rules R0–R6, the unstated backstop, `close_headline` (proceeded / unanswered blocking findings → survival expectations) | `change_reason`, `expectations` |
+| **why** (`provledger why <qn|nk_…|file:line>`) | the same pack, printed: `node · 下游 n · 履历 m 次 · 约束 k（生效 j）· 否决 r · 待补 p`, then each record as `#id · tier · 来源等级 · when · 展示 n 次 · 被 <plan> 采用`; `--impact`, `--all`, `--pending`, `--never-read` (constraints nobody was ever shown), `--search` (FTS5, LIKE when unavailable and it says so) | `read_hit(moment='why')` |
+
+**Adopted** is written by exactly three paths, all of which cite a record id: a
+headline response (`headline-respond`, `provledger headline respond|ack`), a
+reason's `because`, an acknowledged constraint. `influence` and `read_hit` are
+never derived from each other (I11); `reason_stats_v` reports shown per moment
+and never sums across moments — the edit hook can show a hot file's constraint
+dozens of times a day.
+
+**Never blocking.** `publish` exits 0 whatever the headline says; PreToolUse
+touches `permissionDecision` only for a human constraint declared `block: true`
+in the extensions file, which is also the one exit-5 path of publish. R0 makes
+the user's own sentence naming a node its stated reason before any other rule.
+
+### 8.1 · Cost — what provledger costs a plan
+
+`tool_call_log.command_head` (the first 80 chars of a Bash command) lets
+`plan_metrics.overhead` bucket a plan's calls into *orchestration*
+(`run-step | publish-plan | review_run | complete-step | …`) and *provenance*
+(`reason- | provledger | hooks/ | analyzer`); `overhead_ratio` is their sum,
+`context_overhead_tokens` = the pack's `approx_tokens` + the headline text / 4 +
+every PreToolUse injection in the window / 4. `test_h1_overhead_ratio`
+(provenance ≤ 10 %, overhead ≤ 35 %) and `test_h4_context_overhead` (≤ 3000)
+run over the last five completed plans and **skip out loud** when there is
+nothing to measure. `docs/perf-baseline.json` carries the two columns and a
+hand-measured `superpowers_only` reference (a headless session with the
+provledger plugin disabled, tool_use count and input tokens read from the
+stream-json transcript — a reference number, never an assertion: a single run
+jitters 20–30 %).
+
+### 8.2 · Degraded mode — hooks alone
+
+Without the skills nobody publishes a plan. The Stop hook then records the
+session (`session_run`, the one table that may be UPDATEd) and, when the repo
+is registered, the session published no plan, the tree moved since the graph
+was built, `reasons.session_refresh` is not `off` and no refresh is running,
+queues `init_project.sh --trigger session --session-id <sid> --notify-orch-db`
+in the background. When it reports back, R0–R6 run over the session's changed
+nodes under the placeholder plan `session:<sid>`, the rest is backstopped
+`unstated`, and a headline is stored for the session — never printed.
+
+What is lost is explicit, never silent (`test_degraded_mode.py`, marker
+`degraded`):
+
+| with the skills | hooks only |
+|---|---|
+| a plan with steps, deviations, a review | `session_run` with `refresh_state ∈ skipped/queued/done/failed` and the reason |
+| reasons answered at close (stated / asserted / unstated) | only `derived` (rules), `stated` (R0) and `unstated` — never `asserted`: nobody interpreted anything |
+| headline printed and answered; `influence` rows | `headline(session_id)` stored, `headline_response` and `influence` empty |
+| records shown at plan / close | only the edit hook's injection is `read_hit` |
+
+`selfcheck` reports `sessions_without_plan` and their unstated share.
+
+### 8.3 · Honest boundaries, continued
+
+- *Shown* is a `read_hit`; *adopted* is an `influence`; nothing is *read*.
+- The headline is computed from what is on record: a node with no history has
+  no findings and says so (`0 findings`), which is a statement about the
+  ledger, not about the change.
+- The edit hook resolves lines through the last analysed snapshot; edits below
+  the last refresh's line numbers can miss or mis-anchor. It says which node it
+  matched, and `provledger why file:line` shows the same resolution.
