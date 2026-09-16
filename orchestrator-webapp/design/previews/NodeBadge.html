@@ -1,0 +1,40 @@
+<!-- @dsCard group="Provenance" -->
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NodeBadge — provLedger Design</title>
+<link rel="stylesheet" href="../dist/styles.css">
+<style>
+  main { max-width: 880px; margin: 0 auto; padding: 24px; }
+  header h1 { font-size: 1.125rem; font-weight: 600; margin: 0 0 4px; }
+  header p { font-size: .75rem; color: var(--pl-brand-muted); margin: 0 0 24px; }
+  section[data-variant] { margin: 0 0 28px; }
+  .variant-label { font-size: .6875rem; text-transform: uppercase; letter-spacing: .06em;
+                   color: var(--pl-brand-muted); font-weight: 500; margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>NodeBadge</h1>
+    <p>这个节点背后有几条记录。0 是空心圈，不是没有这一格。</p>
+  </header>
+  <section data-variant="有故事 / 没故事">
+    <h2 class="variant-label">有故事 / 没故事</h2>
+    <div data-host="0"></div>
+  </section>
+  <section data-variant="只有次要记录">
+    <h2 class="variant-label">只有次要记录</h2>
+    <div data-host="1"></div>
+  </section>
+</main>
+<script src="../dist/_ds_bundle.js"></script>
+<script>
+  var D = window.ProvLedgerDS, React = D.__React;
+  D.__render(React.createElement('div',{style:{display:'grid',gap:6}},React.createElement(D.NodeBadge,{count:7,tier:'stated',minor:3,name:'app.queries.compute_etag'}),React.createElement(D.NodeBadge,{count:0,tier:'observed',name:'app.queries.short_title'})), document.querySelector('[data-host="0"]'));
+  D.__render(React.createElement(D.NodeBadge,{count:0,tier:'derived',minor:12,name:'app.main.health'}), document.querySelector('[data-host="1"]'));
+</script>
+</body>
+</html>

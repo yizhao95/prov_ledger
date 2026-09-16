@@ -1,0 +1,45 @@
+<!-- @dsCard group="Provenance" -->
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HeadlineBlock — provLedger Design</title>
+<link rel="stylesheet" href="../dist/styles.css">
+<style>
+  main { max-width: 880px; margin: 0 auto; padding: 24px; }
+  header h1 { font-size: 1.125rem; font-weight: 600; margin: 0 0 4px; }
+  header p { font-size: .75rem; color: var(--pl-brand-muted); margin: 0 0 24px; }
+  section[data-variant] { margin: 0 0 28px; }
+  .variant-label { font-size: .6875rem; text-transform: uppercase; letter-spacing: .06em;
+                   color: var(--pl-brand-muted); font-weight: 500; margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>HeadlineBlock</h1>
+    <p>开工前的提醒。永不阻断：没回应的条数被数出来，不是被藏起来。</p>
+  </header>
+  <section data-variant="有未回应的">
+    <h2 class="variant-label">有未回应的</h2>
+    <div data-host="0"></div>
+  </section>
+  <section data-variant="全部回应完，其中一条是 agent 越过">
+    <h2 class="variant-label">全部回应完，其中一条是 agent 越过</h2>
+    <div data-host="1"></div>
+  </section>
+  <section data-variant="账上没有任何记录">
+    <h2 class="variant-label">账上没有任何记录</h2>
+    <div data-host="2"></div>
+  </section>
+</main>
+<script src="../dist/_ds_bundle.js"></script>
+<script>
+  var D = window.ProvLedgerDS, React = D.__React;
+  D.__render(React.createElement(D.HeadlineBlock,{summary:{unanswered:1,shown:7,adopted:1,targets:4,layers:2},findings:[{id:'f1',kind:'active_constraint',severity:'blocking',tier:'stated',text:'load_orders 只保留已付款的订单',unanswered:true},{id:'f2',kind:'removed_upstream',severity:'blocking',tier:'observed',text:'上游 orders.discount 在第 93 次分析里被移除 —— 因为：“收到上游通知，v2 以后不再有 discount 列”（你的原话，任务 A）',response:{action:'revise',by:'agent',rationale:'改用 list_price 重算'}},{id:'f3',kind:'unverified_upstream',severity:'info',tier:'derived',text:'读 orders —— 表结构是假定的，计划时没核对过'}]}), document.querySelector('[data-host="0"]'));
+  D.__render(React.createElement(D.HeadlineBlock,{summary:{unanswered:0,shown:3,adopted:2},findings:[{id:'f1',kind:'rejected_path',severity:'warning',tier:'asserted',text:'“按自然周切分”上次试过，财务对不上',response:{action:'proceed',by:'agent',rationale:'这次不涉及周口径'},agent_proceeded:true}]}), document.querySelector('[data-host="1"]'));
+  D.__render(React.createElement(D.HeadlineBlock,{summary:{unanswered:0,shown:0,adopted:0},findings:[]}), document.querySelector('[data-host="2"]'));
+</script>
+</body>
+</html>

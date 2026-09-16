@@ -1,0 +1,40 @@
+<!-- @dsCard group="Navigation" -->
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SessionCard — provLedger Design</title>
+<link rel="stylesheet" href="../dist/styles.css">
+<style>
+  main { max-width: 880px; margin: 0 auto; padding: 24px; }
+  header h1 { font-size: 1.125rem; font-weight: 600; margin: 0 0 4px; }
+  header p { font-size: .75rem; color: var(--pl-brand-muted); margin: 0 0 24px; }
+  section[data-variant] { margin: 0 0 28px; }
+  .variant-label { font-size: .6875rem; text-transform: uppercase; letter-spacing: .06em;
+                   color: var(--pl-brand-muted); font-weight: 500; margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>SessionCard</h1>
+    <p>一次会话说了什么、花了什么、改了什么、发布了什么。没发布计划的那张卡最重要。</p>
+  </header>
+  <section data-variant="发布过计划">
+    <h2 class="variant-label">发布过计划</h2>
+    <div data-host="0"></div>
+  </section>
+  <section data-variant="降级：一次没发布计划的会话">
+    <h2 class="variant-label">降级：一次没发布计划的会话</h2>
+    <div data-host="1"></div>
+  </section>
+</main>
+<script src="../dist/_ds_bundle.js"></script>
+<script>
+  var D = window.ProvLedgerDS, React = D.__React;
+  D.__render(React.createElement(D.SessionCard,{sessionId:'c4ec4b65-ebbf-4914-ba78-4e3ec64c0ce5',utterances:[{id:30,text:'每个 task：先写失败测试（RED 要求 pytest 退出码 1）→ 实现 → 跑相关套件 → commit',at:'2026-09-16'}],calls:146,buckets:{orchestration:2,provenance:0,other:144},changedNodes:[{node_key:'nk_684a0f17c6b9',qualified_name:'orchestrator.psg_bridge.graph_at'}],plans:[{plan_id:'dp2d-t0-20260916150040',title:'四个小修',status:'COMPLETED'}]}), document.querySelector('[data-host="0"]'));
+  D.__render(React.createElement(D.SessionCard,{sessionId:'6cd7dbb3-cb83-4bd9-8f06-0c9311a0a567',utterances:[{id:26,text:'帮我看看这个报表的数为什么对不上'}],calls:5,buckets:{other:5},changedNodes:[],plans:[],degraded:true}), document.querySelector('[data-host="1"]'));
+</script>
+</body>
+</html>

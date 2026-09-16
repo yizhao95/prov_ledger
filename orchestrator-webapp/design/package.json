@@ -1,0 +1,20 @@
+{
+  "name": "provledger-design",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The provLedger dashboard's components, compiled — the form Claude Design can read and edit.",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node test.mjs",
+    "tokens": "python3 ../../scripts/gen_tokens.py"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "typescript": "5.9.3",
+    "@types/react": "18.3.27",
+    "@types/react-dom": "18.3.7"
+  }
+}

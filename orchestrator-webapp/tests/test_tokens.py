@@ -138,3 +138,61 @@ def test_the_tokens_file_carries_what_both_sides_need():
     assert set(doc["severities"]) == {"blocking", "warning", "info"}
     for s in doc["severities"].values():
         assert s.get("icon") and s.get("label")
+
+
+# ── DP phase 2d (Task 2): the compiled library Claude Design reads ────────────
+# The dashboard's look has to exist as compiled React too. These assertions are
+# structural on purpose: what can actually go wrong is a component that never
+# made it into the bundle, a preview card missing the tag the sync tool looks
+# for, or a stylesheet whose import closure does not reach the bundle's CSS.
+
+DESIGN = WEBAPP / "design"
+DIST = DESIGN / "dist"
+PREVIEWS = DESIGN / "previews"
+COMPONENTS = ("TierBadge", "SourceLevelBadge", "HeadlineBlock", "TimelineEntry", "ViewSwitcher",
+              "NodeBadge", "SessionCard", "OutcomeRow", "ShownAdopted")
+DS_CARD = re.compile(r'^<!--\s*@dsCard\s+group="[^"]+"\s*-->$')
+
+
+def test_the_library_is_wired_to_the_same_token_file():
+    index = (DESIGN / "src" / "index.ts").read_text(encoding="utf-8")
+    assert "./tokens" in index
+    assert TOKENS_TS.exists() and json.loads(TOKENS_JSON.read_text(encoding="utf-8"))["colors"]["brand-blue"] in TOKENS_TS.read_text(encoding="utf-8")
+
+
+def test_every_component_has_a_source_file():
+    for name in COMPONENTS:
+        assert (DESIGN / "src" / "components" / f"{name}.tsx").exists(), f"no source for {name}"
+
+
+def test_the_committed_bundle_names_all_nine_components():
+    js = DIST / "_ds_bundle.js"
+    assert js.exists(), "design/dist/_ds_bundle.js is not committed — the sync tool reads the tree, not a build"
+    text = js.read_text(encoding="utf-8")
+    missing = [n for n in COMPONENTS if not re.search(rf"\b{n}\b", text)]
+    assert missing == [], f"bundle is missing {missing}"
+    assert "ProvLedgerDS" in text
+
+
+def test_the_stylesheet_closure_reaches_the_bundle_css():
+    assert (DIST / "_ds_bundle.css").exists()
+    assert "_ds_bundle.css" in (DIST / "styles.css").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", COMPONENTS)
+def test_each_preview_card_is_tagged_and_renders_from_dist(name):
+    card = PREVIEWS / f"{name}.html"
+    assert card.exists(), f"no preview card for {name}"
+    text = card.read_text(encoding="utf-8")
+    first = text.split("\n")[0].strip()
+    assert DS_CARD.match(first), f"{name}.html first line is not an @dsCard tag: {first!r}"
+    assert "_ds_bundle.js" in text and "styles.css" in text
+    assert text.count("data-variant=") >= 2, f"{name}.html shows fewer than two variants"
+
+
+def test_the_toolchain_is_pinned_and_locked():
+    pkg = json.loads((DESIGN / "package.json").read_text(encoding="utf-8"))
+    dev = pkg["devDependencies"]
+    for dep in ("react", "react-dom", "esbuild", "typescript"):
+        assert dep in dev and re.match(r"^\d+\.\d+\.\d+$", dev[dep]), f"{dep} is not pinned exactly"
+    assert (DESIGN / "package-lock.json").exists(), "package-lock.json must be committed"
