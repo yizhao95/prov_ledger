@@ -20,6 +20,8 @@ Nothing here reads a model; a rule is a function of the ledger and the graph.
 """
 from __future__ import annotations
 
+import sqlite3
+
 import json
 import re
 from dataclasses import dataclass
@@ -320,6 +322,24 @@ def r5_constraint_covered(ctx: Ctx, node: dict) -> str | None:
     return f"covered by active constraint #{c.get('id')}: {(c.get('statement') or '')[:160]}"
 
 
+def _existing_rule_reason(conn, project: str, node_key: str, rule_id: str, basis: str) -> int | None:
+    """The id of an identical rule record already on this node, if there is one.
+
+    A constraint being in force is a fact about the NODE, not about each plan
+    that meets it. Writing it once per plan produced 16 identical `derived` rows
+    on this repo's own compute_etag — true, repetitive, and unreadable. The
+    later plans record that the fact was SURFACED to them (read_hit), which is
+    the distinction read_hit exists to carry."""
+    try:
+        row = conn.execute(
+            "SELECT id FROM change_reason WHERE project = ? AND node_key = ? AND rule_id = ? "
+            "AND interpretation = ? AND state = 'active' AND superseded_by IS NULL ORDER BY id LIMIT 1",
+            (project, node_key, rule_id, basis)).fetchone()
+    except sqlite3.Error:
+        return None
+    return row[0] if row else None
+
+
 RULES: tuple[Rule, ...] = (
     Rule("R0", "the user's own words name the node (stated, verbatim span)", r0_user_words),
     Rule("R1", "a test failed then passed in this plan and names the node", r1_test_fixed),
@@ -467,8 +487,15 @@ def evaluate(conn, *, project: str, plan_id: str, psg_db_path: str | None, ask: 
                                          recorded_by="system", commit=False)
             else:
                 basis = found
-                provenance.insert_reason(conn, project=project, plan_id=plan_id, node_key=key, kind="technical",
-                                         run_id=node["run_id"], interpretation=basis, rule_id=rule_id, recorded_by="system", commit=False)
+                seen = _existing_rule_reason(conn, project, key, rule_id, basis)
+                if seen is None:
+                    provenance.insert_reason(conn, project=project, plan_id=plan_id, node_key=key, kind="technical",
+                                             run_id=node["run_id"], interpretation=basis, rule_id=rule_id, recorded_by="system", commit=False)
+                else:
+                    # the fact is already on the node — this plan was SHOWN it
+                    conn.execute("INSERT INTO read_hit (reason_id, project, plan_id, moment) VALUES (?, ?, ?, 'close')",
+                                 (seen, project, plan_id))
+                    basis = f"{basis} (already recorded as #{seen}; surfaced to this plan)"
             conn.execute("INSERT INTO trigger_log (project, plan_id, node_key, path, rule_id, verdict, basis) VALUES (?, ?, ?, 'code', ?, 'auto', ?)",
                          (project, plan_id, key, rule_id, basis))
             result["auto"] += 1

@@ -112,7 +112,8 @@ def test_a_plan_that_adopted_nothing_says_so(client):
     pid = client._seeded["plan_id"]
     t = client.get(f"/plan/{pid}").text
     assert 'data-panel="changed-by-history"' in t
-    assert "本 plan 未采用任何历史记录" in t
+    from app import vocab
+    assert vocab.ui("prior_decisions_empty") in t
 
 
 def test_shown_and_adopted_stay_two_different_numbers_in_the_same_block(client):
@@ -130,8 +131,10 @@ def test_trace_strip_is_newest_first_and_never_longer_than_eight():
     from app import queries
     rows = [{"kind": "event", "at": f"2026-09-{d:02d}", "significant": True, "event_type": "node_changed",
              "tier": "observed", "run_id": d} for d in range(1, 21)]
+    # Recent takes the latest of each KIND, capped at 5 — one repeated sentence
+    # must not fill it (DP 2d follow-up)
     strip = queries.trace_strip({"timeline": rows}, limit=8)
-    assert len(strip) == 8
+    assert 1 <= len(strip) <= 5
     assert [r["at"] for r in strip] == sorted([r["at"] for r in strip], reverse=True)
     assert strip[0]["at"] == "2026-09-20"
 
@@ -179,7 +182,8 @@ def test_search_is_read_only_and_groups_by_node(client):
     assert r.status_code == 200
     t = r.text
     assert 'data-panel="search"' in t and "nk_a" in t or "pkg.m.load_orders" in t
-    assert "回到当时的任务" in t
+    from app import vocab
+    assert vocab.ui("back_to_task") in t
 
 
 def test_search_says_when_it_could_not_use_the_index(client):
@@ -190,9 +194,10 @@ def test_search_says_when_it_could_not_use_the_index(client):
 
 
 def test_an_empty_search_is_a_sentence_not_a_blank_page(client):
-    assert "输入要找的词" in client.get("/search").text
+    from app import vocab
+    assert vocab.ui("search_hint") in client.get("/search").text
     r = client.get("/search?q=zzzznotathing&project=demo")
-    assert r.status_code == 200 and "没有找到" in r.text
+    assert r.status_code == 200 and vocab.ui("search_empty") in r.text
 
 
 def test_search_did_not_add_a_write_route(client):

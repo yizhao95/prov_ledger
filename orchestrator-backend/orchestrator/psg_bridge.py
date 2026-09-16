@@ -295,11 +295,34 @@ GRAPH_MODES = ("focus", "story", "data", "full")
 DATA_TYPES = ("dataset", "column", "sql_table", "api_source", "bq_dataset", "data_var")
 NEIGHBOURHOOD_HOPS = 2
 NEIGHBOURHOOD_MAX_NODES = 400
+# Past this many selected nodes the view CLUSTERS by module instead of dropping
+# nodes. The previous flat cap of 200 silently discarded three quarters of a
+# 1601-node selection, which is not a reduced view but a wrong one: the count in
+# the corner said 1601 and the picture showed 200.
+CLUSTER_ABOVE = 600
+# level 0 of the data-flow layout: where data comes from
+SOURCE_TYPES = ("sql_table", "bq_dataset", "api_source", "dataset", "file")
 # story / data pick their nodes from the whole project rather than from one
 # neighbourhood, so they need their own, tighter cap: on prov_ledger 1163 nodes
 # carry a story and an uncapped story page is 2 MB. The cut is reported as
 # `mode_total` (what the mode selected) beside `total_nodes` (the whole graph).
 MODE_MAX_NODES = 200
+
+
+def subsystem_of(file_path: str | None) -> str:
+    """Top two path segments → module key. No path → '(external)'.
+
+    A deliberate copy of skills/update-project-state-graph/scripts/graph_viz.py
+    ::subsystem_of — the backend never imports the analyzer (module docstring),
+    and this is four lines of convention, not logic worth a dependency."""
+    if not file_path:
+        return "(external)"
+    parts = file_path.replace("\\", "/").lstrip("./").split("/")
+    if len(parts) >= 3:
+        return parts[0] + "/" + parts[1]
+    if len(parts) == 2:
+        return parts[0]
+    return "(root)"
 
 
 def _adjacency(edges: list[dict]) -> dict[str, set[str]]:
@@ -338,7 +361,8 @@ def _neighbourhood(nodes: list[dict], edges: list[dict], focus: str,
 
 def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "functions",
              mode: str = "full", focus: str | None = None, hops: int = NEIGHBOURHOOD_HOPS,
-             story_keys=None, max_nodes: int | None = None) -> dict:
+             story_keys=None, max_nodes: int | None = None,
+             cluster_above: int = CLUSTER_ABOVE) -> dict:
     """{nodes: [{node_key, qualified_name, node_type, file_path}], edges: [{src_key, dst_key, edge_type}],
     run_id, edges_from, level, mode, total_nodes, mode_total, truncated, focus_key, focus_found, hops}.
 
@@ -359,7 +383,7 @@ def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "f
         return {"nodes": [], "edges": [], "run_id": None, "edges_from": "none", "level": level}
     mode = mode if mode in GRAPH_MODES else "full"
     if max_nodes is None:
-        max_nodes = MODE_MAX_NODES if mode in ("story", "data") else NEIGHBOURHOOD_MAX_NODES
+        max_nodes = NEIGHBOURHOOD_MAX_NODES
     rows = _query(psg_db_path, "SELECT node_key, qualified_name, node_type, file_path FROM node_snapshot "
                                "WHERE run_id = ? AND node_key <> '' ORDER BY qualified_name", (run,))
     every = [{"node_key": r["node_key"], "qualified_name": r["qualified_name"], "node_type": r["node_type"],
@@ -404,11 +428,8 @@ def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "f
             keep = data_keys | set(touching)
         nodes = [n for n in nodes if n["node_key"] in keep]
         mode_total = len(nodes)
-        if len(nodes) > max_nodes:
-            nodes = sorted(nodes, key=lambda n: order.get(n["node_key"], len(order)))[:max_nodes]
-            keep = {n["node_key"] for n in nodes}
         edges = [e for e in edges if e["src_key"] in keep and e["dst_key"] in keep]
-        truncated = len(nodes) < total_nodes or len(nodes) < mode_total
+        truncated = len(nodes) < total_nodes
     else:
         nodes = at_level
         mode_total = len(nodes)
@@ -423,10 +444,48 @@ def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "f
                 nodes = [n for n in nodes if n["node_key"] in neigh]
                 edges = [e for e in edges if e["src_key"] in neigh and e["dst_key"] in neigh]
                 mode_total = len(nodes)
+    # Past the threshold the picture is clustered by module, never cropped: the
+    # clusters' node counts add up to exactly what the mode selected.
+    clusters = _cluster_by_module(nodes) if len(nodes) > cluster_above else []
+    layout = "physics" if mode == "full" else "hierarchical"
+    if layout == "hierarchical":
+        _assign_levels(nodes, edges)
     return {"nodes": nodes, "edges": edges, "run_id": run, "edges_from": "latest" if run != latest_run else "run",
             "latest_run_id": latest_run, "level": level, "mode": mode, "focus": focus or None,
             "focus_key": focus_key, "focus_found": focus_found, "hops": hops,
-            "total_nodes": total_nodes, "mode_total": mode_total, "truncated": truncated}
+            "total_nodes": total_nodes, "mode_total": mode_total, "truncated": truncated,
+            "clusters": clusters, "layout": layout}
+
+
+def _cluster_by_module(nodes: list[dict]) -> list[dict]:
+    """Group the drawn nodes by module (the top two path segments) so a large
+    selection renders as a handful of expandable bubbles. Every node belongs to
+    exactly one cluster, so the totals still reconcile."""
+    buckets: dict[str, list[dict]] = {}
+    for n in nodes:
+        buckets.setdefault(subsystem_of(n.get("file_path")), []).append(n)
+    return [{"key": k, "label": k, "nodes": len(v),
+             "members": [x["node_key"] for x in v],
+             "badged": sum(1 for x in v if x.get("badge"))}
+            for k, v in sorted(buckets.items())]
+
+
+def _assign_levels(nodes: list[dict], edges: list[dict]) -> None:
+    """Layer the nodes for a top-down data-flow picture (layout spec 2, applied
+    to the graph): level 0 is where data comes from, level 1 the code that reads
+    it, level 2 what that code produces. A node with no data relation lands on
+    level 1 — the code layer — rather than being left unplaced."""
+    by_key = {n["node_key"]: n for n in nodes}
+    sources = {k for k, n in by_key.items() if n.get("node_type") in SOURCE_TYPES}
+    readers = {e["src_key"] for e in edges if e["dst_key"] in sources and e["src_key"] in by_key}
+    readers |= {e["dst_key"] for e in edges if e["src_key"] in sources and e["dst_key"] in by_key}
+    for key, n in by_key.items():
+        if key in sources:
+            n["level"] = 0
+        elif key in readers or n.get("node_type") in APP_FUNC_TYPES:
+            n["level"] = 1
+        else:
+            n["level"] = 2
 
 
 def latest_tier_of(psg_db_path: str | None, run_id: int | None = None) -> dict[str, str]:

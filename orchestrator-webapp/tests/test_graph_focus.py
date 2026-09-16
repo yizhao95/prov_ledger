@@ -35,6 +35,11 @@ from orchestrator import db as odb  # noqa: E402
 from orchestrator import psg_bridge  # noqa: E402
 from test_routes import _seed_db  # noqa: E402
 
+
+def vocab_ui(key):
+    from app import vocab
+    return vocab.ui(key)
+
 CHAIN = 12          # f0 → f1 → … → f11, all in pkg/core/mod.py
 ISLANDS = 5         # unconnected functions in pkg/side/util.py — no edges, no story
 FUNCS = CHAIN + ISLANDS
@@ -192,7 +197,7 @@ def test_focus_page_draws_the_neighbourhood_and_offers_the_full_graph(client):
     assert 'data-mode="focus"' in t
     assert t.count('data-node="nk_') == 5 and 'data-focus="1"' in t
     assert f'data-total-nodes="{FUNCS}"' in t
-    assert f"展开全图（{FUNCS} 个节点）" in t and "mode=full" in t    # the cut is a link with a number, never a silence
+    assert f"{vocab_ui('expand_full')} ({FUNCS})" in t and "mode=full" in t    # the cut is a link with a number, never a silence
 
 
 def test_a_page_without_a_focus_is_the_story_mode(client):
@@ -222,7 +227,7 @@ def test_full_mode_still_renders_every_function(client):
     assert 'data-mode="full"' in t and t.count('data-node="nk_') == FUNCS
 
 
-def test_the_neighbourhood_is_capped_even_for_a_hub(client):
+def test_the_neighbourhood_is_still_bounded_by_its_hop_count(client):
     from app import queries
     g = queries.get_graph(queries.open_db_readonly(client._db), "demo", focus="pkg.core.mod.f5")
     assert len(g["nodes"]) <= queries.NEIGHBOURHOOD_MAX_NODES and g["mode"] == "focus"
@@ -238,23 +243,19 @@ def test_a_project_without_a_graph_is_still_200_in_every_mode(client, tmp_path, 
 
 # ── the cap: story and data are bounded too (step D of the 2d Task 0 plan) ────
 
-def test_story_is_capped_and_says_how_much_it_drew(tmp_path):
-    """prov_ledger has 1163 nodes with a story: `story` without a cap is 2 MB.
-    The cap keeps the most-storied seeds (the caller's order) and the page says
-    `drawn / selected / whole` — the crop is a number, not a silence."""
+def test_story_draws_everything_it_selected(tmp_path):
+    """The old flat cap of 200 turned a 1601-node selection into a 200-node
+    picture while the corner still said 1601. Nothing is dropped now."""
     g, _ = _chain_graph(tmp_path)
-    ordered = ["nk_3", "nk_7"]                       # most-badged first, as queries.get_graph sorts them
-    s = psg_bridge.graph_at(g, mode="story", story_keys=ordered, max_nodes=1)
-    assert _keys(s) == {"nk_3"} and s["truncated"] is True
-    assert s["mode_total"] == 4 and s["total_nodes"] == FUNCS       # 2 seeds + 2 data nodes were selected
-    assert len(s["nodes"]) <= 1
+    s = psg_bridge.graph_at(g, mode="story", story_keys=["nk_3", "nk_7"])
+    assert _keys(s) == {"nk_3", "nk_7", "nk_orders", "nk_amount"}
+    assert len(s["nodes"]) == s["mode_total"] == 4 and s["total_nodes"] == FUNCS
 
 
-def test_data_is_capped_the_same_way(tmp_path):
+def test_data_draws_everything_it_selected(tmp_path):
     g, _ = _chain_graph(tmp_path)
-    d = psg_bridge.graph_at(g, mode="data", max_nodes=2)
-    assert len(d["nodes"]) == 2 and d["truncated"] is True and d["mode_total"] == 6
-    assert {n["node_type"] for n in d["nodes"]} <= {"sql_table", "column"}   # data nodes first, functions are the tail
+    d = psg_bridge.graph_at(g, mode="data")
+    assert len(d["nodes"]) == d["mode_total"] == 6
 
 
 def test_an_uncapped_mode_reports_mode_total_equal_to_what_it_drew(tmp_path):
@@ -268,11 +269,120 @@ def test_an_uncapped_mode_reports_mode_total_equal_to_what_it_drew(tmp_path):
 def test_the_page_prints_drawn_of_selected_of_whole(client):
     t = client.get("/graph/demo").text
     assert 'data-drawn="4"' in t and 'data-mode-total="4"' in t and f'data-total-nodes="{FUNCS}"' in t
-    assert f"展开全图（{FUNCS} 个节点）" in t
+    assert f"{vocab_ui('expand_full')} ({FUNCS})" in t
 
 
-def test_the_cap_the_page_uses_is_the_one_the_module_publishes(client):
+def test_story_is_the_default_and_draws_its_whole_selection(client):
     from app import queries
-    assert queries.MODE_MAX_NODES <= queries.NEIGHBOURHOOD_MAX_NODES
     g = queries.get_graph(queries.open_db_readonly(client._db), "demo")
-    assert len(g["nodes"]) <= queries.MODE_MAX_NODES and g["mode"] == "story"
+    assert g["mode"] == "story" and len(g["nodes"]) == g["mode_total"]
+
+
+# ── DP phase 2d follow-up: the 200 cap was cutting the graph in half ─────────
+# On prov_ledger, story selected 1601 nodes and drew 200; data selected 645 and
+# drew 200. A cap that silently removes three quarters of the picture is not a
+# reduced view, it is a wrong one. Nothing is dropped now: up to CLUSTER_ABOVE
+# everything is drawn, and beyond that nodes are CLUSTERED by module, so the
+# total is preserved and the reader can expand.
+
+def test_a_selection_under_the_cluster_threshold_is_drawn_whole(tmp_path):
+    g, _ = _chain_graph(tmp_path)
+    s = psg_bridge.graph_at(g, mode="story", story_keys=list(STORY_NODES))
+    assert len(s["nodes"]) == s["mode_total"], "nodes were dropped below the clustering threshold"
+    assert s["clusters"] == []
+
+
+def test_a_large_selection_clusters_by_module_and_keeps_the_total(tmp_path):
+    g, _ = _chain_graph(tmp_path)
+    s = psg_bridge.graph_at(g, mode="full", level="full", cluster_above=3)
+    assert s["clusters"], "a selection past the threshold did not cluster"
+    inside = sum(c["nodes"] for c in s["clusters"])
+    assert inside == s["mode_total"], f"clusters hold {inside} of {s['mode_total']} — nodes went missing"
+    assert all(c["key"] and c["label"] for c in s["clusters"])
+
+
+def test_the_page_states_the_cluster_arithmetic(client):
+    from app import queries
+    conn = queries.open_db_readonly(client._db)
+    try:
+        g = queries.get_graph(conn, "demo", mode="full", level="full", cluster_above=3)
+    finally:
+        conn.close()
+    assert g["clusters"] and sum(c["nodes"] for c in g["clusters"]) == g["mode_total"]
+
+
+def test_there_is_no_silent_node_cap_any_more(client):
+    from app import queries
+    assert not hasattr(queries, "MODE_MAX_NODES") or queries.MODE_MAX_NODES is None
+
+
+# ── data flow is a layered picture, not a physics soup ──────────────────────
+
+def test_data_mode_assigns_a_level_to_every_node(tmp_path):
+    g, _ = _chain_graph(tmp_path)
+    d = psg_bridge.graph_at(g, mode="data")
+    assert d["layout"] == "hierarchical"
+    assert all("level" in n for n in d["nodes"]), "a node has no layer"
+    levels = {n["node_key"]: n["level"] for n in d["nodes"]}
+    assert levels["nk_orders"] == 0 and levels["nk_customers"] == 0, "sources are not on level 0"
+    assert levels["nk_3"] == 1 and levels["nk_5"] == 1, "the readers are not on level 1"
+
+
+def test_story_and_focus_are_layered_too_and_full_is_not(tmp_path):
+    g, _ = _chain_graph(tmp_path)
+    assert psg_bridge.graph_at(g, mode="story", story_keys=list(STORY_NODES))["layout"] == "hierarchical"
+    assert psg_bridge.graph_at(g, mode="focus", focus="nk_5")["layout"] == "hierarchical"
+    assert psg_bridge.graph_at(g, mode="full")["layout"] == "physics"
+
+
+def test_the_page_passes_the_layout_to_the_renderer(client):
+    t = client.get("/graph/demo?mode=data").text
+    assert '"layout": "hierarchical"' in t or "hierarchical" in t
+
+
+def test_a_clustered_page_ships_cluster_summaries_not_every_node(client):
+    """Removing the cap must not move the cost from the picture to the payload:
+    past the threshold the page carries the clusters and a minimal per-node
+    record, not 1601 full node dicts."""
+    from app import queries, main
+    conn = queries.open_db_readonly(client._db)
+    try:
+        g = queries.get_graph(conn, "demo", mode="full", level="full", cluster_above=3)
+    finally:
+        conn.close()
+    payload = main.graph_payload(g)
+    assert payload["clusters"], "no clusters in the payload"
+    assert sum(c["nodes"] for c in payload["clusters"]) == g["mode_total"]
+    for n in payload["nodes"]:
+        assert set(n) <= {"node_key", "qualified_name", "node_type", "level", "badge", "tier"}, \
+            f"a clustered payload still carries {sorted(set(n))}"
+
+
+def test_a_clustered_page_aggregates_its_edges_too(client):
+    """1601 nodes drag ~12k edges behind them, which is most of the payload. A
+    clustered picture shows module-to-module flow, so the edges are aggregated
+    with it — and the page says the detail lives in the focused view."""
+    from app import queries, main
+    conn = queries.open_db_readonly(client._db)
+    try:
+        g = queries.get_graph(conn, "demo", mode="full", level="full", cluster_above=3)
+    finally:
+        conn.close()
+    payload = main.graph_payload(g)
+    assert payload["edges"], "a clustered payload has no edges at all"
+    for e in payload["edges"]:
+        assert set(e) == {"src_key", "dst_key", "weight"}, f"edge is not aggregated: {e}"
+        assert e["src_key"].startswith("cluster:") and e["dst_key"].startswith("cluster:")
+    assert len(payload["edges"]) <= len(g["edges"])
+
+
+def test_an_unclustered_page_keeps_the_full_node_records(client):
+    from app import queries, main
+    conn = queries.open_db_readonly(client._db)
+    try:
+        g = queries.get_graph(conn, "demo", focus="pkg.core.mod.f5")
+    finally:
+        conn.close()
+    payload = main.graph_payload(g)
+    assert payload["clusters"] == []
+    assert any("file_path" in n for n in payload["nodes"])

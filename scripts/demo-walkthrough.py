@@ -56,12 +56,14 @@ STRIP = """
 """
 
 STEPS = [
-    ("1", "任务 B：agent 想重新用 discount 列。页面第一块就是「因历史而变的决定」。", None),
-    ("2", "拦住它的是一条规矩——原地展开就能看到是谁、什么时候、凭什么记下的。",
+    ("1", "Task B — the agent's plan. Findings show a prior decision on this column.", None),
+    ("2", "The constraint that stopped it, expanded in place.",
      '[data-panel="changed-by-history"], [data-panel="headline"]'),
-    ("3", "点进这个东西本身：列是哪一次没的，以及当时记下的原话。", '[data-panel="trace-strip"]'),
-    ("4", "回到任务 A——那句话是人说的，后面挂着那封邮件。", '[data-panel="changed-by-history"]'),
-    ("5", "整张图只画有故事的部分；页面自己说明这是精简视图。", '[data-mode-chips]'),
+    ("3", "The node itself: when the column went, and the reason recorded at the time.",
+     '[data-panel="trace-strip"]'),
+    ("4", "Task A — the person's own words, and the email behind them.",
+     '[data-panel="changed-by-history"]'),
+    ("5", "Graph — reduced view, clustered by module.", '[data-mode-chips]'),
 ]
 
 

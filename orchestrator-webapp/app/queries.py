@@ -886,6 +886,49 @@ def _timeline_rows(base: dict) -> list[dict]:
     return rows
 
 
+def group_timeline(rows: list[dict]) -> list[dict]:
+    """Collapse consecutive rows that say the SAME thing at the same tier.
+
+    R5 used to record "covered by active constraint #1414" once per plan that
+    met the node; on this repo's own compute_etag that is 16 identical derived
+    rows out of 21. The records are real and stay (append-only) — what was
+    wrong was printing the same sentence sixteen times. A group carries the
+    count, the date span and every row inside it, so nothing is lost and the
+    page stops repeating itself."""
+    groups: list[dict] = []
+    for r in rows:
+        text = ((r.get("record") or {}).get("text") or (r.get("record") or {}).get("statement") or "").strip()
+        sig = (r.get("kind"), r.get("tier"), r.get("event_type"), text)
+        if text and groups and groups[-1]["_sig"] == sig:
+            g = groups[-1]
+            g["rows"].append(r)
+            g["count"] += 1
+            ats = [x for x in (g["first_at"], r.get("at")) if x]
+            g["first_at"] = min(ats) if ats else g["first_at"]
+            g["last_at"] = max([x for x in (g["last_at"], r.get("at")) if x] or [g["last_at"]])
+            g["plans"] = sorted({x for x in (g["plans"] + [r.get("plan_id")]) if x})
+            continue
+        groups.append({**r, "_sig": sig, "count": 1, "rows": [r], "text": text,
+                       "first_at": r.get("at"), "last_at": r.get("at"),
+                       "plans": [r["plan_id"]] if r.get("plan_id") else []})
+    return groups
+
+
+# The Recent strip answers "what happened to this lately", so it takes the latest
+# of each KIND rather than the latest N rows — otherwise one repeated sentence
+# fills it and the other four kinds never appear.
+RECENT_KINDS = ("structural", "stated", "asserted", "constraint", "outcome")
+
+
+def _recent_kind(row: dict) -> str:
+    if row.get("kind") == "constraint":
+        return "constraint"
+    if row.get("kind") == "event":
+        return "structural"
+    tier = row.get("tier")
+    return "stated" if tier == "stated" else ("asserted" if tier == "asserted" else "outcome")
+
+
 def filter_timeline(rows: list[dict], show: dict) -> tuple[list[dict], dict]:
     """(kept, folded counts). Folding is always reported per reason it folded."""
     folded = {"events": 0, "minor": 0, "filtered": 0}
@@ -1003,6 +1046,7 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str,
     rows = _timeline_rows(base)
     base["timeline_all"] = rows
     base["timeline"], base["folded"] = filter_timeline(rows, show)
+    base["groups"] = group_timeline(base["timeline"])
     base["show"] = show
     base["upstream"] = list(base["card"].get("callers") or [])
     base["downstream"] = list(base["card"].get("output_consumers") or [])
@@ -1130,7 +1174,10 @@ def node_badges(conn: sqlite3.Connection, project: str) -> dict[str, dict]:
 
 NEIGHBOURHOOD_MAX_NODES = _psg.NEIGHBOURHOOD_MAX_NODES if _psg is not None else 400
 NEIGHBOURHOOD_HOPS = _psg.NEIGHBOURHOOD_HOPS if _psg is not None else 2
-MODE_MAX_NODES = _psg.MODE_MAX_NODES if _psg is not None else 200
+# There is deliberately no flat node cap any more: a selection past this many
+# nodes is CLUSTERED by module, never cropped (the old 200 drew a quarter of a
+# 1601-node selection while the corner still said 1601).
+CLUSTER_ABOVE = _psg.CLUSTER_ABOVE if _psg is not None else 600
 GRAPH_MODES = _psg.GRAPH_MODES if _psg is not None else ("focus", "story", "data", "full")
 
 
@@ -1155,7 +1202,7 @@ def reason_run(conn: sqlite3.Connection, reason_id: int) -> dict | None:
 
 
 def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = None, level: str = "functions",
-              focus: str | None = None, mode: str | None = None) -> dict:
+              focus: str | None = None, mode: str | None = None, cluster_above: int | None = None) -> dict:
     """The project as it is (or was, at `at`): nodes with their badge (how many
     records have a story) and the tier of their latest event, edges, the run list
     for the selector. `at` is typed (`run:` / `reason:`); a reason id is resolved
@@ -1167,7 +1214,8 @@ def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = Non
     base = {"project": project, "available": False, "reason": None, "nodes": [], "edges": [], "runs": [], "run": None,
             "edges_from": "none", "level": level, "badged": 0, "focus": focus or None, "mode": mode,
             "total_nodes": 0, "mode_total": 0, "truncated": False, "focus_found": False, "hops": NEIGHBOURHOOD_HOPS,
-            "at_kind": None, "at_reason": None, "at_id": None, "story_keys": 0}
+            "at_kind": None, "at_reason": None, "at_id": None, "story_keys": 0,
+            "clusters": [], "layout": "physics"}
     a = parse_at(at)
     base.update(at_kind=a["kind"], at_id=a["id"])
     if _psg is None:
@@ -1188,7 +1236,8 @@ def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = Non
     story_keys = [k for k, _ in sorted(((k, int(b.get("badge") or 0)) for k, b in badges.items()),
                                        key=lambda kv: (-kv[1], kv[0])) if _ > 0]
     g = _psg.graph_at(db_path, run_id=run_id, level=level if level in ("functions", "full") else "functions",
-                      mode=mode, focus=focus, hops=NEIGHBOURHOOD_HOPS, story_keys=story_keys)
+                      mode=mode, focus=focus, hops=NEIGHBOURHOOD_HOPS, story_keys=story_keys,
+                      cluster_above=CLUSTER_ABOVE if cluster_above is None else cluster_above)
     tiers = _psg.latest_tier_of(db_path, run_id=g["run_id"])
     nodes = []
     for n in g["nodes"]:
@@ -1203,7 +1252,8 @@ def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = Non
                 total_nodes=g.get("total_nodes", len(nodes)), mode_total=g.get("mode_total", len(nodes)),
                 truncated=bool(g.get("truncated")),
                 focus_found=bool(g.get("focus_found")), hops=g.get("hops", NEIGHBOURHOOD_HOPS),
-                mode=g.get("mode", mode), story_keys=len(story_keys))
+                mode=g.get("mode", mode), story_keys=len(story_keys),
+                clusters=g.get("clusters") or [], layout=g.get("layout", "physics"))
     return base
 
 
@@ -1398,12 +1448,20 @@ TRACE_STRIP_MAX = 8
 
 
 def trace_strip(ledger: dict, limit: int = TRACE_STRIP_MAX) -> list[dict]:
-    """The node's last significant moments, newest first, at most `limit` — the
-    strip at the top of the node page. Everything past the cut is still in the
-    timeline below, so this crops a summary, not the record."""
+    """The latest moment of each KIND, newest first — at most one structural
+    change, one stated reason, one asserted reason, one constraint, one outcome.
+
+    Taking the latest N rows instead put the same repeated sentence in every
+    line, which told the reader nothing. Everything past the cut is still in the
+    timeline below: this crops a summary, not the record."""
     rows = [r for r in (ledger.get("timeline") or []) if r.get("significant", True)]
     rows.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
-    return rows[:max(0, int(limit))]
+    seen: dict[str, dict] = {}
+    for r in rows:
+        seen.setdefault(_recent_kind(r), r)
+    out = [seen[k] for k in RECENT_KINDS if k in seen]
+    out.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
+    return out[:max(0, min(int(limit), 5))]
 
 
 def mark_span(text: str | None, start: int | None, end: int | None) -> str:

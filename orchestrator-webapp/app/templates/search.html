@@ -10,20 +10,20 @@
 {% block content %}
 <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="search">
   <form method="get" class="flex items-center gap-2 mb-3">
-    <input name="q" value="{{ q }}" placeholder="搜原话、理由、规矩…" autofocus
+    <input name="q" value="{{ q }}" placeholder="{{ ui('search_placeholder', lang) }}" autofocus
            class="flex-1 border border-hairline rounded-lg px-3 py-1.5 text-sm bg-brand-bg">
     {% if project %}<input type="hidden" name="project" value="{{ project }}">{% endif %}
-    <button class="px-3 py-1.5 rounded-lg bg-brand-blue text-white text-sm font-semibold">找</button>
+    <button class="px-3 py-1.5 rounded-lg bg-brand-blue text-white text-sm font-semibold">{{ ui('search', lang) }}</button>
   </form>
 
   {% if error %}
   <div class="text-sm text-brand-red">{{ error }}</div>
   {% elif not q %}
-  <div class="text-xs text-brand-muted">输入要找的词——搜的是记下来的话：原话、理由、规矩。</div>
+  <div class="text-xs text-brand-muted">{{ ui('search_hint', lang) }}</div>
   {% elif not groups %}
-  <div class="text-xs text-brand-muted">没有找到含“{{ q }}”的记录。</div>
+  <div class="text-xs text-brand-muted">{{ ui('search_empty', lang) }}</div>
   {% else %}
-  <div class="text-xs text-brand-muted mb-2">{{ hits }} 条，按它们记在谁头上分组。</div>
+  <div class="text-xs text-brand-muted mb-2">{{ hits }} — {{ ui('search_grouped', lang) }}</div>
   {% for g in groups %}
   <div class="mb-4" data-group="{{ g.node_key }}">
     <div class="text-[11px] uppercase tracking-wide text-brand-muted font-mono">
@@ -34,10 +34,10 @@
     <div class="text-xs mt-1 border-l-2 border-hairline pl-2" data-hit="{{ h.reason_id }}">
       <span class="text-gray-800">“{{ h.text }}”</span>
       <span data-tier="{{ h.tier }}" class="px-1.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
-      {% if h.verbatim %}<span data-verbatim="1" class="text-brand-blue">你的原话</span>{% endif %}
-      <span class="text-brand-muted">· {{ h.source_level }}</span>
+      {% if h.verbatim %}<span data-verbatim="1" class="text-brand-blue">{{ 'stated'|say('tier', lang) }}</span>{% endif %}
+      <span class="text-brand-muted">· {{ h.evidence_level|say('evidence_level', lang) }}</span>
       {% if h.plan_id %}
-      <a class="text-brand-blue" href="/plan/{{ h.plan_id }}?node={{ g.node_key }}&at=reason:{{ h.reason_id }}{% if h.step_id %}#step-{{ h.step_id }}{% endif %}">回到当时的任务 →</a>
+      <a class="text-brand-blue" href="/plan/{{ h.plan_id }}?node={{ g.node_key }}&at=reason:{{ h.reason_id }}{% if h.step_id %}#step-{{ h.step_id }}{% endif %}">{{ ui('back_to_task', lang) }} →</a>
       {% endif %}
     </div>
     {% endfor %}
@@ -47,8 +47,7 @@
 
   {% if degraded and q %}
   <div class="text-[11px] text-brand-muted border-t border-hairline pt-2 mt-2" data-degraded="1">
-    只读连接建不了全文索引，这里用的是子串匹配——可能漏掉词形不同的命中。完整检索用
-    <code class="font-mono">provledger why --search</code>。
+    {{ ui('search_degraded', lang) }}
   </div>
   {% endif %}
 </section>

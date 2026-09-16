@@ -88,7 +88,7 @@
   <section class="bg-surface rounded-xl shadow-sm p-5 mb-4 border border-hairline">
     <div class="flex items-center justify-between mb-3">
       <h3 class="text-sm font-semibold text-gray-900 flex items-center gap-2">
-        🧠 Skills Activated
+        🧠 {{ ui('skills_activated', lang) }}
         <span class="text-xs font-normal text-brand-gray">(loaded for this plan)</span>
       </h3>
       {% if skills %}
@@ -134,26 +134,26 @@
   <section class="bg-surface rounded-xl shadow-sm border border-hairline border-l-4 {{ 'border-l-brand-blue' if changed_by_history else 'border-l-hairline' }} mb-4 px-5 py-4"
            data-panel="changed-by-history" data-shown="{{ shown_total }}" data-adopted="{{ changed_by_history|length }}">
     <div class="flex items-baseline flex-wrap gap-x-2">
-      <h2 class="text-sm font-semibold text-gray-900">🧭 因历史而变的决定</h2>
-      <span class="text-xs text-brand-muted tnum">被看到 {{ shown_total }} 条 · 改变了这次计划 {{ changed_by_history|length }} 条</span>
+      <h2 class="text-sm font-semibold text-gray-900">{{ ui('prior_decisions', lang) }}</h2>
+      <span class="text-xs text-brand-muted tnum">{{ vocab.shown(shown_total, lang) }} · {{ vocab.adopted(changed_by_history|length, lang) }}</span>
     </div>
     {% if not changed_by_history %}
-    <div class="text-xs text-brand-muted mt-1">本 plan 未采用任何历史记录。</div>
+    <div class="text-xs text-brand-muted mt-1">{{ ui('prior_decisions_empty', lang) }}</div>
     {% else %}
     {% for h in changed_by_history %}
     {% set tb = tier_badge(h.tier) %}
     <div class="text-xs mt-2 border-l-2 border-hairline pl-3" data-adopted-record="{{ h.reason_id }}">
       <div class="text-gray-800">“{{ h.text }}”
-        {% if h.verbatim %}<span data-verbatim="1" class="text-brand-blue">你的原话</span>{% endif %}
+        {% if h.verbatim %}<span data-verbatim="1" class="text-brand-blue">{{ 'stated'|say('tier', lang) }}</span>{% endif %}
       </div>
       <div class="text-brand-muted flex flex-wrap items-baseline gap-x-2">
         <span data-tier="{{ h.tier }}" class="px-1.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
-        <span>{{ h.source_level }}</span>
-        <span>{{ h.recorded_by }} 记于 {{ (h.recorded_at or '')[:10] }}</span>
-        {% if h.node_key %}<a class="text-brand-blue font-mono" href="/node/{{ plan.project }}/{{ h.qualified_name }}?at=reason:{{ h.reason_id }}" title="{{ h.node_key }}">{{ h.qualified_name.split('.')[-1] }} →</a>{% endif %}
+        <span>{{ h.evidence_level|say('evidence_level', lang) }}</span>
+        <span>{{ ui('recorded_by', lang) }} {{ h.recorded_by }}, {{ (h.recorded_at or '')[:10] }}</span>
+        {% if h.node_key %}<a class="text-brand-blue font-mono" href="/node/{{ plan.project }}/{{ h.qualified_name }}?at=reason:{{ h.reason_id }}" title="{{ h.node_key }}">{{ ui('open_node', lang) }}: {{ h.qualified_name.split('.')[-1] }} →</a>{% endif %}
         {% if h.recorded_in_plan %}
         <a class="text-brand-blue" href="/plan/{{ h.recorded_in_plan }}?node={{ h.qualified_name or '' }}&at=reason:{{ h.reason_id }}{% if h.recorded_in_step %}#step-{{ h.recorded_in_step }}{% endif %}"
-           title="{{ h.recorded_in_plan }}">回到当时的任务《{{ short_title({'plan_id': h.recorded_in_plan, 'original_goal': h.recorded_in_title}) }}》 →</a>
+           title="{{ h.recorded_in_plan }}">{{ ui('back_to_task', lang) }}: {{ short_title({'plan_id': h.recorded_in_plan, 'original_goal': h.recorded_in_title}) }} →</a>
         {% endif %}
       </div>
     </div>
@@ -171,7 +171,7 @@
              {% if viewing_plan_id %}open{% endif %}>
       <summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-gray-900
                       hover:bg-brand-bg rounded-xl select-none">
-        📝 Original Query <span class="text-xs text-brand-muted font-normal ml-2">(verbatim user prompt)</span>
+        📝 {{ ui('original_instruction', lang) }} <span class="text-xs text-brand-muted font-normal ml-2">({{ ui('verbatim', lang) }})</span>
       </summary>
       {# Task 3c: landing from a record marks exactly the span it cites, so you
          see WHICH words caused the decision rather than having to find them. #}
@@ -235,7 +235,7 @@
       📰 plan headline
       <span class="text-xs text-brand-muted font-normal ml-2">
         {{ headline.summary.targets }} targets · 2 layers · {{ headline.summary.blocking }} blocking · {{ headline.summary.warning }} warning · {{ headline.summary.info }} info
-        · <span class="{{ 'text-brand-red font-semibold' if headline.summary.unanswered else '' }}">{{ headline.summary.unanswered }} 未回答</span>
+        · <span class="{{ 'text-brand-red font-semibold' if headline.summary.unanswered else '' }}">{{ headline.summary.unanswered }} {{ 'unanswered' if lang != 'zh' else '未回应' }}</span>
         · {{ shown_adopted.plan.shown|length }} 展示过 · {{ shown_adopted.plan.adopted|length }} 采用了
       </span>
     </div>
@@ -243,15 +243,15 @@
       {% for f in headline.findings %}
       {% set focused = focus_node and (f.anchor == focus_node or (f.id and focus_node in f.id)) %}
       <div class="text-xs flex flex-wrap items-baseline gap-x-2 border-l-2 {{ 'border-brand-blue bg-[#eef4fc] rounded' if focused else 'border-hairline' }} pl-2" data-severity="{{ f.severity }}" data-tier="{{ f.tier }}" data-finding="{{ f.id }}"{% if focused %} data-focus="1"{% endif %}>
-        <span class="font-semibold {{ 'text-brand-red' if f.severity == 'blocking' else 'text-gray-700' }}">{{ '⚠' if f.severity == 'blocking' else '·' }} {{ f.severity }}</span>
+        <span class="font-semibold {{ 'text-brand-red' if f.severity == 'blocking' else 'text-gray-700' }}">{{ '⚠' if f.severity == 'blocking' else '·' }} {{ f.severity|say('severity', lang) }}</span>
         <span class="px-1.5 py-0.5 rounded bg-brand-bg text-[11px]">{{ f.tier }}</span>
         <span class="font-mono text-[11px] text-brand-muted">{{ f.id }}</span>
         <span class="text-gray-800">{{ f.text }}</span>
         {% if f.response %}
         <span class="text-[11px] text-brand-muted">→ {{ f.response.action }} ({{ f.response.by }}){% if f.response.rationale %} · {{ f.response.rationale }}{% endif %}</span>
-        {% if f.agent_proceeded %}<span class="text-[11px] px-1.5 rounded bg-[#fab219]/20 text-[#7a5200]" data-agent-proceeded="1">agent 越过</span>{% endif %}
+        {% if f.agent_proceeded %}<span class="text-[11px] px-1.5 rounded bg-[#fab219]/20 text-[#7a5200]" data-agent-proceeded="1">{{ 'agent proceeded' if lang != 'zh' else 'agent 已越过' }}</span>{% endif %}
         {% elif f.severity == 'blocking' %}
-        <span class="text-[11px] text-brand-red" data-unanswered-finding="1">未回答</span>
+        <span class="text-[11px] text-brand-red" data-unanswered-finding="1">{{ 'unanswered' if lang != 'zh' else '未回应' }}</span>
         {% endif %}
       </div>
       {% endfor %}
@@ -261,13 +261,13 @@
   </section>
   {% endif %}
 
-  {# Phase 3: 🧭 Reasons — why each changed data point changed, per node_key.
+  {# Phase 3: {{ ui('reasons_panel', lang) }} — why each changed data point changed, per node_key.
      Tier is a LABEL (data-tier + text), never colour alone (E3-1). #}
   {% if node_reasons %}
   <details class="bg-surface rounded-xl shadow-sm border border-hairline border-l-4 {{ 'border-l-brand-red' if unstated.unstated else 'border-l-brand-blue' }} mb-4"
            {% if unstated.unstated %}open{% endif %}>
     <summary class="cursor-pointer px-5 py-3 text-sm font-semibold text-gray-900 hover:bg-brand-bg rounded-xl select-none">
-      🧭 Reasons
+      {{ ui('reasons_panel', lang) }}
       <span class="text-xs text-brand-muted font-normal ml-2">
         ({{ node_reasons|length }} row{{ '' if node_reasons|length == 1 else 's' }} · {{ unstated.unstated }}/{{ unstated.slots }} unstated — stated by the agent, backstopped by the system, never invented)
       </span>

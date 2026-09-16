@@ -69,7 +69,9 @@ def test_every_enum_value_has_a_word_in_both_languages(kind, values, lang):
     from app import vocab
     for v in values:
         word = vocab.say(v, kind=kind, lang=lang)
-        assert word and word != v, f"{kind}.{v} has no {lang} word"
+        assert word, f"{kind}.{v} has no {lang} word"
+        # `unstated` is the agreed English word for itself — completeness is what
+        # this test is for, so it asks the table, not the string
         assert not vocab.is_fallback(v, kind=kind, lang=lang), f"{kind}.{v} fell back"
 
 
@@ -84,20 +86,26 @@ def test_the_five_tiers_still_read_as_five_different_things():
     from app import vocab
     words = {vocab.say(t, kind="tier") for t in TIERS}
     assert len(words) == 5, "two tiers translate to the same phrase — the distinction is gone"
-    assert vocab.say("stated", kind="tier") == "你的原话"
-    assert vocab.say("unstated", kind="tier") == "未说明"
+    assert vocab.say("stated", kind="tier") == "stated"
+    assert vocab.say("unstated", kind="tier") == "unstated"
+    assert vocab.say("stated", kind="tier", lang="zh") == "用户陈述"
 
 
 def test_the_quiet_events_say_they_are_folded():
     from app import vocab
-    assert vocab.say("node_matched", kind="event") == vocab.say("identity_kept", kind="event") == "无变化"
+    assert vocab.say("node_matched", kind="event") == vocab.say("identity_kept", kind="event") == "unchanged"
+    assert vocab.say("node_matched", kind="event", lang="zh") == "无变更"
 
 
-def test_counts_read_as_sentences():
+def test_counts_read_as_measurements_not_chatter():
+    """Professional register: a count states the measurement, it does not narrate."""
     from app import vocab
-    assert vocab.shown(3) == "被看到 3 次" and vocab.shown(0) == "没有被看到过"
-    assert vocab.adopted(2) == "改变了 2 次计划" and vocab.adopted(0) == "没有改变过任何计划"
-    assert "《任务标题》" in vocab.adopted_by("任务标题")
+    assert vocab.shown(3) == "Surfaced 3" and vocab.shown(0) == "Surfaced 0"
+    assert vocab.adopted(2) == "Adopted 2" and vocab.adopted(0) == "Adopted 0"
+    assert vocab.adopted_by("Drop the discount column") == "Adopted by plan Drop the discount column"
+    assert vocab.folded(16) == "Unchanged matches: 16"
+    assert vocab.shown(3, "zh") == "呈现 3 次" and vocab.adopted(2, "zh") == "被 2 个计划采纳"
+    assert vocab.adopted_by("下线 discount 列", "zh") == "被计划《下线 discount 列》采纳"
 
 
 # ── the filter and the switch ────────────────────────────────────────────────
@@ -107,11 +115,91 @@ def test_the_say_filter_is_available_to_every_template(client):
     assert "say" in main.TEMPLATES.env.filters
 
 
-def test_lang_en_switches_the_words(client):
-    zh = client.get("/graph/demo").text
-    en = client.get("/graph/demo?lang=en").text
-    assert "开工前的提醒" in zh or "记录" in zh
-    assert "开工前的提醒" not in en
+def test_english_is_the_default_and_zh_is_the_switch(client):
+    """The package is used in English; Chinese is available, not assumed."""
+    from app import vocab
+    assert vocab.DEFAULT_LANG == "en"
+    default = client.get("/node/demo/pkg.m.load_orders").text
+    zh = client.get("/node/demo/pkg.m.load_orders?lang=zh").text
+    assert "Change history" in default and "变更历史" not in default
+    assert "变更历史" in zh
+
+
+def test_the_agreed_english_register(client):
+    from app import vocab
+    # the ledger's own terms, used directly — and each label carries a one-line
+    # definition in its tooltip, because a label alone teaches nobody
+    for t in TIERS:
+        assert vocab.say(t, kind="tier") == t
+        assert vocab.define(t, kind="tier").startswith(t + ":")
+    for lv in LEVELS:
+        assert vocab.define(lv, kind="evidence_level")
+    assert vocab.say("task_context", kind="evidence_level") == "task-context"
+    assert vocab.say("blocking", kind="severity") == "Blocking"
+    assert vocab.say("warning", kind="severity") == "Warning"
+    assert vocab.say("info", kind="severity") == "Info"
+    assert vocab.say("constraint", kind="role") == "constraint"
+    assert vocab.say("rejected_path", kind="role") == "rejected alternative"
+    assert vocab.say("reason", kind="role") == "reason"
+    assert vocab.say("headline", kind="term") == "Findings"
+    assert vocab.say("influence", kind="term") == "Decisions relied on"
+
+
+def test_the_agreed_chinese_register(client):
+    from app import vocab
+    z = lambda v, k: vocab.say(v, kind=k, lang="zh")
+    assert z("observed", "tier") == "系统观测" and z("derived", "tier") == "系统推导"
+    assert z("asserted", "tier") == "模型断言" and z("unstated", "tier") == "未陈述"
+    assert z("blocking", "severity") == "需响应" and z("warning", "severity") == "需关注" and z("info", "severity") == "参考"
+    assert z("linked", "evidence_level") == "可核对链接" and z("verbal", "evidence_level") == "原话记录"
+    assert z("task_context", "evidence_level") == "仅任务上下文"
+    assert z("constraint", "role") == "生效约束" and z("rejected_path", "role") == "已否决方案"
+    assert z("reason", "role") == "变更原因"
+    assert z("headline", "term") == "计划前置检查"
+    assert z("influence", "term") == "依据的历史记录"
+
+
+def test_every_ui_phrase_exists_in_both_columns():
+    """The page strings live in the same table as the enums, so a phrase cannot
+    be added in one language and silently left English in the other."""
+    from app import vocab
+    assert vocab.UI, "no UI phrase table"
+    for key, row in vocab.UI.items():
+        for lang in LANGS:
+            assert row.get(lang), f"UI.{key} has no {lang} phrase"
+    for key in ("prior_decisions", "prior_decisions_empty", "active_constraints", "change_summary",
+                "change_history", "dependencies", "node_ledger", "read_only", "home", "history",
+                "skills_activated", "original_instruction", "context_estimate", "reduced_view",
+                "expand_full", "unchanged_matches", "no_match", "search_placeholder"):
+        assert key in vocab.UI, f"UI table is missing {key}"
+
+
+LANGS = ("en", "zh")
+
+
+COLLOQUIAL = ("因历史而变的决定", "还管着它的规矩", "走不通的路", "开工前的提醒", "必须回应",
+              "值得注意", "仅供参考", "被看到", "这条记录改变了", "最近发生了什么",
+              "一路怎么变的", "看它连着谁", "这个东西一路怎么变的", "系统观测到", "系统推出",
+              "agent 的判断", "你的原话", "有链接可查", "只有任务脉络", "无变化的匹配")
+
+LEFTOVER_ENGLISH = ("Back to Home", "Back to History", "Skills Activated",
+                    "Original Query", "verbatim user prompt", "approx_tokens", "plan headline")
+
+
+@pytest.mark.parametrize("lang", ["", "?lang=zh"])
+def test_no_colloquial_phrase_survives_in_either_language(client, lang):
+    for path in ("/graph/demo", "/node/demo/pkg.m.load_orders"):
+        prose = _prose(client.get(path + lang).text)
+        found = [w for w in COLLOQUIAL if w in prose]
+        assert found == [], f"{path}{lang} still reads colloquially: {found}"
+
+
+def test_the_leftover_english_chrome_is_gone(client):
+    pid = client._seeded["plan_id"]
+    for path in ("/", f"/plan/{pid}", "/history", "/graph/demo", "/node/demo/pkg.m.load_orders"):
+        prose = _prose(client.get(path).text)
+        found = [w for w in LEFTOVER_ENGLISH if w in prose]
+        assert found == [], f"{path} still shows raw chrome: {found}"
 
 
 # ── the machine attributes are untouched ─────────────────────────────────────
@@ -151,7 +239,11 @@ def test_no_node_key_is_shown_as_prose(client, path):
 
 @pytest.mark.parametrize("path", ["/graph/demo", "/node/demo/pkg.m.load_orders"])
 def test_no_bare_enum_token_is_shown_as_prose(client, path):
+    """Internal tokens only. `unstated` and `observed` are now parts of agreed
+    phrases (`unstated`, `system-observed`), so the match is on word boundaries
+    and the list is the words that are ONLY ever schema identifiers."""
     prose = _prose(client.get(path).text)
-    leaked = [w for w in ("observed", "asserted", "unstated", "read_hit", "influence",
-                          "headline_response", "evidence_level", "rejected_path") if w in prose]
+    leaked = [w for w in ("read_hit", "influence", "headline_response", "evidence_level",
+                          "rejected_path", "node_matched", "identity_kept", "change_reason")
+              if re.search(rf"\b{w}\b", prose)]
     assert leaked == [], f"{path} shows internal words to the reader: {leaked}"

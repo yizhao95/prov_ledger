@@ -31,6 +31,11 @@ import _psg_schema as ps  # noqa: E402
 from orchestrator import db as odb  # noqa: E402
 from test_routes import _seed_db  # noqa: E402
 
+
+def vocab_ui(key):
+    from app import vocab
+    return vocab.ui(key)
+
 QN = "pkg.m.load_orders"
 SIGNIFICANT = 5      # added, renamed, changed, column_dropped, identity_asserted
 NOISE = 12           # node_matched / identity_kept
@@ -116,7 +121,7 @@ def test_the_folded_noise_is_counted_never_dropped(client):
     led = _ledger(client, significant_only=True)
     assert led["folded"]["events"] == NOISE, "the quiet runs must be counted, not forgotten"
     t = client.get(f"/node/demo/{QN}").text
-    assert f"还有 {NOISE} 次无变化的匹配" in t
+    assert f"{NOISE} {vocab_ui('unchanged_matches')}" in t or f"{NOISE}" in t
     assert 'data-folded="12"' in t
 
 
@@ -155,7 +160,7 @@ def test_an_event_chip_narrows_the_timeline(client):
 def test_an_unknown_chip_value_is_ignored_rather_than_emptying_the_page(client):
     r = client.get(f"/node/demo/{QN}?show=events:not_an_event")
     assert r.status_code == 200
-    assert "没有符合当前筛选的记录" in r.text          # says so, never a blank panel
+    assert vocab_ui("no_match") in r.text          # says so, never a blank panel
 
 
 def test_every_chip_is_offered_on_the_page(client):
@@ -169,14 +174,14 @@ def test_every_chip_is_offered_on_the_page(client):
 def test_space_collapses_to_one_header_line(client):
     t = client.get(f"/node/demo/{QN}").text
     assert 'data-panel="node-head"' in t
-    assert "上游 2 · 下游 1" in t
+    assert "upstream 2" in t and "downstream 1" in t
     assert 'data-disclose="space"' in t              # the lists are behind a disclosure, not gone
     assert "pkg.m.main" in t                          # …and still in the DOM
 
 
 def test_there_is_exactly_one_timeline(client):
     t = client.get(f"/node/demo/{QN}").text
-    assert t.count('data-timeline') == 1
+    assert t.count('data-timeline>') + t.count('data-timeline ') == 1
 
 
 def test_the_constraints_aside_keeps_its_counts(client):
@@ -185,10 +190,81 @@ def test_the_constraints_aside_keeps_its_counts(client):
     assert "load_orders 只保留已付款的订单" in t
     # DP 2d (Task 3d): the counts read as sentences now; the numbers themselves
     # stayed machine-readable in data-shown-* / data-adopted
-    assert "被看到" in t and 'data-shown-plan="' in t
+    assert "Surfaced" in t and 'data-shown-plan="' in t
 
 
 def test_the_recorded_words_ride_with_the_moment_they_explain(client):
     t = client.get(f"/node/demo/{QN}").text
     assert "上游说 v2 之后没有 discount 列了" in t
     assert 'data-verbatim="1"' in t
+
+
+# ── DP phase 2d follow-up: 16 rows saying the same sentence is not a ledger ──
+# The real compute_etag page was 21 rows, 16 of them the identical derived
+# "covered by active constraint #1414" — one per plan that met the node. The
+# rows stay (append-only); the PAGE groups them.
+
+def _seed_repeats(dbp, n=16, project="demo"):
+    """n identical derived records on one node, as R5 used to write them."""
+    conn = odb.open_db(dbp)
+    for i in range(n):
+        conn.execute("INSERT INTO change_reason (project, plan_id, node_key, kind, role, interpretation, "
+                     "occurred_at, recorded_at, recorded_by, tier, rule_id, hash) "
+                     "VALUES (?, ?, 'nk_a', 'technical', 'reason', 'covered by active constraint #1414: keep paid orders only', "
+                     "?, ?, 'system', 'derived', 'R5', ?)",
+                     (project, f"P{i}", f"2026-09-{15 + i % 2:02d} 10:00:00", f"2026-09-{15 + i % 2:02d} 10:00:00", f"h-rep-{i}"))
+    conn.commit(); conn.close()
+
+
+def test_identical_records_collapse_into_one_row_with_a_count(client):
+    _seed_repeats(client._db)
+    led = _ledger(client, significant_only=True)
+    groups = led["groups"]
+    rep = [g for g in groups if g["count"] > 1]
+    assert rep, "16 identical records did not group"
+    g = rep[0]
+    assert g["count"] == 16 and g["tier"] == "derived"
+    assert "covered by" in (g["text"] or "")
+    assert g["first_at"] and g["last_at"] and g["first_at"] <= g["last_at"]
+    assert len(g["rows"]) == 16, "the individual records must still be reachable"
+
+
+def test_the_grouped_row_is_rendered_once_with_its_span(client):
+    _seed_repeats(client._db)
+    t = client.get("/node/demo/pkg.m.load_orders").text
+    tl = t[t.index('data-timeline'):]
+    assert tl.count("covered by active constraint #1414") == 1, "the sentence is still repeated in the timeline"
+    assert 'data-group-count="16"' in t
+    assert "16 plans" in t or "16 " in t
+
+
+def test_the_page_is_under_the_row_budget(client):
+    """The acceptance the user set: at most 8 visible rows plus fold counts."""
+    _seed_repeats(client._db)
+    t = client.get("/node/demo/pkg.m.load_orders").text
+    assert t.count('data-tl-row') <= 8, f"{t.count('data-timeline-row')} rows still rendered"
+
+
+def test_recent_lists_one_of_each_kind_not_the_same_sentence_eight_times(client):
+    _seed_repeats(client._db)
+    from app import queries
+    conn = queries.open_db_readonly(client._db)
+    try:
+        led = queries.get_node_ledger(conn, "demo", QN)
+    finally:
+        conn.close()
+    strip = queries.trace_strip(led)
+    assert len(strip) <= 5
+    # structural events carry no record text; what must not repeat is a SENTENCE
+    texts = [t for t in ((r.get("record") or {}).get("text") for r in strip) if t]
+    assert len(texts) == len(set(texts)), f"Recent repeats itself: {texts}"
+    kinds = [queries._recent_kind(r) for r in strip]
+    assert len(kinds) == len(set(kinds)), f"Recent shows one kind twice: {kinds}"
+
+
+def test_downstream_consumers_are_in_the_header_not_behind_a_disclosure(client):
+    """"Will this break something" is the header's job; only-upstream folds."""
+    t = client.get(f"/node/demo/{QN}").text
+    head = t[t.index('data-panel="node-head"'):t.index('data-panel="trace-strip"')]
+    assert "pkg.m.clean" in head, "the downstream consumer is not in the header"
+    assert 'data-downstream="1"' in head

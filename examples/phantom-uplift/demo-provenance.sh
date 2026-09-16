@@ -35,8 +35,8 @@ WP="$REPO_ROOT/skills/writing-plans/scripts"
 EP="$REPO_ROOT/skills/executing-plans/scripts"
 PSG="$REPO_ROOT/skills/project-state-graph/scripts"
 
-VERBATIM='收到上游通知，v2 以后不再有 discount 列'
-EMAIL_LABEL='Re: orders feed v2 schema（演示）'
+VERBATIM='Drop orders.discount from the rollup — upstream said the v2 feed no longer carries it'
+EMAIL_LABEL='Re: orders feed v2 schema (demo)'
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
@@ -93,7 +93,7 @@ bash "$PSG/init_project.sh" --name "$PROJECT" --repo "$SRC" --out-dir "$OUT" >"$
 say "3/6  task A — a person removes orders.discount and records WHY, with the email"
 cat > "$DEMO_HOME/plan-a.json" <<JSONEOF
 {
-  "goal": "下线 orders.discount：上游 v2 不再提供这一列",
+  "goal": "Drop orders.discount: the v2 upstream feed no longer provides it",
   "prefix": "demo-task-a",
   "project": "$PROJECT",
   "user_query": "$VERBATIM",
@@ -136,8 +136,8 @@ from orchestrator import constraints as oc, db as odb
 conn = odb.open_db(sys.argv[1]); odb.run_migrations(conn)
 oc.record_constraint(conn, project=sys.argv[2],
                      subjects=["pkg.tiles.dashboard_tile", "pkg.rollup.load_orders"],
-                     statement="\u4e0d\u8981\u518d\u4f9d\u8d56 orders.discount\uff1a\u4e0a\u6e38 v2 \u4e4b\u540e\u4e0d\u518d\u63d0\u4f9b\u8fd9\u4e00\u5217",
-                     rationale="\u4e0a\u6e38\u90ae\u4ef6\u901a\u77e5\uff0cv2 schema \u5df2\u53d1\u5e03",
+                     statement="Do not depend on orders.discount: the v2 upstream feed no longer provides it",
+                     rationale="Upstream notified by email; the v2 schema is published",
                      why_ref=sys.argv[3], why_visibility="shared")
 conn.commit(); conn.close()
 PYX
@@ -158,7 +158,7 @@ print(r[0] if r else "")
 PYEOF
 )"
 cat > "$DEMO_HOME/done-a.json" <<JSONEOF
-{"step_id": "$STEP_A", "type": "CODE", "summary": "discount 列下线", "log_context": "v2: discount is gone upstream"}
+{"step_id": "$STEP_A", "type": "CODE", "summary": "discount column dropped", "log_context": "v2: discount is gone upstream"}
 JSONEOF
 bash "$EP/complete-step.sh" "$DEMO_HOME/done-a.json" >/dev/null 2>&1 || true
 
@@ -166,10 +166,10 @@ bash "$EP/complete-step.sh" "$DEMO_HOME/done-a.json" >/dev/null 2>&1 || true
 say "5/6  task B — an agent plans to use it again; the heads-up carries the rule and the words"
 cat > "$DEMO_HOME/plan-b.json" <<JSONEOF
 {
-  "goal": "给周报加一个折扣率指标",
+  "goal": "Add a discount-rate metric to the weekly report",
   "prefix": "demo-task-b",
   "project": "$PROJECT",
-  "user_query": "周报里加个折扣率，用 orders 的 discount 除以 amount",
+  "user_query": "Add a discount rate to the weekly report: orders.discount over amount",
   "declared_targets": ["pkg.tiles.dashboard_tile"],
   "skills": [{"name": "writing-plans", "source": "iron-law"}],
   "steps": [{"description": "CODE: add discount_rate back onto the weekly rollup", "type": "CODE"}]
@@ -202,7 +202,7 @@ if [[ -n "$FINDING" ]]; then
 import json, sys
 f = json.loads(sys.argv[1])
 json.dump({"plan_id": sys.argv[2], "finding_id": f["id"], "action": "revise",
-           "rationale": "discount 列已经下线，改用 list_price - amount 估算，先不发这个指标",
+           "rationale": "discount is gone upstream; estimate from list_price - amount instead and hold the metric",
            "cites": f["cites"], "by": "agent"}, open(sys.argv[3], "w"), ensure_ascii=False)
 PYEOF
   bash "$EP/headline-respond.sh" "$DEMO_HOME/respond.json" >/dev/null
@@ -222,15 +222,15 @@ PYEOF
 )"
 cat > "$DEMO_HOME/urls.txt" <<URLEOF
 
-Look at it in this order (the dashboard reads \$ORCH_DB):
+Read in this order (the dashboard reads \$ORCH_DB):
 
-  1. the agent's task, and what history changed about it
+  1. Task B — the agent's plan, and the decisions it relied on
      /plan/$PLAN_B?node=$NODE&at=reason:$REASON
-  2. the thing itself — when the column went, and why
+  2. Node — when the column went, and the reason recorded at the time
      /node/$PROJECT/$NODE?at=reason:$REASON
-  3. the person's task, with their words and the email
+  3. Task A — the person's plan, their words and the email
      /plan/$PLAN_A?node=$NODE&at=reason:$REASON
-  4. the map, reduced to what has a story
+  4. Graph — reduced view, nodes with records
      /graph/$PROJECT?mode=story
 
   ORCH_DB=$ORCH_DB

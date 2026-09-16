@@ -123,10 +123,27 @@ rather than the decoration:
   something was shown, never that anyone read it, and a design that merges the
   two numbers is asserting something the ledger refuses to assert.
 
-## Plain language
+## Wording
 
-`orchestrator-webapp/app/vocab.py` maps the ledger's tokens to the words a
-person reads (`?lang=en` switches). The rule is that the machine attributes —
-`data-tier`, `data-severity`, `data-role` and the count attributes — keep the
-ledger's own tokens, so the wording can change without the ETag, the test suite
-or anyone reading the page as data noticing.
+`orchestrator-webapp/app/vocab.py` is the one table the page reads its words
+from. English is the default; `?lang=zh` switches.
+
+The register is an audit surface's: professional, precise, restrained. Short
+nouns, no explanatory sentences, and the ledger's own terms used directly —
+`observed`, `derived`, `asserted`, `stated`, `unstated` are already the precise
+words, so they are the labels, with a one-line definition in the tooltip
+(`vocab.define`). A count states a measurement: `Surfaced 3 · Adopted 2`, not a
+story about who looked at what.
+
+Two rules the suite enforces:
+
+- **every value has an entry in both columns** — a phrase added in one language
+  and left untranslated in the other fails `test_every_ui_phrase_exists_in_both_columns`;
+- **machine attributes keep the ledger's token.** `data-tier="asserted"` stays
+  `asserted` in every language, so the wording can change without the ETag, the
+  test suite or anyone reading the page as data noticing.
+
+An earlier draft of this table overcorrected into conversational Chinese
+("因历史而变的决定", "还管着它的规矩"). That is the failure mode to avoid in both
+directions: a page that chats is as unusable for audit as a page that only
+prints column names.

@@ -21,6 +21,11 @@ sys.path.insert(0, str(ORCH_BACKEND))
 from orchestrator import api, db as odb  # noqa: E402
 
 
+def vocab_ui(key):
+    from app import vocab
+    return vocab.ui(key)
+
+
 def _seed_db(path: Path) -> dict:
     conn = odb.open_db(path)
     odb.run_migrations(conn)
@@ -240,7 +245,7 @@ def _insert_reasons(db_path, plan_id):
 def test_e3_1_tier_badges_distinct_without_color(client):
     _insert_reasons(client._db, client._seeded["plan_id"])
     r = client.get("/api/dashboard")
-    assert r.status_code == 200 and "🧭 Reasons" in r.text
+    assert r.status_code == 200 and vocab_ui("reasons_panel") in r.text
     for tier in ("derived", "asserted", "stated", "unstated"):
         assert f'data-tier="{tier}"' in r.text and f">{tier}<" in r.text, tier
     assert "— unstated —" in r.text and "nk_uns" in r.text and 'data-source-level="verbal"' in r.text
@@ -475,7 +480,7 @@ def test_node_page_shows_space_time_and_reasons_in_one_query(client, tmp_path, m
     assert "renamed so the name says which table it reads" in t and 'data-tier="stated"' in t and 'data-tier="unstated"' in t
     assert "load_orders must keep paid orders only" in t and "finance reconciles on paid orders" in t
     assert "never read the raw orders table in prod" in t and "ticket SEC-42" in t and "SECRET-RATIONALE" not in t
-    assert "approx_tokens" in t
+    assert vocab_ui("context_estimate") in t
     from app import queries
     conn = odb.open_db(client._db)
     ledger = queries.get_node_ledger(conn, "demo", "pkg.m.load_orders")
@@ -528,10 +533,10 @@ def test_reasons_panel_shows_source_level_for_migrated_and_new_rows(client):
     pv.insert_reason(conn, project="demo", plan_id=pid, node_key="nk_gap", kind="technical", recorded_by="system")
     conn.close()
     r = client.get("/api/dashboard")
-    assert r.status_code == 200 and "🧭 Reasons" in r.text
+    assert r.status_code == 200 and vocab_ui("reasons_panel") in r.text
     # DP 2d (Task 3d): the node page says the level in plain words ("有链接可查"),
     # the plan panels still print the 来源等级 prefix; both are the same column.
-    assert ("来源等级" in r.text or "有原话" in r.text) and "证据等级" not in r.text
+    assert ("linked" in r.text or "verbal" in r.text or "task-context" in r.text) and "证据等级" not in r.text
     assert 'data-tier="asserted"' in r.text and "legacy sentence written as stated" in r.text      # migrated: asserted, not stated
     assert 'data-tier="stated"' in r.text and 'data-source-level="verbal"' in r.text
     assert 'data-tier="unstated"' in r.text and 'data-source-level="unstated"' in r.text
@@ -555,7 +560,7 @@ def test_node_page_constraints_come_from_change_reason(client, tmp_path, monkeyp
     assert "never read the raw orders table in prod" in r.text and "ticket SEC-42" in r.text and "SECRET-RATIONALE" not in r.text
     # DP 2d (Task 3d): the node page says how checkable the source is in plain
     # words instead of printing the column name — same column, a reader's phrasing
-    assert ("有链接可查" in r.text or "有原话" in r.text or "只有任务脉络" in r.text or "未说明" in r.text)
+    assert ("linked" in r.text or "verbal" in r.text or "task-context" in r.text or "unstated" in r.text)
     from app import queries
     conn = odb.open_db(client._db)
     ledger = queries.get_node_ledger(conn, "demo", "pkg.m.load_orders")
@@ -604,7 +609,7 @@ def test_headline_block_shows_findings_with_severity_and_the_unanswered_count(cl
     assert 'data-panel="headline"' in html and 'data-unanswered="1"' in html and 'data-findings="3"' in html
     assert html.count('data-severity="blocking"') == 2 and html.count('data-severity="warning"') == 1
     assert 'data-tier="stated"' in html and 'data-agent-proceeded="1"' in html and 'data-unanswered-finding="1"' in html
-    assert "→ proceed (agent) · the filter moves downstream" in html and "未回答" in html and "provledger why pkg.m.load_orders --all" in html
+    assert "→ proceed (agent) · the filter moves downstream" in html and "unanswered" in html and "provledger why pkg.m.load_orders --all" in html
     assert "2 展示过 · 0 采用了" in html                                # plan-level buckets (the step's rows are the step's)
 
 
@@ -630,7 +635,7 @@ def test_node_page_hit_counts_per_moment_and_the_adopting_plan_backlink(client, 
     # replaced "被 <plan> 采用" with the sentence a person would say, and moved the
     # plan id into title= (layout spec 8).
     assert f'href="/plan/{pid}?node=pkg.m.load_orders&at=reason:{ids["cid"]}" title="{pid}"' in html
-    assert "这条记录改变了" in html and "的计划" in html
+    assert "Adopted by plan" in html
     assert f'data-stats="{ids["rid"]}" data-shown-plan="1" data-shown-edit="0" data-shown-why="0" data-adopted="0"' in html
     hi = client.get(f"/node/demo/nk_a?at=reason:{ids['cid']}").text
     assert f'data-record="{ids["cid"]}" data-at="1"' in hi and hi.count(' data-record="') == hi.count('data-record="') and f'data-record="{ids["rid"]}" data-at="1"' not in hi   # only the asked record (the view bar carries its own data-at, DP 2b)

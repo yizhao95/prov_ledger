@@ -42,6 +42,7 @@ TEMPLATES.env.globals["tier_badge"] = queries.tier_badge
 # tokens for display; every data-* attribute keeps the token itself.
 TEMPLATES.env.filters["say"] = lambda token, kind="term", lang="zh": vocab.say(token, kind=kind, lang=lang)
 TEMPLATES.env.globals["vocab"] = vocab
+TEMPLATES.env.globals["ui"] = vocab.ui
 
 app = FastAPI(title="provLedger Dashboard", version="0.1.0")
 # DP phase 2d (Task 1): the generated tokens.js the chrome reads. StaticFiles
@@ -361,6 +362,32 @@ def session_card(request: Request, session_id: str):
     return TEMPLATES.TemplateResponse(request, "session.html", ctx)
 
 
+# Removing the node cap must not move the cost from the picture to the payload:
+# a clustered page carries the cluster summaries and the minimum each node needs
+# to be drawn and expanded, not 1601 full records.
+COMPACT_NODE_FIELDS = ("node_key", "qualified_name", "node_type", "level", "badge", "tier")
+
+
+def graph_payload(graph: dict) -> dict:
+    nodes, edges = graph["nodes"], graph["edges"]
+    clusters = graph.get("clusters") or []
+    if clusters:
+        nodes = [{k: n[k] for k in COMPACT_NODE_FIELDS if k in n} for n in nodes]
+        # module-to-module flow, aggregated. 1601 nodes drag ~12k edges behind
+        # them and that is most of the payload; a clustered picture is about
+        # which module feeds which, and the per-node detail is one click away in
+        # the focused view — which the page says rather than leaving it implied.
+        of = {m: f"cluster:{c['key']}" for c in clusters for m in c["members"]}
+        weights: dict[tuple[str, str], int] = {}
+        for e in edges:
+            a, b = of.get(e["src_key"]), of.get(e["dst_key"])
+            if a and b and a != b:
+                weights[(a, b)] = weights.get((a, b), 0) + 1
+        edges = [{"src_key": a, "dst_key": b, "weight": w} for (a, b), w in sorted(weights.items())]
+    return {"nodes": nodes, "edges": edges, "clusters": clusters,
+            "layout": graph.get("layout", "physics")}
+
+
 @app.get("/graph/{project}", response_class=HTMLResponse)
 def graph_view(request: Request, project: str, focus: str | None = None, at: str | None = None,
                level: str = "functions", mode: str | None = None):
@@ -376,9 +403,10 @@ def graph_view(request: Request, project: str, focus: str | None = None, at: str
     empty = {"available": False, "reason": None, "nodes": [], "edges": [], "runs": [], "run": None, "level": level,
              "badged": 0, "focus": focus or None, "mode": resolved, "total_nodes": 0, "mode_total": 0, "truncated": False,
              "focus_found": False, "at_reason": None, "at_kind": at_parsed["kind"], "at_id": at_parsed["id"],
-             "hops": queries.NEIGHBOURHOOD_HOPS, "edges_from": "none", "story_keys": 0}
+             "hops": queries.NEIGHBOURHOOD_HOPS, "edges_from": "none", "story_keys": 0,
+             "clusters": [], "layout": "physics"}
     ctx = {"request": request, "error": None, "project": project, "focus": focus or None, "graph": None, "graph_json": "{}",
-           "mode": resolved, "level": level, "max_nodes": queries.MODE_MAX_NODES, "lang": _lang(request),
+           "mode": resolved, "level": level, "lang": _lang(request),
            "bar": queries.view_bar("graph", queries.triple(project, focus, at))}
     try:
         conn = queries.open_db_readonly()
@@ -388,7 +416,7 @@ def graph_view(request: Request, project: str, focus: str | None = None, at: str
         return TEMPLATES.TemplateResponse(request, "graph.html", ctx)
     try:
         ctx["graph"] = queries.get_graph(conn, project, at=at, level=level, focus=focus, mode=mode)
-        ctx["graph_json"] = _json.dumps({"nodes": ctx["graph"]["nodes"], "edges": ctx["graph"]["edges"]}, default=str)
+        ctx["graph_json"] = _json.dumps(graph_payload(ctx["graph"]), default=str)
     except sqlite3.Error as e:
         ctx["error"] = f"database error: {e}"
         ctx["graph"] = {**empty, "reason": ctx["error"]}

@@ -27,8 +27,8 @@ import pytest
 REPO = Path(__file__).resolve().parents[3]
 SCRIPT = REPO / "examples" / "phantom-uplift" / "demo-provenance.sh"
 WALKTHROUGH = REPO / "scripts" / "demo-walkthrough.py"
-VERBATIM = "收到上游通知，v2 以后不再有 discount 列"
-EMAIL_LABEL = "Re: orders feed v2 schema（演示）"
+VERBATIM = "Drop orders.discount from the rollup — upstream said the v2 feed no longer carries it"
+EMAIL_LABEL = "Re: orders feed v2 schema (demo)"
 
 
 def _run(workspace: Path) -> subprocess.CompletedProcess:
