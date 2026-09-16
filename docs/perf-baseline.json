@@ -1,25 +1,25 @@
 {
  "calls_per_step": {
-  "median": null,
-  "n": 0,
-  "p90": null
+  "median": 4.2222,
+  "n": 8,
+  "p90": 8.8024
  },
- "generated_at": "2026-09-16T08:20:45Z",
- "n_measured": 0,
- "n_plans": 93,
- "n_proxy": 93,
+ "generated_at": "2026-09-16T19:38:45Z",
+ "n_measured": 8,
+ "n_plans": 102,
+ "n_proxy": 94,
  "overhead": {
   "context_overhead_tokens": {
    "median": 0.0,
-   "n": 93,
-   "p90": 1508.0
+   "n": 102,
+   "p90": 1576.2
   },
-  "n_measured": 0,
-  "n_plans": 93,
+  "n_measured": 8,
+  "n_plans": 102,
   "overhead_ratio": {
-   "median": null,
-   "n": 0,
-   "p90": null
+   "median": 0.0,
+   "n": 8,
+   "p90": 0.0443
   },
   "plans": {
    "dp-t0-20260915161334": {
@@ -183,6 +183,60 @@
     "overhead_ratio": null,
     "provenance_ratio": null,
     "total_calls": 0
+   },
+   "dp2b-t6-20260916082001": {
+    "context_overhead_tokens": 722,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2d-t0-20260916150040": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": 0.0311,
+    "provenance_ratio": 0.0052,
+    "total_calls": 193
+   },
+   "dp2d-t1-20260916161727": {
+    "context_overhead_tokens": 755,
+    "overhead_ratio": 0.0,
+    "provenance_ratio": 0.0,
+    "total_calls": 40
+   },
+   "dp2d-t2-20260916163712": {
+    "context_overhead_tokens": 1625,
+    "overhead_ratio": 0.0,
+    "provenance_ratio": 0.0,
+    "total_calls": 17
+   },
+   "dp2d-t3-20260916165632": {
+    "context_overhead_tokens": 1439,
+    "overhead_ratio": 0.0,
+    "provenance_ratio": 0.0,
+    "total_calls": 23
+   },
+   "dp2d-t3b-20260916171903": {
+    "context_overhead_tokens": 1104,
+    "overhead_ratio": 0.0,
+    "provenance_ratio": 0.0,
+    "total_calls": 29
+   },
+   "dp2d-t3c-20260916174956": {
+    "context_overhead_tokens": 1636,
+    "overhead_ratio": 0.0,
+    "provenance_ratio": 0.0,
+    "total_calls": 24
+   },
+   "dp2d-t3d-20260916181418": {
+    "context_overhead_tokens": 639,
+    "overhead_ratio": 0.0,
+    "provenance_ratio": 0.0,
+    "total_calls": 20
+   },
+   "dp2d-t5-20260916184337": {
+    "context_overhead_tokens": 983,
+    "overhead_ratio": 0.075,
+    "provenance_ratio": 0.05,
+    "total_calls": 40
    },
    "hist-p1-t1-20260904210010": {
     "context_overhead_tokens": 0,
@@ -582,15 +636,56 @@
    }
   },
   "provenance_ratio": {
-   "median": null,
-   "n": 0,
-   "p90": null
+   "median": 0.0,
+   "n": 8,
+   "p90": 0.0186
   }
  },
- "plans": {},
+ "plans": {
+  "dp2d-t0-20260916150040": {
+   "calls_per_step": 13.7857,
+   "steps": 14,
+   "tool_calls": 193
+  },
+  "dp2d-t1-20260916161727": {
+   "calls_per_step": 6.6667,
+   "steps": 6,
+   "tool_calls": 40
+  },
+  "dp2d-t2-20260916163712": {
+   "calls_per_step": 2.4286,
+   "steps": 7,
+   "tool_calls": 17
+  },
+  "dp2d-t3-20260916165632": {
+   "calls_per_step": 3.2857,
+   "steps": 7,
+   "tool_calls": 23
+  },
+  "dp2d-t3b-20260916171903": {
+   "calls_per_step": 4.8333,
+   "steps": 6,
+   "tool_calls": 29
+  },
+  "dp2d-t3c-20260916174956": {
+   "calls_per_step": 4.0,
+   "steps": 6,
+   "tool_calls": 24
+  },
+  "dp2d-t3d-20260916181418": {
+   "calls_per_step": 3.3333,
+   "steps": 6,
+   "tool_calls": 20
+  },
+  "dp2d-t5-20260916184337": {
+   "calls_per_step": 4.4444,
+   "steps": 9,
+   "tool_calls": 40
+  }
+ },
  "proxy_calls_per_step": {
   "median": 1.8571,
-  "n": 93,
+  "n": 94,
   "p90": 2.125
  },
  "since": null,
@@ -598,8 +693,8 @@
   "assistant_turns": 10,
   "context_tokens_total": 266393,
   "measured_at": "2026-09-15",
-  "method": "one headless session per run: `claude -p --output-format stream-json --permission-mode acceptEdits --settings '{\"enabledPlugins\": {\"provledger@provledger\": false}}'` in a scratch copy of examples/phantom-uplift (not a registered repo; ORCH_DB pointed at a file that was never created \u2014 the provledger hooks did not fire), superpowers left on; the task: add weekly_totals(orders) to gen_upstream.py, write tests/test_weekly_totals.py with two cases, run pytest. tool_uses = assistant tool_use blocks in the transcript; tokens = summed message.usage over assistant turns (input + cache_read + cache_creation).",
-  "note": "a reference number, never an assertion \u2014 three runs of the same task ranged 5..26 tool calls on permission and interpreter friction alone; re-measure by hand once per version",
+  "method": "one headless session per run: `claude -p --output-format stream-json --permission-mode acceptEdits --settings '{\"enabledPlugins\": {\"provledger@provledger\": false}}'` in a scratch copy of examples/phantom-uplift (not a registered repo; ORCH_DB pointed at a file that was never created — the provledger hooks did not fire), superpowers left on; the task: add weekly_totals(orders) to gen_upstream.py, write tests/test_weekly_totals.py with two cases, run pytest. tool_uses = assistant tool_use blocks in the transcript; tokens = summed message.usage over assistant turns (input + cache_read + cache_creation).",
+  "note": "a reference number, never an assertion — three runs of the same task ranged 5..26 tool calls on permission and interpreter friction alone; re-measure by hand once per version",
   "reference_run": 3,
   "runs": [
    {
@@ -650,8 +745,8 @@
   "tool_calls": 5
  },
  "wall_per_step": {
-  "median": null,
-  "n": 0,
-  "p90": null
+  "median": 216.25,
+  "n": 8,
+  "p90": 309.8381
  }
 }
