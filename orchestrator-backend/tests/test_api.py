@@ -220,3 +220,19 @@ def test_invalid_transition_pending_to_completed_via_helper(conn):
     sid = r["step_ids"][0]
     with pytest.raises(InvalidTransitionError):
         api.complete_step(conn, sid)  # still PENDING
+
+
+# ── DP phase 2b Task 4b: plan ids never collide inside one second ──
+
+def test_two_plans_in_the_same_second_get_distinct_ids(conn, monkeypatch):
+    """publish-plan twice within the same second (a suite under load, or a script) used to
+    raise UNIQUE constraint failed: Plans.plan_id — the id is prefix + YYYYmmddHHMMSS.
+    A taken id now gets a -2, -3 … suffix; nothing else changes."""
+    from orchestrator import api
+    monkeypatch.setattr(api, "_now_compact", lambda: "20260916120000")
+    a = api.initialize_plan(conn, "g", ["s1"], plan_id_prefix="p")["plan_id"]
+    b = api.initialize_plan(conn, "g", ["s1"], plan_id_prefix="p")["plan_id"]
+    c = api.initialize_plan(conn, "g", ["s1"], plan_id_prefix="p")["plan_id"]
+    assert (a, b, c) == ("p-20260916120000", "p-20260916120000-2", "p-20260916120000-3")
+    assert conn.execute("SELECT COUNT(*) FROM Plans WHERE plan_id LIKE 'p-20260916120000%'").fetchone()[0] == 3
+    assert conn.execute("SELECT COUNT(*) FROM Steps WHERE plan_id = ?", (b,)).fetchone()[0] == 1

@@ -73,6 +73,13 @@ def initialize_plan(
     if not initial_steps:
         raise ValueError("initial_steps must contain at least 1 step")
     plan_id = f"{plan_id_prefix}-{_now_compact()}"
+    # DP phase 2b (Task 4b): the id has one-second resolution; a second plan in the
+    # same second (a suite under load, a script) takes a -2, -3 … suffix instead of
+    # failing on UNIQUE
+    base, n = plan_id, 1
+    while conn.execute("SELECT 1 FROM Plans WHERE plan_id = ?", (plan_id,)).fetchone():
+        n += 1
+        plan_id = f"{base}-{n}"
     db.insert_plan(conn, plan_id, original_goal, max_revisions=max_revisions, user_query=user_query,
                    project=project, project_source=project_source)
     step_ids = []
