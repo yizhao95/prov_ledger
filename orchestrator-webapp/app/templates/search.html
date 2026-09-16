@@ -27,7 +27,7 @@
   {% for g in groups %}
   <div class="mb-4" data-group="{{ g.node_key }}">
     <div class="text-[11px] uppercase tracking-wide text-brand-muted font-mono">
-      <a class="text-brand-blue" href="/node/{{ g.project }}/{{ g.node_key }}">{{ g.node_key }}</a>
+      <a class="text-brand-blue" href="/node/{{ g.project }}/{{ g.node_key }}" title="{{ g.node_key }}">{{ g.qualified_name or g.node_key }}</a>
     </div>
     {% for h in g.hits %}
     {% set tb = tier_badge(h.tier) %}

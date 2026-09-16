@@ -300,6 +300,8 @@ NEIGHBOURHOOD_MAX_NODES = 400
 # 1601-node selection, which is not a reduced view but a wrong one: the count in
 # the corner said 1601 and the picture showed 200.
 CLUSTER_ABOVE = 600
+# past this many nodes on one level, the level is split into sub-rows by module
+CROWDED_LEVEL = 12
 # level 0 of the data-flow layout: where data comes from
 SOURCE_TYPES = ("sql_table", "bq_dataset", "api_source", "dataset", "file")
 # story / data pick their nodes from the whole project rather than from one
@@ -362,7 +364,7 @@ def _neighbourhood(nodes: list[dict], edges: list[dict], focus: str,
 def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "functions",
              mode: str = "full", focus: str | None = None, hops: int = NEIGHBOURHOOD_HOPS,
              story_keys=None, max_nodes: int | None = None,
-             cluster_above: int = CLUSTER_ABOVE) -> dict:
+             cluster_above: int = CLUSTER_ABOVE, crowd: int = CROWDED_LEVEL) -> dict:
     """{nodes: [{node_key, qualified_name, node_type, file_path}], edges: [{src_key, dst_key, edge_type}],
     run_id, edges_from, level, mode, total_nodes, mode_total, truncated, focus_key, focus_found, hops}.
 
@@ -448,6 +450,7 @@ def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "f
     # clusters' node counts add up to exactly what the mode selected.
     layout = "physics" if mode == "full" else "hierarchical"
     _assign_levels(nodes, edges, focus_key if mode == "focus" else None)
+    _split_crowded_levels(nodes, crowd)
     clusters = _cluster_by_module(nodes, edges) if len(nodes) > cluster_above else []
     return {"nodes": nodes, "edges": edges, "run_id": run, "edges_from": "latest" if run != latest_run else "run",
             "latest_run_id": latest_run, "level": level, "mode": mode, "focus": focus or None,
@@ -546,6 +549,29 @@ def _assign_levels(nodes: list[dict], edges: list[dict], focus_key: str | None =
             level[k] = (min(preds) + 1) if preds else 0
     for k, n in by_key.items():
         n["level"] = int(level.get(k, 0))
+
+
+def _split_crowded_levels(nodes: list[dict], crowd: int = CROWDED_LEVEL) -> None:
+    """Give every node `level * 10 + sub-row`, splitting a crowded level by module.
+
+    A level holding 25 nodes is 4500px wide and renders as a smear whatever the
+    zoom. Splitting it by module keeps the band's meaning (same depth) while
+    giving the nodes somewhere to go, and grouping by module means the sub-rows
+    are not arbitrary — they are the thing the nodes have in common."""
+    bands: dict[int, list[dict]] = {}
+    for n in nodes:
+        bands.setdefault(int(n.get("level", 0)), []).append(n)
+    for level, members in bands.items():
+        if len(members) <= crowd:
+            for n in members:
+                n["level"] = level * 10
+            continue
+        by_mod: dict[str, list[dict]] = {}
+        for n in members:
+            by_mod.setdefault(subsystem_of(n.get("file_path")), []).append(n)
+        for row, mod in enumerate(sorted(by_mod, key=lambda m: (-len(by_mod[m]), m))):
+            for n in by_mod[mod]:
+                n["level"] = level * 10 + min(row, 9)
 
 
 def latest_tier_of(psg_db_path: str | None, run_id: int | None = None) -> dict[str, str]:

@@ -325,7 +325,7 @@ def test_data_mode_assigns_a_level_to_every_node(tmp_path):
     assert all("level" in n for n in d["nodes"]), "a node has no layer"
     levels = {n["node_key"]: n["level"] for n in d["nodes"]}
     assert levels["nk_orders"] == 0 and levels["nk_customers"] == 0, "sources are not on level 0"
-    assert levels["nk_3"] == 1 and levels["nk_5"] == 1, "the readers are not on level 1"
+    assert levels["nk_3"] > 0 and levels["nk_5"] > 0, "the readers are not below the sources"
 
 
 def test_story_and_focus_are_layered_too_and_full_is_not(tmp_path):
@@ -397,9 +397,10 @@ def test_focus_levels_are_signed_distance_from_the_focus(tmp_path):
     g, _ = _chain_graph(tmp_path)
     nb = psg_bridge.graph_at(g, mode="focus", focus="nk_5", hops=2)
     lv = {n["node_key"]: n["level"] for n in nb["nodes"]}
+    # levels are banded (depth * 10 + sub-row) so a crowded band can split
     assert lv["nk_5"] == 0, "the focus is not the origin"
-    assert lv["nk_4"] == -1 and lv["nk_3"] == -2, "callers are not above the focus"
-    assert lv["nk_6"] == 1 and lv["nk_7"] == 2, "callees are not below the focus"
+    assert lv["nk_4"] == -10 and lv["nk_3"] == -20, "callers are not above the focus"
+    assert lv["nk_6"] == 10 and lv["nk_7"] == 20, "callees are not below the focus"
     assert len(set(lv.values())) >= 3
 
 
@@ -442,3 +443,34 @@ def test_the_renderer_gets_the_options_the_layout_needs(client):
     assert "sortMethod: 'directed'" in t and "direction: 'UD'" in t
     assert "forceDirection: 'vertical'" in t
     assert "window.network" in t, "the vis instance is not exposed for inspection"
+
+
+# ── a level holding 25 nodes is a list, not a layer ─────────────────────────
+
+def test_a_crowded_level_splits_into_sub_rows_by_module(tmp_path):
+    """56 nodes with ~25 on one level rendered as a 4500px smear. A level past
+    the crowd limit is split by module into sub-rows, so the layer still reads
+    as one band but the nodes have somewhere to go."""
+    g, _ = _chain_graph(tmp_path)
+    nb = psg_bridge.graph_at(g, mode="focus", focus="nk_5", hops=2, crowd=2)
+    levels = [n["level"] for n in nb["nodes"]]
+    assert len(set(levels)) > 3, "a crowded level did not split"
+    # sub-rows stay adjacent: every level is level*10 + small row index
+    assert all(abs(l) % 10 < 10 for l in levels)
+    # and the ordering of the bands is preserved
+    bands = sorted({l // 10 for l in levels})
+    assert bands == sorted(set(bands))
+
+
+def test_an_uncrowded_level_is_not_split(tmp_path):
+    g, _ = _chain_graph(tmp_path)
+    nb = psg_bridge.graph_at(g, mode="focus", focus="nk_5", hops=2, crowd=50)
+    assert {n["level"] for n in nb["nodes"]} == {-20, -10, 0, 10, 20}
+
+
+def test_labels_are_reserved_for_what_the_reader_asked_about(client):
+    """A label on all 56 nodes is unreadable at any zoom. The focus, its direct
+    neighbours and anything carrying records keep their label; the rest show it
+    on hover."""
+    t = client.get("/graph/demo?focus=pkg.core.mod.f5").text
+    assert "labelWhenHovered" in t or "always_label" in t

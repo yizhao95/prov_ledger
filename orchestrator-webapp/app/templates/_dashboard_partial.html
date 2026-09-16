@@ -146,7 +146,8 @@
       <div class="text-gray-800">“{{ h.text }}”
         {% if h.verbatim %}<span data-verbatim="1" class="text-brand-blue">{{ 'stated'|say('tier', lang) }}</span>{% endif %}
       </div>
-      <div class="text-brand-muted flex flex-wrap items-baseline gap-x-2">
+      <div class="text-brand-muted flex flex-wrap items-baseline gap-x-2"
+           title="{% for v in h.vias %}{{ (v.at or '')[:10] }} {{ v.via }}{% if not loop.last %} · {% endif %}{% endfor %}">
         {% if h.adoptions > 1 %}<span class="font-semibold text-brand-gray" data-adoptions="{{ h.adoptions }}">Adopted {{ h.adoptions }}×</span>{% endif %}
         <span data-tier="{{ h.tier }}" class="px-1.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
         <span>{{ h.evidence_level|say('evidence_level', lang) }}</span>
@@ -251,7 +252,8 @@
     <div class="mt-2 space-y-1">
       {% for f in headline.findings %}
       {% set focused = focus_node and (f.anchor == focus_node or (f.id and focus_node in f.id)) %}
-      <div class="text-xs flex flex-wrap items-baseline gap-x-2 border-l-2 {{ 'border-brand-blue bg-[#eef4fc] rounded' if focused else 'border-hairline' }} pl-2" data-severity="{{ f.severity }}" data-tier="{{ f.tier }}" data-finding="{{ f.id }}"{% if focused %} data-focus="1"{% endif %}>
+      <div class="text-xs flex flex-wrap items-baseline gap-x-2 border-l-2 {{ 'border-brand-blue bg-[#eef4fc] rounded' if focused else 'border-hairline' }} pl-2" data-severity="{{ f.severity }}" data-tier="{{ f.tier }}" data-finding="{{ f.id }}"
+           title="{{ f.kind }}{% if f.evidence and f.evidence.reason_id %} · record #{{ f.evidence.reason_id }}{% endif %}{% if f.evidence and f.evidence.plan_id %} · recorded in {{ f.evidence.plan_id }}{% endif %}{% if f.evidence and f.evidence.expectation_id %} · claim #{{ f.evidence.expectation_id }}{% endif %}"{% if focused %} data-focus="1"{% endif %}>
         <span class="font-semibold {{ 'text-brand-red' if f.severity == 'blocking' else 'text-gray-700' }}">{{ '⚠' if f.severity == 'blocking' else '·' }} {{ f.severity|say('severity', lang) }}</span>
         <span class="px-1.5 py-0.5 rounded bg-brand-bg text-[11px]">{{ f.tier }}</span>
         <span class="font-mono text-[11px] text-brand-muted">{{ f.id }}</span>

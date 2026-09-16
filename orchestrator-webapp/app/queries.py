@@ -1418,6 +1418,20 @@ def reason_for_mark(conn: sqlite3.Connection, reason_id: int | None) -> dict | N
 SEARCH_LIMIT = 40
 
 
+def _qualified_for(project: str | None, node_key: str | None) -> str | None:
+    """A node's name for a key — a reader wants the name, the key belongs in the
+    tooltip (layout spec 8)."""
+    if not (project and node_key and str(node_key).startswith("nk_") and _psg is not None):
+        return node_key
+    db_path = _psg.db_path_for(project)
+    if not db_path or not os.path.exists(db_path):
+        return node_key
+    try:
+        return _psg.latest_qualified_name(db_path, node_key) or node_key
+    except Exception:
+        return node_key
+
+
 def search_records(conn: sqlite3.Connection, q: str, project: str | None = None) -> tuple[list[dict], bool, int]:
     """(groups, degraded, hits) — records whose words match `q`, grouped by the
     node they are recorded on. `degraded` is True when the FTS5 index was not
@@ -1450,7 +1464,8 @@ def search_records(conn: sqlite3.Connection, q: str, project: str | None = None)
         d["source_level"] = SOURCE_LEVELS.get(d.get("evidence_level") or "", "—")
         d["verbatim"] = d["tier"] == "stated"
         key = d["node_key"] or "(没有锚点)"
-        g = grouped.setdefault(key, {"node_key": key, "project": d["project"], "hits": []})
+        g = grouped.setdefault(key, {"node_key": key, "project": d["project"], "hits": [],
+                                     "qualified_name": _qualified_for(d["project"], key)})
         g["hits"].append(d)
     # `degraded` is True by construction: the read-only connection cannot build or
     # trust the FTS index, so this is LIKE, and the page says so.

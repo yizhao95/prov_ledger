@@ -124,8 +124,11 @@ def test_the_rail_is_exactly_the_changes_plus_the_distinct_decisions(client):
 
 
 def test_the_repeated_sentence_appears_once(client):
-    t = _rail(client)
-    assert t.count(DERIVED_TEXT) == 1, "the merged sentence is still printed more than once"
+    """Once as VISIBLE text. It also rides in the row's title= so a truncated
+    line can be read in full on hover — that is the tooltip doing its job, not
+    the page repeating itself."""
+    body = re.sub(r"<[^>]*>", " ", _rail(client))
+    assert body.count(DERIVED_TEXT) == 1, "the merged sentence is still printed more than once"
 
 
 def test_hits_are_the_activations_not_the_rows(client):

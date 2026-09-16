@@ -119,7 +119,7 @@
               style="{{ 'background: ' ~ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(row.tier, '#898781') if lit else 'border: 1.5px solid ' ~ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(row.tier, '#898781') }}"></span>
         {% if not loop.last %}<span class="absolute left-[3px] top-4 bottom-0 w-px bg-hairline"></span>{% endif %}
 
-        <div class="flex items-baseline gap-x-2">
+        <div class="flex items-baseline gap-x-2" {% if row.text %}title="{{ row.text }}"{% endif %}>
           <span class="text-brand-muted tnum shrink-0">{{ (row.at or '')[:10] }}</span>
           <span class="{{ 'font-medium' if is_decision else '' }} shrink-0">
             {%- if row.kind == 'event' %}{{ row.event_type|say('event', lang) }}
@@ -130,7 +130,8 @@
             {%- if is_decision %}{{ row.text }}
             {%- elif row.payload %}{% if row.event_type in ('node_renamed', 'node_moved') %}{{ row.payload.get('from') }} → {{ row.payload.get('to') }}{% elif row.event_type == 'node_changed' %}{{ (row.payload.get('changed') or [])|join(', ') }}{% elif row.event_type == 'column_dropped' %}{{ row.payload.get('column') }}{% endif %}{% endif -%}
           </span>
-          <span class="text-brand-muted text-[11px] tnum shrink-0" title="{{ vocab.define(row.tier, kind='tier', lang=lang) }}">
+          <span class="text-brand-muted text-[11px] tnum shrink-0"{% if row.tier %} data-tier="{{ row.tier }}"{% endif %}
+                title="{{ vocab.define(row.tier, kind='tier', lang=lang) }}{% if row.record and row.record.stats %} — surfaced at plan/edit/why: {{ row.record.stats.plan }}/{{ row.record.stats.edit }}/{{ row.record.stats.why }}{% endif %}{% if row.merged %} · {{ row.merged }} identical records merged{% endif %}">
             {{ row.tier|say('tier', lang) }}{% if is_decision %} · {{ row.hits }} hits{% if lit %} <span class="text-brand-blue font-semibold">+1</span>{% endif %}{% endif %}
           </span>
         </div>
@@ -172,7 +173,8 @@
         <div class="text-brand-muted text-[11px] tnum" data-stats="{{ c.id }}"
              data-shown-plan="{{ c.stats.plan if c.stats else 0 }}" data-shown-edit="{{ c.stats.edit if c.stats else 0 }}"
              data-shown-why="{{ c.stats.why if c.stats else 0 }}" data-adopted="{{ c.stats.adopted if c.stats else 0 }}"
-             title="{{ vocab.define(c.tier, kind='tier', lang=lang) }}">
+             data-tier="{{ c.tier }}"
+             title="{{ vocab.define(c.tier, kind='tier', lang=lang) }}{% if c.stats %} — surfaced at plan/edit/why: {{ c.stats.plan }}/{{ c.stats.edit }}/{{ c.stats.why }}{% endif %}">
           {{ c.tier|say('tier', lang) }}{% if c.stats %} · {{ (c.stats.plan or 0) + (c.stats.edit or 0) + (c.stats.why or 0) }} hits{% endif %}
         </div>
         <details class="text-[11px]">

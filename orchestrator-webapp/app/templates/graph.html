@@ -118,16 +118,29 @@
                     title: c.label + ' — ' + c.nodes + ' nodes, ' + c.badged + ' with records'};
           });
         } else {
+          // A label on every one of 56 nodes is unreadable at any zoom. The
+          // focus, its direct neighbours and anything carrying records keep
+          // theirs; the rest reveal it on hover (labelWhenHovered).
+          var near = {};
+          data.edges.forEach(function (e) {
+            if (e.src_key === focus) { near[e.dst_key] = true; }
+            if (e.dst_key === focus) { near[e.src_key] = true; }
+          });
           nodes = data.nodes.map(function (n) {
+            var always = !!n.badge || n.node_key === focus || n.qualified_name === focus || near[n.node_key];
+            var short = n.qualified_name.split('.').pop();
             return {id: n.node_key, level: n.level,
-                    label: n.badge ? (n.qualified_name.split('.').pop() + ' [' + n.badge + ']') : n.qualified_name.split('.').pop(),
+                    label: always ? (n.badge ? short + ' [' + n.badge + ']' : short) : undefined,
+                    hidden: false, labelHighlightBold: false,
                     title: n.qualified_name + '\n' + (n.node_type || '') + (n.file_path ? '\n' + n.file_path : '')
                            + '\n' + (n.tier || '') + ' · ' + (n.badge || 0) + ' records'
                            + (n.last_at ? '\nlast change ' + String(n.last_at).slice(0, 10) : '') + '\nopen node',
                     color: {background: n.badge ? '#fff3d6' : '#f9f9f7', border: tierColor[n.tier] || '#898781'},
                     borderWidth: n.node_key === focus || n.qualified_name === focus ? 4 : (n.badge ? 2 : 1),
                     shape: n.node_type === 'route' ? 'box' : 'dot',
-                    size: n.badge ? 12 + Math.min(n.badge, 8) : 10, font: {size: 11}};
+                    size: n.badge ? 12 + Math.min(n.badge, 8) : 10,
+                    font: {size: 11, color: '#52514e'},
+                    labelWhenHovered: short};
           });
         }
         edges = data.edges.map(function (e) {
