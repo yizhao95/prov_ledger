@@ -206,3 +206,66 @@ What is lost is explicit, never silent (`test_degraded_mode.py`, marker
 - The edit hook resolves lines through the last analysed snapshot; edits below
   the last refresh's line numbers can miss or mis-anchor. It says which node it
   matched, and `provledger why file:line` shows the same resolution.
+
+## 9 · Phase 2b — three views on one context triple, significance, R0 sees the words that caused the plan
+
+### 9.1 · The context triple `(project, node, at)`
+
+Every view carries the same three things in its URL and hands them to the
+next view unchanged (I12): `/graph/{project}?focus=<qn|nk_>&at=<run>`,
+`/node/{project}/{qn}?at=<run|reason_id>`, `/plan/{plan_id}?node=&at=`. The
+fixed bar at the top — **Graph · Node · Task** — is built from the triple by
+`queries.view_bar`; the current view is highlighted, a view with nothing to
+anchor to is disabled rather than a dead link, and the breadcrumb reads
+`project › node › at`. Missing items degrade: no `at` means the latest run
+or record; no `node` means the Task view highlights nothing; no state graph
+means Graph and Node say `state graph unavailable` and the bar stays.
+
+| view | answers | what it shows |
+|---|---|---|
+| **Graph** `/graph/{project}` | what does the project look like now (or at run N), which nodes have a story | nodes of `node_snapshot` at the run (functions / methods / routes by default, `level=full` for everything), a **badge** per node = `node_badge_v` (reasons whose effective significance is not minor + rejected paths + active constraints), the colour of the latest event's tier; the graph keeps no edge history, so a historical run shows today's edges mapped by node_key and says `edges_from: latest`; vis-network from the CDN with the full node table underneath, so an offline page still answers |
+| **Node** `/node/{project}/{qn}` | what happened to this node at each moment, who was shown it, who used it | the timeline (the run at `at` highlighted), every record with 展示 per moment and 被 <plan> 采用 links that carry the triple back into the Task view |
+| **Task** `/plan/{plan_id}` | what did this task read, what did it decide | the headline, the per-step 展示过 / 采用了 columns, the focused node highlighted, the session it was published from and that session's other plans |
+| **Session** `/session/{id}` | what was said, what it cost, what changed — with or without a plan | utterances (a personal one marked), tool calls in the two buckets, the session refresh's nodes, the never-printed session headline, the plans; `降级（无 plan）` when there were none |
+
+### 9.2 · Significance — a hint on every reason, a verdict on the record
+
+The computation layer never changes: `node_event` records everything. The
+threshold only shapes what is shown and asked about. At review close every
+new reason gets a **hint** (derived): the user's own words (tier stated), a
+struct_sig change, ≥ 1 downstream consumer, a gate failure in the plan, an
+active constraint on the node, a recorded outcome — any one → `major`, none →
+`minor`. Each hint is one `significance_log` row with its basis. With
+`reasons.significance: llm` in `provledger-extensions.json` the arbiter's
+headless runner is asked for a **verdict** too — strict JSON only; a
+non-JSON answer leaves the hint standing and the row says so. A person's
+word is `provledger reason mark <id> major|minor` (judged_by human).
+`change_reason_v.significance_eff` = the latest verdict, else the latest
+hint, else NULL; the pack, `why` and the views fold only an explicit `minor`
+into a count. `provledger significance eval` (manual, never CI) prints the
+hint × verdict confusion matrix; selfcheck lists `significance_disagreements`
+(hint major, verdict minor) — believed, but on the record (I14).
+
+### 9.3 · R0 sees the words that caused the plan
+
+Phase 2 ended with zero real R0 hits for two reasons that were in the design.
+The sentence that causes a plan is said **before** the plan exists, so the
+candidate window never saw it (FL-069): a plan now carries `Plans.session_id`
+— the newest tool call from this repo within 30 minutes, else the session id
+the hooks-less path leaves in the environment, else NULL and one stderr line
+— and everything said in that session is a candidate. A file name in a
+sentence matched every node in the file and was judged generic (FL-066): the
+basename is its own rule now and anchors to `psg_bridge.changed_in_file` —
+the nodes the plan changed in that file, all of them, never the untouched
+ones, outside the "> 3 nodes" limit. The local-name rule (≥ 4 characters,
+stopwords, > 3 nodes per sentence = generic) is unchanged: 挂错比不挂糟.
+
+### 9.4 · Honest boundaries, continued
+
+- A badge counts records, not importance: a node with three minor reasons
+  and one active constraint shows `1`.
+- The Graph view's edges are today's; the page says so whenever `at` is not
+  the latest run.
+- The session that installs the hooks does not fire them; the phase-2b
+  dogfood ran in such a session, so its cost numbers are the stored packs
+  only and its R0 material entered through `provledger note --session`.

@@ -284,6 +284,13 @@ def list_plans(conn: sqlite3.Connection) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def set_plan_session(conn: sqlite3.Connection, plan_id: str, session_id: str | None, commit: bool = True) -> None:
+    """DP phase 2b: the Claude Code session a plan was published from (NULL when unknown)."""
+    conn.execute("UPDATE Plans SET session_id = ? WHERE plan_id = ?", (session_id, plan_id))
+    if commit:
+        conn.commit()
+
+
 def set_plan_impact_context(conn: sqlite3.Connection, plan_id: str, impact_context: str) -> None:
     """Persist the Phase D forward-impact analysis JSON on the Plan row."""
     conn.execute(

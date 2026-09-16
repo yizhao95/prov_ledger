@@ -541,3 +541,45 @@ def test_block_true_human_constraint_makes_publish_exit_5_until_answered(tmp_pat
     assert payload["headline"]["summary"]["hard_unanswered"] == 1
     # a system-recorded constraint with the same statement is never hard
     _orch_constraint(tmp_db, ["pipeline.process"], "process must never drop the label column", recorded_by="system") if False else None
+
+
+# ── DP phase 2b Task 0: a plan carries its session (FL-069) ──
+def test_publish_records_the_session_of_the_latest_recent_tool_call_in_this_repo(tmp_path, tmp_db, scripts_dir, monkeypatch):
+    gdb = tmp_path / "proj.db"; _seed_project_graph(gdb)
+    reg = _registry(tmp_path, "demoproj", gdb)
+    from orchestrator import db as _odb
+    c = _odb.open_db(tmp_db); _odb.run_migrations(c)
+    repo = str(Path.cwd())
+    c.execute("INSERT INTO tool_call_log (session_id, cwd, tool_name, at) VALUES ('old-session', ?, 'Bash', strftime('%Y-%m-%d %H:%M:%S.000', 'now', '-2 hours'))", (repo,))
+    c.execute("INSERT INTO tool_call_log (session_id, cwd, tool_name, at) VALUES ('elsewhere', '/somewhere/else', 'Bash', strftime('%Y-%m-%d %H:%M:%S.000', 'now', '-1 minute'))")
+    c.execute("INSERT INTO tool_call_log (session_id, cwd, tool_name, at) VALUES ('sess-live', ?, 'Edit', strftime('%Y-%m-%d %H:%M:%S.000', 'now', '-3 minutes'))", (repo + "/orchestrator-backend",))
+    c.commit(); c.close()
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    plan = _valid_input_dict(); plan["project"] = "demoproj"; plan["declared_targets"] = ["pipeline.process"]
+    p = tmp_path / "in.json"; p.write_text(_json.dumps(plan))
+    res = _run_publish_env(scripts_dir, p, tmp_db, reg)
+    assert res.returncode == 0, res.stderr
+    payload = _json.loads(res.stdout)
+    assert payload["session_id"] == "sess-live" and payload["session_source"] == "tool_call_log"
+    c = _sqlite.connect(str(tmp_db))
+    assert c.execute("SELECT session_id FROM Plans WHERE plan_id=?", (payload["plan_id"],)).fetchone()[0] == "sess-live"
+
+
+def test_publish_without_a_recent_tool_call_falls_back_to_the_env_then_null_and_says_so(tmp_path, tmp_db, scripts_dir, monkeypatch):
+    gdb = tmp_path / "proj.db"; _seed_project_graph(gdb)
+    reg = _registry(tmp_path, "demoproj", gdb)
+    plan = _valid_input_dict(); plan["project"] = "demoproj"; plan["declared_targets"] = ["pipeline.process"]
+    p = tmp_path / "in.json"; p.write_text(_json.dumps(plan))
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "sess-env")
+    res = _run_publish_env(scripts_dir, p, tmp_db, reg)
+    assert res.returncode == 0, res.stderr
+    payload = _json.loads(res.stdout)
+    assert payload["session_id"] == "sess-env" and payload["session_source"] == "env"
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    plan["prefix"] = "second"; p.write_text(_json.dumps(plan))                    # plan ids are prefix + timestamp: a second publish in the same second needs its own prefix
+    res = _run_publish_env(scripts_dir, p, tmp_db, reg)
+    assert res.returncode == 0, res.stderr
+    payload = _json.loads(res.stdout)
+    assert payload["session_id"] is None and "no session" in res.stderr
+    c = _sqlite.connect(str(tmp_db))
+    assert c.execute("SELECT session_id FROM Plans WHERE plan_id=?", (payload["plan_id"],)).fetchone()[0] is None

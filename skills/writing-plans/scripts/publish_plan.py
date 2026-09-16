@@ -131,6 +131,38 @@ def _resolve_project_db(project: str) -> str:
     return ""  # unreachable
 
 
+SESSION_WINDOW_MINUTES = 30
+
+
+def _session_for_plan(conn, cwd: Path) -> tuple[str | None, str]:
+    """(session_id, source): the newest tool_call_log row whose cwd lies under
+    this repo's toplevel and which is at most 30 minutes old → 'tool_call_log';
+    else the CLAUDE_CODE_SESSION_ID the hooks-less path leaves → 'env'; else None."""
+    root = _git_toplevel(cwd) or str(cwd)
+    try:
+        rows = conn.execute(
+            "SELECT session_id, cwd FROM tool_call_log WHERE at >= strftime('%Y-%m-%d %H:%M:%S', 'now', ?) "
+            "AND session_id <> '' ORDER BY at DESC, id DESC LIMIT 200", (f"-{SESSION_WINDOW_MINUTES} minutes",)).fetchall()
+    except sqlite3.Error:
+        rows = []
+    for sid, c in rows:
+        c = (c or "").rstrip("/")
+        if c == root or c.startswith(root.rstrip("/") + "/"):
+            return sid, "tool_call_log"
+    env = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if env:
+        return env, "env"
+    return None, "none"
+
+
+def _git_toplevel(cwd: Path) -> str | None:
+    try:
+        p = subprocess.run(["git", "-C", str(cwd), "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout.strip() or None if p.returncode == 0 else None
+
+
 def _die(msg: str, code: int = 1) -> None:
     """Print a one-line error to stderr and exit non-zero."""
     print(f"❌ publish-plan: {msg}", file=sys.stderr)
@@ -298,6 +330,15 @@ def main() -> None:
     # complete_plan when no review row is found.
     review_step_id = db.insert_review_step(conn, result["plan_id"])
     result["review_step_id"] = review_step_id
+    # DP phase 2b (Task 0, FL-069): the plan carries the session it was published
+    # from — the latest tool call in this repo within 30 minutes, else the env the
+    # hooks-less case leaves (CLAUDE_CODE_SESSION_ID), else NULL and one stderr line.
+    session_id, session_source = _session_for_plan(conn, Path.cwd())
+    db.set_plan_session(conn, result["plan_id"], session_id)
+    result["session_id"], result["session_source"] = session_id, session_source
+    if session_id is None:
+        print("⚠️  publish-plan: no session for this plan (no tool call from this repo in the last 30 minutes and "
+              "no CLAUDE_CODE_SESSION_ID) — R0 will only see utterances inside the plan window", file=sys.stderr)
     if tracked:
         # DP phase 2: the impact analysis (and its context pack) runs once the
         # plan id exists, so every surfaced record is a read_hit of THIS plan.

@@ -8,6 +8,8 @@ in the repo, `provledger ...` once installed.
   why <node|nk_…|file:line> [...]         one bounded read: history, constraints, rejected paths, blast radius
   export <project> --md DIR               one markdown per node (shareable rows only)
   init --agents-md                        drop the two verbs into ./AGENTS.md
+  reason mark <id> major|minor            a person's word on a reason's significance
+  significance eval|disagreements         the significance ledger (eval is manual, never CI)
   headline show|respond|ack <plan> …      the plan headline and its answers
 """
 from __future__ import annotations
@@ -151,6 +153,62 @@ def _headline_cmd(args) -> int:
         conn.close()
 
 
+def _reason_cmd(args) -> int:
+    from . import significance
+    conn = _open()
+    try:
+        try:
+            lid = significance.mark(conn, args.reason_id, args.level, basis=args.basis)
+        except ValueError as e:
+            print(f"provledger reason mark: {e}", file=sys.stderr)
+            return 2
+        eff = conn.execute("SELECT significance_eff FROM change_reason_v WHERE id = ?", (args.reason_id,)).fetchone()[0]
+        print(json.dumps({"reason_id": args.reason_id, "log_id": lid, "significance_eff": eff, "judged_by": "human"}))
+        return 0
+    finally:
+        conn.close()
+
+
+def _significance_cmd(args) -> int:
+    from . import significance
+    conn = _open()
+    try:
+        if args.sub == "disagreements":
+            print(json.dumps(significance.disagreements(conn, args.project), indent=1, ensure_ascii=False, default=str))
+            return 0
+        # eval — manual, never CI: reasons that carry a hint but no verdict yet
+        sql = ("SELECT r.id, r.project, r.plan_id, r.node_key, r.run_id, r.role, r.tier, "
+               "       COALESCE(r.interpretation, r.statement, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS text "
+               "FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
+               "WHERE r.role = 'reason' AND r.tier <> 'unstated' "
+               "AND NOT EXISTS (SELECT 1 FROM significance_log s WHERE s.reason_id = r.id AND s.verdict IS NOT NULL)")
+        params: list = []
+        if args.target:
+            sql += " AND r.plan_id = ?"; params.append(args.target)
+        if args.since:
+            sql += " AND r.recorded_at >= ?"; params.append(args.since)
+        if args.project:
+            sql += " AND r.project = ?"; params.append(args.project)
+        sql += " ORDER BY r.id DESC LIMIT ?"; params.append(args.limit)
+        rows = [dict(r) for r in conn.execute(sql, params)]
+        if args.runner == "claude":
+            from .testing.claude_arbiter import default_runner as runner
+        elif args.runner == "stub-major":
+            def runner(prompt, *, model=None, timeout_s=None): return '{"significance": "major", "basis": "stub"}'
+        else:
+            def runner(prompt, *, model=None, timeout_s=None): return '{"significance": "minor", "basis": "stub"}'
+        results = []
+        for r in rows:
+            results.append(significance.judge(conn, r, runner=runner, model=args.model, commit=True))
+        out = {"judged": len(results), "verdicts": sum(1 for x in results if x["verdict"]), "runner": args.runner,
+               "confusion": significance.confusion(conn, args.project), "disagreements": len(significance.disagreements(conn, args.project)),
+               "rows": results}
+        print(json.dumps(out, indent=1, ensure_ascii=False, default=str))
+        return 0
+    finally:
+        conn.close()
+
+
 def _reasons_cmd(args) -> int:
     conn = _open()
     try:
@@ -261,6 +319,21 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--md", required=True, metavar="DIR", help="output directory")
     i = sub.add_parser("init", help="set a repo up: --agents-md writes the provledger block into ./AGENTS.md")
     i.add_argument("--agents-md", action="store_true", help="write or refresh the provledger section of ./AGENTS.md")
+    rm = sub.add_parser("reason", help="one reason record")
+    rms = rm.add_subparsers(dest="sub", required=True)
+    mk = rms.add_parser("mark", help="a person's word on a reason's significance (major | minor) — logged as judged_by human")
+    mk.add_argument("reason_id", type=int); mk.add_argument("level", choices=["major", "minor"]); mk.add_argument("--basis", default=None)
+    sg = sub.add_parser("significance", help="the significance ledger: hints, verdicts, disagreements")
+    sgs = sg.add_subparsers(dest="sub", required=True)
+    ev = sgs.add_parser("eval", help="MANUAL: ask an LLM runner for a verdict on reasons that only carry a hint, and print the hint × verdict confusion matrix — never run in CI")
+    ev.add_argument("target", nargs="?", default=None, help="a plan id (default: every reason since --since)")
+    ev.add_argument("--since", default=None, help="only reasons recorded at or after this timestamp")
+    ev.add_argument("--project", default=None)
+    ev.add_argument("--runner", default="claude", choices=["claude", "stub-major", "stub-minor"], help="claude = headless claude (the arbiter's runner); stubs never call a model")
+    ev.add_argument("--limit", type=int, default=50)
+    ev.add_argument("--model", default=None)
+    dis = sgs.add_parser("disagreements", help="hint = major but the latest verdict says minor")
+    dis.add_argument("--project", default=None)
     r = sub.add_parser("reasons", help="the reasons ledger")
     rs = r.add_subparsers(dest="sub", required=True)
     rs.add_parser("reclass-status", help="whether the legacy node_reason / ledger rows were migrated into change_reason, and the tier counts")
@@ -279,6 +352,10 @@ def main(argv=None) -> int:
         return _reasons_cmd(args)
     if args.cmd == "why":
         return _why_cmd(args)
+    if args.cmd == "reason":
+        return _reason_cmd(args)
+    if args.cmd == "significance":
+        return _significance_cmd(args)
     if args.cmd == "export":
         return _export_cmd(args)
     if args.cmd == "init":

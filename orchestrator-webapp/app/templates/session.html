@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}session {{ session.session_id[:8] }} — session card{% endblock %}
+{% block content %}
+  <div class="mb-4 flex items-center justify-between gap-3 flex-wrap">
+    <div class="flex items-center gap-2">
+      <a href="/" class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue rounded-lg shadow-sm hover:bg-brand-bg text-sm font-semibold transition">🏠 Home</a>
+    </div>
+    <span class="text-xs text-brand-muted italic">🗂 session card · what was said, what it cost, what changed · read-only</span>
+  </div>
+
+  <div class="bg-surface rounded-xl shadow-sm border border-hairline px-5 py-4 mb-4" data-panel="session-head" data-session="{{ session.session_id }}"{% if session.degraded %} data-degraded="1"{% endif %}>
+    <div class="text-[11px] uppercase tracking-wide text-brand-muted">session</div>
+    <h1 class="text-lg font-semibold font-mono text-gray-900 break-all">{{ session.session_id }}</h1>
+    <div class="text-xs text-brand-muted mt-1">
+      {% if session.run %}{{ session.run.project or '—' }} · refresh {{ session.run.refresh_state }}{% if session.run.psg_run_id %} · run {{ session.run.psg_run_id }}{% endif %}{% if session.run.note %} · {{ session.run.note }}{% endif %}{% else %}no session_run row{% endif %}
+      {% if session.degraded %}<span class="ml-2 px-1.5 py-0.5 rounded bg-[#ec835a]/15 text-[#8a3416]" data-degraded-badge>降级（无 plan）</span>{% endif %}
+    </div>
+  </div>
+
+  {% if error %}
+  <div class="bg-surface rounded-xl border border-hairline p-5 text-sm text-brand-red">{{ error }}</div>
+  {% elif not session.found %}
+  <div class="bg-surface rounded-xl border border-hairline border-l-4 border-l-brand-serious p-5 text-sm text-brand-gray" data-state="not-found">nothing recorded for this session id</div>
+  {% else %}
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="said">
+      <h2 class="text-sm font-semibold text-gray-900 mb-2">🗣 said — {{ session.utterances|length }} utterance{{ '' if session.utterances|length == 1 else 's' }}</h2>
+      {% for u in session.utterances %}
+      <div class="text-xs mb-2 border-l-2 border-hairline pl-2" data-utterance="{{ u.id }}" data-visibility="{{ u.visibility }}">
+        <div class="text-brand-muted">#{{ u.id }} · {{ u.occurred_at }}{% if u.plan_id %} · <a class="text-brand-blue font-mono" href="/plan/{{ u.plan_id }}">{{ u.plan_id }}</a>{% endif %}{% if u.visibility == 'personal' %} · personal{% endif %}</div>
+        <div class="text-gray-800 whitespace-pre-wrap">{{ u.text[:600] }}{% if u.text|length > 600 %}…{% endif %}</div>
+      </div>
+      {% else %}<div class="text-xs text-brand-muted">no utterance recorded</div>{% endfor %}
+    </section>
+    <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="cost">
+      <h2 class="text-sm font-semibold text-gray-900 mb-2">⚙ cost — {{ session.tool_calls }} tool call{{ '' if session.tool_calls == 1 else 's' }}</h2>
+      <div class="text-xs tnum" data-buckets>
+        orchestration {{ session.buckets.orchestration }}{% if session.ratios.orchestration is not none %} ({{ (session.ratios.orchestration * 100)|round(1) }}%){% endif %}
+        · provenance {{ session.buckets.provenance }}{% if session.ratios.provenance is not none %} ({{ (session.ratios.provenance * 100)|round(1) }}%){% endif %}
+        · other {{ session.buckets.other }}
+      </div>
+      {% if session.first_at %}<div class="text-[11px] text-brand-muted mt-1">{{ session.first_at }} → {{ session.last_at }}</div>{% endif %}
+      {% if not session.tool_calls %}<div class="text-xs text-brand-muted">no tool call recorded (the hooks were not live for this session)</div>{% endif %}
+    </section>
+    <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="changed">
+      <h2 class="text-sm font-semibold text-gray-900 mb-2">🧬 changed — {{ session.changed_nodes|length }} node{{ '' if session.changed_nodes|length == 1 else 's' }}</h2>
+      {% for n in session.changed_nodes %}
+      <div class="text-xs font-mono"><a class="text-brand-blue" href="/node/{{ session.run.project }}/{{ n.node_key }}?at={{ n.run_id }}">{{ n.qualified_name or n.node_key }}</a> <span class="text-brand-muted">{{ n.event_types|join('/') }}</span></div>
+      {% else %}<div class="text-xs text-brand-muted">{% if session.plans %}the plans' closes refreshed the graph — see each plan{% else %}no session refresh recorded{% endif %}</div>{% endfor %}
+      {% if session.headline %}
+      <div class="text-xs mt-3" data-session-headline>headline · {{ session.headline.summary.findings }} finding(s) · {{ session.headline.summary.blocking }} blocking · never printed — nobody was there to answer</div>
+      {% endif %}
+    </section>
+    <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="plans">
+      <h2 class="text-sm font-semibold text-gray-900 mb-2">📋 plans — {{ session.plans|length }}</h2>
+      {% for p in session.plans %}
+      <div class="text-xs mb-1"><a class="text-brand-blue font-mono" href="/plan/{{ p.plan_id }}">{{ p.plan_id }}</a> · {{ p.status }} · {{ p.original_goal[:90] }}</div>
+      {% else %}<div class="text-xs text-brand-muted" data-no-plan>no plan published in this session</div>{% endfor %}
+    </section>
+  </div>
+  {% endif %}
+{% endblock %}

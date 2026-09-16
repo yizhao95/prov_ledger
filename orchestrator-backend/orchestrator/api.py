@@ -13,7 +13,7 @@ import sqlite3
 import string
 from datetime import datetime, timezone
 
-from . import checks, circuit_breakers, constraints, db, outcomes, psg_bridge, reasons, state_machine, telemetry, triggers
+from . import significance, checks, circuit_breakers, constraints, db, outcomes, psg_bridge, reasons, state_machine, telemetry, triggers
 from .circuit_breakers import HardStop, SoftStop  # noqa: F401  re-export
 from .state_machine import InvalidTransitionError, StepStatus  # noqa: F401
 
@@ -73,6 +73,13 @@ def initialize_plan(
     if not initial_steps:
         raise ValueError("initial_steps must contain at least 1 step")
     plan_id = f"{plan_id_prefix}-{_now_compact()}"
+    # DP phase 2b (Task 4b): the id has one-second resolution; a second plan in the
+    # same second (a suite under load, a script) takes a -2, -3 … suffix instead of
+    # failing on UNIQUE
+    base, n = plan_id, 1
+    while conn.execute("SELECT 1 FROM Plans WHERE plan_id = ?", (plan_id,)).fetchone():
+        n += 1
+        plan_id = f"{base}-{n}"
     db.insert_plan(conn, plan_id, original_goal, max_revisions=max_revisions, user_query=user_query,
                    project=project, project_source=project_source)
     step_ids = []
@@ -512,6 +519,12 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         n_unstated = reasons.backstop_unstated(
             conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False,
             state="unknown" if close_mode == "pending" else "active") if psg_db else 0
+        # DP phase 2b (Task 2): every new reason of the plan gets its significance hint
+        # (one significance_log row each); reasons.significance: llm asks for a logged
+        # verdict too — the default is hint, zero model calls
+        sig_mode = _significance_mode(project, registry_path)
+        significance_close = significance.apply_for_plan(conn, project=project, plan_id=plan_id, psg_db_path=psg_db,
+                                                         mode=sig_mode, commit=False) if project else {}
         # DP phase 2 (Task 3): blocking findings proceeded past or never answered
         # become survival expectations, so going past them has an outcome
         headline_close = checks.close_headline(conn, plan_id=plan_id, commit=False) if project else {}
@@ -559,10 +572,24 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         "close_mode": close_mode,
         "triggers": triggered,
         "headline": headline_close,
+        "significance": significance_close,
         "rejected_paths": n_rejected,
         "constraints_bypassed": n_bypassed,
         "outcomes_backfilled": backfilled,
     }
+
+
+def _significance_mode(project: str | None, registry_path) -> str:
+    """provledger-extensions.json → reasons.significance (hint | llm); hint whenever in doubt."""
+    if not project:
+        return "hint"
+    try:
+        from . import extensions
+        repo = psg_bridge.repo_for(project, _resolve_registry_path(registry_path))
+        path = extensions.discover(repo) if repo else None
+        return extensions.load(path).reasons_significance if path else "hint"
+    except Exception:
+        return "hint"
 
 
 def _close_mode(project: str | None, registry_path) -> str:

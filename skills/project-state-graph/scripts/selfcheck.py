@@ -562,6 +562,27 @@ def _check_sessions_without_plan(conn) -> Dict[str, Any]:
             "detail": f"{n} session(s) without a plan ({', '.join(f'{k}={v}' for k, v in sorted(states.items())) or 'none'}); {ratio}"}
 
 
+def _check_significance_disagreements(conn) -> Dict[str, Any]:
+    """DP phase 2b (§17): reasons whose hint said major but whose latest verdict
+    says minor — the calibration list, informational."""
+    import os
+    path = os.environ.get("ORCH_DB") or os.path.expanduser("~/skill-workspace/orchestrator.db")
+    if not os.path.exists(path):
+        return {"name": "significance_disagreements", "ok": True, "severity": "warning", "detail": "no orchestrator.db (0)"}
+    try:
+        oc = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            n = oc.execute("SELECT COUNT(*) FROM significance_log s WHERE s.verdict = 'minor' AND s.hint = 'major' "
+                           "AND s.id = (SELECT MAX(id) FROM significance_log x WHERE x.reason_id = s.reason_id AND x.verdict IS NOT NULL)").fetchone()[0]
+            total = oc.execute("SELECT COUNT(*) FROM significance_log").fetchone()[0]
+        finally:
+            oc.close()
+    except sqlite3.Error as e:
+        return {"name": "significance_disagreements", "ok": True, "severity": "warning", "detail": f"orchestrator.db unreadable ({e})"}
+    return {"name": "significance_disagreements", "ok": True, "severity": "warning", "count": int(n), "rows": int(total),
+            "detail": f"{n} reason(s) hinted major but judged minor (of {total} significance_log rows)"}
+
+
 _CHECKS = [
     _check_node_types_nonempty,
     _check_no_dangling_edges,
@@ -586,6 +607,7 @@ _CHECKS = [
     _check_arbiter_gate,
     _check_hook_failures,
     _check_sessions_without_plan,
+    _check_significance_disagreements,
 ]
 
 

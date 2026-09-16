@@ -9,6 +9,13 @@
 {% else %}
   {% set badge = status_badge(plan.status) %}
 
+  {# DP phase 2b (Task 5): the session this plan was published from, and its other plans #}
+  {% if plan and plan_session %}
+  <div class="text-xs text-brand-muted mb-2" data-plan-session="{{ plan_session }}">
+    session <a class="text-brand-blue font-mono" href="/session/{{ plan_session }}">{{ plan_session[:12] }}…</a>
+    {% if session_plans %}· 本 session 其他 plan: {% for sp in session_plans %}<a class="text-brand-blue font-mono" href="/plan/{{ sp.plan_id }}">{{ sp.plan_id }}</a>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+  </div>
+  {% endif %}
   <!-- Plan card -->
   <section class="bg-surface rounded-xl shadow-sm p-5 mb-4 border border-hairline">
     <div class="flex items-start justify-between mb-2">
@@ -197,7 +204,8 @@
     </div>
     <div class="mt-2 space-y-1">
       {% for f in headline.findings %}
-      <div class="text-xs flex flex-wrap items-baseline gap-x-2 border-l-2 border-hairline pl-2" data-severity="{{ f.severity }}" data-tier="{{ f.tier }}" data-finding="{{ f.id }}">
+      {% set focused = focus_node and (f.anchor == focus_node or (f.id and focus_node in f.id)) %}
+      <div class="text-xs flex flex-wrap items-baseline gap-x-2 border-l-2 {{ 'border-brand-blue bg-[#eef4fc] rounded' if focused else 'border-hairline' }} pl-2" data-severity="{{ f.severity }}" data-tier="{{ f.tier }}" data-finding="{{ f.id }}"{% if focused %} data-focus="1"{% endif %}>
         <span class="font-semibold {{ 'text-brand-red' if f.severity == 'blocking' else 'text-gray-700' }}">{{ '⚠' if f.severity == 'blocking' else '·' }} {{ f.severity }}</span>
         <span class="px-1.5 py-0.5 rounded bg-brand-bg text-[11px]">{{ f.tier }}</span>
         <span class="font-mono text-[11px] text-brand-muted">{{ f.id }}</span>
@@ -230,7 +238,8 @@
     <div class="px-5 pb-4 space-y-1.5">
       {% for r in node_reasons %}
       {% set tb = tier_badge(r.display_tier) %}
-      <div class="text-sm flex flex-wrap items-baseline gap-x-2 border-l-2 border-hairline pl-3">
+      {% set focused = focus_node and r.node_key == focus_node %}
+      <div class="text-sm flex flex-wrap items-baseline gap-x-2 border-l-2 {{ 'border-brand-blue bg-[#eef4fc] rounded' if focused else 'border-hairline' }} pl-3"{% if focused %} data-focus="1"{% endif %}>
         <span data-tier="{{ r.display_tier }}" class="text-xs px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
         <span class="text-[11px] text-brand-muted">{{ r.kind }} · {{ r.source }}</span>
         {% if r.node_key and plan and plan.project %}

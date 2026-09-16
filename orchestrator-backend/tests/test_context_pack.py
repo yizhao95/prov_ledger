@@ -43,7 +43,9 @@ def _seed(conn, n_reasons=5, n_rejected=7):
     for i in range(n_reasons):
         ids["reasons"].append(pv.insert_reason(conn, project="proj", plan_id=f"P{i}", node_key="nk_a", kind="technical",
                                                interpretation=f"reason {i} " + "x" * 60, recorded_by="agent"))
-    ids["reasons"].append(pv.insert_reason(conn, project="proj", plan_id="P9", node_key="nk_a", kind="technical", interpretation="a minor one", recorded_by="agent", significance="minor"))
+    minor = pv.insert_reason(conn, project="proj", plan_id="P9", node_key="nk_a", kind="technical", interpretation="a minor one", recorded_by="agent")
+    conn.execute("INSERT INTO significance_log (reason_id, project, hint, hint_basis, judged_by) VALUES (?, 'proj', 'minor', 'nothing hit', 'hint')", (minor,))   # DP 2b: significance_eff, not the stored column
+    ids["reasons"].append(minor)
     for i in range(n_rejected):
         ids["rejected"].append(pv.insert_reason(conn, project="proj", plan_id=f"P{i}", node_key="nk_a", kind="technical", role="rejected_path",
                                                 interpretation=f"tried {i} " + "y" * 60, rule_id="R6", recorded_by="system"))

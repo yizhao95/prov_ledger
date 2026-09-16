@@ -988,3 +988,193 @@ def record_stats(conn: sqlite3.Connection, reason_ids: list[int]) -> dict[int, d
     except sqlite3.Error:
         return {}
     return out
+
+
+# ── DP phase 2b (Task 3): the Graph view ───────────────────────────────────────
+
+def node_badges(conn: sqlite3.Connection, project: str) -> dict[str, dict]:
+    """node_key → {badge, reasons, rejected_paths, constraints, minor, last_at} from node_badge_v (empty on an older DB)."""
+    try:
+        return {r["node_key"]: dict(r) for r in conn.execute(
+            "SELECT node_key, badge, reasons, rejected_paths, constraints, minor, last_at FROM node_badge_v WHERE project = ?", (project,))}
+    except sqlite3.Error:
+        return {}
+
+
+def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = None, level: str = "functions") -> dict:
+    """The project as it is (or was, at run `at`): nodes with their badge (how
+    many records have a story) and the tier of their latest event, edges, the
+    run list for the selector. PSG only through psg_bridge (ro); a missing
+    graph is `available: False`, never a 500."""
+    base = {"project": project, "available": False, "reason": None, "nodes": [], "edges": [], "runs": [], "run": None,
+            "edges_from": "none", "level": level, "badged": 0}
+    if _psg is None:
+        base["reason"] = "state graph unavailable: provledger.psg_bridge cannot be imported in this environment"
+        return base
+    db_path = _psg.db_path_for(project)
+    if not db_path or not os.path.exists(db_path):
+        base["reason"] = f"state graph unavailable: project {project!r} is not registered or its graph file is missing"
+        return base
+    run_id = None
+    if at not in (None, ""):
+        try:
+            run_id = int(at)
+        except (TypeError, ValueError):
+            run_id = None
+    g = _psg.graph_at(db_path, run_id=run_id, level=level if level in ("functions", "full") else "functions")
+    tiers = _psg.latest_tier_of(db_path, run_id=g["run_id"])
+    badges = node_badges(conn, project)
+    nodes = []
+    for n in g["nodes"]:
+        # a record may be anchored by node_key or by qualified name (a constraint declared by name): both count
+        b1 = badges.get(n["node_key"]) or {}; b2 = badges.get(n["qualified_name"]) or {}
+        nodes.append({**n, "badge": int(b1.get("badge") or 0) + int(b2.get("badge") or 0), "minor": int(b1.get("minor") or 0) + int(b2.get("minor") or 0),
+                      "tier": tiers.get(n["node_key"], "observed"), "last_at": max([x for x in (b1.get("last_at"), b2.get("last_at")) if x], default=None)})
+    runs = _psg.runs_of(db_path)
+    run = next((r for r in runs if r["run_id"] == g["run_id"]), None)
+    base.update(available=True, nodes=nodes, edges=g["edges"], runs=runs[:50], run=run, edges_from=g["edges_from"],
+                level=g["level"], badged=sum(1 for n in nodes if n["badge"]), latest_run_id=g.get("latest_run_id"))
+    return base
+
+
+# ── DP phase 2b (Task 4): the context triple (project, node, at) across the three views ──
+
+def triple(project: str | None = None, node: str | None = None, at: str | None = None) -> dict:
+    """The context every view carries: missing items are simply absent (I12)."""
+    return {"project": project or None, "node": node or None, "at": (str(at) if at not in (None, "") else None)}
+
+
+def url_for_view(view: str, t: dict, plan_id: str | None = None) -> str | None:
+    """graph | node | task → the URL that keeps the triple; None when the view has no anchor to go to."""
+    from urllib.parse import quote, urlencode
+    q = {}
+    project, node, at = t.get("project"), t.get("node"), t.get("at")
+    if view == "graph":
+        if not project:
+            return None
+        if node:
+            q["focus"] = node
+        if at and str(at).isdigit():
+            q["at"] = at
+        return f"/graph/{quote(project, safe='')}" + (f"?{urlencode(q)}" if q else "")
+    if view == "node":
+        if not (project and node):
+            return None
+        if at:
+            q["at"] = at
+        return f"/node/{quote(project, safe='')}/{quote(node, safe='')}" + (f"?{urlencode(q)}" if q else "")
+    if view == "task":
+        pid = plan_id or (at if at and not str(at).isdigit() else None)
+        if not pid:
+            return "/"
+        if node:
+            q["node"] = node
+        if at and at != pid:
+            q["at"] = at
+        return f"/plan/{quote(pid, safe='')}" + (f"?{urlencode(q)}" if q else "")
+    return None
+
+
+def view_bar(view: str, t: dict, plan_id: str | None = None) -> dict:
+    """What base.html renders: the three links (None when unreachable), the current view, the breadcrumb."""
+    return {"current": view, "triple": t, "plan_id": plan_id,
+            "links": {v: url_for_view(v, t, plan_id) for v in ("graph", "node", "task")}}
+
+
+# ── DP phase 2b (Task 5): session cards ─────────────────────────────────────────
+
+_ORCH_RE = re.compile(r"run-step|publish-plan|review_run|complete-step|start-step|deviate|fail-step|finish-plan|record-|ledger-")
+_PROV_RE = re.compile(r"reason-|provledger |hooks/|analyzer ")
+
+
+def _bucket(head: str | None) -> str | None:
+    if not head:
+        return None
+    if _PROV_RE.search(head):
+        return "provenance"
+    if _ORCH_RE.search(head):
+        return "orchestration"
+    return None
+
+
+def get_session(conn: sqlite3.Connection, session_id: str, personal_ok: bool = True) -> dict:
+    """One session: what was said (utterances; personal ones marked, shown only on
+    this machine), what it cost (tool calls, the two buckets), what changed
+    (the session refresh's node events, when there was one), its headline, the
+    plans it published. Read-only; an older DB renders empty parts."""
+    out = {"session_id": session_id, "found": False, "run": None, "utterances": [], "tool_calls": 0, "buckets": {"orchestration": 0, "provenance": 0, "other": 0},
+           "ratios": {"orchestration": None, "provenance": None}, "changed_nodes": [], "headline": None, "plans": [], "degraded": False, "first_at": None, "last_at": None}
+    try:
+        r = conn.execute("SELECT session_id, project, cwd, started_at, ended_at, psg_run_id, refresh_state, note FROM session_run WHERE session_id = ?", (session_id,)).fetchone()
+        out["run"] = dict(r) if r else None
+    except sqlite3.Error:
+        out["run"] = None
+    try:
+        rows = conn.execute("SELECT id, project, plan_id, text, occurred_at, visibility FROM utterance WHERE session_id = ? ORDER BY id", (session_id,)).fetchall()
+        out["utterances"] = [{**dict(u), "text": (u["text"] if (personal_ok or u["visibility"] != "personal") else "(personal — not shown here)")} for u in rows]
+    except sqlite3.Error:
+        pass
+    try:
+        calls = conn.execute("SELECT tool_name, command_head, at FROM tool_call_log WHERE session_id = ? ORDER BY id", (session_id,)).fetchall()
+        out["tool_calls"] = len(calls)
+        for c in calls:
+            b = _bucket(c["command_head"]) if c["tool_name"] == "Bash" else None
+            out["buckets"][b or "other"] += 1
+        if calls:
+            out["first_at"], out["last_at"] = calls[0]["at"], calls[-1]["at"]
+            n = len(calls)
+            out["ratios"] = {"orchestration": round(out["buckets"]["orchestration"] / n, 4), "provenance": round(out["buckets"]["provenance"] / n, 4)}
+    except sqlite3.Error:
+        pass
+    try:
+        out["plans"] = [dict(p) for p in conn.execute("SELECT plan_id, original_goal, status, created_at, project FROM Plans WHERE session_id = ? ORDER BY created_at", (session_id,))]
+    except sqlite3.Error:
+        out["plans"] = []
+    try:
+        h = conn.execute("SELECT id, findings_json, computed_at FROM headline WHERE session_id = ? ORDER BY id DESC LIMIT 1", (session_id,)).fetchone()
+        if h:
+            doc = json.loads(h["findings_json"]); out["headline"] = {"headline_id": h["id"], "computed_at": h["computed_at"], "summary": doc.get("summary") or {}, "findings": doc.get("findings") or []}
+    except (sqlite3.Error, ValueError):
+        pass
+    run = out["run"]
+    if run and run.get("psg_run_id") and _psg is not None and run.get("project"):
+        db_path = _psg.db_path_for(run["project"])
+        if db_path and os.path.exists(db_path):
+            try:
+                out["changed_nodes"] = _psg.changed_node_keys(db_path, f"session:{session_id}")
+            except Exception:
+                out["changed_nodes"] = []
+    out["found"] = bool(run or out["utterances"] or out["tool_calls"] or out["plans"])
+    out["degraded"] = out["found"] and not out["plans"]
+    return out
+
+
+def recent_sessions(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
+    """The last sessions the hooks or the publish saw: id, first/last activity, utterance and tool-call counts, plan count, degraded flag."""
+    try:
+        rows = conn.execute("""
+            SELECT s.session_id, MIN(s.first_at) AS first_at, MAX(s.last_at) AS last_at,
+                   SUM(s.utterances) AS utterances, SUM(s.calls) AS calls, SUM(s.plans) AS plans
+            FROM (
+              SELECT session_id, MIN(occurred_at) AS first_at, MAX(occurred_at) AS last_at, COUNT(*) AS utterances, 0 AS calls, 0 AS plans FROM utterance WHERE session_id <> '' GROUP BY session_id
+              UNION ALL
+              SELECT session_id, MIN(at), MAX(at), 0, COUNT(*), 0 FROM tool_call_log WHERE session_id <> '' GROUP BY session_id
+              UNION ALL
+              SELECT session_id, MIN(created_at), MAX(created_at), 0, 0, COUNT(*) FROM Plans WHERE session_id IS NOT NULL GROUP BY session_id
+              UNION ALL
+              SELECT session_id, started_at, ended_at, 0, 0, 0 FROM session_run
+            ) s GROUP BY s.session_id ORDER BY last_at DESC LIMIT ?""", (limit,)).fetchall()
+    except sqlite3.Error:
+        return []
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            sr = conn.execute("SELECT refresh_state, project FROM session_run WHERE session_id = ?", (d["session_id"],)).fetchone()
+        except sqlite3.Error:
+            sr = None
+        d["refresh_state"] = sr["refresh_state"] if sr else None
+        d["project"] = sr["project"] if sr else None
+        d["degraded"] = not d["plans"]
+        out.append(d)
+    return out

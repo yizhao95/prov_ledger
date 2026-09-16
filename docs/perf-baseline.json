@@ -4,18 +4,18 @@
   "n": 0,
   "p90": null
  },
- "generated_at": "2026-09-16T00:21:39Z",
+ "generated_at": "2026-09-16T08:20:45Z",
  "n_measured": 0,
- "n_plans": 81,
- "n_proxy": 81,
+ "n_plans": 93,
+ "n_proxy": 93,
  "overhead": {
   "context_overhead_tokens": {
    "median": 0.0,
-   "n": 81,
-   "p90": 0.0
+   "n": 93,
+   "p90": 1508.0
   },
   "n_measured": 0,
-  "n_plans": 81,
+  "n_plans": 93,
   "overhead_ratio": {
    "median": null,
    "n": 0,
@@ -108,6 +108,78 @@
    },
    "dp2-t5-20260915234959": {
     "context_overhead_tokens": 1816,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2-t6-20260916001920": {
+    "context_overhead_tokens": 1585,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2-t7-20260916005300": {
+    "context_overhead_tokens": 2127,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2-t7b-20260916011503": {
+    "context_overhead_tokens": 4510,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2-t8-20260916015919": {
+    "context_overhead_tokens": 748,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2b-t0-20260916034236": {
+    "context_overhead_tokens": 1983,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2b-t0b-20260916050547": {
+    "context_overhead_tokens": 1408,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2b-t1-20260916041906": {
+    "context_overhead_tokens": 1581,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2b-t2-20260916053419": {
+    "context_overhead_tokens": 2264,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2b-t3-20260916060502": {
+    "context_overhead_tokens": 1590,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2b-t4-20260916063402": {
+    "context_overhead_tokens": 1533,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2b-t4b-20260916072205": {
+    "context_overhead_tokens": 830,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2b-t5-20260916075102": {
+    "context_overhead_tokens": 1342,
     "overhead_ratio": null,
     "provenance_ratio": null,
     "total_calls": 0
@@ -518,7 +590,7 @@
  "plans": {},
  "proxy_calls_per_step": {
   "median": 1.8571,
-  "n": 81,
+  "n": 93,
   "p90": 2.125
  },
  "since": null,
@@ -526,8 +598,8 @@
   "assistant_turns": 10,
   "context_tokens_total": 266393,
   "measured_at": "2026-09-15",
-  "method": "one headless session per run: `claude -p --output-format stream-json --permission-mode acceptEdits --settings '{\"enabledPlugins\": {\"provledger@provledger\": false}}'` in a scratch copy of examples/phantom-uplift (not a registered repo; ORCH_DB pointed at a file that was never created — the provledger hooks did not fire), superpowers left on; the task: add weekly_totals(orders) to gen_upstream.py, write tests/test_weekly_totals.py with two cases, run pytest. tool_uses = assistant tool_use blocks in the transcript; tokens = summed message.usage over assistant turns (input + cache_read + cache_creation).",
-  "note": "a reference number, never an assertion — three runs of the same task ranged 5..26 tool calls on permission and interpreter friction alone; re-measure by hand once per version",
+  "method": "one headless session per run: `claude -p --output-format stream-json --permission-mode acceptEdits --settings '{\"enabledPlugins\": {\"provledger@provledger\": false}}'` in a scratch copy of examples/phantom-uplift (not a registered repo; ORCH_DB pointed at a file that was never created \u2014 the provledger hooks did not fire), superpowers left on; the task: add weekly_totals(orders) to gen_upstream.py, write tests/test_weekly_totals.py with two cases, run pytest. tool_uses = assistant tool_use blocks in the transcript; tokens = summed message.usage over assistant turns (input + cache_read + cache_creation).",
+  "note": "a reference number, never an assertion \u2014 three runs of the same task ranged 5..26 tool calls on permission and interpreter friction alone; re-measure by hand once per version",
   "reference_run": 3,
   "runs": [
    {

@@ -615,10 +615,10 @@ def test_node_page_hit_counts_per_moment_and_the_adopting_plan_backlink(client, 
     ids = _seed_headline(client._db, pid, step)
     html = client.get("/node/demo/nk_a").text
     assert f'data-stats="{ids["cid"]}"' in html and "展示 plan 1 · edit 1 · why 0 · 采用 1" in html
-    assert f'href="/plan/{pid}">{pid}</a> 采用' in html                      # 被 <plan> 采用
+    assert f'href="/plan/{pid}?node=pkg.m.load_orders&at={ids["cid"]}">{pid}</a> 采用' in html    # 被 <plan> 采用, carrying the triple (DP 2b)
     assert f'data-stats="{ids["rid"]}"' in html and "展示 plan 1 · edit 0 · why 0 · 采用 0" in html
     hi = client.get(f"/node/demo/nk_a?at={ids['cid']}").text
-    assert f'data-record="{ids["cid"]}" data-at="1"' in hi and hi.count('data-at="1"') == 1
+    assert f'data-record="{ids["cid"]}" data-at="1"' in hi and hi.count(' data-record="') == hi.count('data-record="') and f'data-record="{ids["rid"]}" data-at="1"' not in hi   # only the asked record (the view bar carries its own data-at, DP 2b)
 
 
 def test_footer_carries_the_two_overhead_numbers(client):
@@ -654,3 +654,105 @@ def test_etag_changes_on_a_headline_response(client):
     conn.commit(); conn.close()
     ro = queries.open_db_readonly(client._db); after = queries.compute_etag(ro); ro.close()
     assert before != after
+
+
+# ── DP phase 2b (Task 3): the Graph view ──
+
+def test_graph_page_renders_nodes_with_badge_and_tier_and_links_to_node(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path)
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    _seed_reasons_and_constraints(client._db)
+    html = client.get("/graph/demo").text
+    assert 'data-panel="graph-table"' in html and 'data-node="nk_a"' in html
+    assert 'data-badge="3"' in html                                # 1 stated reason + 2 active constraints (the unstated one has no badge)
+    assert 'data-tier="asserted"' in html                          # the latest event of nk_a is identity_asserted
+    assert 'href="/node/demo/pkg.m.load_orders"' in html and "run 2" in html and "bbbbbbb" in html
+    focused = client.get("/graph/demo?focus=pkg.m.load_orders").text
+    assert 'data-focus="1"' in focused and 'name="focus" value="pkg.m.load_orders"' in focused
+
+
+def test_graph_page_at_a_run_shows_that_runs_nodes_and_says_where_edges_come_from(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path)
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    then = client.get("/graph/demo?at=1").text
+    assert "run 1" in then and "aaaaaaa" in then and "edges_from: latest" in then
+    assert 'href="/node/demo/pkg.m.load?at=1"' in then                 # the name it carried at run 1, and the triple carries at
+    now = client.get("/graph/demo").text
+    assert "pkg.m.load_orders" in now and 'href="/node/demo/pkg.m.load?at=1"' not in now
+
+
+def test_graph_page_without_a_graph_is_200_and_says_so(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(tmp_path / "empty.json")); (tmp_path / "empty.json").write_text('{"projects": []}')
+    r = client.get("/graph/nope")
+    assert r.status_code == 200 and 'data-state="unavailable"' in r.text and "state graph unavailable" in r.text
+
+
+def test_graph_page_full_level_includes_data_nodes_and_old_db_stays_200(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path)
+    monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    conn = odb.open_db(client._db); conn.execute("DROP VIEW node_badge_v"); conn.commit(); conn.close()
+    r = client.get("/graph/demo?level=full")
+    assert r.status_code == 200 and 'data-badge="0"' in r.text                 # no badge view → badges read 0, page still renders
+
+
+# ── DP phase 2b (Task 5): session cards ──
+
+def _seed_session(db, pid, sid="sess-A"):
+    conn = odb.open_db(db)
+    conn.execute("INSERT INTO utterance (session_id, project, plan_id, text, occurred_at, visibility, hash) VALUES (?, 'demo', ?, 'please keep fiscal weeks', '2026-09-16 09:00:00', 'personal', 'h1')", (sid, pid))
+    conn.execute("INSERT INTO utterance (session_id, project, plan_id, text, occurred_at, visibility, hash) VALUES (?, 'demo', NULL, 'and rename load to load_orders', '2026-09-16 09:01:00', 'shareable', 'h2')", (sid,))
+    for head, tool in (("bash scripts/run-step.sh a", "Bash"), ("bash scripts/reason-fill.sh r", "Bash"), ("pytest -q", "Bash"), (None, "Edit")):
+        conn.execute("INSERT INTO tool_call_log (session_id, cwd, tool_name, command_head) VALUES (?, '/x', ?, ?)", (sid, tool, head))
+    conn.execute("UPDATE Plans SET session_id=?, project='demo' WHERE plan_id=?", (sid, pid))
+    conn.execute("INSERT INTO session_run (session_id, project, cwd, started_at, ended_at, refresh_state, note) VALUES ('sess-D', 'demo', '/x', '2026-09-16 08:00:00', '2026-09-16 08:30:00', 'done', 'refresh queued: tracked files changed')")
+    conn.execute("UPDATE session_run SET psg_run_id = 2 WHERE session_id='sess-D'")
+    conn.execute("INSERT INTO utterance (session_id, project, plan_id, text, occurred_at, visibility, hash) VALUES ('sess-D', 'demo', NULL, 'add order_count', '2026-09-16 08:10:00', 'shareable', 'h3')")
+    conn.execute("INSERT INTO headline (project, session_id, findings_json) VALUES ('demo', 'sess-D', ?)", (json.dumps({"findings": [], "summary": {"targets": 1, "layers": 2, "findings": 0, "blocking": 0, "warning": 0, "info": 0, "unanswered": 0, "shown": 0, "adopted": 0}}),))
+    conn.commit(); conn.close()
+
+
+def test_session_page_shows_said_cost_changed_and_plans(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path); monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    pid = client._seeded["plan_id"]; _seed_session(client._db, pid)
+    html = client.get("/session/sess-A").text
+    assert 'data-session="sess-A"' in html and 'data-degraded="1"' not in html
+    assert 'data-visibility="personal"' in html and "please keep fiscal weeks" in html and "and rename load to load_orders" in html
+    assert "orchestration 1 (25.0%)" in html and "provenance 1 (25.0%)" in html and "other 2" in html
+    assert f'href="/plan/{pid}"' in html and "no plan published" not in html
+
+
+def test_degraded_session_is_marked_and_shows_its_refresh_and_headline(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path); monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    pid = client._seeded["plan_id"]; _seed_session(client._db, pid)
+    conn = odb.open_db(client._db)
+    conn.execute("UPDATE analysis_run SET plan_id='session:sess-D' WHERE id=2") if False else None
+    conn.close()
+    html = client.get("/session/sess-D").text
+    assert 'data-degraded="1"' in html and "降级（无 plan）" in html and "refresh done" in html and "run 2" in html
+    assert "data-session-headline" in html and "never printed" in html and "data-no-plan" in html
+    assert client.get("/session/nope").status_code == 200 and 'data-state="not-found"' in client.get("/session/nope").text
+
+
+def test_home_lists_recent_sessions_with_and_without_a_plan(client, tmp_path, monkeypatch):
+    _, reg = _seed_state_graph(tmp_path); monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
+    pid = client._seeded["plan_id"]; _seed_session(client._db, pid)
+    html = client.get("/").text
+    assert 'data-panel="recent-sessions"' in html and 'data-session-card="sess-A"' in html and 'data-session-card="sess-D" data-degraded="1"' in html
+    assert "1 plan" in html and "降级（无 plan）" in html
+
+
+def test_plan_header_names_its_session_and_the_sessions_other_plans(client):
+    pid = client._seeded["plan_id"]; _seed_session(client._db, pid)
+    conn = odb.open_db(client._db)
+    conn.execute("INSERT INTO Plans (plan_id, original_goal, status, project, project_source, session_id) VALUES ('other-plan', 'g2', 'COMPLETED', 'demo', 'declared', 'sess-A')")
+    conn.commit(); conn.close()
+    html = client.get(f"/plan/{pid}").text
+    assert 'data-plan-session="sess-A"' in html and 'href="/session/sess-A"' in html and 'href="/plan/other-plan"' in html
+
+
+def test_session_pages_survive_an_old_db(client):
+    conn = odb.open_db(client._db)
+    for t in ("session_run",):
+        conn.execute(f"DROP TABLE {t}")
+    conn.commit(); conn.close()
+    assert client.get("/session/x").status_code == 200 and client.get("/").status_code == 200

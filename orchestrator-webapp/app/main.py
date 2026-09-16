@@ -6,6 +6,8 @@ Routes:
   GET /api/health       — JSON ping for uptime monitoring
   GET /outcomes         — every claim across plans with its latest outcome (phase 8, FL-042)
   GET /node/{project}/{qualified_name} — one node's space / time / intent ledger (phase 8, FL-009)
+  GET /graph/{project}?focus=&at=&level= — the project as it is, or was at a run (DP phase 2b)
+  GET /session/{session_id} — what a session said, cost, changed, published (DP phase 2b)
 
 Read-only access to ~/skill-workspace/orchestrator.db. Never mutates.
 """
@@ -39,7 +41,7 @@ TEMPLATES.env.globals["tier_badge"] = queries.tier_badge
 app = FastAPI(title="provLedger Dashboard", version="0.1.0")
 
 
-def _build_context(request: Request, plan_id: str | None = None) -> dict:
+def _build_context(request: Request, plan_id: str | None = None, node: str | None = None, at: str | None = None) -> dict:
     """Build the template context for one plan.
 
     If `plan_id` is None, the latest plan is shown (default behavior).
@@ -55,6 +57,8 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
             "node_reasons": [], "unstated": {"slots": 0, "unstated": 0, "pct": 0}, "outcomes": [],
             "headline": None, "shown_adopted": {"plan": {"shown": [], "adopted": []}, "steps": {}}, "overhead": None,
             "total_plans": 0, "db_size_kb": 0, "viewing_plan_id": plan_id,
+            "focus_node": node, "focus_at": at, "bar": queries.view_bar("task", queries.triple(None, node, at), plan_id),
+            "plan_session": None, "session_plans": [], "recent_sessions": [],
         }
 
     try:
@@ -99,6 +103,10 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         overhead = queries.get_overhead(conn, plan["plan_id"]) if plan else None
         total_plans = queries.count_total_plans(conn)
         db_size_kb = queries.get_db_size_kb()
+        # DP phase 2b (Task 5): the plan's session and its other plans; the home page's recent sessions
+        plan_session = plan.get("session_id") if plan else None
+        session_plans = [dict(r) for r in conn.execute("SELECT plan_id, status FROM Plans WHERE session_id = ? AND plan_id <> ? ORDER BY created_at", (plan_session, plan["plan_id"]))] if plan_session else []
+        recent_sessions = queries.recent_sessions(conn) if not plan_id else []
     except sqlite3.Error as e:
         return _error_ctx(f"database error: {e}")
     finally:
@@ -129,6 +137,13 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         "total_plans": total_plans,
         "db_size_kb": db_size_kb,
         "viewing_plan_id": plan_id,  # None = viewing latest; set = viewing a specific historical plan
+        # DP phase 2b (Task 4): the context triple this page carries and the view bar built from it
+        "focus_node": node,
+        "focus_at": at,
+        "bar": queries.view_bar("task", queries.triple(plan.get("project") if plan else None, node, at), plan["plan_id"] if plan else None),
+        "plan_session": plan_session,
+        "session_plans": session_plans,
+        "recent_sessions": recent_sessions,
     }
 
 
@@ -140,9 +155,10 @@ def dashboard(request: Request):
 
 
 @app.get("/plan/{plan_id}", response_class=HTMLResponse)
-def view_plan(request: Request, plan_id: str):
-    """View a specific historical plan by id (linked from /history)."""
-    context = _build_context(request, plan_id=plan_id)
+def view_plan(request: Request, plan_id: str, node: str | None = None, at: str | None = None):
+    """View a specific historical plan by id (linked from /history). `node` / `at`
+    are the context triple (DP phase 2b): the node is highlighted, the bar keeps both."""
+    context = _build_context(request, plan_id=plan_id, node=node, at=at)
     return TEMPLATES.TemplateResponse(request, "dashboard.html", context)
 
 
@@ -163,11 +179,12 @@ def history(request: Request):
         "request": request,
         "error": None,
         "plans": plans,
+        "bar": queries.view_bar("history", queries.triple(None, None, None)),
     })
 
 
 @app.get("/api/dashboard", response_class=HTMLResponse)
-def dashboard_partial(request: Request, plan: str | None = None):
+def dashboard_partial(request: Request, plan: str | None = None, node: str | None = None, at: str | None = None):
     """HTMX partial — swappable inner content.
 
     Optional ?plan=<plan_id> query param: poll a specific historical plan
@@ -204,7 +221,7 @@ def dashboard_partial(request: Request, plan: str | None = None):
         )
 
     # 2. Otherwise render the partial and stamp the new ETag
-    context = _build_context(request, plan_id=plan)
+    context = _build_context(request, plan_id=plan, node=node, at=at)
     response = TEMPLATES.TemplateResponse(request, "_dashboard_partial.html", context)
     response.headers["ETag"] = etag
     response.headers["Cache-Control"] = "no-store, must-revalidate"
@@ -235,7 +252,8 @@ def health():
 def outcomes(request: Request, project: str | None = None):
     """Phase 8 (FL-042): every expectation across plans with its latest
     outcome — a claim ledger. Read-only; an old DB renders an empty page."""
-    ctx = {"request": request, "error": None, "rows": [], "stats": queries.outcome_stats([]), "project": project}
+    ctx = {"request": request, "error": None, "rows": [], "stats": queries.outcome_stats([]), "project": project,
+           "bar": queries.view_bar("outcomes", queries.triple(project, None, None))}
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:
@@ -255,12 +273,63 @@ def outcomes(request: Request, project: str | None = None):
     return TEMPLATES.TemplateResponse(request, "outcomes.html", ctx)
 
 
+@app.get("/session/{session_id}", response_class=HTMLResponse)
+def session_card(request: Request, session_id: str):
+    """DP phase 2b (Task 5, FL-062): one session — what was said, what it cost,
+    what changed, its headline, the plans it published; a session without a
+    plan is marked 降级. Read-only; an older DB renders empty parts."""
+    ctx = {"request": request, "error": None, "session": None, "bar": queries.view_bar("session", queries.triple(None, None, None))}
+    try:
+        conn = queries.open_db_readonly()
+    except FileNotFoundError as e:
+        ctx["error"] = f"orchestrator.db not found: {e}"
+        ctx["session"] = {"session_id": session_id, "found": False, "degraded": False, "run": None, "utterances": [], "tool_calls": 0, "buckets": {}, "ratios": {}, "changed_nodes": [], "headline": None, "plans": []}
+        return TEMPLATES.TemplateResponse(request, "session.html", ctx)
+    try:
+        ctx["session"] = queries.get_session(conn, session_id)
+        if ctx["session"]["run"] and ctx["session"]["run"].get("project"):
+            ctx["bar"] = queries.view_bar("session", queries.triple(ctx["session"]["run"]["project"], None, None))
+    except sqlite3.Error as e:
+        ctx["error"] = f"database error: {e}"
+        ctx["session"] = {"session_id": session_id, "found": False, "degraded": False, "run": None, "utterances": [], "tool_calls": 0, "buckets": {}, "ratios": {}, "changed_nodes": [], "headline": None, "plans": []}
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse(request, "session.html", ctx)
+
+
+@app.get("/graph/{project}", response_class=HTMLResponse)
+def graph_view(request: Request, project: str, focus: str | None = None, at: str | None = None, level: str = "functions"):
+    """DP phase 2b (Task 3): the project as it is (or was, at a run) — nodes with a
+    badge (records with a story) and the tier of their latest event. PSG only
+    through psg_bridge; a missing graph is 200 + "state graph unavailable"."""
+    import json as _json
+    ctx = {"request": request, "error": None, "project": project, "focus": focus or None, "graph": None, "graph_json": "{}",
+           "bar": queries.view_bar("graph", queries.triple(project, focus, at))}
+    try:
+        conn = queries.open_db_readonly()
+    except FileNotFoundError as e:
+        ctx["error"] = f"orchestrator.db not found: {e}"
+        ctx["graph"] = {"available": False, "reason": ctx["error"], "nodes": [], "edges": [], "runs": [], "run": None, "level": level, "badged": 0}
+        return TEMPLATES.TemplateResponse(request, "graph.html", ctx)
+    try:
+        ctx["graph"] = queries.get_graph(conn, project, at=at, level=level)
+        ctx["graph_json"] = _json.dumps({"nodes": ctx["graph"]["nodes"], "edges": ctx["graph"]["edges"]}, default=str)
+    except sqlite3.Error as e:
+        ctx["error"] = f"database error: {e}"
+        ctx["graph"] = {"available": False, "reason": ctx["error"], "nodes": [], "edges": [], "runs": [], "run": None, "level": level, "badged": 0}
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse(request, "graph.html", ctx)
+
+
 @app.get("/node/{project}/{qualified_name:path}", response_class=HTMLResponse)
 def node_ledger(request: Request, project: str, qualified_name: str):
     """Phase 8 (FL-009): one node's upstream/downstream, history and reasons —
     three dimensions in one read-only query (docs/NORTH-STAR essence #2)."""
+    at = request.query_params.get("at")
     ctx = {"request": request, "error": None, "ledger": None, "project": project, "qualified_name": qualified_name,
-           "at": request.query_params.get("at")}          # DP phase 2: ?at=<reason_id> highlights one record
+           "at": at,                                       # DP phase 2: ?at=<reason_id> highlights one record; 2b: a run id highlights the run
+           "bar": queries.view_bar("node", queries.triple(project, qualified_name, at))}
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:
