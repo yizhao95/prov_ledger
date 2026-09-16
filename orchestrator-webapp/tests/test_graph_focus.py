@@ -386,3 +386,59 @@ def test_an_unclustered_page_keeps_the_full_node_records(client):
     payload = main.graph_payload(g)
     assert payload["clusters"] == []
     assert any("file_path" in n for n in payload["nodes"])
+
+
+# ── the layering has to be a real depth, not a three-bucket guess ────────────
+# The first version assigned levels by node_type alone, so every function landed
+# on level 1 and vis drew 56 nodes on one horizontal line. A layered picture
+# needs a DEPTH: distance from the focus, or topological depth from the sources.
+
+def test_focus_levels_are_signed_distance_from_the_focus(tmp_path):
+    g, _ = _chain_graph(tmp_path)
+    nb = psg_bridge.graph_at(g, mode="focus", focus="nk_5", hops=2)
+    lv = {n["node_key"]: n["level"] for n in nb["nodes"]}
+    assert lv["nk_5"] == 0, "the focus is not the origin"
+    assert lv["nk_4"] == -1 and lv["nk_3"] == -2, "callers are not above the focus"
+    assert lv["nk_6"] == 1 and lv["nk_7"] == 2, "callees are not below the focus"
+    assert len(set(lv.values())) >= 3
+
+
+def test_data_levels_are_topological_depth_not_node_type(tmp_path):
+    g, _ = _chain_graph(tmp_path)
+    d = psg_bridge.graph_at(g, mode="data")
+    lv = {n["node_key"]: n["level"] for n in d["nodes"]}
+    assert lv["nk_orders"] == 0 and lv["nk_customers"] == 0, "sources are not at depth 0"
+    assert lv["nk_3"] > lv["nk_orders"], "the reader is not below what it reads"
+    assert len(set(lv.values())) >= 2
+
+
+def test_story_levels_spread_over_more_than_one_line(tmp_path):
+    g, _ = _chain_graph(tmp_path)
+    s = psg_bridge.graph_at(g, mode="story", story_keys=["nk_3", "nk_7"])
+    assert len({n["level"] for n in s["nodes"]}) >= 2, "story drew everything on one line"
+
+
+def test_a_cycle_does_not_hang_or_explode(tmp_path):
+    """Topological depth on a graph with a cycle: the cycle is collapsed, every
+    node still gets a level, and nothing recurses forever."""
+    g, _ = _chain_graph(tmp_path)
+    import sqlite3
+    c = sqlite3.connect(g)
+    c.execute("INSERT INTO edge (edge_type_id, src_node_id, dst_node_id) VALUES (1, 12, 1)")  # f11 -> f0
+    c.commit(); c.close()
+    full = psg_bridge.graph_at(g, mode="data")
+    assert all(isinstance(n.get("level"), int) for n in full["nodes"])
+
+
+def test_clusters_sit_at_the_shallowest_level_they_contain(tmp_path):
+    g, _ = _chain_graph(tmp_path)
+    s = psg_bridge.graph_at(g, mode="full", level="full", cluster_above=3)
+    assert s["clusters"] and all("level" in c for c in s["clusters"])
+
+
+def test_the_renderer_gets_the_options_the_layout_needs(client):
+    t = client.get("/graph/demo?mode=data").text
+    assert "levelSeparation: 140" in t and "nodeSpacing: 180" in t
+    assert "sortMethod: 'directed'" in t and "direction: 'UD'" in t
+    assert "forceDirection: 'vertical'" in t
+    assert "window.network" in t, "the vis instance is not exposed for inspection"

@@ -612,7 +612,7 @@ def test_headline_block_shows_findings_with_severity_and_the_unanswered_count(cl
     assert html.count('data-severity="blocking"') == 2 and html.count('data-severity="warning"') == 1
     assert 'data-tier="stated"' in html and 'data-agent-proceeded="1"' in html and 'data-unanswered-finding="1"' in html
     assert "→ proceed (agent) · the filter moves downstream" in html and "unanswered" in html and "provledger why pkg.m.load_orders --all" in html
-    assert "2 展示过 · 0 采用了" in html                                # plan-level buckets (the step's rows are the step's)
+    assert "Surfaced 2" in html and "Adopted 0" in html                                # plan-level buckets (the step's rows are the step's)
 
 
 def test_step_panel_has_shown_and_adopted_columns(client):
@@ -621,7 +621,7 @@ def test_step_panel_has_shown_and_adopted_columns(client):
     html = client.get("/api/dashboard").text
     assert f'data-step-records="{step}"' in html and 'data-shown="1"' in html and 'data-adopted="1"' in html
     assert f'href="/node/demo/nk_a?at={ids["cid"]}"' in html               # adopted entries link to the record
-    assert "展示过（1）" in html and "采用了（1）" in html
+    assert "Surfaced 1" in html and "Adopted 1" in html
 
 
 def test_node_page_hit_counts_per_moment_and_the_adopting_plan_backlink(client, tmp_path, monkeypatch):

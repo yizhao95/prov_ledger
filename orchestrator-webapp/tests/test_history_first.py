@@ -200,3 +200,56 @@ def test_search_did_not_add_a_write_route(client):
     for route in main.app.routes:
         verbs |= {m for m in getattr(route, "methods", set()) if m not in ("HEAD", "OPTIONS")}
     assert verbs == {"GET"}
+
+
+# ── one record, one row, on the Task page too ────────────────────────────────
+
+def test_decisions_relied_on_shows_a_record_once_with_its_count(client):
+    """Three influence rows all citing constraint #1414 are three ADOPTIONS of
+    one record, not three decisions. The block shows the record once and says
+    how often it was adopted; the individual adoptions are one expand away."""
+    from app import queries
+    pid = client._seeded["plan_id"]; step = client._seeded["step_ids"][0]
+    rid = _adopt(client._db, pid, step)
+    conn = odb.open_db(client._db)
+    for via in ("reason_because", "constraint_ack"):
+        conn.execute("INSERT INTO influence (reason_id, project, plan_id, step_id, node_key, via, by, at) "
+                     "VALUES (?, 'demo', ?, ?, 'nk_a', ?, 'agent', '2026-09-16 11:00:00')", (rid, pid, step, via))
+    conn.commit(); conn.close()
+    ro = queries.open_db_readonly(client._db)
+    try:
+        rows = queries.changed_by_history(ro, pid)
+    finally:
+        ro.close()
+    assert len(rows) == 1, f"the same record is listed {len(rows)} times"
+    assert rows[0]["adoptions"] == 3 and len(rows[0]["vias"]) == 3
+    t = client.get(f"/plan/{pid}").text
+    block = t[t.index('data-panel="changed-by-history"'):t.index('data-panel="changed-by-history"') + 6000]
+    block = block[:block.index("</section>")]
+    assert block.count(VERBATIM) == 1, "the quoted record is printed more than once in the block"
+    assert "Adopted 3×" in block
+
+
+def test_the_task_page_carries_no_leftover_chinese(client):
+    """The package reads in English unless asked otherwise; a stray Chinese
+    phrase in the default view is a missed entry in the table, not a feature."""
+    import re as _re
+    pid = client._seeded["plan_id"]; step = client._seeded["step_ids"][0]
+    _adopt(client._db, pid, step)
+    html = client.get(f"/plan/{pid}").text
+    prose = _re.sub(r"<[^>]*>", " ", _re.sub(r"<(script|style).*?</\1>", " ", html, flags=_re.S))
+    # the seeded fixtures quote Chinese user words on purpose; those are DATA
+    for quoted in (VERBATIM, PRE):
+        prose = prose.replace(quoted, " ")
+    cjk = _re.findall(r"[一-鿿]+", prose)
+    assert cjk == [], f"Chinese chrome left on the Task page: {cjk[:6]}"
+
+
+def test_the_task_page_uses_the_agreed_words(client):
+    pid = client._seeded["plan_id"]; step = client._seeded["step_ids"][0]
+    _adopt(client._db, pid, step)
+    t = client.get(f"/plan/{pid}").text
+    assert "plan headline" not in t
+    from app import vocab
+    assert vocab.ui("prior_decisions") in t          # the block is always rendered
+    assert "Surfaced" in t and "Adopted" in t

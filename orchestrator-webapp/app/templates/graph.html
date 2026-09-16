@@ -92,7 +92,7 @@
     <span class="font-semibold">{{ ui('graph_unavailable', lang) }}</span> — {{ graph.reason }}
   </div>
   {% else %}
-  <div id="graph-canvas" class="bg-surface rounded-xl shadow-sm border border-hairline mb-4" style="height: 520px" data-canvas>
+  <div id="graph-canvas" class="bg-surface rounded-xl shadow-sm border border-hairline mb-4" style="height: {{ 720 if graph.layout == 'hierarchical' else 520 }}px" data-canvas>
     <div id="graph-fallback" class="p-4 text-xs text-brand-muted">图渲染库加载中… 若此提示不消失，说明 vis-network 不可用（离线或被拦截）——下方节点表仍完整。</div>
   </div>
   <script>
@@ -104,53 +104,75 @@
       var tierColor = {observed: '#2a78d6', derived: '#1baf7a', asserted: '#eda100', stated: '#4a3aa7', unstated: '#898781'};
       function draw() {
         if (typeof vis === 'undefined') { return false; }
-        var nodes = data.nodes.map(function (n) {
-          return {id: n.node_key, label: n.badge ? (n.qualified_name.split('.').pop() + ' [' + n.badge + ']') : n.qualified_name.split('.').pop(),
-                  title: n.qualified_name + '\n' + (n.file_path || '') + '\ntier ' + n.tier + ' · badge ' + n.badge,
-                  color: {background: n.badge ? '#fff3d6' : '#f9f9f7', border: tierColor[n.tier] || '#898781'},
-                  borderWidth: n.node_key === focus || n.qualified_name === focus ? 4 : (n.badge ? 2 : 1),
-                  shape: n.node_type === 'route' ? 'box' : 'dot', size: n.badge ? 12 + Math.min(n.badge, 8) : 10, font: {size: 11}};
+        var clustered = (data.clusters || []).length > 0;
+        var nodes, edges;
+
+        if (clustered) {
+          // The payload already carries module summaries and module-to-module
+          // edges; drawing 1601 individual nodes is what made this canvas an
+          // unreadable smear. Double-click a module to open it.
+          nodes = data.clusters.map(function (c) {
+            return {id: 'cluster:' + c.key, label: c.label + '\n(' + c.nodes + ')', level: c.level,
+                    shape: 'box', margin: 10, color: {background: '#eef4fc', border: '#2a78d6'},
+                    font: {size: 13, multi: true},
+                    title: c.label + ' — ' + c.nodes + ' nodes, ' + c.badged + ' with records'};
+          });
+        } else {
+          nodes = data.nodes.map(function (n) {
+            return {id: n.node_key, level: n.level,
+                    label: n.badge ? (n.qualified_name.split('.').pop() + ' [' + n.badge + ']') : n.qualified_name.split('.').pop(),
+                    title: n.qualified_name + '\n' + (n.node_type || '') + (n.file_path ? '\n' + n.file_path : '')
+                           + '\n' + (n.tier || '') + ' · ' + (n.badge || 0) + ' records'
+                           + (n.last_at ? '\nlast change ' + String(n.last_at).slice(0, 10) : '') + '\nopen node',
+                    color: {background: n.badge ? '#fff3d6' : '#f9f9f7', border: tierColor[n.tier] || '#898781'},
+                    borderWidth: n.node_key === focus || n.qualified_name === focus ? 4 : (n.badge ? 2 : 1),
+                    shape: n.node_type === 'route' ? 'box' : 'dot',
+                    size: n.badge ? 12 + Math.min(n.badge, 8) : 10, font: {size: 11}};
+          });
+        }
+        edges = data.edges.map(function (e) {
+          return {from: e.src_key, to: e.dst_key, arrows: 'to', color: {color: '#c9c8c1'},
+                  smooth: {type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4},
+                  width: e.weight ? 1 + Math.min(e.weight / 40, 6) : 1,
+                  title: e.edge_type || (e.weight + ' refs')};
         });
-        var edges = data.edges.map(function (e) { return {from: e.src_key, to: e.dst_key, arrows: 'to', color: {color: '#c9c8c1'}, smooth: {type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4}, width: e.weight ? 1 + Math.min(e.weight / 40, 6) : 1, title: e.edge_type || (e.weight + ' refs')}; });
-        var el = document.getElementById('graph-canvas'); el.innerHTML = '';
-        // Layered top-down for focus / story / data flow — the "one row per node,
-        // connected by lines" picture; only the full graph keeps physics, where
-        // there is no meaningful layering left to show.
+
         var opts = {interaction: {hover: true}};
         if (data.layout === 'hierarchical') {
-          nodes.forEach(function (n, i) { n.level = (data.nodes[i] || {}).level; });
           opts.layout = {hierarchical: {enabled: true, direction: 'UD', sortMethod: 'directed',
-                                        levelSeparation: 120, nodeSpacing: 140, treeSpacing: 160}};
+                                        levelSeparation: 140, nodeSpacing: 180, treeSpacing: 200}};
           opts.physics = false;
         } else {
           opts.physics = {stabilization: {iterations: 150}};
         }
+
+        var el = document.getElementById('graph-canvas'); el.innerHTML = '';
         var net = new vis.Network(el, {nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges)}, opts);
-        // Past the threshold the picture is clustered by module rather than cropped;
-        // every cluster is expandable, so no node is unreachable.
-        // a clustered payload already ships cluster nodes and aggregated edges
-        if ((data.clusters || []).length) {
-          nodes = data.clusters.map(function (c) {
-            return {id: 'cluster:' + c.key, label: c.label + '\n(' + c.nodes + ')', shape: 'database',
-                    color: {background: '#eef4fc', border: '#2a78d6'}, font: {size: 13, multi: true},
-                    title: c.label + ': ' + c.nodes + ' nodes, ' + c.badged + ' with records'};
-          });
-        }
-        [].forEach(function (c) {
-          var members = {};
-          c.members.forEach(function (k) { members[k] = true; });
-          net.cluster({
-            joinCondition: function (n) { return members[n.id]; },
-            clusterNodeProperties: {id: 'cluster:' + c.key, label: c.label + '\n(' + c.nodes + ')',
-                                    shape: 'database', color: {background: '#eef4fc', border: '#2a78d6'},
-                                    font: {size: 13, multi: true}, allowSingleNodeCluster: false}
-          });
+        window.network = net;   // exposed so the layout can be inspected from the console
+        // a layered graph is taller than it is wide: fit it, or the viewport shows
+        // one band of an otherwise correct picture (which is what it did)
+        // Fit, but never below the point where a node stops being readable: a
+        // level with 25 nodes is 4500px wide, and fitting that into 830px turns a
+        // correct layout into a smear. Below the floor the view stays zoomed and
+        // pannable, which is the honest trade.
+        net.once('afterDrawing', function () {
+          net.fit({animation: false});
+          var MIN = 0.35;
+          if (net.getScale() < MIN) {
+            net.moveTo({scale: MIN, position: net.getViewPosition(), animation: false});
+          }
         });
         net.on('doubleClick', function (p) {
-          if (p.nodes.length && net.isCluster(p.nodes[0])) { net.openCluster(p.nodes[0]); }
+          if (!p.nodes.length) { return; }
+          var id = p.nodes[0];
+          if (net.isCluster && net.isCluster(id)) { net.openCluster(id); return; }
+          if (String(id).indexOf('cluster:') === 0) { return; }
+          window.location = '/node/' + encodeURIComponent(project) + '/' + encodeURIComponent(id) + (at ? '?at=' + at : '');
         });
         net.on('click', function (p) {
-          if (p.nodes.length) { window.location = '/node/' + encodeURIComponent(project) + '/' + encodeURIComponent(p.nodes[0]) + (at ? '?at=' + at : ''); }
+          if (p.nodes.length && String(p.nodes[0]).indexOf('cluster:') !== 0) {
+            window.location = '/node/' + encodeURIComponent(project) + '/' + encodeURIComponent(p.nodes[0]) + (at ? '?at=' + at : '');
+          }
         });
         return true;
       }

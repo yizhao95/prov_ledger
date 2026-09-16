@@ -446,10 +446,9 @@ def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "f
                 mode_total = len(nodes)
     # Past the threshold the picture is clustered by module, never cropped: the
     # clusters' node counts add up to exactly what the mode selected.
-    clusters = _cluster_by_module(nodes) if len(nodes) > cluster_above else []
     layout = "physics" if mode == "full" else "hierarchical"
-    if layout == "hierarchical":
-        _assign_levels(nodes, edges)
+    _assign_levels(nodes, edges, focus_key if mode == "focus" else None)
+    clusters = _cluster_by_module(nodes, edges) if len(nodes) > cluster_above else []
     return {"nodes": nodes, "edges": edges, "run_id": run, "edges_from": "latest" if run != latest_run else "run",
             "latest_run_id": latest_run, "level": level, "mode": mode, "focus": focus or None,
             "focus_key": focus_key, "focus_found": focus_found, "hops": hops,
@@ -457,35 +456,96 @@ def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "f
             "clusters": clusters, "layout": layout}
 
 
-def _cluster_by_module(nodes: list[dict]) -> list[dict]:
+def _cluster_by_module(nodes: list[dict], edges: list[dict] | None = None) -> list[dict]:
     """Group the drawn nodes by module (the top two path segments) so a large
     selection renders as a handful of expandable bubbles. Every node belongs to
     exactly one cluster, so the totals still reconcile."""
     buckets: dict[str, list[dict]] = {}
     for n in nodes:
         buckets.setdefault(subsystem_of(n.get("file_path")), []).append(n)
-    return [{"key": k, "label": k, "nodes": len(v),
-             "members": [x["node_key"] for x in v],
-             "badged": sum(1 for x in v if x.get("badge"))}
-            for k, v in sorted(buckets.items())]
+    out = [{"key": k, "label": k, "nodes": len(v), "members": [x["node_key"] for x in v],
+            "badged": sum(1 for x in v if x.get("badge")), "level": 0}
+           for k, v in sorted(buckets.items())]
+    # A cluster's layer is its depth in the MODULE-to-module flow. Taking the
+    # minimum member level put every module on row 0, because nearly every module
+    # contains something that reads a source — one row is not a layered picture.
+    of = {m: c["key"] for c in out for m in c["members"]}
+    proj = [{"src_key": of[e["src_key"]], "dst_key": of[e["dst_key"]]}
+            for e in (edges or []) if e["src_key"] in of and e["dst_key"] in of
+            and of[e["src_key"]] != of[e["dst_key"]]]
+    stand = [{"node_key": c["key"], "node_type": "module"} for c in out]
+    _assign_levels(stand, proj)
+    lv = {n["node_key"]: n["level"] for n in stand}
+    for c in out:
+        c["level"] = lv.get(c["key"], 0)
+    return out
 
 
-def _assign_levels(nodes: list[dict], edges: list[dict]) -> None:
-    """Layer the nodes for a top-down data-flow picture (layout spec 2, applied
-    to the graph): level 0 is where data comes from, level 1 the code that reads
-    it, level 2 what that code produces. A node with no data relation lands on
-    level 1 — the code layer — rather than being left unplaced."""
+def _assign_levels(nodes: list[dict], edges: list[dict], focus_key: str | None = None) -> None:
+    """Give every node a LAYER, so the picture reads top to bottom.
+
+    The first version bucketed by node_type, which put every function on level 1
+    and drew 56 nodes on one horizontal line — a hierarchical layout with one
+    level is just a list. A layer has to be a depth:
+
+      with a focus  signed BFS distance from it. Callers are negative (above),
+                    the focus is 0, callees positive (below), so the thing you
+                    asked about sits in the middle and the flow runs through it.
+      otherwise     topological depth: a node with no incoming edge is 0, every
+                    other node is max(level of its predecessors) + 1. Cycles are
+                    collapsed to their entry depth rather than looping forever —
+                    a call cycle is real and must not hang the page.
+    """
     by_key = {n["node_key"]: n for n in nodes}
-    sources = {k for k, n in by_key.items() if n.get("node_type") in SOURCE_TYPES}
-    readers = {e["src_key"] for e in edges if e["dst_key"] in sources and e["src_key"] in by_key}
-    readers |= {e["dst_key"] for e in edges if e["src_key"] in sources and e["dst_key"] in by_key}
-    for key, n in by_key.items():
-        if key in sources:
-            n["level"] = 0
-        elif key in readers or n.get("node_type") in APP_FUNC_TYPES:
-            n["level"] = 1
-        else:
-            n["level"] = 2
+    out: dict[str, set[str]] = {}
+    inc: dict[str, set[str]] = {}
+    for e in edges:
+        a, b = e["src_key"], e["dst_key"]
+        if a not in by_key or b not in by_key or a == b:
+            continue
+        # A read edge points AT the table (`f3 --reads_sql--> orders`) but the
+        # data flows the other way. For layering, reverse it: a source a function
+        # reads is upstream of that function, which is the whole point of the
+        # data-flow picture.
+        if by_key[b].get("node_type") in SOURCE_TYPES and by_key[a].get("node_type") not in SOURCE_TYPES:
+            a, b = b, a
+        out.setdefault(a, set()).add(b)
+        inc.setdefault(b, set()).add(a)
+
+    if focus_key and focus_key in by_key:
+        level = {focus_key: 0}
+        for adj, sign in ((out, 1), (inc, -1)):
+            frontier, depth = {focus_key}, 0
+            while frontier:
+                depth += sign
+                nxt = {k for f in frontier for k in adj.get(f, ()) if k not in level}
+                for k in nxt:
+                    level[k] = depth
+                frontier = nxt
+        for k, n in by_key.items():
+            n["level"] = level.get(k, 0)
+        return
+
+    # Kahn's algorithm, with the remainder (the cycles) placed at the depth they
+    # were reached from instead of being dropped
+    remaining = {k: set(inc.get(k, set())) for k in by_key}
+    level = {k: 0 for k in by_key if not remaining[k]}
+    queue = list(level)
+    while queue:
+        k = queue.pop(0)
+        for nxt in out.get(k, ()):
+            remaining[nxt].discard(k)
+            level[nxt] = max(level.get(nxt, 0), level[k] + 1)
+            if not remaining[nxt] and nxt not in queue and nxt not in level.keys() - set(queue):
+                queue.append(nxt)
+            elif not remaining[nxt] and nxt not in queue:
+                queue.append(nxt)
+    for k in by_key:
+        if k not in level:                      # inside a cycle: one below its shallowest entry
+            preds = [level[p] for p in inc.get(k, ()) if p in level]
+            level[k] = (min(preds) + 1) if preds else 0
+    for k, n in by_key.items():
+        n["level"] = int(level.get(k, 0))
 
 
 def latest_tier_of(psg_db_path: str | None, run_id: int | None = None) -> dict[str, str]:

@@ -147,6 +147,7 @@
         {% if h.verbatim %}<span data-verbatim="1" class="text-brand-blue">{{ 'stated'|say('tier', lang) }}</span>{% endif %}
       </div>
       <div class="text-brand-muted flex flex-wrap items-baseline gap-x-2">
+        {% if h.adoptions > 1 %}<span class="font-semibold text-brand-gray" data-adoptions="{{ h.adoptions }}">Adopted {{ h.adoptions }}×</span>{% endif %}
         <span data-tier="{{ h.tier }}" class="px-1.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
         <span>{{ h.evidence_level|say('evidence_level', lang) }}</span>
         <span>{{ ui('recorded_by', lang) }} {{ h.recorded_by }}, {{ (h.recorded_at or '')[:10] }}</span>
@@ -156,6 +157,14 @@
            title="{{ h.recorded_in_plan }}">{{ ui('back_to_task', lang) }}: {{ short_title({'plan_id': h.recorded_in_plan, 'original_goal': h.recorded_in_title}) }} →</a>
         {% endif %}
       </div>
+      {% if h.adoptions > 1 %}
+      <details class="text-[11px] mt-0.5">
+        <summary class="cursor-pointer text-brand-blue">{{ ui('expand', lang) }} ({{ h.adoptions }})</summary>
+        <div class="pl-2 border-l border-hairline text-brand-muted">
+          {% for v in h.vias %}<div>{{ (v.at or '')[:10] }} · {{ v.via|say('via', lang) }} · {{ v.by }}{% if v.step_id %} · <span title="{{ v.step_id }}">step</span>{% endif %}</div>{% endfor %}
+        </div>
+      </details>
+      {% endif %}
     </div>
     {% endfor %}
     {% endif %}
@@ -232,11 +241,11 @@
   <section class="bg-surface rounded-xl shadow-sm border border-hairline border-l-4 {{ 'border-l-brand-red' if headline.summary.unanswered else 'border-l-brand-blue' }} mb-4 px-5 py-3"
            data-panel="headline" data-unanswered="{{ headline.summary.unanswered }}" data-findings="{{ headline.findings|length }}">
     <div class="text-sm font-semibold text-gray-900">
-      📰 plan headline
+      📰 {{ 'headline'|say('term', lang) }}
       <span class="text-xs text-brand-muted font-normal ml-2">
         {{ headline.summary.targets }} targets · 2 layers · {{ headline.summary.blocking }} blocking · {{ headline.summary.warning }} warning · {{ headline.summary.info }} info
         · <span class="{{ 'text-brand-red font-semibold' if headline.summary.unanswered else '' }}">{{ headline.summary.unanswered }} {{ 'unanswered' if lang != 'zh' else '未回应' }}</span>
-        · {{ shown_adopted.plan.shown|length }} 展示过 · {{ shown_adopted.plan.adopted|length }} 采用了
+        · {{ vocab.shown(shown_adopted.plan.shown|length, lang) }} · {{ vocab.adopted(shown_adopted.plan.adopted|length, lang) }}
       </span>
     </div>
     <div class="mt-2 space-y-1">
@@ -521,11 +530,11 @@
             {% if sa %}
             <div class="grid grid-cols-2 gap-3 mt-2 text-[11px]" data-step-records="{{ s.step_id }}">
               <div data-shown="{{ sa.shown|length }}">
-                <div class="uppercase tracking-wide text-brand-muted">展示过（{{ sa.shown|length }}）</div>
+                <div class="uppercase tracking-wide text-brand-muted">{{ vocab.shown(sa.shown|length, lang) }}</div>
                 {% for r in sa.shown %}<div class="text-gray-700">#{{ r.reason_id }} · {{ r.moment }} · {{ r.text }}</div>{% endfor %}
               </div>
               <div data-adopted="{{ sa.adopted|length }}">
-                <div class="uppercase tracking-wide text-brand-muted">采用了（{{ sa.adopted|length }}）</div>
+                <div class="uppercase tracking-wide text-brand-muted">{{ vocab.adopted(sa.adopted|length, lang) }}</div>
                 {% for r in sa.adopted %}<div class="text-gray-700">{% if plan and plan.project and r.node_key %}<a class="text-brand-blue" href="/node/{{ plan.project }}/{{ r.node_key }}?at={{ r.reason_id }}">#{{ r.reason_id }}</a>{% else %}#{{ r.reason_id }}{% endif %} · {{ r.via }} · {{ r.by }} · {{ r.text }}</div>{% endfor %}
               </div>
             </div>

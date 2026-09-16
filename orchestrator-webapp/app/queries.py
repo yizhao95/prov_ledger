@@ -1363,9 +1363,23 @@ def changed_by_history(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
     except sqlite3.Error:
         project = None
     db_path = _psg.db_path_for(project) if (_psg is not None and project) else None
-    out = []
+    # Three influence rows citing the same constraint are three ADOPTIONS of one
+    # record, not three decisions. The record is listed once with its count; the
+    # individual adoptions (and how each was made) ride along for the expand.
+    out: list[dict] = []
+    by_id: dict[int, dict] = {}
     for r in rows:
         d = dict(r)
+        if d["reason_id"] in by_id:
+            g = by_id[d["reason_id"]]
+            g["adoptions"] += 1
+            g["vias"].append({"via": d.get("via"), "by": d.get("by"), "at": d.get("at"),
+                              "step_id": d.get("adopted_in_step")})
+            continue
+        d["adoptions"] = 1
+        d["vias"] = [{"via": d.get("via"), "by": d.get("by"), "at": d.get("at"),
+                      "step_id": d.get("adopted_in_step")}]
+        by_id[d["reason_id"]] = d
         d["node_key"] = d["node_key"] or d["influence_node"]
         d["qualified_name"] = d["node_key"]
         if db_path and d["node_key"] and str(d["node_key"]).startswith("nk_"):
