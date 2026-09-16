@@ -294,10 +294,18 @@ def _ask_cmd(args) -> int:
     try:
         doc = ask_mod.run(conn, project=project, question=args.question, runner=runner, model=args.model,
                           runner_name=runner_name, lang=args.lang)
+        if args.export:
+            from .ask import card
+            with open(args.export, "w", encoding="utf-8") as f:
+                f.write(card.card_md(conn, doc))
         if args.json:
-            print(json.dumps(ask_mod.as_json(doc), indent=1, ensure_ascii=False, default=str))
+            out = ask_mod.as_json(doc)
+            out["export"] = args.export
+            print(json.dumps(out, indent=1, ensure_ascii=False, default=str))
         else:
             print(ask_mod.render_text(doc))
+            if args.export:
+                print(f"\nevidence card written to {args.export}")
         return 0
     finally:
         conn.close()
@@ -371,6 +379,7 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("rest", nargs="*", help=argparse.SUPPRESS)
     a.add_argument("--project", default=None, help="registered project (default: the one whose repo contains the cwd)")
     a.add_argument("--json", action="store_true", help="machine-readable answer, fact table included as text")
+    a.add_argument("--export", default=None, metavar="FILE", help="also write the evidence card (markdown) here")
     a.add_argument("--no-model", action="store_true", help="no model at all: print the fact table, the absences and the scope")
     a.add_argument("--model", default=None, help="model for the headless claude runner")
     a.add_argument("--runner", default="claude", choices=["claude", "stub"], help="stub never calls a model (tests)")
