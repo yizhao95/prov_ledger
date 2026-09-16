@@ -126,8 +126,10 @@ def _literal(name: str) -> re.Pattern:
 
 
 def r0_names(node: dict) -> list[str]:
-    """The literals that count for a node: its local name (≥ 4 chars, not a
-    stopword), its qualified name and its file's basename."""
+    """The literals that count for a node under the local-name rule: its local
+    name (≥ 4 chars, not a stopword) and its qualified name. The file's basename
+    is a separate rule since DP phase 2b (FL-066): it anchors to the nodes the
+    plan changed in that file — see r0_basename."""
     names = []
     local = _local(node)
     if len(local) >= R0_MIN_LOCAL and local not in R0_STOPWORDS:
@@ -135,11 +137,12 @@ def r0_names(node: dict) -> list[str]:
     qn = node.get("qualified_name") or ""
     if qn and qn != local:
         names.append(qn)
-    fp = node.get("file_path") or ""
-    base = fp.rsplit("/", 1)[-1]
-    if base:
-        names.append(base)
     return names
+
+
+def r0_basename(node: dict) -> str:
+    fp = node.get("file_path") or ""
+    return fp.rsplit("/", 1)[-1] if fp else ""
 
 
 def candidate_utterances(ctx: Ctx) -> list[dict]:
@@ -148,15 +151,18 @@ def candidate_utterances(ctx: Ctx) -> list[dict]:
     same session(s) as those (before a plan exists the hook cannot attribute)."""
     created = ctx.plan.get("created_at") or "0000-00-00 00:00:00"
     completed = ctx.plan.get("completed_at") or "9999-12-31 23:59:59"
-    if ctx.plan.get("session_id"):                     # a session's placeholder plan: only what was said in that session
+    if str(ctx.plan_id).startswith("session:") and ctx.plan.get("session_id"):     # a session's placeholder plan: only what was said in that session
         return [dict(r) for r in ctx.conn.execute(
             "SELECT id, session_id, text FROM utterance WHERE session_id = ? OR plan_id = ? ORDER BY id",
             (ctx.plan["session_id"], ctx.plan_id))]
+    # DP phase 2b (FL-069): Plans.session_id — everything said in the session that
+    # published the plan counts, whether or not it carries a plan_id or predates created_at
     return [dict(r) for r in ctx.conn.execute(
         "SELECT id, session_id, text FROM utterance WHERE plan_id = ? "
         "OR (project = ? AND occurred_at BETWEEN ? AND ?) "
-        "OR session_id IN (SELECT session_id FROM utterance WHERE plan_id = ?) ORDER BY id",
-        (ctx.plan_id, ctx.project, created, completed, ctx.plan_id))]
+        "OR session_id IN (SELECT session_id FROM utterance WHERE plan_id = ?) "
+        "OR (? IS NOT NULL AND session_id = ?) ORDER BY id",
+        (ctx.plan_id, ctx.project, created, completed, ctx.plan_id, ctx.plan.get("session_id"), ctx.plan.get("session_id")))]
 
 
 def _sentence_hits(ctx: Ctx) -> dict:
@@ -176,6 +182,36 @@ def _sentence_hits(ctx: Ctx) -> dict:
     return hits
 
 
+def _basename_hits(ctx: Ctx) -> dict:
+    """{(utterance_id, start, end): {node_key: basename}} — a sentence naming a file
+    anchors to the nodes the plan CHANGED in that file (FL-066): never to the
+    untouched ones, and never subject to the "> 3 nodes" limit."""
+    cache = getattr(ctx, "_r0_base_hits", None)
+    if cache is not None:
+        return cache
+    by_base: dict[str, list[str]] = {}
+    for key, node in ctx.touched.items():
+        base = r0_basename(node)
+        if base:
+            by_base.setdefault(base, []).append(key)
+    hits: dict = {}
+    if by_base:
+        pats = {base: _literal(base) for base in by_base}
+        changed_cache: dict[str, set] = {}
+        for u in candidate_utterances(ctx):
+            for s, e in sentences(u["text"]):
+                sent = u["text"][s:e]
+                for base, pat in pats.items():
+                    if not pat.search(sent):
+                        continue
+                    if base not in changed_cache:
+                        changed_cache[base] = {n["node_key"] for n in psg_bridge.changed_in_file(ctx.psg_db_path, ctx.plan_id, base)}
+                    for key in changed_cache[base]:
+                        hits.setdefault((u["id"], s, e), {})[key] = base
+    ctx._r0_base_hits = hits
+    return hits
+
+
 def r0_user_words(ctx: Ctx, node: dict):
     """The first specific sentence that names the node → (utterance_id, start,
     end, basis); a sentence naming more than 3 nodes is generic and is skipped
@@ -183,6 +219,9 @@ def r0_user_words(ctx: Ctx, node: dict):
     for (uid, s, e), keys in sorted(_sentence_hits(ctx).items()):
         if node["node_key"] in keys and len(keys) <= R0_MAX_NODES_PER_SENTENCE:
             return (uid, s, e, f"R0: the user's words name {_local(node) or node.get('qualified_name')} (utterance {uid})")
+    for (uid, s, e), keys in sorted(_basename_hits(ctx).items()):
+        if node["node_key"] in keys:
+            return (uid, s, e, f"R0: the user's words name the file {keys[node['node_key']]} (utterance {uid})")
     return None
 
 

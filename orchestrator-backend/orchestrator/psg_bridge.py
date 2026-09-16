@@ -247,3 +247,21 @@ def nodes_at(psg_db_path: str | None, file_path: str, line_lo: int, line_hi: int
                         "file_path": r["file_path"], "line_start": r["line_start"], "line_end": r["line_end"]})
     out.sort(key=lambda n: (n["line_end"] - n["line_start"], n["line_start"]))
     return out
+
+
+def changed_in_file(psg_db_path: str | None, plan_id: str, file_path: str) -> list[dict]:
+    """DP phase 2b (R0, FL-066): the nodes this plan changed / added / removed
+    whose latest snapshot lives in `file_path` (a repo-relative path or just a
+    basename — matched by suffix). The file name in the user's words anchors
+    to exactly these, however many."""
+    if not file_path:
+        return []
+    norm = file_path.replace("\\", "/")
+    out = []
+    for c in changed_node_keys(psg_db_path, plan_id):
+        row = _query(psg_db_path, "SELECT file_path FROM node_snapshot WHERE node_key = ? ORDER BY run_id DESC, id DESC LIMIT 1", (c["node_key"],))
+        fp = (row[0]["file_path"] or "").replace("\\", "/") if row else ""
+        if fp and (fp == norm or fp.endswith("/" + norm)):
+            out.append({"node_key": c["node_key"], "qualified_name": c["qualified_name"], "file_path": fp})
+    out.sort(key=lambda n: n["node_key"])
+    return out
