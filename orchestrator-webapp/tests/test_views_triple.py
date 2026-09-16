@@ -35,7 +35,9 @@ def client(tmp_path, monkeypatch):
 
 
 def _bar(html: str) -> dict:
-    m = re.search(r'<nav class="[^"]*" data-view-bar data-view="([^"]*)"\s+data-project="([^"]*)" data-node="([^"]*)" data-at="([^"]*)"', html)
+    # the nav carries other attributes too (DP 2d added data-transition) — match on
+    # the data-* the bar is identified by, not on their position after class=
+    m = re.search(r'<nav [^>]*data-view-bar data-view="([^"]*)"\s+data-project="([^"]*)" data-node="([^"]*)" data-at="([^"]*)"', html)
     assert m, "no view bar"
     links = dict(re.findall(r'<a href="([^"]+)" data-view-link="(\w+)"', html))
     return {"view": m.group(1), "project": m.group(2), "node": m.group(3), "at": m.group(4),
