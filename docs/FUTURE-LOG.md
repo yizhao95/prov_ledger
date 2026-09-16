@@ -81,3 +81,7 @@
 | FL-074 | dp-phase2b | DEFERRED | `Plans.session_id` 的 env 回退（`CLAUDE_CODE_SESSION_ID`）在钩子不活的会话里成立，但没有 tool_call_log 交叉验证；下一会话钩子活了之后应对比两条来源是否一致，并在不一致时记 stderr | 下一会话 |
 | FL-075 | dp-phase2b | DEFERRED | 一份迁移在 Task 0 整体落地、Task 1 只补测试：RED 步天然绿，靠 deviation 记录。迁移类 task 的 RED 应改为"对上一版 schema 的 DB 断言缺列/缺表"（用 tmp DB 只跑到 019） | 下一期 |
 | FL-076 | dp-phase2b | DEFERRED | `/graph/prov_ledger` 在自家图上是 2616 个函数节点 / 12093 条边 / 3.7 MB HTML：vis-network 渲染这个量级很慢，节点表也太长。需要子系统层（`graph_viz.build_subsystems` 已有）作默认、按 focus 的邻域裁剪、或分页 | DP 2c |
+| FL-077 | dp-phase2d | DEFERRED | `orchestrator-webapp/tests` 里 `app` 包能被导入，靠的是 `test_parallel_detection.py` 在收集时 `sys.path.insert(parent)`：按字母序排在它前面的新测试文件会让全套件一起 ImportError（本期 `test_at_typed.py` / `test_graph_focus.py` 各自补了一行）。应加 `orchestrator-webapp/conftest.py`（或 pyproject 的 `pythonpath`），别让导入依赖收集顺序 | DP 3 期 |
+| FL-078 | dp-phase2d | DEFERRED | 两桶开销被 `command_head` 的 80 字符截断漏报：`run-step` / `publish-plan` 出现在 `SP=…` 或 `cd … && …` 之后就不进 orchestration 桶（本期 146 次调用只认出 2 次）。`_bucket` 应对整条命令做匹配，或 `command_head` 存更长的前缀 + 单独存"命令里出现的脚本名" | DP 3 期 |
+| FL-079 | dp-phase2d | DEFERRED | 重建表式迁移（019、021 都是为了放宽一个 CHECK）每次都可能漏掉上一版加的枚举值——021 第一稿就丢了 019 的 `ambiguous`，靠 backend 套件抓到。迁移应从一份"枚举清单"生成，或加一条通用测试：重建后所有历史 verdict/tier 值仍可写入 | DP 3 期 |
+| FL-080 | dp-phase2d | DEFERRED | `mode=full` 的 `/graph` 仍是 3.78 MB / 2652 节点：story 与 focus 已经把日常用量降到 260 KB / 66 KB，但"展开全图"这条路本身还需要分页或换渲染（FL-076 的另一半） | DP 3 期 |
