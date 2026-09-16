@@ -1001,13 +1001,48 @@ def node_badges(conn: sqlite3.Connection, project: str) -> dict[str, dict]:
         return {}
 
 
-def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = None, level: str = "functions") -> dict:
-    """The project as it is (or was, at run `at`): nodes with their badge (how
-    many records have a story) and the tier of their latest event, edges, the
-    run list for the selector. PSG only through psg_bridge (ro); a missing
-    graph is `available: False`, never a 500."""
+NEIGHBOURHOOD_MAX_NODES = _psg.NEIGHBOURHOOD_MAX_NODES if _psg is not None else 400
+NEIGHBOURHOOD_HOPS = _psg.NEIGHBOURHOOD_HOPS if _psg is not None else 2
+MODE_MAX_NODES = _psg.MODE_MAX_NODES if _psg is not None else 200
+GRAPH_MODES = _psg.GRAPH_MODES if _psg is not None else ("focus", "story", "data", "full")
+
+
+def resolve_mode(mode: str | None, focus: str | None) -> str:
+    """DP phase 2d: which of the four modes a request means. With a focus the
+    default is that focus's neighbourhood; without one it is `story` — the nodes
+    that have a story. An unrecognised mode falls back to the same defaults, never
+    to `full`: the whole graph is only ever drawn because someone asked for it."""
+    if mode in GRAPH_MODES:
+        return mode
+    return "focus" if focus else "story"
+
+
+def reason_run(conn: sqlite3.Connection, reason_id: int) -> dict | None:
+    """The record `at=reason:<id>` points at: its run and the node it is anchored
+    on, so the Graph view can render that run and SAY why (DP phase 2d, Task 0)."""
+    try:
+        r = conn.execute("SELECT id, run_id, node_key, project, plan_id FROM change_reason_v WHERE id = ?", (int(reason_id),)).fetchone()
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+    return dict(r) if r else None
+
+
+def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = None, level: str = "functions",
+              focus: str | None = None, mode: str | None = None) -> dict:
+    """The project as it is (or was, at `at`): nodes with their badge (how many
+    records have a story) and the tier of their latest event, edges, the run list
+    for the selector. `at` is typed (`run:` / `reason:`); a reason id is resolved
+    to the run it belongs to and the result says so. `mode` decides how much graph
+    is drawn — focus / story / data / full — and the result always carries
+    `total_nodes` so a cropped view can name what it cropped. PSG only through
+    psg_bridge (ro); a missing graph is `available: False`, never a 500."""
+    mode = resolve_mode(mode, focus)
     base = {"project": project, "available": False, "reason": None, "nodes": [], "edges": [], "runs": [], "run": None,
-            "edges_from": "none", "level": level, "badged": 0}
+            "edges_from": "none", "level": level, "badged": 0, "focus": focus or None, "mode": mode,
+            "total_nodes": 0, "mode_total": 0, "truncated": False, "focus_found": False, "hops": NEIGHBOURHOOD_HOPS,
+            "at_kind": None, "at_reason": None, "at_id": None, "story_keys": 0}
+    a = parse_at(at)
+    base.update(at_kind=a["kind"], at_id=a["id"])
     if _psg is None:
         base["reason"] = "state graph unavailable: provledger.psg_bridge cannot be imported in this environment"
         return base
@@ -1015,15 +1050,19 @@ def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = Non
     if not db_path or not os.path.exists(db_path):
         base["reason"] = f"state graph unavailable: project {project!r} is not registered or its graph file is missing"
         return base
-    run_id = None
-    if at not in (None, ""):
-        try:
-            run_id = int(at)
-        except (TypeError, ValueError):
-            run_id = None
-    g = _psg.graph_at(db_path, run_id=run_id, level=level if level in ("functions", "full") else "functions")
-    tiers = _psg.latest_tier_of(db_path, run_id=g["run_id"])
+    run_id = a["id"] if a["kind"] == "run" else None
+    if a["kind"] == "reason":
+        rec = reason_run(conn, a["id"])
+        base["at_reason"] = rec
+        run_id = rec["run_id"] if rec and rec["run_id"] is not None else None
     badges = node_badges(conn, project)
+    # the badge lives in the orchestrator DB, so `story` mode's seeds are computed here —
+    # ordered by badge descending so the cap keeps the nodes with the most to say
+    story_keys = [k for k, _ in sorted(((k, int(b.get("badge") or 0)) for k, b in badges.items()),
+                                       key=lambda kv: (-kv[1], kv[0])) if _ > 0]
+    g = _psg.graph_at(db_path, run_id=run_id, level=level if level in ("functions", "full") else "functions",
+                      mode=mode, focus=focus, hops=NEIGHBOURHOOD_HOPS, story_keys=story_keys)
+    tiers = _psg.latest_tier_of(db_path, run_id=g["run_id"])
     nodes = []
     for n in g["nodes"]:
         # a record may be anchored by node_key or by qualified name (a constraint declared by name): both count
@@ -1033,15 +1072,47 @@ def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = Non
     runs = _psg.runs_of(db_path)
     run = next((r for r in runs if r["run_id"] == g["run_id"]), None)
     base.update(available=True, nodes=nodes, edges=g["edges"], runs=runs[:50], run=run, edges_from=g["edges_from"],
-                level=g["level"], badged=sum(1 for n in nodes if n["badge"]), latest_run_id=g.get("latest_run_id"))
+                level=g["level"], badged=sum(1 for n in nodes if n["badge"]), latest_run_id=g.get("latest_run_id"),
+                total_nodes=g.get("total_nodes", len(nodes)), mode_total=g.get("mode_total", len(nodes)),
+                truncated=bool(g.get("truncated")),
+                focus_found=bool(g.get("focus_found")), hops=g.get("hops", NEIGHBOURHOOD_HOPS),
+                mode=g.get("mode", mode), story_keys=len(story_keys))
     return base
 
 
 # ── DP phase 2b (Task 4): the context triple (project, node, at) across the three views ──
 
+AT_PREFIXES = ("run", "reason")
+
+
+def parse_at(at) -> dict:
+    """DP phase 2d (Task 0): `at` says WHAT it points at — `run:<id>` (a state-graph
+    analysis run) or `reason:<id>` (one recorded record). 2b shipped a bare id and
+    the three views disagreed about what it meant: Node treated it as both, Graph
+    always as a run, so the "被 <plan> 采用" link sent a reason id to a run lookup.
+
+    A bare number still reads as a run for one version (compatibility). Anything
+    else — a plan id, a malformed prefix — stays untyped rather than being guessed
+    into a type it does not have."""
+    if at in (None, ""):
+        return {"kind": None, "id": None, "at": None}
+    s = str(at)
+    for kind in AT_PREFIXES:
+        if s.startswith(kind + ":"):
+            rest = s[len(kind) + 1:]
+            return {"kind": kind, "id": int(rest), "at": f"{kind}:{int(rest)}"} if rest.isdigit() \
+                else {"kind": None, "id": None, "at": s}
+    if s.isdigit():
+        return {"kind": "run", "id": int(s), "at": f"run:{int(s)}"}     # compatibility: a bare id was always a run
+    return {"kind": None, "id": None, "at": s}
+
+
 def triple(project: str | None = None, node: str | None = None, at: str | None = None) -> dict:
-    """The context every view carries: missing items are simply absent (I12)."""
-    return {"project": project or None, "node": node or None, "at": (str(at) if at not in (None, "") else None)}
+    """The context every view carries: missing items are simply absent (I12).
+    `at` is normalised to its typed form (DP phase 2d) and carries its kind."""
+    a = parse_at(at)
+    return {"project": project or None, "node": node or None, "at": a["at"],
+            "at_kind": a["kind"], "at_id": a["id"]}
 
 
 def url_for_view(view: str, t: dict, plan_id: str | None = None) -> str | None:
@@ -1049,12 +1120,13 @@ def url_for_view(view: str, t: dict, plan_id: str | None = None) -> str | None:
     from urllib.parse import quote, urlencode
     q = {}
     project, node, at = t.get("project"), t.get("node"), t.get("at")
+    kind = t.get("at_kind", parse_at(at)["kind"])
     if view == "graph":
         if not project:
             return None
         if node:
             q["focus"] = node
-        if at and str(at).isdigit():
+        if at and kind in AT_PREFIXES:                  # a typed at: Graph resolves a reason to its run, never guesses
             q["at"] = at
         return f"/graph/{quote(project, safe='')}" + (f"?{urlencode(q)}" if q else "")
     if view == "node":
@@ -1064,7 +1136,7 @@ def url_for_view(view: str, t: dict, plan_id: str | None = None) -> str | None:
             q["at"] = at
         return f"/node/{quote(project, safe='')}/{quote(node, safe='')}" + (f"?{urlencode(q)}" if q else "")
     if view == "task":
-        pid = plan_id or (at if at and not str(at).isdigit() else None)
+        pid = plan_id or (at if at and kind is None else None)
         if not pid:
             return "/"
         if node:

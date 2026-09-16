@@ -9,28 +9,68 @@
     <span class="text-xs text-brand-muted italic">🕸 graph view · the project as it is (or was, at a run) · badges = records with a story · read-only</span>
   </div>
 
-  <div class="bg-surface rounded-xl shadow-sm border border-hairline px-5 py-4 mb-4" data-panel="graph-head">
+  <div class="bg-surface rounded-xl shadow-sm border border-hairline px-5 py-4 mb-4" data-panel="graph-head"
+       data-mode="{{ graph.mode }}" data-total-nodes="{{ graph.total_nodes }}"
+       data-drawn="{{ graph.nodes|length }}" data-mode-total="{{ graph.mode_total }}"
+       {%- if graph.run %} data-at-run="{{ graph.run.run_id }}"{% endif %}
+       {%- if graph.at_reason %} data-at-reason="{{ graph.at_reason.id }}"{% endif %}>
     <div class="text-[11px] uppercase tracking-wide text-brand-muted">{{ project }}</div>
     {% if graph.available and graph.run %}
     <h1 class="text-lg font-semibold text-gray-900">run {{ graph.run.run_id }} · <span class="font-mono">{{ (graph.run.commit_sha or '')[:7] }}</span> · {{ graph.run.plan_id or '—' }}{% if graph.run.run_id != graph.latest_run_id %} <span class="text-xs text-brand-muted">(historical — edges_from: {{ graph.edges_from }})</span>{% endif %}</h1>
     {% else %}
     <h1 class="text-lg font-semibold text-gray-900">graph</h1>
     {% endif %}
+    {% if graph.at_reason %}
+    {# DP phase 2d: `at=reason:<id>` is a record, not a run — say which run it was resolved to, never hop silently #}
+    <div class="text-xs text-brand-muted mt-1" data-at-note>
+      按记录 #{{ graph.at_reason.id }}（record #{{ graph.at_reason.id }}{% if graph.at_reason.node_key %} · <span class="font-mono">{{ graph.at_reason.node_key }}</span>{% endif %}）渲染：它记在 run {{ graph.at_reason.run_id or '—' }}{% if not graph.at_reason.run_id %} —— 这条记录没有 run，页面退回最新一次分析{% endif %}
+    </div>
+    {% elif graph.at_kind == 'reason' %}
+    <div class="text-xs text-brand-red mt-1" data-at-note>at=reason:{{ graph.at_id }} — 库里没有这条 record（record not found）；页面退回最新一次分析。</div>
+    {% endif %}
     {% if graph.available %}
     <form method="get" class="mt-2 flex items-center gap-2 text-xs" data-run-selector>
       {% if focus %}<input type="hidden" name="focus" value="{{ focus }}">{% endif %}
+      <input type="hidden" name="mode" value="{{ graph.mode }}">
       <label class="text-brand-muted">at run</label>
       <select name="at" class="border border-hairline rounded px-1 py-0.5 bg-surface" onchange="this.form.submit()">
         <option value="" {% if not graph.run or graph.run.run_id == graph.latest_run_id %}selected{% endif %}>latest</option>
-        {% for r in graph.runs %}<option value="{{ r.run_id }}" {% if graph.run and graph.run.run_id == r.run_id and r.run_id != graph.latest_run_id %}selected{% endif %}>run {{ r.run_id }} · {{ (r.commit_sha or '')[:7] }} · {{ r.plan_id or r.trigger or '—' }}</option>{% endfor %}
+        {% for r in graph.runs %}<option value="run:{{ r.run_id }}" {% if graph.run and graph.run.run_id == r.run_id and r.run_id != graph.latest_run_id %}selected{% endif %}>run {{ r.run_id }} · {{ (r.commit_sha or '')[:7] }} · {{ r.plan_id or r.trigger or '—' }}</option>{% endfor %}
       </select>
       <label class="text-brand-muted ml-2">level</label>
       <select name="level" class="border border-hairline rounded px-1 py-0.5 bg-surface" onchange="this.form.submit()">
         <option value="functions" {% if graph.level == 'functions' %}selected{% endif %}>functions</option>
         <option value="full" {% if graph.level == 'full' %}selected{% endif %}>full</option>
       </select>
-      <span class="text-brand-muted ml-2 tnum">{{ graph.nodes|length }} nodes · {{ graph.edges|length }} edges · {{ graph.badged }} with a story</span>
+      <span class="text-brand-muted ml-2 tnum" data-counts>{{ graph.nodes|length }} nodes · {{ graph.edges|length }} edges · {{ graph.badged }} with a story · 全图 {{ graph.total_nodes }} 个节点</span>
     </form>
+    {# 渐进加载：裁掉的永远以计数出现，展开是一个链接（用户 2026-09-16：记全是对的，画全是错的）#}
+    <div class="mt-2 flex items-center gap-1 text-xs" data-mode-chips>
+      {% for m, label in [('focus', '🎯 focus'), ('story', '📖 story'), ('data', '🗄 data'), ('full', '🌐 full')] %}
+        {% set href = '/graph/' ~ project ~ '?mode=' ~ m ~ ('&focus=' ~ focus if focus else '') ~ ('&at=run:' ~ graph.run.run_id if graph.run and graph.run.run_id != graph.latest_run_id else '') ~ ('&level=' ~ graph.level if graph.level != 'functions' else '') %}
+        {% if m == graph.mode %}
+        <span data-mode-chip="{{ m }}" data-current="1" class="px-2 py-0.5 rounded-lg border bg-brand-blue text-white border-brand-blue">{{ label }}</span>
+        {% elif m == 'focus' and not focus %}
+        <span data-mode-chip="{{ m }}" data-mode-disabled="1" class="px-2 py-0.5 rounded-lg border border-hairline text-brand-muted" title="没有 focus 节点——从 Node 视图或下面的表格点进来">{{ label }}</span>
+        {% else %}
+        <a data-mode-chip="{{ m }}" href="{{ href }}" class="px-2 py-0.5 rounded-lg border bg-surface text-brand-blue border-hairline hover:bg-brand-bg">{{ label }}</a>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <div class="mt-1 text-xs text-brand-muted" data-mode-note>
+      {% if graph.mode == 'story' %}
+        有故事的节点（{{ graph.story_keys }} 个带记录）与它们直接产出/消费的数据节点：画了 {{ graph.nodes|length }} / 选中 {{ graph.mode_total }} / 全图 {{ graph.total_nodes }}{% if graph.nodes|length < graph.mode_total %}——上限 {{ max_nodes }} 个，按记录数从多到少取{% endif %}。
+      {% elif graph.mode == 'data' %}
+        数据节点与直接产出/消费它们的函数：画了 {{ graph.nodes|length }} / 选中 {{ graph.mode_total }} / 全图 {{ graph.total_nodes }}。
+      {% elif graph.mode == 'focus' and graph.focus_found %}
+        focus <span class="font-mono">{{ graph.focus }}</span> 的 ±{{ graph.hops }} 跳邻域（{{ graph.nodes|length }} / {{ graph.total_nodes }} 个节点）。
+      {% elif graph.mode == 'focus' %}
+        focus <span class="font-mono">{{ graph.focus }}</span> 不在这张图里（focus not found）——下面画的是全图。
+      {% else %}
+        全图：{{ graph.nodes|length }} 个节点、{{ graph.edges|length }} 条边（渲染会慢）。
+      {% endif %}
+      {% if graph.mode != 'full' %}<a class="text-brand-blue ml-1" data-expand-full href="/graph/{{ project }}?mode=full{% if focus %}&focus={{ focus }}{% endif %}{% if graph.run and graph.run.run_id != graph.latest_run_id %}&at=run:{{ graph.run.run_id }}{% endif %}{% if graph.level != 'functions' %}&level={{ graph.level }}{% endif %}">展开全图（{{ graph.total_nodes }} 个节点）</a>{% endif %}
+    </div>
     {% endif %}
   </div>
 
@@ -49,7 +89,7 @@
       var data = {{ graph_json|safe }};
       var focus = {{ focus|tojson }};
       var project = {{ project|tojson }};
-      var at = {{ (graph.run.run_id if graph.run and graph.run.run_id != graph.latest_run_id else '')|tojson }};
+      var at = {{ (('run:' ~ graph.run.run_id) if graph.run and graph.run.run_id != graph.latest_run_id else '')|tojson }};
       var tierColor = {observed: '#2a78d6', derived: '#1baf7a', asserted: '#eda100', stated: '#4a3aa7', unstated: '#898781'};
       function draw() {
         if (typeof vis === 'undefined') { return false; }
@@ -75,14 +115,14 @@
   <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" async onload="(function(){var e=new Event('load');window.dispatchEvent(e)})()"></script>
 
   <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="graph-table">
-    <h2 class="text-sm font-semibold text-gray-900 mb-2">nodes ({{ graph.nodes|length }}) — badge = records with a story · colour = tier of the latest event</h2>
+    <h2 class="text-sm font-semibold text-gray-900 mb-2">nodes ({{ graph.nodes|length }} / {{ graph.total_nodes }}) — badge = records with a story · colour = tier of the latest event</h2>
     <div class="overflow-x-auto">
       <table class="text-xs w-full">
         <thead><tr class="text-brand-muted text-left"><th class="pr-3">node</th><th class="pr-3">type</th><th class="pr-3">tier</th><th class="pr-3">badge</th><th class="pr-3">minor</th><th>file</th></tr></thead>
         <tbody>
         {% for n in graph.nodes %}
           <tr class="{{ 'bg-[#fff3d6]' if focus and (focus == n.qualified_name or focus == n.node_key) else '' }}" data-node="{{ n.node_key }}" data-tier="{{ n.tier }}" data-badge="{{ n.badge }}"{% if focus and (focus == n.qualified_name or focus == n.node_key) %} data-focus="1"{% endif %}>
-            <td class="pr-3 font-mono"><a class="text-brand-blue" href="/node/{{ project }}/{{ n.qualified_name }}{% if graph.run and graph.run.run_id != graph.latest_run_id %}?at={{ graph.run.run_id }}{% endif %}">{{ n.qualified_name }}</a></td>
+            <td class="pr-3 font-mono"><a class="text-brand-blue" href="/node/{{ project }}/{{ n.qualified_name }}{% if graph.run and graph.run.run_id != graph.latest_run_id %}?at=run:{{ graph.run.run_id }}{% endif %}">{{ n.qualified_name }}</a></td>
             <td class="pr-3">{{ n.node_type }}</td>
             <td class="pr-3"><span class="type-dot" style="background: {{ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(n.tier, '#898781') }}"></span> {{ n.tier }}</td>
             <td class="pr-3 tnum">{{ n.badge }}</td>

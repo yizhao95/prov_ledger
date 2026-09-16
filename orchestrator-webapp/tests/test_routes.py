@@ -615,9 +615,9 @@ def test_node_page_hit_counts_per_moment_and_the_adopting_plan_backlink(client, 
     ids = _seed_headline(client._db, pid, step)
     html = client.get("/node/demo/nk_a").text
     assert f'data-stats="{ids["cid"]}"' in html and "展示 plan 1 · edit 1 · why 0 · 采用 1" in html
-    assert f'href="/plan/{pid}?node=pkg.m.load_orders&at={ids["cid"]}">{pid}</a> 采用' in html    # 被 <plan> 采用, carrying the triple (DP 2b)
+    assert f'href="/plan/{pid}?node=pkg.m.load_orders&at=reason:{ids["cid"]}">{pid}</a> 采用' in html    # 被 <plan> 采用, carrying the TYPED triple (DP 2d: a record id, not a run)
     assert f'data-stats="{ids["rid"]}"' in html and "展示 plan 1 · edit 0 · why 0 · 采用 0" in html
-    hi = client.get(f"/node/demo/nk_a?at={ids['cid']}").text
+    hi = client.get(f"/node/demo/nk_a?at=reason:{ids['cid']}").text
     assert f'data-record="{ids["cid"]}" data-at="1"' in hi and hi.count(' data-record="') == hi.count('data-record="') and f'data-record="{ids["rid"]}" data-at="1"' not in hi   # only the asked record (the view bar carries its own data-at, DP 2b)
 
 
@@ -662,23 +662,24 @@ def test_graph_page_renders_nodes_with_badge_and_tier_and_links_to_node(client, 
     _, reg = _seed_state_graph(tmp_path)
     monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
     _seed_reasons_and_constraints(client._db)
-    html = client.get("/graph/demo").text
+    html = client.get("/graph/demo?mode=full").text                   # DP 2d: the bare page is the `story` mode now
     assert 'data-panel="graph-table"' in html and 'data-node="nk_a"' in html
     assert 'data-badge="3"' in html                                # 1 stated reason + 2 active constraints (the unstated one has no badge)
     assert 'data-tier="asserted"' in html                          # the latest event of nk_a is identity_asserted
     assert 'href="/node/demo/pkg.m.load_orders"' in html and "run 2" in html and "bbbbbbb" in html
     focused = client.get("/graph/demo?focus=pkg.m.load_orders").text
     assert 'data-focus="1"' in focused and 'name="focus" value="pkg.m.load_orders"' in focused
+    assert 'data-mode="focus"' in focused and 'data-mode="story"' in client.get("/graph/demo").text
 
 
 def test_graph_page_at_a_run_shows_that_runs_nodes_and_says_where_edges_come_from(client, tmp_path, monkeypatch):
     _, reg = _seed_state_graph(tmp_path)
     monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
-    then = client.get("/graph/demo?at=1").text
+    then = client.get("/graph/demo?at=run:1&mode=full").text
     assert "run 1" in then and "aaaaaaa" in then and "edges_from: latest" in then
-    assert 'href="/node/demo/pkg.m.load?at=1"' in then                 # the name it carried at run 1, and the triple carries at
-    now = client.get("/graph/demo").text
-    assert "pkg.m.load_orders" in now and 'href="/node/demo/pkg.m.load?at=1"' not in now
+    assert 'href="/node/demo/pkg.m.load?at=run:1"' in then              # the name it carried at run 1, and the triple carries a TYPED at
+    now = client.get("/graph/demo?mode=full").text
+    assert "pkg.m.load_orders" in now and 'href="/node/demo/pkg.m.load?at=run:1"' not in now
 
 
 def test_graph_page_without_a_graph_is_200_and_says_so(client, tmp_path, monkeypatch):
@@ -691,7 +692,7 @@ def test_graph_page_full_level_includes_data_nodes_and_old_db_stays_200(client, 
     _, reg = _seed_state_graph(tmp_path)
     monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
     conn = odb.open_db(client._db); conn.execute("DROP VIEW node_badge_v"); conn.commit(); conn.close()
-    r = client.get("/graph/demo?level=full")
+    r = client.get("/graph/demo?level=full&mode=full")
     assert r.status_code == 200 and 'data-badge="0"' in r.text                 # no badge view → badges read 0, page still renders
 
 

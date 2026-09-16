@@ -52,7 +52,57 @@ def _fid(kind: str, anchor_key: str | None, n: int) -> str:
     return f"{kind}:{(anchor_key or 'none')[:12]}:{n}"
 
 
-def layer_self(pack, *, hard_statements: frozenset = frozenset()) -> list[Finding]:
+
+# ── DP phase 2d (Task 0): a finding carries the words recorded at the time ────
+# "upstream X was removed in run N" is true and useless: the agent cannot see WHY
+# it went, so it cannot adopt that record either. Every observation-shaped finding
+# now appends the reason recorded against that node for that run (or that plan),
+# the user's own words first, and carries its reason_id so a response can cite it.
+# Nothing recorded reads 当时未说明 — the gap is stated, never left blank.
+REASON_SNIPPET_MAX = 160
+
+
+def _reason_at(conn, node_key: str | None, *, run_id: int | None = None, plan_id: str | None = None) -> dict | None:
+    """The live reason recorded on `node_key` for that run / plan: the user's own
+    words win over an agent's reading, the newest wins over the older. None when
+    there is nothing on record (or no connection to ask)."""
+    if conn is None or not node_key or (run_id is None and plan_id is None):
+        return None
+    where, params = ["r.node_key = ?", "r.role = 'reason'", "r.state = 'active'", "r.superseded_by IS NULL"], [node_key]
+    if run_id is not None and plan_id is not None:
+        where.append("(r.run_id = ? OR r.plan_id = ?)"); params += [int(run_id), plan_id]
+    elif run_id is not None:
+        where.append("r.run_id = ?"); params.append(int(run_id))
+    else:
+        where.append("r.plan_id = ?"); params.append(plan_id)
+    try:
+        row = conn.execute(
+            "SELECT r.id, r.plan_id, r.tier, r.rule_id, r.recorded_by, "
+            "       COALESCE(substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start), r.interpretation, r.statement) AS text "
+            "FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
+            f"WHERE {' AND '.join(where)} "
+            "ORDER BY (r.tier = 'stated') DESC, r.id DESC LIMIT 1", params).fetchone()
+    except Exception:                      # an older DB has no change_reason_v: say nothing, invent nothing
+        return None
+    if not row or not row["text"]:
+        return None
+    return {"reason_id": row["id"], "plan_id": row["plan_id"], "tier": row["tier"],
+            "label": "用户原话" if row["tier"] == "stated" else (row["rule_id"] or row["recorded_by"]),
+            "text": row["text"][:REASON_SNIPPET_MAX]}
+
+
+def _because(rec: dict | None, *, asked: bool) -> str:
+    """The clause appended to a finding. `asked` is False when the caller passed
+    no connection — then the finding says nothing about reasons at all, rather
+    than claiming none exists."""
+    if not asked:
+        return ""
+    if not rec:
+        return " —— 当时未说明"
+    return f' —— 因为："{rec["text"]}"（{rec["label"]}，{rec["plan_id"]}）'
+
+
+def layer_self(pack, *, hard_statements: frozenset = frozenset(), conn=None) -> list[Finding]:
     out: list[Finding] = []
     for t in pack.targets:
         key = t.node_key or t.qualified_name
@@ -71,13 +121,23 @@ def layer_self(pack, *, hard_statements: frozenset = frozenset()) -> list[Findin
             failed = (o["kind"] == "survival" and o.get("signal") not in (None, "untouched", "untouched_consumed", "survived")) \
                 or (o["kind"] == "observed" and isinstance(o.get("delta_pct"), (int, float)) and abs(o["delta_pct"]) > 5)
             if failed:
+                rec = _reason_at(conn, t.node_key or key, plan_id=o["plan_id"])
+                ev_dict = {"expectation_id": o["expectation_id"]}
+                if rec:
+                    ev_dict.update(reason_id=rec["reason_id"], plan_id=rec["plan_id"])
                 out.append(Finding(_fid("prior_outcome_failed", key, n), "self", "prior_outcome_failed", "derived", "warning",
-                                   f"{o['plan_id']} claimed \"{o['claim']}\" — outcome {o['kind']} {o.get('signal') or o.get('delta_pct')}",
-                                   t.qualified_name, {"expectation_id": o["expectation_id"]}))
+                                   f"{o['plan_id']} claimed \"{o['claim']}\" — outcome {o['kind']} {o.get('signal') or o.get('delta_pct')}"
+                                   + _because(rec, asked=conn is not None),
+                                   t.qualified_name, ev_dict))
         for n, ev in enumerate(getattr(t, "removed_upstream", []) or [], 1):
+            rec = _reason_at(conn, ev.get("node_key"), run_id=ev.get("run_id"))
+            ev_dict = {"event_id": ev["event_id"]}
+            if rec:
+                ev_dict.update(reason_id=rec["reason_id"], plan_id=rec["plan_id"])
             out.append(Finding(_fid("removed_upstream", key, n), "self", "removed_upstream", "observed", "blocking",
-                               f"upstream {ev['qualified_name']} was removed in run {ev['run_id']}", t.qualified_name,
-                               {"event_id": ev["event_id"]}))
+                               f"upstream {ev['qualified_name']} was removed in run {ev['run_id']}"
+                               + _because(rec, asked=conn is not None),
+                               t.qualified_name, ev_dict))
     return out
 
 
@@ -139,7 +199,7 @@ def summarize(findings: list[Finding], n_targets: int, shown: int, adopted: int 
 def headline(conn, *, project: str, pack, plan_id: str | None = None, session_id: str | None = None,
              notes=(), hard_statements: frozenset = frozenset(), commit: bool = True) -> dict:
     """Compute, store (a new headline row every time) and return the headline. Never empty (I1)."""
-    findings = layer_self(pack, hard_statements=hard_statements) + layer_impact(pack, hard_statements=hard_statements)
+    findings = layer_self(pack, hard_statements=hard_statements, conn=conn) + layer_impact(pack, hard_statements=hard_statements)
     findings += asserted_notes(conn, notes, [t.qualified_name for t in pack.targets])
     doc = {"findings": [f.as_dict() for f in findings],
            "summary": summarize(findings, len(pack.targets), pack.shown),

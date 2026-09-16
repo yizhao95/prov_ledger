@@ -279,13 +279,77 @@ def runs_of(psg_db_path: str | None) -> list[dict]:
             for r in _query(psg_db_path, "SELECT id, commit_sha, plan_id, started_at, trigger FROM analysis_run ORDER BY id DESC")]
 
 
-def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "functions") -> dict:
+# DP phase 2d (Task 0, FL-076): a whole project is too much graph for one page.
+# User feedback on the 2b screenshots (2026-09-16): 记全是对的，画全是错的 — recording
+# every node is right, DRAWING every node is wrong. So the reader has four modes
+# and the biggest one is never what a page asks for by default:
+#
+#   focus — the focus node's ±hops neighbourhood
+#   story — the nodes that have a story (the caller passes their keys, since the
+#           badge lives in the orchestrator DB, not here) plus the data nodes
+#           they directly produce or consume
+#   data  — every data node plus the functions that directly produce or consume it
+#   full  — everything at `level` (the 2b behaviour, and this reader's default:
+#           the UX default belongs to the view, not to the bridge)
+GRAPH_MODES = ("focus", "story", "data", "full")
+DATA_TYPES = ("dataset", "column", "sql_table", "api_source", "bq_dataset", "data_var")
+NEIGHBOURHOOD_HOPS = 2
+NEIGHBOURHOOD_MAX_NODES = 400
+# story / data pick their nodes from the whole project rather than from one
+# neighbourhood, so they need their own, tighter cap: on prov_ledger 1163 nodes
+# carry a story and an uncapped story page is 2 MB. The cut is reported as
+# `mode_total` (what the mode selected) beside `total_nodes` (the whole graph).
+MODE_MAX_NODES = 200
+
+
+def _adjacency(edges: list[dict]) -> dict[str, set[str]]:
+    adj: dict[str, set[str]] = {}
+    for e in edges:
+        adj.setdefault(e["src_key"], set()).add(e["dst_key"])
+        adj.setdefault(e["dst_key"], set()).add(e["src_key"])
+    return adj
+
+
+def _neighbourhood(nodes: list[dict], edges: list[dict], focus: str,
+                   hops: int, max_nodes: int) -> tuple[set[str] | None, str | None, bool]:
+    """(keys to keep, the focus node_key, truncated) — (None, None, False) when
+    `focus` names nothing in this graph, so the caller can show the whole thing
+    and SAY the focus was not found rather than render an empty canvas."""
+    by_key = {n["node_key"]: n for n in nodes}
+    key = focus if focus in by_key else next((n["node_key"] for n in nodes if n["qualified_name"] == focus), None)
+    if key is None:
+        return None, None, False
+    adj = _adjacency(edges)
+    seen, frontier, truncated = {key}, {key}, False
+    for _ in range(max(0, int(hops))):
+        nxt = {k for f in frontier for k in adj.get(f, ()) if k not in seen and k in by_key}
+        if not nxt:
+            break
+        room = max_nodes - len(seen)
+        if len(nxt) > room:
+            nxt = set(sorted(nxt, key=lambda k: by_key[k]["qualified_name"])[:room])
+            truncated = True
+        seen |= nxt
+        frontier = nxt
+        if truncated:
+            break
+    return seen, key, truncated or len(seen) < len(nodes)
+
+
+def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "functions",
+             mode: str = "full", focus: str | None = None, hops: int = NEIGHBOURHOOD_HOPS,
+             story_keys=None, max_nodes: int | None = None) -> dict:
     """{nodes: [{node_key, qualified_name, node_type, file_path}], edges: [{src_key, dst_key, edge_type}],
-    run_id, edges_from, level}. Nodes come from node_snapshot of `run_id` (the
-    newest run when None). Edges have no run dimension in the graph — they are
-    the latest graph's, mapped through node_key, and the result says so
-    (`edges_from: 'latest'`), never silently. level=functions keeps
-    function / method / route and calls / downstream_data_feed; full keeps all."""
+    run_id, edges_from, level, mode, total_nodes, mode_total, truncated, focus_key, focus_found, hops}.
+
+    Nodes come from node_snapshot of `run_id` (the newest run when None). Edges
+    have no run dimension in the graph — they are the latest graph's, mapped
+    through node_key, and the result says so (`edges_from: 'latest'`), never
+    silently. `level` filters node TYPES (functions keeps function / method /
+    route and calls / downstream_data_feed; full keeps all); `mode` decides how
+    much of that graph is drawn (see GRAPH_MODES). `total_nodes` is always the
+    full count at `level` and `mode_total` what the mode picked before the cap,
+    so a cropped view can always say exactly what it cropped."""
     if not psg_db_path:
         return {"nodes": [], "edges": [], "run_id": None, "edges_from": "none", "level": level}
     latest = _query(psg_db_path, "SELECT MAX(run_id) AS r FROM node_snapshot")
@@ -293,19 +357,76 @@ def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "f
     run = int(run_id) if run_id is not None else latest_run
     if run is None:
         return {"nodes": [], "edges": [], "run_id": None, "edges_from": "none", "level": level}
-    type_filter = f"AND node_type IN ({','.join('?' * len(APP_FUNC_TYPES))})" if level == "functions" else ""
-    params: tuple = (run, *APP_FUNC_TYPES) if level == "functions" else (run,)
-    rows = _query(psg_db_path, f"SELECT node_key, qualified_name, node_type, file_path FROM node_snapshot WHERE run_id = ? AND node_key <> '' {type_filter} ORDER BY qualified_name", params)
-    nodes = [{"node_key": r["node_key"], "qualified_name": r["qualified_name"], "node_type": r["node_type"], "file_path": r["file_path"]} for r in rows]
-    keep = {n["node_key"] for n in nodes}
-    edge_filter = f"AND t.name IN ({','.join('?' * len(FLOW_EDGES))})" if level == "functions" else ""
+    mode = mode if mode in GRAPH_MODES else "full"
+    if max_nodes is None:
+        max_nodes = MODE_MAX_NODES if mode in ("story", "data") else NEIGHBOURHOOD_MAX_NODES
+    rows = _query(psg_db_path, "SELECT node_key, qualified_name, node_type, file_path FROM node_snapshot "
+                               "WHERE run_id = ? AND node_key <> '' ORDER BY qualified_name", (run,))
+    every = [{"node_key": r["node_key"], "qualified_name": r["qualified_name"], "node_type": r["node_type"],
+              "file_path": r["file_path"]} for r in rows]
+    at_level = [n for n in every if level != "functions" or n["node_type"] in APP_FUNC_TYPES]
+    total_nodes = len(at_level)
     erows = _query(psg_db_path,
-                   f"SELECT s.node_key AS src_key, d.node_key AS dst_key, t.name AS edge_type FROM edge e "
-                   f"JOIN edge_type t ON t.id = e.edge_type_id JOIN node s ON s.id = e.src_node_id JOIN node d ON d.id = e.dst_node_id "
-                   f"WHERE s.node_key IS NOT NULL AND d.node_key IS NOT NULL {edge_filter}", FLOW_EDGES if level == "functions" else ())
-    edges = [{"src_key": r["src_key"], "dst_key": r["dst_key"], "edge_type": r["edge_type"]} for r in erows if r["src_key"] in keep and r["dst_key"] in keep]
+                   "SELECT s.node_key AS src_key, d.node_key AS dst_key, t.name AS edge_type FROM edge e "
+                   "JOIN edge_type t ON t.id = e.edge_type_id JOIN node s ON s.id = e.src_node_id JOIN node d ON d.id = e.dst_node_id "
+                   "WHERE s.node_key IS NOT NULL AND d.node_key IS NOT NULL")
+    all_edges = [{"src_key": r["src_key"], "dst_key": r["dst_key"], "edge_type": r["edge_type"]} for r in erows]
+
+    focus_key, focus_found, truncated = None, False, False
+    if mode in ("story", "data"):
+        # story / data reason over every node type and every edge type: a data node
+        # is invisible at level=functions, and `reads_sql` is not a flow edge.
+        nodes, pool_edges = every, all_edges
+        present = {n["node_key"] for n in nodes}
+        edges = [e for e in pool_edges if e["src_key"] in present and e["dst_key"] in present]
+        adj = _adjacency(edges)
+        data_keys = {n["node_key"] for n in nodes if n["node_type"] in DATA_TYPES}
+        if mode == "story":
+            # story_keys may be an ORDERED sequence (queries sorts it by badge,
+            # most-storied first) so the cap keeps the nodes with the most to say
+            ranked = list(dict.fromkeys(story_keys or ()))
+            rank = {k: i for i, k in enumerate(ranked)}
+            wanted = set(ranked)
+            seeds = [n["node_key"] for n in nodes if n["node_key"] in wanted or n["qualified_name"] in wanted]
+            seeds.sort(key=lambda k: rank.get(k, len(rank)))
+            order = {k: i for i, k in enumerate(seeds)}
+            neighbours = [k for s in seeds for k in sorted(adj.get(s, ())) if k in data_keys]
+            for k in dict.fromkeys(neighbours):
+                order.setdefault(k, len(order))
+            keep = set(seeds) | set(neighbours)
+        else:
+            # data nodes first, the functions that touch them after: a cap eats the tail
+            ordered_data = sorted(data_keys)
+            order = {k: i for i, k in enumerate(ordered_data)}
+            touching = [k for d in ordered_data for k in sorted(adj.get(d, ())) if k not in data_keys]
+            for k in dict.fromkeys(touching):
+                order.setdefault(k, len(order))
+            keep = data_keys | set(touching)
+        nodes = [n for n in nodes if n["node_key"] in keep]
+        mode_total = len(nodes)
+        if len(nodes) > max_nodes:
+            nodes = sorted(nodes, key=lambda n: order.get(n["node_key"], len(order)))[:max_nodes]
+            keep = {n["node_key"] for n in nodes}
+        edges = [e for e in edges if e["src_key"] in keep and e["dst_key"] in keep]
+        truncated = len(nodes) < total_nodes or len(nodes) < mode_total
+    else:
+        nodes = at_level
+        mode_total = len(nodes)
+        keep = {n["node_key"] for n in nodes}
+        edge_types = FLOW_EDGES if level == "functions" else None
+        edges = [e for e in all_edges if e["src_key"] in keep and e["dst_key"] in keep
+                 and (edge_types is None or e["edge_type"] in edge_types)]
+        if mode == "focus" and focus:
+            neigh, focus_key, truncated = _neighbourhood(nodes, edges, focus, hops, max_nodes)
+            focus_found = neigh is not None
+            if neigh is not None:
+                nodes = [n for n in nodes if n["node_key"] in neigh]
+                edges = [e for e in edges if e["src_key"] in neigh and e["dst_key"] in neigh]
+                mode_total = len(nodes)
     return {"nodes": nodes, "edges": edges, "run_id": run, "edges_from": "latest" if run != latest_run else "run",
-            "latest_run_id": latest_run, "level": level}
+            "latest_run_id": latest_run, "level": level, "mode": mode, "focus": focus or None,
+            "focus_key": focus_key, "focus_found": focus_found, "hops": hops,
+            "total_nodes": total_nodes, "mode_total": mode_total, "truncated": truncated}
 
 
 def latest_tier_of(psg_db_path: str | None, run_id: int | None = None) -> dict[str, str]:

@@ -1,0 +1,6 @@
+{
+  "projectId": "edae7a78-0f9d-4eab-9f8d-ff2d31459978",
+  "projectName": "provLedger Dashboard",
+  "shape": "package",
+  "notes": "created 2026-09-16 by /design-sync; the component library lives in orchestrator-webapp/design/ (DP phase 2d) — pkg is recorded once it exists"
+}

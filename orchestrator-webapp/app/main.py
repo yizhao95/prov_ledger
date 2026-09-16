@@ -6,7 +6,7 @@ Routes:
   GET /api/health       — JSON ping for uptime monitoring
   GET /outcomes         — every claim across plans with its latest outcome (phase 8, FL-042)
   GET /node/{project}/{qualified_name} — one node's space / time / intent ledger (phase 8, FL-009)
-  GET /graph/{project}?focus=&at=&level= — the project as it is, or was at a run (DP phase 2b)
+  GET /graph/{project}?focus=&at=&level=&mode= — the project, cropped to focus | story | data | full (DP phase 2b/2d)
   GET /session/{session_id} — what a session said, cost, changed, published (DP phase 2b)
 
 Read-only access to ~/skill-workspace/orchestrator.db. Never mutates.
@@ -298,25 +298,36 @@ def session_card(request: Request, session_id: str):
 
 
 @app.get("/graph/{project}", response_class=HTMLResponse)
-def graph_view(request: Request, project: str, focus: str | None = None, at: str | None = None, level: str = "functions"):
+def graph_view(request: Request, project: str, focus: str | None = None, at: str | None = None,
+               level: str = "functions", mode: str | None = None):
     """DP phase 2b (Task 3): the project as it is (or was, at a run) — nodes with a
-    badge (records with a story) and the tier of their latest event. PSG only
-    through psg_bridge; a missing graph is 200 + "state graph unavailable"."""
+    badge (records with a story) and the tier of their latest event. DP phase 2d
+    (Task 0): `at` is typed (`run:` / `reason:`) and `mode` decides how much graph
+    is drawn — the focus neighbourhood by default, `story` with no focus, `data`
+    or the whole thing on request. PSG only through psg_bridge; a missing graph
+    is 200 + "state graph unavailable"."""
     import json as _json
+    resolved = queries.resolve_mode(mode, focus)
+    at_parsed = queries.parse_at(at)
+    empty = {"available": False, "reason": None, "nodes": [], "edges": [], "runs": [], "run": None, "level": level,
+             "badged": 0, "focus": focus or None, "mode": resolved, "total_nodes": 0, "mode_total": 0, "truncated": False,
+             "focus_found": False, "at_reason": None, "at_kind": at_parsed["kind"], "at_id": at_parsed["id"],
+             "hops": queries.NEIGHBOURHOOD_HOPS, "edges_from": "none", "story_keys": 0}
     ctx = {"request": request, "error": None, "project": project, "focus": focus or None, "graph": None, "graph_json": "{}",
+           "mode": resolved, "level": level, "max_nodes": queries.MODE_MAX_NODES,
            "bar": queries.view_bar("graph", queries.triple(project, focus, at))}
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:
         ctx["error"] = f"orchestrator.db not found: {e}"
-        ctx["graph"] = {"available": False, "reason": ctx["error"], "nodes": [], "edges": [], "runs": [], "run": None, "level": level, "badged": 0}
+        ctx["graph"] = {**empty, "reason": ctx["error"]}
         return TEMPLATES.TemplateResponse(request, "graph.html", ctx)
     try:
-        ctx["graph"] = queries.get_graph(conn, project, at=at, level=level)
+        ctx["graph"] = queries.get_graph(conn, project, at=at, level=level, focus=focus, mode=mode)
         ctx["graph_json"] = _json.dumps({"nodes": ctx["graph"]["nodes"], "edges": ctx["graph"]["edges"]}, default=str)
     except sqlite3.Error as e:
         ctx["error"] = f"database error: {e}"
-        ctx["graph"] = {"available": False, "reason": ctx["error"], "nodes": [], "edges": [], "runs": [], "run": None, "level": level, "badged": 0}
+        ctx["graph"] = {**empty, "reason": ctx["error"]}
     finally:
         conn.close()
     return TEMPLATES.TemplateResponse(request, "graph.html", ctx)
@@ -327,9 +338,12 @@ def node_ledger(request: Request, project: str, qualified_name: str):
     """Phase 8 (FL-009): one node's upstream/downstream, history and reasons —
     three dimensions in one read-only query (docs/NORTH-STAR essence #2)."""
     at = request.query_params.get("at")
+    t = queries.triple(project, qualified_name, at)
     ctx = {"request": request, "error": None, "ledger": None, "project": project, "qualified_name": qualified_name,
-           "at": at,                                       # DP phase 2: ?at=<reason_id> highlights one record; 2b: a run id highlights the run
-           "bar": queries.view_bar("node", queries.triple(project, qualified_name, at))}
+           # DP phase 2d: `at` is typed — `reason:<id>` highlights one record, `run:<id>` highlights that run,
+           # and a bare number still reads as a run for one version. 2b's untyped `at` highlighted both.
+           "at": t["at"], "at_kind": t["at_kind"], "at_id": t["at_id"],
+           "bar": queries.view_bar("node", t)}
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:
