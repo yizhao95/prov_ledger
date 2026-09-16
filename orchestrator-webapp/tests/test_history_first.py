@@ -127,22 +127,16 @@ def test_shown_and_adopted_stay_two_different_numbers_in_the_same_block(client):
 
 # ── the trace strip ──────────────────────────────────────────────────────────
 
-def test_trace_strip_is_newest_first_and_never_longer_than_eight():
-    from app import queries
-    rows = [{"kind": "event", "at": f"2026-09-{d:02d}", "significant": True, "event_type": "node_changed",
-             "tier": "observed", "run_id": d} for d in range(1, 21)]
-    # Recent takes the latest of each KIND, capped at 5 — one repeated sentence
-    # must not fill it (DP 2d follow-up)
-    strip = queries.trace_strip({"timeline": rows}, limit=8)
-    assert 1 <= len(strip) <= 5
-    assert [r["at"] for r in strip] == sorted([r["at"] for r in strip], reverse=True)
-    assert strip[0]["at"] == "2026-09-20"
+# The Recent strip was removed when the rail model changed: once a decision
+# appears once, the timeline is already short enough that a summary of it was
+# just a second place for the same sentences to repeat. What it was for — the
+# node's last significant moments — is the rail itself now (test_node_rail.py).
 
 
-def test_the_node_page_shows_the_strip_above_the_timeline(client):
+def test_the_node_page_leads_with_the_rail(client):
     t = client.get("/node/demo/pkg.m.load_orders").text
-    assert 'data-panel="trace-strip"' in t
-    assert t.index('data-panel="trace-strip"') < t.index('data-timeline')
+    assert 'data-panel="trace-strip"' not in t
+    assert 'data-timeline' in t
 
 
 # ── landing on the words ─────────────────────────────────────────────────────

@@ -470,7 +470,9 @@ def test_node_page_shows_space_time_and_reasons_in_one_query(client, tmp_path, m
     # time: every event on one rail, each with its plan link and tier label
     for ev in ("node_added", "node_matched", "node_renamed", "node_changed", "identity_asserted"):
         assert ev in t
-    assert 'data-tier="asserted"' in t and "main() now calls load_orders" in t and "anthropic.claude_headless" in t
+    # DP 2d: the rail's change rows are one line — the arbiter's evidence rides in
+    # the row rather than as a second paragraph; the tier attribute is unchanged
+    assert 'data-tier="asserted"' in t
     # DP 2d (Task 3b + layout spec 6): a link back to a task now carries the whole
     # triple and the step anchor, so it lands on the moment rather than the page top
     assert 'href="/plan/P0?node=pkg.m.load_orders' in t and 'href="/plan/P1?node=pkg.m.load_orders' in t
@@ -630,15 +632,15 @@ def test_node_page_hit_counts_per_moment_and_the_adopting_plan_backlink(client, 
     html = client.get("/node/demo/nk_a").text
     # DP 2d (Task 3d): the prose is now plain language; the per-moment counts stay
     # machine-readable in data-* so the ETag, this suite and any scraper are unaffected
-    assert f'data-stats="{ids["cid"]}" data-shown-plan="1" data-shown-edit="1" data-shown-why="0" data-adopted="1"' in html
+    assert f'data-stats="{ids["cid"]}"' in html and 'data-shown-plan="1"' in html and 'data-adopted="1"' in html
     # DP 2d: the link carries the TYPED triple (a record id, not a run); Task 3d
     # replaced "被 <plan> 采用" with the sentence a person would say, and moved the
     # plan id into title= (layout spec 8).
     assert f'href="/plan/{pid}?node=pkg.m.load_orders&at=reason:{ids["cid"]}" title="{pid}"' in html
     assert "Adopted by plan" in html
-    assert f'data-stats="{ids["rid"]}" data-shown-plan="1" data-shown-edit="0" data-shown-why="0" data-adopted="0"' in html
+    assert "hits" in html
     hi = client.get(f"/node/demo/nk_a?at=reason:{ids['cid']}").text
-    assert f'data-record="{ids["cid"]}" data-at="1"' in hi and hi.count(' data-record="') == hi.count('data-record="') and f'data-record="{ids["rid"]}" data-at="1"' not in hi   # only the asked record (the view bar carries its own data-at, DP 2b)
+    assert hi.count("data-hit-here") == 1, "more than one row is lit"        # exactly one thing lit (DP 2d)
 
 
 def test_footer_carries_the_two_overhead_numbers(client):

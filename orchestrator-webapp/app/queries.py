@@ -886,47 +886,46 @@ def _timeline_rows(base: dict) -> list[dict]:
     return rows
 
 
-def group_timeline(rows: list[dict]) -> list[dict]:
-    """Collapse consecutive rows that say the SAME thing at the same tier.
+def merge_decisions(rows: list[dict], hits: dict[int, int] | None = None) -> list[dict]:
+    """The rail: one row per CHANGE, one row per DECISION, and a decision appears
+    once no matter how often it was activated.
 
-    R5 used to record "covered by active constraint #1414" once per plan that
-    met the node; on this repo's own compute_etag that is 16 identical derived
-    rows out of 21. The records are real and stay (append-only) — what was
-    wrong was printing the same sentence sixteen times. A group carries the
-    count, the date span and every row inside it, so nothing is lost and the
-    page stops repeating itself."""
-    groups: list[dict] = []
+    A constraint being in force, or a reason having been given, is a fact about
+    the node. Every later plan that meets it ACTIVATES it — and an activation is
+    a hit, not another line of text. Rules no longer write a second record
+    (triggers._existing_rule_reason), but 16 identical rows already exist on this
+    repo's own compute_etag, so the merge also happens here on read: rows with
+    the same (role, text, tier) become one, and each merged row counts as an
+    activation because that is what it was. The merge is reported on the row, not
+    hidden: `merged` and the plans are part of the result."""
+    hits = hits or {}
+    out: list[dict] = []
+    seen: dict[tuple, dict] = {}
     for r in rows:
-        text = ((r.get("record") or {}).get("text") or (r.get("record") or {}).get("statement") or "").strip()
-        sig = (r.get("kind"), r.get("tier"), r.get("event_type"), text)
-        if text and groups and groups[-1]["_sig"] == sig:
-            g = groups[-1]
-            g["rows"].append(r)
-            g["count"] += 1
-            ats = [x for x in (g["first_at"], r.get("at")) if x]
-            g["first_at"] = min(ats) if ats else g["first_at"]
-            g["last_at"] = max([x for x in (g["last_at"], r.get("at")) if x] or [g["last_at"]])
-            g["plans"] = sorted({x for x in (g["plans"] + [r.get("plan_id")]) if x})
+        rec = r.get("record") or {}
+        text = (rec.get("text") or rec.get("statement") or "").strip()
+        if r.get("kind") == "event" or not text:
+            out.append({**r, "row": "change", "text": text, "hits": 0, "merged": 0, "plans": []})
             continue
-        groups.append({**r, "_sig": sig, "count": 1, "rows": [r], "text": text,
-                       "first_at": r.get("at"), "last_at": r.get("at"),
-                       "plans": [r["plan_id"]] if r.get("plan_id") else []})
-    return groups
-
-
-# The Recent strip answers "what happened to this lately", so it takes the latest
-# of each KIND rather than the latest N rows — otherwise one repeated sentence
-# fills it and the other four kinds never appear.
-RECENT_KINDS = ("structural", "stated", "asserted", "constraint", "outcome")
-
-
-def _recent_kind(row: dict) -> str:
-    if row.get("kind") == "constraint":
-        return "constraint"
-    if row.get("kind") == "event":
-        return "structural"
-    tier = row.get("tier")
-    return "stated" if tier == "stated" else ("asserted" if tier == "asserted" else "outcome")
+        sig = (r.get("kind"), r.get("tier"), text)
+        if sig in seen:
+            g = seen[sig]
+            g["merged"] += 1
+            # N identical writes are N activations — including the first one, which
+            # only becomes "a write among many" once a second arrives
+            g["hits"] += 2 if g["merged"] == 1 else 1
+            if r.get("plan_id"):
+                g["plans"] = sorted(set(g["plans"] + [r["plan_id"]]))
+            g["first_at"] = min(x for x in (g["first_at"], r.get("at")) if x)
+            continue
+        stats = rec.get("stats") or {}
+        base_hits = hits.get(rec.get("id")) if rec.get("id") in hits else \
+            (stats.get("plan") or 0) + (stats.get("edit") or 0) + (stats.get("why") or 0) + (stats.get("close") or 0)
+        g = {**r, "row": "decision", "text": text, "hits": int(base_hits or 0), "merged": 0,
+             "plans": [r["plan_id"]] if r.get("plan_id") else [], "first_at": r.get("at")}
+        seen[sig] = g
+        out.append(g)
+    return out
 
 
 def filter_timeline(rows: list[dict], show: dict) -> tuple[list[dict], dict]:
@@ -1046,7 +1045,7 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str,
     rows = _timeline_rows(base)
     base["timeline_all"] = rows
     base["timeline"], base["folded"] = filter_timeline(rows, show)
-    base["groups"] = group_timeline(base["timeline"])
+    base["rail"] = merge_decisions(base["timeline"], _read_hit_counts(conn, base))
     base["show"] = show
     base["upstream"] = list(base["card"].get("callers") or [])
     base["downstream"] = list(base["card"].get("output_consumers") or [])
@@ -1442,6 +1441,20 @@ def search_records(conn: sqlite3.Connection, q: str, project: str | None = None)
     # `degraded` is True by construction: the read-only connection cannot build or
     # trust the FTS index, so this is LIKE, and the page says so.
     return list(grouped.values()), True, len(rows)
+
+
+def _read_hit_counts(conn: sqlite3.Connection, base: dict) -> dict[int, int]:
+    """How often each of this node's records was surfaced. Counted from read_hit,
+    never inferred from how many rows exist."""
+    ids = [r["id"] for r in (base.get("reasons") or []) + (base.get("constraints") or []) if r.get("id")]
+    if not ids:
+        return {}
+    ph = ",".join("?" * len(ids))
+    try:
+        return {r[0]: r[1] for r in conn.execute(
+            f"SELECT reason_id, COUNT(*) FROM read_hit WHERE reason_id IN ({ph}) GROUP BY reason_id", ids)}
+    except sqlite3.Error:
+        return {}
 
 
 TRACE_STRIP_MAX = 8

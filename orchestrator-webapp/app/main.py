@@ -435,7 +435,7 @@ def node_ledger(request: Request, project: str, qualified_name: str):
     ctx = {"request": request, "error": None, "ledger": None, "project": project, "qualified_name": qualified_name,
            # DP phase 2d: `at` is typed — `reason:<id>` highlights one record, `run:<id>` highlights that run,
            # and a bare number still reads as a run for one version. 2b's untyped `at` highlighted both.
-           "at": t["at"], "at_kind": t["at_kind"], "at_id": t["at_id"], "show": show, "strip": [], "lang": _lang(request),
+           "at": t["at"], "at_kind": t["at_kind"], "at_id": t["at_id"], "show": show, "lang": _lang(request),
            "bar": queries.view_bar("node", t)}
     try:
         conn = queries.open_db_readonly()
@@ -445,8 +445,7 @@ def node_ledger(request: Request, project: str, qualified_name: str):
     try:
         ctx["ledger"] = queries.get_node_ledger(conn, project, qualified_name,
                                                 significant_only=not show["all"], filters=show)
-        # DP phase 2d (Task 3c): the last significant moments, at the very top
-        ctx["strip"] = queries.trace_strip(ctx["ledger"])
+
     except sqlite3.Error as e:
         ctx["error"] = f"database error: {e}"
     finally:

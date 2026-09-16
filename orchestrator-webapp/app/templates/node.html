@@ -72,27 +72,6 @@
   </div>
   {% else %}
 
-  {# ── DP phase 2d (Task 3c): the trace strip — the last significant moments,
-       one line each, at most 8. Everything past the cut is in the timeline. ── #}
-  <section class="bg-surface rounded-xl shadow-sm border border-hairline px-5 py-3 mb-3" data-panel="trace-strip">
-    <h2 class="text-[11px] uppercase tracking-wide text-brand-muted mb-1">{{ ui('change_summary', lang) }}</h2>
-    {% if not strip %}
-    <div class="text-xs text-brand-muted">{{ ui('no_significant_change', lang) }}</div>
-    {% endif %}
-    {% for row in strip %}
-    <div class="text-xs flex flex-wrap items-baseline gap-x-2 py-0.5" data-strip-row="{{ loop.index }}">
-      <span class="text-brand-muted tnum">{{ (row.at or '')[:10] }}</span>
-      <span class="font-medium">{{ row.event_type|say('event', lang) if row.kind == 'event' else ('constraint'|say('role', lang) if row.kind == 'constraint' else 'reason'|say('role', lang)) }}</span>
-      {% if row.record and (row.record.text or row.record.statement) %}
-      <span class="text-gray-800">{{ ui('because', lang) }}: “{{ (row.record.text or row.record.statement)[:60] }}”</span>
-      {% if row.tier == 'stated' %}<span data-verbatim="1" class="text-brand-blue">{{ 'stated'|say('tier', lang) }}</span>{% endif %}
-      {% elif row.kind != 'event' %}<span class="text-brand-muted">{{ ui('not_recorded', lang) }}</span>{% endif %}
-      {% if row.plan_id %}<a class="text-brand-blue" href="/plan/{{ row.plan_id }}?node={{ ledger.qualified_name }}{% if row.record %}&at=reason:{{ row.record.id }}{% elif row.run_id %}&at=run:{{ row.run_id }}{% endif %}{% if row.step_id %}#step-{{ row.step_id }}{% endif %}" title="{{ row.plan_id }}">{{ ui('back_to_task', lang) }} →</a>{% endif %}
-      {% if row.record and row.record.stats %}<span class="text-brand-muted tnum">{{ vocab.shown((row.record.stats.plan or 0) + (row.record.stats.edit or 0) + (row.record.stats.why or 0), lang) }} · {{ vocab.adopted(row.record.stats.adopted, lang) }}</span>{% endif %}
-    </div>
-    {% endfor %}
-  </section>
-
   {# ── the chips: the filter state IS the URL, so a filtered view is a link ── #}
   <div class="flex flex-wrap items-center gap-1 mb-3" data-chips>
     {{ chip('', ui('chip_significant', lang), not show.all and not show.events and not show.tier and not show.since and not show.adopted) }}
@@ -116,72 +95,55 @@
         <a class="text-brand-blue" href="?{% if at %}at={{ at }}&{% endif %}show=all">{{ ui('expand', lang) }}</a></div>
       {% endif %}
 
-      {% for g in ledger.groups %}
-      {% set row = g %}
-      {% set tb = tier_badge(row.tier) %}
+      {#
+        Two kinds of row and nothing else. A DECISION is the subject of its row:
+        body colour, normal weight, the text first. A CHANGE is context: muted,
+        one line. The tier and the hit count are the faintest thing on the row,
+        right-aligned, plain text — they qualify the row, they are not the row.
+        Only the row the URL points at is lit.
+      #}
+      {% for row in ledger.rail %}
+      {% set is_decision = row.row == 'decision' %}
       {% set record_hit = at_kind == 'reason' and row.record and at_id == row.record.id %}
-      {% set run_hit = at_kind == 'run' and row.run_id and at_id == row.run_id %}
-      {% set hit = record_hit or run_hit %}
-      <div class="relative pl-5 pb-4 {{ 'ring-2 ring-brand-blue rounded' if hit else '' }}" data-tl-row
-           data-event="{{ row.event_type or row.kind }}" data-kind="{{ row.kind }}" data-tier="{{ row.tier }}"
-           data-group-count="{{ g.count }}"
+      {% set run_hit = at_kind == 'run' and row.run_id and at_id == row.run_id and not row.record %}
+      {% set lit = record_hit or run_hit %}
+      <div class="group relative pl-5 py-1 {{ 'bg-[#eef4fc] rounded' if lit else '' }} {{ 'text-gray-800' if is_decision else 'text-brand-muted text-[11px]' }}"
+           data-row="{{ row.row }}" data-event="{{ row.event_type or row.kind }}" data-tier="{{ row.tier }}"
            {%- if row.record %} data-record="{{ row.record.id }}"{% endif %}
            {%- if row.run_id %} data-run="{{ row.run_id }}"{% endif %}
-           {%- if record_hit %} data-at="1" data-hit-here="1"{% endif %}
-           {%- if run_hit %} data-at-run="{{ row.run_id }}" data-hit-here="1"{% endif %}>
-        <span class="absolute left-0 top-1 w-2 h-2 rounded-full" style="background: {{ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(row.tier, '#898781') }}"></span>
-        {% if not loop.last %}<span class="absolute left-[3px] top-3 bottom-0 w-px bg-hairline"></span>{% endif %}
+           {%- if row.merged %} data-merged="{{ row.merged }}"{% endif %}
+           {%- if record_hit %} data-hit-here="1" data-at="1"{% endif %}
+           {%- if run_hit %} data-hit-here="1" data-at-run="{{ row.run_id }}"{% endif %}
+           {%- if row.merged %} title="{{ row.merged }} identical records merged — each write was an activation, counted in hits"{% endif %}>
+        <span class="absolute left-0 top-2 w-2 h-2 rounded-full {{ '' if lit else 'bg-surface' }}"
+              style="{{ 'background: ' ~ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(row.tier, '#898781') if lit else 'border: 1.5px solid ' ~ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(row.tier, '#898781') }}"></span>
+        {% if not loop.last %}<span class="absolute left-[3px] top-4 bottom-0 w-px bg-hairline"></span>{% endif %}
 
-        <div class="text-xs flex flex-wrap items-baseline gap-x-2">
-          <span class="text-brand-muted tnum">{{ (row.last_at or row.at or '')[:10] }}{% if g.count > 1 and (g.first_at or '')[:10] != (g.last_at or '')[:10] %} ← {{ (g.first_at or '')[:10] }}{% endif %}</span>
-          <span class="font-semibold">
+        <div class="flex items-baseline gap-x-2">
+          <span class="text-brand-muted tnum shrink-0">{{ (row.at or '')[:10] }}</span>
+          <span class="{{ 'font-medium' if is_decision else '' }} shrink-0">
             {%- if row.kind == 'event' %}{{ row.event_type|say('event', lang) }}
             {%- elif row.kind == 'constraint' %}{{ 'constraint'|say('role', lang) }}
-            {%- else %}{{ 'reason'|say('role', lang) }}{% endif -%}
+            {%- else %}{{ row.record.kind if false else ('rejected_path'|say('role', lang) if row.record and row.record.kind == 'rejected_path' else 'reason'|say('role', lang)) }}{% endif -%}
           </span>
-          <span data-tier="{{ row.tier }}" title="{{ vocab.define(row.tier, kind='tier', lang=lang) }}" class="px-2 py-0.5 rounded {{ tb[1] }}">{{ row.tier|say('tier', lang) }}</span>
-          {% if g.count > 1 %}<span class="text-brand-muted tnum" data-group-plans="{{ g.plans|length }}">· {{ g.plans|length }} {{ ui('plans', lang) }}</span>{% endif %}
-          {% if g.count == 1 and row.plan_id %}<a class="text-brand-blue" href="/plan/{{ row.plan_id }}?node={{ ledger.qualified_name }}{% if row.record %}&at=reason:{{ row.record.id }}{% elif row.run_id %}&at=run:{{ row.run_id }}{% endif %}{% if row.step_id %}#step-{{ row.step_id }}{% endif %}" title="{{ row.plan_id }}">{{ ui('back_to_task', lang) }} →</a>{% endif %}
+          <span class="flex-1 {{ 'line-clamp-2' if is_decision else 'truncate' }}">
+            {%- if is_decision %}{{ row.text }}
+            {%- elif row.payload %}{% if row.event_type in ('node_renamed', 'node_moved') %}{{ row.payload.get('from') }} → {{ row.payload.get('to') }}{% elif row.event_type == 'node_changed' %}{{ (row.payload.get('changed') or [])|join(', ') }}{% elif row.event_type == 'column_dropped' %}{{ row.payload.get('column') }}{% endif %}{% endif -%}
+          </span>
+          <span class="text-brand-muted text-[11px] tnum shrink-0" title="{{ vocab.define(row.tier, kind='tier', lang=lang) }}">
+            {{ row.tier|say('tier', lang) }}{% if is_decision %} · {{ row.hits }} hits{% if lit %} <span class="text-brand-blue font-semibold">+1</span>{% endif %}{% endif %}
+          </span>
         </div>
 
-        {% if row.kind == 'event' and row.payload %}
-        <div class="text-xs font-mono text-brand-muted mt-0.5 break-all">
-          {%- if row.event_type in ('node_renamed', 'node_moved') %}<span data-beforeafter>{{ row.payload.get('from') }} → {{ row.payload.get('to') }}</span>
-          {%- elif row.event_type == 'node_changed' %}{% if row.payload.get('before') %}<span data-beforeafter>{{ row.payload.get('before') }} → {{ row.payload.get('after') }}</span>{% else %}{{ (row.payload.get('changed') or [])|join(', ') }}{% endif %}
-          {%- elif row.event_type == 'column_dropped' %}<span data-beforeafter>{{ row.payload.get('column') }} → —</span>
-          {%- elif row.event_type == 'identity_asserted' %}{{ row.payload.get('cur') }} — {{ row.payload.get('evidence') }} [{{ row.payload.get('arbiter') }}]
-          {%- endif -%}
+        {# the way back is on every row, but it appears on hover: a link on every
+           line, always, is a link nobody reads #}
+        {% if row.plan_id %}
+        <div class="opacity-0 group-hover:opacity-100 transition text-[11px]" data-row-actions>
+          <a class="text-brand-blue" href="/plan/{{ row.plan_id }}?node={{ ledger.qualified_name }}{% if row.record %}&at=reason:{{ row.record.id }}{% elif row.run_id %}&at=run:{{ row.run_id }}{% endif %}{% if row.step_id %}#step-{{ row.step_id }}{% endif %}" title="{{ row.plan_id }}">{{ ui('back_to_task', lang) }} →</a>
+          {% if row.record and row.record.stats and row.record.stats.adopted_by %}
+          {% for pid in row.record.stats.adopted_by %}<span class="text-brand-muted"> · {{ vocab.adopted_by(short_title({'plan_id': pid, 'original_goal': None}), lang) }}</span>{% endfor %}
+          {% endif %}
         </div>
-        {% endif %}
-
-        {% if row.record %}
-        <div class="text-xs mt-0.5">
-          {% if row.record.text or row.record.statement %}
-          <span class="text-gray-800">{{ ui('because', lang) }}: “{{ row.record.text or row.record.statement }}”</span>
-          {% if row.tier == 'stated' %}<span data-verbatim="1" class="text-[11px] text-brand-blue">{{ 'stated'|say('tier', lang) }}</span>{% endif %}
-          {% else %}<span class="text-brand-muted">{{ ui('not_recorded', lang) }}</span>{% endif %}
-          <span class="text-brand-muted" title="{{ vocab.define(row.record.evidence_level, kind='evidence_level', lang=lang) }}">· {{ row.record.evidence_level|say('evidence_level', lang) }}</span>
-        </div>
-        {% if row.record.stats %}
-        <div class="text-[11px] text-brand-muted tnum" data-stats="{{ row.record.id }}" data-shown-plan="{{ row.record.stats.plan }}" data-shown-edit="{{ row.record.stats.edit }}" data-shown-why="{{ row.record.stats.why }}" data-adopted="{{ row.record.stats.adopted }}" title="read_hit plan={{ row.record.stats.plan }} edit={{ row.record.stats.edit }} why={{ row.record.stats.why }} · influence={{ row.record.stats.adopted }}">{{ vocab.shown((row.record.stats.plan or 0) + (row.record.stats.edit or 0) + (row.record.stats.why or 0), lang) }} · {{ vocab.adopted(row.record.stats.adopted, lang) }}{% for pid in row.record.stats.adopted_by %} · <a class="text-brand-blue" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at=reason:{{ row.record.id }}" title="{{ pid }}">{{ vocab.adopted_by(short_title({'plan_id': pid, 'original_goal': None}), lang) }}</a>{% endfor %}</div>
-        {% endif %}
-        {% endif %}
-
-        {% if g.count > 1 %}
-        {# every record in the group stays reachable — the fold is a display
-           decision, not a deletion #}
-        <details class="text-[11px] mt-1" data-group-detail>
-          <summary class="cursor-pointer text-brand-blue">{{ ui('expand', lang) }} ({{ g.count }})</summary>
-          <div class="mt-1 pl-2 border-l border-hairline">
-            {% for r in g.rows %}
-            <div class="py-0.5" data-group-member="{{ r.record.id if r.record else '' }}">
-              <span class="text-brand-muted tnum">{{ (r.at or '')[:10] }}</span>
-              {% if r.plan_id %}<a class="text-brand-blue" href="/plan/{{ r.plan_id }}?node={{ ledger.qualified_name }}{% if r.record %}&at=reason:{{ r.record.id }}{% endif %}" title="{{ r.plan_id }}">{{ short_title({'plan_id': r.plan_id, 'original_goal': None}) }}</a>{% endif %}
-              {% if r.record and r.record.stats %}<span class="text-brand-muted tnum">· {{ vocab.shown((r.record.stats.plan or 0) + (r.record.stats.edit or 0) + (r.record.stats.why or 0), lang) }} · {{ vocab.adopted(r.record.stats.adopted, lang) }}</span>{% endif %}
-            </div>
-            {% endfor %}
-          </div>
-        </details>
         {% endif %}
       </div>
       {% endfor %}
@@ -204,14 +166,23 @@
       <h2 class="text-sm font-semibold text-gray-900 mb-2">{{ ui('active_constraints', lang) }}（{{ ledger.constraints|length }}）</h2>
       {% if not ledger.constraints %}<div class="text-xs text-brand-muted">{{ ui('no_active_constraints', lang) }}</div>{% endif %}
       {% for c in ledger.constraints %}
-      <div class="text-xs mb-2 border-l-2 border-hairline pl-2 {{ 'ring-2 ring-brand-blue rounded' if at_kind == 'reason' and at_id == c.id else '' }}"
+      <div class="text-xs mb-2 {{ 'bg-[#eef4fc] rounded px-1' if at_kind == 'reason' and at_id == c.id else '' }}"
            data-visibility="{{ c.why_visibility }}" data-record="{{ c.id }}"{% if at_kind == 'reason' and at_id == c.id %} data-at="1"{% endif %}>
         <div class="text-gray-800">{{ c.statement }}</div>
-        <div class="text-brand-muted">
-          {% if c.rationale %}{{ ui('because', lang) }}: {{ c.rationale }}{% elif c.why_visibility == 'restricted' %}{{ 'restricted rationale — reference only' if lang != 'zh' else '理由受限，仅保留出处' }}{% endif %}
-          {% if c.why_ref %}· <span title="{{ c.why_ref }}">{{ c.why_ref }}</span>{% endif %}
+        <div class="text-brand-muted text-[11px] tnum" data-stats="{{ c.id }}"
+             data-shown-plan="{{ c.stats.plan if c.stats else 0 }}" data-shown-edit="{{ c.stats.edit if c.stats else 0 }}"
+             data-shown-why="{{ c.stats.why if c.stats else 0 }}" data-adopted="{{ c.stats.adopted if c.stats else 0 }}"
+             title="{{ vocab.define(c.tier, kind='tier', lang=lang) }}">
+          {{ c.tier|say('tier', lang) }}{% if c.stats %} · {{ (c.stats.plan or 0) + (c.stats.edit or 0) + (c.stats.why or 0) }} hits{% endif %}
         </div>
-        {% if c.stats %}<div class="text-brand-muted tnum" data-stats="{{ c.id }}" data-shown-plan="{{ c.stats.plan }}" data-shown-edit="{{ c.stats.edit }}" data-shown-why="{{ c.stats.why }}" data-adopted="{{ c.stats.adopted }}" title="read_hit plan={{ c.stats.plan }} edit={{ c.stats.edit }} why={{ c.stats.why }} · influence={{ c.stats.adopted }}">{{ vocab.shown((c.stats.plan or 0) + (c.stats.edit or 0) + (c.stats.why or 0), lang) }} · {{ vocab.adopted(c.stats.adopted, lang) }}{% for pid in c.stats.adopted_by %} · <a class="text-brand-blue" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at=reason:{{ c.id }}" title="{{ pid }}">{{ vocab.adopted_by(short_title({'plan_id': pid, 'original_goal': None}), lang) }}</a>{% endfor %}</div>{% endif %}
+        <details class="text-[11px]">
+          <summary class="cursor-pointer text-brand-blue">{{ ui('expand', lang) }}</summary>
+          <div class="text-brand-muted">
+            {% if c.rationale %}{{ ui('because', lang) }}: {{ c.rationale }}{% elif c.why_visibility == 'restricted' %}{{ 'restricted rationale — reference only' if lang != 'zh' else '理由受限，仅保留出处' }}{% endif %}
+            {% if c.why_ref %}· <span title="{{ c.why_ref }}">{{ c.why_ref }}</span>{% endif %}
+            {% if c.stats %}{% for pid in c.stats.adopted_by %} · <a class="text-brand-blue" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at=reason:{{ c.id }}" title="{{ pid }}">{{ vocab.adopted_by(short_title({'plan_id': pid, 'original_goal': None}), lang) }}</a>{% endfor %}{% endif %}
+          </div>
+        </details>
       </div>
       {% endfor %}
     </aside>
