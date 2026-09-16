@@ -96,7 +96,10 @@ def records(ft: dict, cites=None) -> list[dict]:
     out = []
     for cite in keys:
         fact = ft["ids"][cite]
-        out.append({"cite": cite, "kind": fact.get("kind"), "node": fact.get("node"),
+        label = fact.get("kind")
+        if label == "reference":
+            label = f"source ({fact.get('source_kind')})"
+        out.append({"cite": cite, "kind": label, "node": fact.get("node"),
                     "url": _url(ft["project"], fact),
                     "text": (fact.get("text") or fact.get("label") or fact.get("claim")
                              or fact.get("event_type") or fact.get("via") or "")})

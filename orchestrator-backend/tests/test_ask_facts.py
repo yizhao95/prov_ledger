@@ -95,6 +95,9 @@ def test_every_cite_id_resolves_and_the_number_set_covers_the_rendering(conn, gr
     assert F.numbers_in(text) <= ft["numbers"], "a number is printed that the table does not state"
     assert F.sha(ft) == F.sha(F.facts(conn, graph, ["pkg.pipe.build_features"], project="proj"))
     assert len(F.sha(ft)) == 64
+    ref = ft["ids"][f"#r{seeded['reference']}"]
+    assert ref["kind"] == "reference" and ref["source_kind"] == "meeting", "the cite namespace is not shadowed by the source's own kind"
+    assert ft["ids"][f"#{seeded['constraint']}"]["kind"] == "constraints"
 
 
 def test_a_node_the_graph_does_not_know_is_reported_as_new_not_dropped(conn, graph, seeded):
