@@ -65,6 +65,7 @@ class ConstraintDecl:
     keywords: tuple[str, ...] = ()
     why_ref: str | None = None
     why_visibility: str = "shared"
+    block: bool = False              # DP phase 2: a HUMAN constraint may veto an edit / publish (the only blocking path)
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,7 @@ class Extensions:
     providers: tuple[ProviderDecl, ...] = ()
     outcome_channels: tuple[ChannelDecl, ...] = ()
     reasons_close_mode: str = "ask"        # DP phase 1: ask (default) | pending
+    reasons_session_refresh: str = "on"    # DP phase 2: on (default) | off — the Stop hook's background refresh
 
     def fingerprint(self) -> dict | None:
         """The shape written to analysis_run.extensions_json; None without a file."""
@@ -205,8 +207,11 @@ def _constraint(i: int, obj: Any) -> ConstraintDecl:
     why_ref = obj.get("why_ref")
     if why_ref is not None and not isinstance(why_ref, str):
         raise _err(where, "why_ref must be a string")
+    block = obj.get("block", False)
+    if not isinstance(block, bool):
+        raise _err(where, "block must be true or false")
     return ConstraintDecl(project=project, statement=st.strip(), subjects=_strs(where, obj, "subjects", required=True),
-                          keywords=_strs(where, obj, "keywords"), why_ref=why_ref, why_visibility=vis)
+                          keywords=_strs(where, obj, "keywords"), why_ref=why_ref, why_visibility=vis, block=block)
 
 
 MODULE_RE = re.compile(r"^[A-Za-z_][\w.]*:[A-Za-z_]\w*$")
@@ -325,10 +330,25 @@ def load(path: str | None) -> Extensions:
     close_mode = reasons_cfg.get("close_mode", "ask")
     if close_mode not in ("ask", "pending"):
         raise ExtensionsError(f"{path}: reasons.close_mode must be ask or pending, got {close_mode!r}")
+    session_refresh = reasons_cfg.get("session_refresh", "on")
+    if session_refresh not in ("on", "off"):
+        raise ExtensionsError(f"{path}: reasons.session_refresh must be on or off, got {session_refresh!r}")
     return Extensions(path=path, sha256=hashlib.sha256(raw).hexdigest(), drift_kinds=kinds, namesets=sets,
-                      constraints=cons, providers=provs, outcome_channels=chans, reasons_close_mode=close_mode)
+                      constraints=cons, providers=provs, outcome_channels=chans, reasons_close_mode=close_mode,
+                      reasons_session_refresh=session_refresh)
 
 
 def current(repo_root: str | None = None) -> Extensions:
     """load(discover(repo_root)) — the one-liner every caller uses."""
     return load(discover(repo_root))
+
+
+def hard_statements(repo_root: str | None) -> frozenset:
+    """The statements of the project's constraints declared with block: true —
+    the only findings publish may refuse to proceed past unanswered."""
+    try:
+        path = discover(repo_root) if repo_root else None
+        ext = load(path) if path else EMPTY
+    except Exception:
+        return frozenset()
+    return frozenset(c.statement for c in ext.constraints if c.block)

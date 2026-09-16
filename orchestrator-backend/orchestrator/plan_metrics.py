@@ -131,10 +131,17 @@ def baseline(conn, *, since: str | None = None) -> dict:
         "proxy_calls_per_step": _summary([m["proxy_calls_per_step"] for m in proxy]),
         "plans": {m["plan_id"]: {"calls_per_step": m["calls_per_step"], "tool_calls": m["tool_calls"], "steps": m["steps"]}
                   for m in measured},
+        # DP phase 2 (Task 6): what part of a plan is provledger itself
+        "overhead": overhead_baseline(conn, since=since),
     }
 
 
 def write_baseline(path, data: dict) -> None:
+    """Rewrite the baseline file, carrying forward the hand-measured
+    `superpowers_only` section (it is not computed here — see docs)."""
+    prev = read_baseline(path) or {}
+    if "superpowers_only" in prev and "superpowers_only" not in data:
+        data = {**data, "superpowers_only": prev["superpowers_only"]}
     Path(path).write_text(json.dumps(data, indent=1, sort_keys=True) + "\n", encoding="utf-8")
 
 
@@ -143,3 +150,96 @@ def read_baseline(path) -> dict | None:
     if not p.exists():
         return None
     return json.loads(p.read_text(encoding="utf-8"))
+
+
+# ── DP phase 2 (Task 6): how much of a plan is provledger itself ─────────────
+
+ORCHESTRATION_RE = re.compile(r"run-step|publish-plan|review_run|complete-step|start-step|deviate|fail-step|finish-plan|record-|ledger-")
+PROVENANCE_RE = re.compile(r"reason-|provledger |hooks/|analyzer ")
+COMMAND_HEAD_CHARS = 80
+
+
+def classify(command_head: str | None) -> str | None:
+    """orchestration | provenance | None (the agent's own work). A head that
+    matches both buckets is provenance (reason-fill.sh runs through the
+    executing-plans scripts, but it is provenance work)."""
+    if not command_head:
+        return None
+    if PROVENANCE_RE.search(command_head):
+        return "provenance"
+    if ORCHESTRATION_RE.search(command_head):
+        return "orchestration"
+    return None
+
+
+def overhead(conn, plan_id: str) -> dict:
+    """{plan_id, total_calls, orchestration_calls, provenance_calls, orchestration_ratio,
+    provenance_ratio, overhead_ratio, context_overhead_tokens, context: {pack, headline,
+    injected}, measured}. Calls are the plan window's Bash rows (command_head is
+    only recorded for Bash); context is the pack's approx_tokens + the headline
+    text / 4 + every PreToolUse injection in the window / 4."""
+    row = conn.execute("SELECT project, created_at, completed_at, impact_context, headline_json FROM Plans WHERE plan_id = ?", (plan_id,)).fetchone()
+    if row is None:
+        raise KeyError(f"no plan {plan_id!r}")
+    project, created, completed, ic_json, hl_json = row[0], row[1], row[2] or _now_str(), row[3], row[4]
+    repo = psg_bridge.repo_for(project) if project else None
+    rows = conn.execute("SELECT cwd, tool_name, command_head FROM tool_call_log WHERE at >= ? AND at <= ?", (created, completed)).fetchall()
+    rows = [r for r in rows if _in_repo(r[0], repo)]
+    total = len(rows)
+    buckets = {"orchestration": 0, "provenance": 0}
+    for _, tool, head in rows:
+        k = classify(head) if tool == "Bash" else None
+        if k:
+            buckets[k] += 1
+    pack_tokens = 0
+    try:
+        pack = (json.loads(ic_json) if ic_json else {}).get("pack") or {}
+        pack_tokens = int(pack.get("approx_tokens") or 0)
+    except (ValueError, TypeError, AttributeError):
+        pack_tokens = 0
+    headline_tokens = 0
+    try:
+        doc = json.loads(hl_json) if hl_json else None
+        if doc:
+            from . import checks
+            headline_tokens = len(checks.render(doc)) // 4
+    except (ValueError, TypeError, KeyError):
+        headline_tokens = 0
+    injected = conn.execute("SELECT COALESCE(SUM(injected_chars), 0) FROM read_hit WHERE moment = 'edit' AND at >= ? AND at <= ? "
+                            "AND (plan_id = ? OR plan_id IS NULL) AND project IS ?", (created, completed, plan_id, project)).fetchone()[0] or 0
+    injected_tokens = int(injected) // 4
+    o_ratio = round(buckets["orchestration"] / total, 4) if total else None
+    p_ratio = round(buckets["provenance"] / total, 4) if total else None
+    return {
+        "plan_id": plan_id, "project": project, "window": [created, completed],
+        "total_calls": total, "orchestration_calls": buckets["orchestration"], "provenance_calls": buckets["provenance"],
+        "orchestration_ratio": o_ratio, "provenance_ratio": p_ratio,
+        "overhead_ratio": round(o_ratio + p_ratio, 4) if total else None,
+        "context_overhead_tokens": pack_tokens + headline_tokens + injected_tokens,
+        "context": {"pack": pack_tokens, "headline": headline_tokens, "injected": injected_tokens},
+        "measured": total > 0,
+    }
+
+
+def overhead_baseline(conn, *, since: str | None = None, last: int | None = None) -> dict:
+    """median / p90 of overhead_ratio and context_overhead_tokens over COMPLETED
+    plans (measured ones for the ratio; every plan for the context number)."""
+    sql = "SELECT plan_id FROM Plans WHERE status = 'COMPLETED'"
+    args: list = []
+    if since:
+        sql += " AND created_at >= ?"
+        args.append(since)
+    sql += " ORDER BY created_at DESC"
+    if last:
+        sql += " LIMIT ?"
+        args.append(int(last))
+    plans = [overhead(conn, r[0]) for r in conn.execute(sql, args)]
+    measured = [m for m in plans if m["measured"]]
+    return {
+        "n_plans": len(plans), "n_measured": len(measured),
+        "overhead_ratio": _summary([m["overhead_ratio"] for m in measured]),
+        "provenance_ratio": _summary([m["provenance_ratio"] for m in measured]),
+        "context_overhead_tokens": _summary([float(m["context_overhead_tokens"]) for m in plans]),
+        "plans": {m["plan_id"]: {"overhead_ratio": m["overhead_ratio"], "provenance_ratio": m["provenance_ratio"],
+                                 "context_overhead_tokens": m["context_overhead_tokens"], "total_calls": m["total_calls"]} for m in plans},
+    }

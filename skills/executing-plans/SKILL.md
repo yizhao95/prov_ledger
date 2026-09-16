@@ -227,6 +227,22 @@ later `provledger why --pending`).
 - ✅ good: `{"node_key": "nk_1a2b", "utterance_id": 42, "span": [0, 41]}` where utterance 42 reads *"please keep fiscal weeks, finance reconciles weekly"* — the reason IS the user's sentence.
 - ❌ bad: `{"node_key": "nk_1a2b", "interpretation": "changed load_orders to group by fiscal week"}` — that describes the change, not why it beat calendar weeks or who wanted it.
 
+### 📰 Headline responses and `because` (DP phase 2)
+
+| Script | When | Input |
+|---|---|---|
+| `scripts/headline-respond.sh` | a blocking finding in the plan headline needs an answer (or you proceed past it on purpose) | `{plan_id, finding_id, action: revise\|proceed, rationale?, cites?: [reason_id], by?: agent\|human}` — the finding's record and every cited id become `influence(via=headline_response)`; a second answer to the same finding exits 2 |
+
+Every `reason-fill` answer shape may carry `"because": [reason_id, …]` — the
+records this change leaned on (a constraint you kept, a rejected path you
+avoided). Each id becomes `influence(via=reason_because)`, and the result
+reports `adopted`. Cite what you actually used; `provledger why <qn>` prints the
+ids.
+
+**Shown is not read.** A record listed in a headline, a checklist or a hook's
+injection is `read_hit`; only an id you cite is `influence`. Neither is derived
+from the other, and no count anywhere claims that anyone *read* anything.
+
 ## 📚 Reference index
 
 - [`reference/op-catalog.md`](reference/op-catalog.md) — full per-op reference (state transitions + common mistakes)

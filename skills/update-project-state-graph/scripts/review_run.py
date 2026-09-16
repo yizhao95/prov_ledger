@@ -324,14 +324,16 @@ class Driver:
                 unknown.append(it.get("node_key") or it.get("qualified_name"))
                 continue
             if it.get("utterance_id") is not None and it.get("span"):
-                out.append({"node_key": key, "utterance_id": it["utterance_id"], "span": list(it["span"])})
+                ans = {"node_key": key, "utterance_id": it["utterance_id"], "span": list(it["span"])}
             elif it.get("unstated") or str(it.get("interpretation", it.get("text", ""))).strip().lower() in ("", "unstated", "unknown"):
-                out.append({"node_key": key, "unstated": True})
+                ans = {"node_key": key, "unstated": True}
             else:
                 ans = {"node_key": key, "interpretation": str(it.get("interpretation") or it.get("text")).strip()}
                 if it.get("refs"):
                     ans["refs"] = list(it["refs"])
-                out.append(ans)
+            if it.get("because"):                      # DP phase 2: the records this answer leaned on → influence(reason_because)
+                ans["because"] = [int(x) for x in it["because"]]
+            out.append(ans)
         if unknown:
             _die(f"unknown reason key(s) {unknown} — only this plan's open slots are accepted:\n"
                  + "\n".join(f"  {s['qualified_name']} [{s['node_key']}]" for s in slots)

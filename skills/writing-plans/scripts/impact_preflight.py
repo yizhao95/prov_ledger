@@ -494,7 +494,8 @@ _BOUNDARY_NEW = (
 
 def compute_impact_context(db_path: str, user_query: str,
                            declared_targets: Optional[List[str]],
-                           project: str = "", orch_conn=None) -> Dict:
+                           project: str = "", orch_conn=None, plan_id: Optional[str] = None,
+                           record_hits: bool = True, budget_tokens: int = 1500) -> Dict:
     """Assemble the full impact_context for a plan (steps 1-5 + boundary note).
 
     `orch_conn` (the orchestrator DB, where node_reason and the ledger live)
@@ -546,12 +547,23 @@ def compute_impact_context(db_path: str, user_query: str,
     for m in reminders:
         if m.get("id") is not None and m.get("kind") == "constraint" and m["id"] not in constraint_ids:
             constraint_ids.append(m["id"])
-    if orch_conn is not None:
-        for cid in constraint_ids:
-            ledger_store.record_hit(orch_conn, cid)
+    # DP phase 2 (Task 2): the bounded context pack — the same build `provledger why`
+    # uses (H2). Every record it surfaces is a read_hit(moment=plan) under the plan
+    # id when one is known; a lexical ledger reminder that is not anchored still
+    # counts through record_hit.
+    pack_dict = None
+    if orch_conn is not None and project:
+        try:
+            from orchestrator import context_pack
+            pack = context_pack.build(orch_conn, project=project, targets=target_names, psg_db_path=db_path,
+                                      budget_tokens=budget_tokens, moment="plan", plan_id=plan_id, record=record_hits)
+            pack_dict = pack.as_dict()
+        except Exception as exc:                      # a DB without 019, an unreadable graph: say so, publish anyway
+            pack_dict = {"degraded": f"{type(exc).__name__}: {exc}"[:200]}
+        anchored = {c["id"] for sym in symbols for c in sym.get("constraints", [])}
         for m in reminders:
-            if m.get("id") is not None and m.get("kind") != "constraint":
-                ledger_store.record_hit(orch_conn, m["id"])
+            if m.get("id") is not None and m["id"] not in anchored:
+                ledger_store.record_hit(orch_conn, m["id"], plan_id=plan_id)
 
     ctx = {
         "targets": collected["targets"],
@@ -562,5 +574,7 @@ def compute_impact_context(db_path: str, user_query: str,
         "capability_boundary": boundary,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+    if pack_dict is not None:
+        ctx["pack"] = pack_dict
     ctx["approx_tokens"] = len(json.dumps(ctx, default=str)) // 4   # E2-3: the cost is reported, always
     return ctx

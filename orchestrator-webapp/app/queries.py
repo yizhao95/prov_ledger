@@ -412,6 +412,22 @@ def compute_etag(conn: sqlite3.Connection) -> str:
     h.update(b"R|")
     h.update("|".join(str(v) for v in reason_sig).encode("utf-8"))
     h.update(b"\n")
+    # DP phase 2 (Task 7): a headline, a response, a shown record or an adopted one
+    # are close-time / plan-time rows the page shows — max(id) each; older DBs
+    # contribute a constant.
+    try:
+        dp_sig = conn.execute(
+            "SELECT (SELECT COALESCE(MAX(id), 0) FROM headline), "
+            "       (SELECT COALESCE(MAX(id), 0) FROM headline_response), "
+            "       (SELECT COALESCE(MAX(id), 0) FROM read_hit), "
+            "       (SELECT COALESCE(MAX(id), 0) FROM influence), "
+            "       (SELECT COALESCE(MAX(id), 0) FROM change_reason)"
+        ).fetchone()
+    except sqlite3.Error:
+        dp_sig = (0, 0, 0, 0, 0)
+    h.update(b"H|")
+    h.update("|".join(str(v) for v in dp_sig).encode("utf-8"))
+    h.update(b"\n")
     # Quoted per RFC 7232 §2.3
     return f'"{h.hexdigest()[:16]}"'
 
@@ -834,6 +850,10 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str)
         base["reasons"] = [dict(r, display_tier=r["tier"], source_level=SOURCE_LEVELS.get(r["evidence_level"] or "", "—")) for r in rows]
     except sqlite3.Error:
         base["reasons"] = []
+    # DP phase 2 (Task 7): 展示 per moment (never summed) + 采用 with the adopting plans, per record
+    stats = record_stats(conn, [r["id"] for r in base["reasons"]])
+    for r in base["reasons"]:
+        r["stats"] = stats.get(r["id"])
     try:
         # DP phase 1 (Task 7, closes FL-046): constraints come from change_reason(role=constraint)
         # through the same rule as constraints.anchored_constraints — a personal rationale never leaves
@@ -856,5 +876,115 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str)
         base["constraints"] = cons
     except sqlite3.Error:
         base["constraints"] = []
+    stats = record_stats(conn, [c["id"] for c in base["constraints"]])
+    for c in base["constraints"]:
+        c["stats"] = stats.get(c["id"])
     base["approx_tokens"] = len(json.dumps(base, default=str)) // 4
     return base
+
+
+# ── DP phase 2 (Task 7): headline, shown / adopted, hit counts, overhead ──────
+
+try:
+    from provledger import plan_metrics as _pm
+except Exception:  # pragma: no cover — the dashboard still renders without the backend package
+    _pm = None
+
+
+def get_headline(conn: sqlite3.Connection, plan_id: str) -> dict | None:
+    """The plan's latest headline (headline + headline_response, read-only):
+    findings with their response or 未回答, an `agent_proceeded` flag, and the
+    summary recomputed from the responses. None on an older DB or no row."""
+    try:
+        row = conn.execute("SELECT id, findings_json, computed_at FROM headline WHERE plan_id = ? ORDER BY id DESC LIMIT 1", (plan_id,)).fetchone()
+        if not row:
+            return None
+        doc = json.loads(row["findings_json"])
+        resp = {r["finding_id"]: dict(r) for r in conn.execute(
+            "SELECT finding_id, action, rationale, by, cites_json, at FROM headline_response WHERE headline_id = ?", (row["id"],))}
+    except (sqlite3.Error, ValueError):
+        return None
+    findings = doc.get("findings") or []
+    for f in findings:
+        r = resp.get(f.get("id"))
+        f["response"] = r
+        f["agent_proceeded"] = bool(r and r["action"] == "proceed" and r["by"] == "agent")
+        f["unanswered"] = f.get("severity") == "blocking" and r is None
+    s = dict(doc.get("summary") or {})
+    s["unanswered"] = sum(1 for f in findings if f["unanswered"])
+    s["proceeded_by_agent"] = sum(1 for f in findings if f["agent_proceeded"])
+    s["answered"] = sum(1 for f in findings if f["response"])
+    return {"headline_id": row["id"], "computed_at": row["computed_at"], "findings": findings, "summary": s, "hints": doc.get("hints") or []}
+
+
+def _reason_text_map(conn: sqlite3.Connection, ids: list[int]) -> dict[int, dict]:
+    if not ids:
+        return {}
+    ph = ",".join("?" * len(ids))
+    try:
+        rows = conn.execute(
+            f"SELECT r.id, r.node_key, r.role, r.tier, "
+            f"       COALESCE(r.interpretation, r.statement, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS text "
+            f"FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id WHERE r.id IN ({ph})", ids).fetchall()
+    except sqlite3.Error:
+        return {}
+    return {r["id"]: dict(r) for r in rows}
+
+
+def get_shown_adopted(conn: sqlite3.Connection, plan_id: str) -> dict:
+    """{"plan": {shown, adopted}, "steps": {step_id: {shown, adopted}}} — read_hit
+    rows (展示过) and influence rows (采用了) of the plan, per step; rows without
+    a step land in the plan bucket. Each entry carries the record's node_key and
+    text so the template can link /node/<project>/<key>?at=<id>. Never derived
+    from each other (I11); empty on an older DB."""
+    out = {"plan": {"shown": [], "adopted": []}, "steps": {}}
+    try:
+        hits = conn.execute("SELECT reason_id, step_id, moment, at FROM read_hit WHERE plan_id = ? ORDER BY id", (plan_id,)).fetchall()
+        infl = conn.execute("SELECT reason_id, step_id, via, by, at FROM influence WHERE plan_id = ? ORDER BY id", (plan_id,)).fetchall()
+    except sqlite3.Error:
+        return out
+    texts = _reason_text_map(conn, sorted({r["reason_id"] for r in hits} | {r["reason_id"] for r in infl}))
+
+    def bucket(step_id):
+        if not step_id:
+            return out["plan"]
+        return out["steps"].setdefault(step_id, {"shown": [], "adopted": []})
+    for r in hits:
+        t = texts.get(r["reason_id"], {})
+        bucket(r["step_id"])["shown"].append({"reason_id": r["reason_id"], "moment": r["moment"], "at": r["at"],
+                                             "node_key": t.get("node_key"), "text": (t.get("text") or "")[:120], "role": t.get("role")})
+    for r in infl:
+        t = texts.get(r["reason_id"], {})
+        bucket(r["step_id"])["adopted"].append({"reason_id": r["reason_id"], "via": r["via"], "by": r["by"], "at": r["at"],
+                                               "node_key": t.get("node_key"), "text": (t.get("text") or "")[:120], "role": t.get("role")})
+    return out
+
+
+def get_overhead(conn: sqlite3.Connection, plan_id: str) -> dict | None:
+    """plan_metrics.overhead through the provledger package (None when it is not
+    importable or the plan predates the columns) — the footer's two numbers."""
+    if _pm is None:
+        return None
+    try:
+        return _pm.overhead(conn, plan_id)
+    except Exception:
+        return None
+
+
+def record_stats(conn: sqlite3.Connection, reason_ids: list[int]) -> dict[int, dict]:
+    """reason_stats_v per record — shown per moment (never summed across moments)
+    and adopted, plus the plans that adopted it. Empty on an older DB."""
+    if not reason_ids:
+        return {}
+    ph = ",".join("?" * len(reason_ids))
+    out: dict[int, dict] = {}
+    try:
+        for r in conn.execute(f"SELECT reason_id, shown_plan, shown_edit, shown_close, shown_why, adopted FROM reason_stats_v WHERE reason_id IN ({ph})", reason_ids):
+            out[r["reason_id"]] = {"plan": r["shown_plan"], "edit": r["shown_edit"], "close": r["shown_close"], "why": r["shown_why"],
+                                   "adopted": r["adopted"], "adopted_by": []}
+        for r in conn.execute(f"SELECT DISTINCT reason_id, plan_id, session_id FROM influence WHERE reason_id IN ({ph}) ORDER BY id", reason_ids):
+            if r["reason_id"] in out:
+                out[r["reason_id"]]["adopted_by"].append(r["plan_id"] or (f"session {r['session_id']}" if r["session_id"] else "?"))
+    except sqlite3.Error:
+        return {}
+    return out

@@ -50,4 +50,5 @@ pythonpath = ["."]
 addopts = "-v"
 markers = [
     "veto: an acceptance item whose failure fails the whole suite (decision provenance §12); never skipped",
+    "degraded: the hooks-only mode — asserts what is lost without the skills, explicitly (DP phase 2, Task 7b)",
 ]

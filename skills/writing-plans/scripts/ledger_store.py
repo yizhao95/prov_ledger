@@ -142,14 +142,26 @@ def supersede_entry(conn: sqlite3.Connection, entry_id: int,
     conn.commit()
 
 
-def record_hit(conn: sqlite3.Connection, entry_id: int) -> None:
-    """Bump an entry's hit_count + last_matched_at (SK-D1).
+def record_hit(conn: sqlite3.Connection, entry_id: int, plan_id: Optional[str] = None,
+               step_id: Optional[str] = None) -> int:
+    """DP phase 2: surfacing a constraint at plan time is a read_hit
+    (moment 'plan') on its change_reason twin — the system told the agent;
+    nothing says anyone read it. LedgerEntries.hit_count no longer moves. A
+    decision has no twin and records nothing. Returns the read_hit rows written."""
+    row = conn.execute("SELECT project, kind, statement FROM LedgerEntries WHERE id = ?", (entry_id,)).fetchone()
+    if row is None or row[1] != "constraint":
+        return 0
+    try:
+        twin = conn.execute(
+            "SELECT id FROM change_reason WHERE project = ? AND role = 'constraint' AND statement = ? "
+            "AND state = 'active' AND superseded_by IS NULL ORDER BY id DESC LIMIT 1", (row[0], row[2])).fetchone()
+        if twin is None:
+            return 0
+        conn.execute("INSERT INTO read_hit (reason_id, project, plan_id, step_id, moment) VALUES (?, ?, ?, ?, 'plan')",
+                     (twin[0], row[0], plan_id, step_id))
+        conn.commit()
+        return 1
+    except sqlite3.OperationalError:          # a DB without migration 019
+        return 0
 
-    Called when an entry is surfaced as a plan-time reminder, so frequently-
-    confirmed memories can later be ranked higher.
-    """
-    conn.execute(
-        "UPDATE LedgerEntries SET hit_count = hit_count + 1, "
-        "last_matched_at = strftime('%Y-%m-%d %H:%M:%S','now') WHERE id = ?",
-        (entry_id,))
-    conn.commit()
+

@@ -223,3 +223,27 @@ def project_for_cwd(cwd: str | None, registry_path: str | None = None) -> str | 
             if best is None or len(repo) > best[0]:
                 best = (len(repo), name)
     return best[1] if best else None
+
+
+def nodes_at(psg_db_path: str | None, file_path: str, line_lo: int, line_hi: int) -> list[dict]:
+    """DP phase 2: the nodes whose latest snapshot covers [line_lo, line_hi]
+    of file_path (repo-relative or absolute — matched by path suffix),
+    innermost first. Used by `provledger why file:line` and the PreToolUse
+    hook; read-only, one query."""
+    if not psg_db_path or not file_path:
+        return []
+    norm = file_path.replace("\\", "/")
+    rows = _query(psg_db_path,
+                  "SELECT s.node_key, s.qualified_name, s.node_type, s.file_path, s.line_start, s.line_end "
+                  "FROM node_snapshot s WHERE s.node_key <> '' AND s.file_path IS NOT NULL "
+                  "AND s.run_id = (SELECT MAX(run_id) FROM node_snapshot x WHERE x.node_key = s.node_key) "
+                  "AND s.line_start IS NOT NULL AND s.line_end IS NOT NULL "
+                  "AND s.line_start <= ? AND s.line_end >= ?", (line_hi, line_lo))
+    out = []
+    for r in rows:
+        fp = (r["file_path"] or "").replace("\\", "/")
+        if fp and (fp == norm or norm.endswith("/" + fp) or fp.endswith("/" + norm)):
+            out.append({"node_key": r["node_key"], "qualified_name": r["qualified_name"], "node_type": r["node_type"],
+                        "file_path": r["file_path"], "line_start": r["line_start"], "line_end": r["line_end"]})
+    out.sort(key=lambda n: (n["line_end"] - n["line_start"], n["line_start"]))
+    return out

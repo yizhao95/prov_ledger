@@ -8,6 +8,7 @@ that the plan changed becomes a close-time slot (C2). Every verdict — auto,
 ask, or silent when the project closes in `pending` mode — is one trigger_log
 row (C4), so the false-trigger and miss rates can be computed later.
 
+  R0 user_words          the user's own words name the node → STATED, the sentence as the span (phase 2)
   R1 test_fixed          a test failed then passed in this plan and names the node's file
   R2 gate_response       the previous review of this project failed a gate on this node
   R3 upstream_drift      a drift decision on a dataset the node reads fell in the plan window
@@ -87,6 +88,109 @@ def _mentions(text: str | None, node: dict) -> bool:
 
 def _ordered_steps(ctx: Ctx) -> list[dict]:
     return sorted(ctx.steps, key=lambda s: (s.get("started_at") or "", s.get("execution_order") or 0, s["step_id"]))
+
+
+# ── R0: the user's own words ─────────────────────────────────────────────────
+# A local name that is too short or too common would hit every second sentence.
+R0_STOPWORDS = frozenset("run main load save test init setup data value item index count name path file".split())
+R0_MIN_LOCAL = 4
+R0_MAX_NODES_PER_SENTENCE = 3
+_SENTENCE_END = re.compile(r"(?<=[。！？!?])|(?<=\.)(?=\s|$)|\n")
+
+
+def sentences(text: str) -> list[tuple[int, int]]:
+    """(start, end) of every sentence — split at 。！？!? and at a '.' followed
+    by whitespace / the end (so 'rollup.py' stays whole); whitespace trimmed."""
+    out, pos = [], 0
+    for m in _SENTENCE_END.finditer(text):
+        end = m.end()
+        if end > pos:
+            out.append((pos, end))
+        pos = end
+    if pos < len(text):
+        out.append((pos, len(text)))
+    trimmed = []
+    for s, e in out:
+        while s < e and text[s].isspace():
+            s += 1
+        while e > s and text[e - 1].isspace():
+            e -= 1
+        if e > s:
+            trimmed.append((s, e))
+    return trimmed
+
+
+def _literal(name: str) -> re.Pattern:
+    """Case-sensitive, `_` intact: the name must not be glued to an identifier char."""
+    return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])")
+
+
+def r0_names(node: dict) -> list[str]:
+    """The literals that count for a node: its local name (≥ 4 chars, not a
+    stopword), its qualified name and its file's basename."""
+    names = []
+    local = _local(node)
+    if len(local) >= R0_MIN_LOCAL and local not in R0_STOPWORDS:
+        names.append(local)
+    qn = node.get("qualified_name") or ""
+    if qn and qn != local:
+        names.append(qn)
+    fp = node.get("file_path") or ""
+    base = fp.rsplit("/", 1)[-1]
+    if base:
+        names.append(base)
+    return names
+
+
+def candidate_utterances(ctx: Ctx) -> list[dict]:
+    """The words that may explain this plan: utterances attributed to it, the
+    project's utterances inside the plan window, and everything said in the
+    same session(s) as those (before a plan exists the hook cannot attribute)."""
+    created = ctx.plan.get("created_at") or "0000-00-00 00:00:00"
+    completed = ctx.plan.get("completed_at") or "9999-12-31 23:59:59"
+    if ctx.plan.get("session_id"):                     # a session's placeholder plan: only what was said in that session
+        return [dict(r) for r in ctx.conn.execute(
+            "SELECT id, session_id, text FROM utterance WHERE session_id = ? OR plan_id = ? ORDER BY id",
+            (ctx.plan["session_id"], ctx.plan_id))]
+    return [dict(r) for r in ctx.conn.execute(
+        "SELECT id, session_id, text FROM utterance WHERE plan_id = ? "
+        "OR (project = ? AND occurred_at BETWEEN ? AND ?) "
+        "OR session_id IN (SELECT session_id FROM utterance WHERE plan_id = ?) ORDER BY id",
+        (ctx.plan_id, ctx.project, created, completed, ctx.plan_id))]
+
+
+def _sentence_hits(ctx: Ctx) -> dict:
+    """{(utterance_id, start, end): set(node_key)} over every candidate sentence — computed once per plan."""
+    cache = getattr(ctx, "_r0_hits", None)
+    if cache is not None:
+        return cache
+    pats = {key: [_literal(n) for n in r0_names(node)] for key, node in ctx.touched.items()}
+    hits: dict = {}
+    for u in candidate_utterances(ctx):
+        for s, e in sentences(u["text"]):
+            sent = u["text"][s:e]
+            keys = {key for key, ps_ in pats.items() if any(p.search(sent) for p in ps_)}
+            if keys:
+                hits[(u["id"], s, e)] = keys
+    ctx._r0_hits = hits
+    return hits
+
+
+def r0_user_words(ctx: Ctx, node: dict):
+    """The first specific sentence that names the node → (utterance_id, start,
+    end, basis); a sentence naming more than 3 nodes is generic and is skipped
+    (the ambiguity is logged by evaluate). None when no sentence names it."""
+    for (uid, s, e), keys in sorted(_sentence_hits(ctx).items()):
+        if node["node_key"] in keys and len(keys) <= R0_MAX_NODES_PER_SENTENCE:
+            return (uid, s, e, f"R0: the user's words name {_local(node) or node.get('qualified_name')} (utterance {uid})")
+    return None
+
+
+def r0_ambiguous(ctx: Ctx, node: dict) -> str | None:
+    """The basis of the generic sentences that name the node, if any."""
+    ns = [len(keys) for (uid, s, e), keys in _sentence_hits(ctx).items()
+          if node["node_key"] in keys and len(keys) > R0_MAX_NODES_PER_SENTENCE]
+    return f"R0: sentence names {max(ns)} nodes" if ns else None
 
 
 # ── R1..R5 ────────────────────────────────────────────────────────────────────
@@ -171,6 +275,7 @@ def r5_constraint_covered(ctx: Ctx, node: dict) -> str | None:
 
 
 RULES: tuple[Rule, ...] = (
+    Rule("R0", "the user's own words name the node (stated, verbatim span)", r0_user_words),
     Rule("R1", "a test failed then passed in this plan and names the node", r1_test_fixed),
     Rule("R2", "the previous review failed a gate on the node", r2_gate_response),
     Rule("R3", "an upstream dataset drifted inside the plan window", r3_upstream_drift),
@@ -251,25 +356,39 @@ def rejected_paths(conn, *, project: str, plan_id: str, psg_db_path: str | None,
 
 # ── evaluate ──────────────────────────────────────────────────────────────────
 
+def _session_plan(conn, plan_id: str) -> dict:
+    """DP phase 2 (Task 7b): `session:<sid>` is not a Plans row — its window and
+    project come from session_run, its words from that session only."""
+    sid = plan_id.split(":", 1)[1]
+    r = conn.execute("SELECT project, started_at, ended_at FROM session_run WHERE session_id = ?", (sid,)).fetchone()
+    return {"plan_id": plan_id, "session_id": sid, "project": r[0] if r else None,
+            "created_at": r[1] if r else None, "completed_at": r[2] if r else None}
+
+
 def _ctx(conn, project, plan_id, psg_db_path) -> Ctx:
+    plan = db.get_plan(conn, plan_id) or {}
+    if not plan and str(plan_id).startswith("session:"):
+        plan = _session_plan(conn, plan_id)
     return Ctx(conn=conn, project=project, plan_id=plan_id, psg_db_path=psg_db_path,
-               plan=db.get_plan(conn, plan_id) or {}, steps=db.get_steps(conn, plan_id),
+               plan=plan, steps=db.get_steps(conn, plan_id),
                deviations=db.get_deviations(conn, plan_id), touched=touched_nodes(psg_db_path, plan_id))
 
 
 def _has_rule_reason(conn, plan_id: str, node_key: str) -> bool:
-    return conn.execute("SELECT 1 FROM change_reason WHERE plan_id = ? AND node_key = ? AND role = 'reason' AND tier = 'derived' "
+    """A rule already answered for (plan, node) — derived (R1–R5) or stated (R0)."""
+    return conn.execute("SELECT 1 FROM change_reason WHERE plan_id = ? AND node_key = ? AND role = 'reason' "
                         "AND rule_id IS NOT NULL AND rule_id <> 'legacy' LIMIT 1", (plan_id, node_key)).fetchone() is not None
 
 
 def _logged(conn, plan_id: str, node_key: str) -> bool:
-    return conn.execute("SELECT 1 FROM trigger_log WHERE plan_id = ? AND node_key = ? AND path = 'code' AND (rule_id IS NULL OR rule_id <> 'R6') LIMIT 1",
+    return conn.execute("SELECT 1 FROM trigger_log WHERE plan_id = ? AND node_key = ? AND path = 'code' "
+                        "AND verdict IN ('auto', 'ask', 'silent') AND (rule_id IS NULL OR rule_id <> 'R6') LIMIT 1",
                         (plan_id, node_key)).fetchone() is not None
 
 
 def evaluate(conn, *, project: str, plan_id: str, psg_db_path: str | None, ask: bool = True, commit: bool = False) -> dict:
-    """Try R1..R5 on every node the plan's runs touched. First hit → a derived
-    reason + trigger_log auto; no hit on a node the plan CHANGED → trigger_log
+    """Try R0..R5 on every node the plan's runs touched. First hit → a stated
+    (R0, the user's words) or derived reason + trigger_log auto; no hit on a node the plan CHANGED → trigger_log
     ask (or silent when the project closes in pending mode); no hit on a
     merely-touched node → nothing (it was never a slot). Idempotent."""
     ctx = _ctx(conn, project, plan_id, psg_db_path)
@@ -280,14 +399,25 @@ def evaluate(conn, *, project: str, plan_id: str, psg_db_path: str | None, ask: 
             continue
         hit = None
         for rule in RULES:
-            basis = rule.check(ctx, node)
-            if basis:
-                hit = (rule.id, basis)
+            found = rule.check(ctx, node)
+            if found:
+                hit = (rule.id, found)
                 break
+        amb = r0_ambiguous(ctx, node)
+        if amb and not (hit and hit[0] == "R0"):
+            conn.execute("INSERT INTO trigger_log (project, plan_id, node_key, path, rule_id, verdict, basis) VALUES (?, ?, ?, 'code', 'R0', 'ambiguous', ?)",
+                         (project, plan_id, key, amb))
         if hit:
-            rule_id, basis = hit
-            provenance.insert_reason(conn, project=project, plan_id=plan_id, node_key=key, kind="technical",
-                                     run_id=node["run_id"], interpretation=basis, rule_id=rule_id, recorded_by="system", commit=False)
+            rule_id, found = hit
+            if isinstance(found, tuple):                                    # R0: (utterance_id, start, end, basis) → stated
+                uid, start, end, basis = found
+                provenance.insert_reason(conn, project=project, plan_id=plan_id, node_key=key, kind="technical",
+                                         run_id=node["run_id"], verbatim=(uid, start, end), rule_id=rule_id,
+                                         recorded_by="system", commit=False)
+            else:
+                basis = found
+                provenance.insert_reason(conn, project=project, plan_id=plan_id, node_key=key, kind="technical",
+                                         run_id=node["run_id"], interpretation=basis, rule_id=rule_id, recorded_by="system", commit=False)
             conn.execute("INSERT INTO trigger_log (project, plan_id, node_key, path, rule_id, verdict, basis) VALUES (?, ?, ?, 'code', ?, 'auto', ?)",
                          (project, plan_id, key, rule_id, basis))
             result["auto"] += 1
@@ -306,5 +436,6 @@ def evaluate(conn, *, project: str, plan_id: str, psg_db_path: str | None, ask: 
 def auto_filled(conn, plan_id: str) -> list[dict]:
     """What the rules filled for a plan — shown in the reason-slots checklist."""
     return [dict(r) for r in conn.execute(
-        "SELECT node_key, rule_id, interpretation AS basis FROM change_reason WHERE plan_id = ? AND role = 'reason' "
-        "AND tier = 'derived' AND rule_id IS NOT NULL ORDER BY id", (plan_id,))]
+        "SELECT r.node_key, r.rule_id, COALESCE(r.interpretation, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS basis "
+        "FROM change_reason r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
+        "WHERE r.plan_id = ? AND r.role = 'reason' AND r.tier IN ('derived', 'stated') AND r.rule_id IS NOT NULL ORDER BY r.id", (plan_id,))]

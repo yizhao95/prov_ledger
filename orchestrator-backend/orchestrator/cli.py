@@ -5,6 +5,10 @@ in the repo, `provledger ...` once installed.
   metrics baseline [--since] [--write F]  median / p90 over completed plans
   note "<words>" --at <when> [...]        record something that was said, after the fact
   reasons reclass-status                  the state of the legacy-reason migration
+  why <node|nk_…|file:line> [...]         one bounded read: history, constraints, rejected paths, blast radius
+  export <project> --md DIR               one markdown per node (shareable rows only)
+  init --agents-md                        drop the two verbs into ./AGENTS.md
+  headline show|respond|ack <plan> …      the plan headline and its answers
 """
 from __future__ import annotations
 
@@ -30,7 +34,9 @@ def _metrics(args) -> int:
     conn = _open()
     try:
         if args.sub == "plan":
-            print(json.dumps(plan_metrics.calls_for_plan(conn, args.plan_id), indent=1, sort_keys=True))
+            out = plan_metrics.calls_for_plan(conn, args.plan_id)
+            out["overhead"] = plan_metrics.overhead(conn, args.plan_id)
+            print(json.dumps(out, indent=1, sort_keys=True))
             return 0
         data = plan_metrics.baseline(conn, since=args.since)
         if args.write:
@@ -102,9 +108,55 @@ def _note(args) -> int:
         conn.close()
 
 
+def _ask_basis(conn, since: str | None) -> dict:
+    from . import psg_bridge
+    sql = "SELECT project, plan_id, node_key, basis FROM trigger_log WHERE verdict = 'ask'"
+    params: list = []
+    if since:
+        sql += " AND at >= ?"
+        params.append(since)
+    rows = conn.execute(sql + " ORDER BY id", params).fetchall()
+    groups: dict = {}
+    dbs: dict = {}
+    for project, plan_id, node_key, basis in rows:
+        db_path = dbs.setdefault(project, psg_bridge.db_path_for(project))
+        nt = psg_bridge._query(db_path, "SELECT node_type FROM node_snapshot WHERE node_key = ? ORDER BY run_id DESC, id DESC LIMIT 1", (node_key,))
+        node_type = nt[0][0] if nt else "?"
+        g = groups.setdefault((plan_id, project, node_type), {"plan_id": plan_id, "project": project, "node_type": node_type, "asks": 0, "basis": []})
+        g["asks"] += 1
+        if basis and basis not in g["basis"]:
+            g["basis"].append(basis)
+    return {"since": since, "asks": len(rows), "groups": [groups[k] for k in sorted(groups)]}
+
+
+def _headline_cmd(args) -> int:
+    from . import checks
+    conn = _open()
+    try:
+        if args.sub == "show":
+            doc = checks.latest(conn, plan_id=args.plan_id)
+            if doc is None:
+                print(f"no headline for plan {args.plan_id}")
+                return 1
+            print(checks.render(doc))
+            return 0
+        by = "human" if args.sub == "ack" else args.by
+        action = "proceed" if args.sub == "ack" else args.action
+        rid = checks.respond(conn, plan_id=args.plan_id, finding_id=args.finding_id, action=action,
+                             rationale=args.rationale, by=by, cites=args.cite)
+        print(json.dumps({"response_id": rid, "plan_id": args.plan_id, "finding_id": args.finding_id, "action": action, "by": by,
+                          "adopted": len(set(args.cite))}, indent=1))
+        return 0
+    finally:
+        conn.close()
+
+
 def _reasons_cmd(args) -> int:
     conn = _open()
     try:
+        if args.sub == "ask-basis":
+            print(json.dumps(_ask_basis(conn, args.since), indent=1, sort_keys=True))
+            return 0
         if args.sub == "reclass-status":
             row = conn.execute("SELECT value, at FROM migration_state WHERE key='dp_reclass'").fetchone()
             counts = dict(conn.execute("SELECT tier, COUNT(*) FROM change_reason GROUP BY tier").fetchall())
@@ -115,6 +167,50 @@ def _reasons_cmd(args) -> int:
         return 2
     finally:
         conn.close()
+
+
+def _why_cmd(args) -> int:
+    from . import psg_bridge, why
+    project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+    if not project:
+        print("provledger why: no --project and the cwd is not inside a registered project", file=sys.stderr)
+        return 2
+    conn = _open()
+    try:
+        try:
+            out = why.why(conn, project=project, target=args.target, impact=args.impact, neighbors=args.neighbors,
+                          budget=args.budget, pending_only=args.pending, never_read_only=args.never_read,
+                          all_records=args.all, search_query=args.search, session_id=args.session, plan_id=args.plan)
+        except ValueError as e:
+            print(f"provledger why: {e}", file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(out["doc"], indent=1, ensure_ascii=False, default=str))
+        else:
+            print(out["text"])
+        return 0
+    finally:
+        conn.close()
+
+
+def _export_cmd(args) -> int:
+    from . import why
+    conn = _open()
+    try:
+        out = why.export_md(conn, project=args.project, out_dir=args.md)
+        print(json.dumps({"project": out["project"], "nodes": out["nodes"], "rows": out["rows"], "dir": args.md}, indent=1))
+        return 0
+    finally:
+        conn.close()
+
+
+def _init_cmd(args) -> int:
+    from . import why
+    if not args.agents_md:
+        print("provledger init: nothing to do (pass --agents-md)", file=sys.stderr)
+        return 2
+    print(json.dumps(why.init_agents_md(os.getcwd())))
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -138,9 +234,38 @@ def build_parser() -> argparse.ArgumentParser:
     n.add_argument("--ref", action="append", default=[], metavar="kind=…,label=…[,uri=…]",
                    help="a source to register and link (email, meeting, chat, ticket, doc, commit, verbal, other); repeatable")
     n.add_argument("--session", default=None, help=argparse.SUPPRESS)
+    h = sub.add_parser("headline", help="the plan headline: what the two-layer check found, and how it was answered")
+    hs = h.add_subparsers(dest="sub", required=True)
+    hshow = hs.add_parser("show", help="print a plan's latest headline"); hshow.add_argument("plan_id")
+    hr = hs.add_parser("respond", help="answer one finding (revise | proceed) with a rationale; cited records become adopted")
+    hr.add_argument("plan_id"); hr.add_argument("finding_id")
+    hr.add_argument("--action", required=True, choices=["revise", "proceed"]); hr.add_argument("--rationale", default=None)
+    hr.add_argument("--by", default="agent", choices=["agent", "human"]); hr.add_argument("--cite", action="append", type=int, default=[], metavar="REASON_ID")
+    ha = hs.add_parser("ack", help="a person proceeds past a finding (by human)"); ha.add_argument("plan_id"); ha.add_argument("finding_id")
+    ha.add_argument("--rationale", default=None); ha.add_argument("--cite", action="append", type=int, default=[], metavar="REASON_ID")
+    w = sub.add_parser("why", help="one bounded read of a node: its history, constraints (with 来源等级), rejected paths, prior claims and blast radius; every record shown is counted as shown")
+    w.add_argument("target", nargs="?", default=None, help="qualified name, nk_… node key, or file:line")
+    w.add_argument("--project", default=None, help="registered project (default: the one whose repo contains the cwd)")
+    w.add_argument("--impact", action="store_true", help="expand the blast radius (callers, consumers, lineage)")
+    w.add_argument("--neighbors", action="store_true", help="also list the constraints anchored one hop downstream")
+    w.add_argument("--budget", type=int, default=1500, help="token budget; what is cut appears as a count (default 1500)")
+    w.add_argument("--all", action="store_true", help="lift the caps: every constraint, rejected path and reason")
+    w.add_argument("--pending", action="store_true", help="the unstated slots (of the target, or of the project without a target)")
+    w.add_argument("--never-read", action="store_true", help="active constraints that were never shown to anyone")
+    w.add_argument("--search", default=None, metavar="WORDS", help="full-text search over reasons and constraints (FTS5, LIKE when unavailable)")
+    w.add_argument("--json", action="store_true", help="machine-readable output")
+    w.add_argument("--plan", default=None, help=argparse.SUPPRESS)
+    w.add_argument("--session", default=None, help=argparse.SUPPRESS)
+    e = sub.add_parser("export", help="export a project's shareable records as markdown, one file per node")
+    e.add_argument("project")
+    e.add_argument("--md", required=True, metavar="DIR", help="output directory")
+    i = sub.add_parser("init", help="set a repo up: --agents-md writes the provledger block into ./AGENTS.md")
+    i.add_argument("--agents-md", action="store_true", help="write or refresh the provledger section of ./AGENTS.md")
     r = sub.add_parser("reasons", help="the reasons ledger")
     rs = r.add_subparsers(dest="sub", required=True)
     rs.add_parser("reclass-status", help="whether the legacy node_reason / ledger rows were migrated into change_reason, and the tier counts")
+    ab = rs.add_parser("ask-basis", help="the close-time questions (trigger_log verdict ask) grouped by plan and node type — what the rules did not recognise")
+    ab.add_argument("--since", default=None, help="only verdicts at or after this timestamp")
     return p
 
 
@@ -152,6 +277,14 @@ def main(argv=None) -> int:
         return _note(args)
     if args.cmd == "reasons":
         return _reasons_cmd(args)
+    if args.cmd == "why":
+        return _why_cmd(args)
+    if args.cmd == "export":
+        return _export_cmd(args)
+    if args.cmd == "init":
+        return _init_cmd(args)
+    if args.cmd == "headline":
+        return _headline_cmd(args)
     return 2
 
 

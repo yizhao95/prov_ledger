@@ -85,17 +85,18 @@
       {% if not ledger.reasons %}<div class="text-xs text-brand-muted mb-2">no close-time reason recorded for this node</div>{% endif %}
       {% for r in ledger.reasons %}
       {% set tb = tier_badge(r.display_tier) %}
-      <div class="text-xs flex flex-wrap items-baseline gap-x-2 mb-1">
+      <div class="text-xs flex flex-wrap items-baseline gap-x-2 mb-1 {{ 'ring-2 ring-brand-blue rounded px-1' if at and at|string == r.id|string else '' }}" data-record="{{ r.id }}"{% if at and at|string == r.id|string %} data-at="1"{% endif %}>
         <span data-tier="{{ r.display_tier }}" class="px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
         <span class="text-brand-muted">{{ r.kind }} · {{ r.source }} · <a class="text-brand-blue font-mono" href="/plan/{{ r.plan_id }}">{{ r.plan_id }}</a></span>
         <span class="text-gray-800">{{ r.text if r.text is not none else '— unstated —' }}</span>
         <span class="text-brand-muted" data-source-level="{{ r.evidence_level }}">{{ r.source_level }}{% if r.rule_id %} · 规则 {{ r.rule_id }}{% endif %}</span>
+        {% if r.stats %}<span class="text-brand-muted tnum" data-stats="{{ r.id }}">展示 plan {{ r.stats.plan }} · edit {{ r.stats.edit }} · why {{ r.stats.why }} · 采用 {{ r.stats.adopted }}{% for pid in r.stats.adopted_by %} · 被 <a class="text-brand-blue font-mono" href="/plan/{{ pid }}">{{ pid }}</a> 采用{% endfor %}</span>{% endif %}
       </div>
       {% endfor %}
       <div class="text-[11px] uppercase tracking-wide text-brand-muted mt-3">constraints ({{ ledger.constraints|length }})</div>
       {% if not ledger.constraints %}<div class="text-xs text-brand-muted">no active constraint anchored on this node</div>{% endif %}
       {% for c in ledger.constraints %}
-      <div class="text-xs mb-2 border-l-2 border-hairline pl-2" data-visibility="{{ c.why_visibility }}">
+      <div class="text-xs mb-2 border-l-2 border-hairline pl-2 {{ 'ring-2 ring-brand-blue rounded' if at and at|string == c.id|string else '' }}" data-visibility="{{ c.why_visibility }}" data-record="{{ c.id }}"{% if at and at|string == c.id|string %} data-at="1"{% endif %}>
         <div class="text-gray-900">{{ c.statement }}</div>
         {% if c.why_visibility == 'restricted' %}
         <div class="text-brand-muted">why: restricted — see <span class="font-mono">{{ c.why_ref or '(no reference)' }}</span></div>
@@ -103,6 +104,7 @@
         <div class="text-brand-muted">why: {{ c.rationale or '—' }}{% if c.why_ref %} · <span class="font-mono">{{ c.why_ref }}</span>{% endif %}</div>
         {% endif %}
         <div class="text-brand-muted" data-source-level="{{ c.evidence_level }}">{{ c.source_level }}</div>
+        {% if c.stats %}<div class="text-brand-muted tnum" data-stats="{{ c.id }}">展示 plan {{ c.stats.plan }} · edit {{ c.stats.edit }} · why {{ c.stats.why }} · 采用 {{ c.stats.adopted }}{% for pid in c.stats.adopted_by %} · 被 <a class="text-brand-blue font-mono" href="/plan/{{ pid }}">{{ pid }}</a> 采用{% endfor %}</div>{% endif %}
       </div>
       {% endfor %}
     </section>

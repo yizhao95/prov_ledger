@@ -53,10 +53,24 @@
 | FL-046 | phase8 | DONE（DP 0/1 期 Task 7：`/node` 页与 `constraints.anchored_constraints` 都读 `change_reason(role=constraint)`，同一条规则、同一份数据；restricted 的 rationale 仍不出页面） | 节点履历页的约束查询在 `app/queries.py` 里直接写 SQL（`LedgerEntries` + `json_each`、restricted → rationale 置空），与 `orchestrator.constraints.anchored_constraints` 逻辑重复；webapp 只经 `provledger.psg_bridge` 读 PSG，但 orchestrator 侧的规则也该走一个入口 | 阶段 9 |
 | FL-047 | phase8 | DEFERRED | consistency_card 的 `callers` / `output_consumers` 是裸名（`pkg.m.main`），节点页把它们当限定名链接，裸名会落到 "not in the state graph"；card 应记限定名（PSG-C2 给 profiles 做过同样的事） | 阶段 9 |
 | FL-048 | dp-phase0/1 | DEFERRED | `LedgerEntries` 与 `node_reason` 仍在写（约束经 `ledger_store.add_entry` 双写、`insert_node_reason` 留给迁移与测试）；下一期停写旧表，`node_reason_v` / 视图只留一个版本（0.3.x）后删除 | DP 2 期 |
-| FL-049 | dp-phase0/1 | DEFERRED | `read_hit` / `influence`（展示过 / 采用过）、plan headline、`why` 查询、PreToolUse 钩子、`because:[reason_id]`——spec §5/§6 的 2 期内容；本期 `reason-fill` 不接受 `because` | DP 2 期 |
+| FL-049 | dp-phase0/1 | DONE (DP 2 期) | `read_hit` / `influence`（展示过 / 采用过）、plan headline、`why` 查询、PreToolUse 钩子、`because:[reason_id]`——spec §5/§6 的 2 期内容；本期 `reason-fill` 不接受 `because` | DP 2 期 |
 | FL-050 | dp-phase0/1 | DEFERRED | `reason-fill` 对旧 `{node_key, text}` 形状退出 2 并说明；0.4 起连错误提示也删掉（直接按未知键处理） | 0.4 |
-| FL-051 | dp-phase0/1 | DEFERRED | 钩子在会话启动时加载：安装本插件的那个会话本身不计 tool call、不记 utterance——本 PR 的 `docs/perf-baseline.json` 只有 66 个历史 plan 的代理量，measured 为空；下一个会话跑一次 `metrics baseline --write` 才有真实计数 | 下一会话 |
+| FL-051 | dp-phase0/1 | DEFERRED（2 期再次确认：装钩子的会话自己不计数，PreToolUse / Stop 同样） | 钩子在会话启动时加载：安装本插件的那个会话本身不计 tool call、不记 utterance——本 PR 的 `docs/perf-baseline.json` 只有 66 个历史 plan 的代理量，measured 为空；下一个会话跑一次 `metrics baseline --write` 才有真实计数 | 下一会话 |
 | FL-052 | dp-phase0/1 | DEFERRED | R2（响应 gate 失败）读的是上一个 plan 的 REVIEW 步骤日志里的 `[fail]` 行，不是 PSG 侧的结构化 gate 结果（`analysis_run.extensions_json` 不存 gate）；review_run 应把 gate 结果写成结构化记录供规则读 | DP 2 期 |
 | FL-053 | dp-phase0/1 | DEFERRED | 构造 `change_reason` 时同一个约束按 subject 拆成多行（`anchored_constraints` 按 statement 去重）；spec 的 `change_reason` 只有单个 `node_key`，多主体约束需要 `reason_anchor` 一类的从表 | DP 2 期 |
 | FL-054 | dp-phase0/1 | DEFERRED | 场景 golden 在本期改了两次（12 行 tier stated→asserted；constraint_bypassed 多一条 R5 derived 理由）——都是有意的语义变化，但"golden 不变"不再是本期的验收句；下一期应把 reasons 的 golden 段与事件流的 golden 段分开钉 | DP 2 期 |
 | FL-055 | dp-phase0/1 | DEFERRED | `provledger note --ref` 用逗号分隔 key=value，label 里不能含逗号（本期 dogfood 第一次就撞上）；应改成可重复的 `--ref-kind/--ref-label/--ref-uri` 或用不常见的分隔符 | DP 2 期 |
+| FL-056 | dp-phase2 | DEFERRED | R1–R4 零命中的结构原因（Task 0 复盘：104 ask 里 R1 只看 plan 的 declared_targets 与 utterance 的字面交集、R2 读 REVIEW 日志、R3/R4 依赖 profile/outcome 行）——做一张"规则 × 命中前提 × 当前数据源"的覆盖图，缺的前提逐条补（R2 见 FL-052） | DP 3 期 |
+| FL-057 | dp-phase2 | DEFERRED | publish 的 headline 打到 **stderr**，不是计划里的 stdout：`publish-plan.sh` 的 stdout 是被解析的 JSON。要么给脚本加 `--headline-to stdout`，要么让 JSON 里的 `headline.text` 成为唯一渠道并在 SKILL 里说明 | DP 3 期 |
+| FL-058 | dp-phase2 | DEFERRED | 同一条约束在 change_reason 里按 key / 按名 / 规则回声存三份（FL-053 的后果）：why 显示三行、PreToolUse 注入去重后 read_hit 仍记三行、`--never-read` 三行同时消失。根治要等 `reason_anchor` 从表 | DP 3 期 |
+| FL-059 | dp-phase2 | DEFERRED | context_pack 的预算只按 JSON 长度/4 估 token，结构部分（card、身份链）能单独超过 1500；本期改成"每类至少留 1 条 + approx_tokens 如实报超"，下一步应给结构和记录分开的预算，或按真实 tokenizer 计数 | DP 3 期 |
+| FL-060 | dp-phase2 | DEFERRED | user_query 的关键词反查会把普通词（如 `export`）当成目标塞进 pack（status new，白占预算，还曾把 hint 指错）：反查结果应只在能落到图节点时进入 targets | DP 3 期 |
+| FL-061 | dp-phase2 | DEFERRED | superpowers_only 对照三次同任务 5 / 26 / 7 次 tool call——差异全来自权限与解释器（系统 python3 无 pytest）；对照要可比，需要固定 allowedTools 与解释器的"对照协议"写进 docs，并用 ≥ 3 次取中位数 | 下一版 |
+| FL-062 | dp-phase2 | DEFERRED | 降级模式的 dashboard session 卡片（2b）；session_run 目前只在 selfcheck 与 SQL 里可见 | DP 2b |
+| FL-063 | dp-phase2 | DEFERRED | PostToolUse 每次 tool call 开一次库写一行；有 H1 数据后评估批量写（每 N 次或每步一次） | 等 H1 数据 |
+| FL-064 | dp-phase2 | DEFERRED | `export --md` 只做了 E1 的一半：无 bundle、无 `verify`、无 git notes；`init --agents-md` 片段不按项目定制 | DP 3 期 |
+| FL-065 | dp-phase2 | DEFERRED | PreToolUse 按最近一次分析的行号反查节点；刷新之后、下一次刷新之前的编辑可能锚错（编辑越靠下越可能）。钩子里可以用 old_string 的 def/class 行做二次校验 | DP 3 期 |
+| FL-066 | dp-phase2 | DEFERRED | R0 把文件 basename 也当字面量：一句"in gen_upstream.py add order_count(...)"同时命中该文件里全部节点 → `ambiguous: sentence names 4 nodes`，真实降级会话里唯一的 stated 机会被判成 unstated。文件名只应用于该句里没有其它节点名时，或按"函数名 > 限定名 > 文件名"分级取最具体的命中 | DP 3 期 |
+| FL-067 | dp-phase2 | DEFERRED | 每个 task 的 C 步只跑了 5–6 个套件，PSG 三段直到 7b 才跑——Task 3 的 `sys.path.insert` 越界躺了 4 个 task；C 步脚本应固定为验证总表的全部 11 段（哪怕慢 6 分钟） | 下一期 |
+| FL-068 | dp-phase2 | DEFERRED | 会话 harness 会杀 ~10 分钟以上的后台命令（报"内存不足"，机器实际空闲 25 GB）；本期后半段 review_run / 套件改成 `setsid nohup` 脱离进程组 + 轮询 done 标记。review_run 本身应支持分阶段（refresh 可单独跑、可续跑），不必一条命令 10 分钟 | DP 3 期 |
+| FL-069 | dp-phase2 | DEFERRED | R0 在本 PR 的 9 个真实 plan 上零命中（trigger_log 里连 ambiguous 都没有）：唯一的原话是用 `provledger note` 事后记的、没带 `--plan`，occurred_at 早于所有 plan 窗口，`candidate_utterances` 三条路（plan_id / 项目窗口 / 同 session）都不收它。note 应默认成为其后 N 小时内该项目所有 plan 的候选，或 `--plan` 允许在 plan 创建后补挂 | DP 3 期 |

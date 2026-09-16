@@ -91,6 +91,9 @@ def _answer_kind(item: dict) -> str:
     has_unstated = bool(item.get("unstated"))
     if sum((has_span, has_interp, has_unstated)) != 1:
         raise FillInputError("an answer is exactly one of {utterance_id, span} (stated) | {interpretation, refs?} (asserted) | {unstated: true}")
+    because = item.get("because")
+    if because is not None and not (isinstance(because, (list, tuple)) and all(isinstance(x, int) for x in because)):
+        raise FillInputError("because must be a list of reason ids")
     if has_span:
         span = item.get("span")
         if item.get("utterance_id") is None or not (isinstance(span, (list, tuple)) and len(span) == 2):
@@ -109,6 +112,8 @@ def fill(conn, *, project: str, plan_id: str, run_id: int | None, reasons: list[
       {node_key, utterance_id, span:[s,e]}        -> stated   (a span of the user's recorded words)
       {node_key, interpretation, refs?:[ref_id]}  -> asserted (the agent's or a person's reading)
       {node_key, unstated: true}                  -> unstated (an explicit gap)
+    Any shape may add because: [reason_id, ...] — the records this change
+    leaned on — which become influence rows (via reason_because).
     The old {node_key, text} shape is refused (FillInputError, exit 2) — free
     text can no longer become stated, whoever sends it (A2/A4). Keys outside
     the plan's change set are refused all-or-nothing; the shapes are checked
@@ -118,7 +123,7 @@ def fill(conn, *, project: str, plan_id: str, run_id: int | None, reasons: list[
     changed = {c["node_key"] for c in psg_bridge.changed_node_keys(psg, plan_id)}
     unknown = [r.get("node_key") for r in reasons if r.get("node_key") not in changed]
     if unknown:
-        return {"filled": 0, "stated": 0, "asserted": 0, "unstated": 0, "unknown_keys": unknown}
+        return {"filled": 0, "stated": 0, "asserted": 0, "unstated": 0, "adopted": 0, "unknown_keys": unknown}
     recorded_by = source if source in provenance.RECORDED_BY else "agent"
     counts = {"stated": 0, "asserted": 0, "unstated": 0}
     with db.transaction(conn):
@@ -134,34 +139,46 @@ def fill(conn, *, project: str, plan_id: str, run_id: int | None, reasons: list[
             else:
                 provenance.insert_reason(conn, **common)
             counts[kind] += 1
-    return {"filled": counts["stated"] + counts["asserted"], **counts, "unknown_keys": []}
+            for cited in r.get("because") or ():
+                if provenance.get_reason(conn, int(cited)) is None:
+                    raise FillInputError(f"because: reason {cited} does not exist")
+                conn.execute("INSERT INTO influence (reason_id, project, plan_id, step_id, node_key, via, by) VALUES (?, ?, ?, ?, ?, 'reason_because', ?)",
+                             (int(cited), project, plan_id, step_id, r["node_key"], "human" if recorded_by == "human" else "agent"))
+                counts["adopted"] = counts.get("adopted", 0) + 1
+    return {"filled": counts["stated"] + counts["asserted"], **{k: counts.get(k, 0) for k in ("stated", "asserted", "unstated", "adopted")}, "unknown_keys": []}
 
 
 PREVIEW_CHARS = 120
 
 
 def draft(conn, project: str, plan_id: str, psg_db_path: str | None, per_slot: int = 2) -> list[dict]:
-    """For every open slot, the utterances of the plan window that share tokens
-    with the node's local name / file — deterministic, scored, top `per_slot`.
-    Each candidate is ready to be sent back as a stated answer: {utterance_id,
-    span: [0, len], score, preview}."""
-    plan = db.get_plan(conn, plan_id) or {}
-    created = plan.get("created_at") or "0000-00-00 00:00:00"
-    completed = plan.get("completed_at") or "9999-12-31 23:59:59"
-    utts = [dict(r) for r in conn.execute(
-        "SELECT id, text FROM utterance WHERE (plan_id = ? OR (project = ? AND occurred_at BETWEEN ? AND ?)) ORDER BY id",
-        (plan_id, project, created, completed))]
+    """For every open slot, the candidate utterances (plan window + session): an
+    R0 literal hit scores 10 and proposes that sentence as the span; plain
+    token overlap proposes the whole utterance. Deterministic, top `per_slot`;
+    each candidate is ready to be sent back as a stated answer."""
+    from . import triggers
+    ctx = triggers._ctx(conn, project, plan_id, psg_db_path)
+    utts = triggers.candidate_utterances(ctx)
     out = []
     for slot in slots_for_plan(conn, project, plan_id, psg_db_path):
         qn = slot.get("qualified_name") or ""
+        node = ctx.touched.get(slot["node_key"]) or {"node_key": slot["node_key"], "qualified_name": qn, "file_path": None}
         local = qn.split(".")[-1].split(":")[-1]
         keys = _tokens(local, local.replace("_", " "), qn.split(".")[-2] if "." in qn else "")
+        pats = [triggers._literal(n) for n in triggers.r0_names(node)]
         cands = []
         for u in utts:
-            score = len(keys & _tokens(u["text"]))
+            # R0 first: a sentence that names the node literally is the answer, scored above any token overlap
+            r0 = None
+            for s, e in triggers.sentences(u["text"]):
+                if any(p.search(u["text"][s:e]) for p in pats):
+                    r0 = (s, e)
+                    break
+            score = len(keys & _tokens(u["text"])) + (10 if r0 else 0)
             if score:
-                cands.append({"utterance_id": u["id"], "span": [0, len(u["text"])], "score": score,
-                              "preview": u["text"][:PREVIEW_CHARS]})
+                span = list(r0) if r0 else [0, len(u["text"])]
+                cands.append({"utterance_id": u["id"], "span": span, "score": score, "kind": "r0" if r0 else "overlap",
+                              "preview": u["text"][span[0]:span[0] + PREVIEW_CHARS]})
         cands.sort(key=lambda c: (-c["score"], c["utterance_id"]))
         out.append({"node_key": slot["node_key"], "qualified_name": qn, "candidates": cands[:per_slot]})
     return out

@@ -50,15 +50,19 @@ def test_supersede_records_lineage(conn):
     assert row["updated_at"] is not None
 
 
-def test_record_hit_increments_count(conn):
-    # SK-D1: surfacing an entry bumps hit_count + last_matched_at.
-    eid = ledger_store.add_entry(conn, project="p", kind="decision", statement="s")
-    ledger_store.record_hit(conn, eid)
-    ledger_store.record_hit(conn, eid)
-    row = conn.execute("SELECT hit_count, last_matched_at FROM LedgerEntries WHERE id=?",
-                       (eid,)).fetchone()
-    assert row["hit_count"] == 2
-    assert row["last_matched_at"] is not None
+def test_record_hit_writes_read_hit_not_hit_count(conn):
+    """DP phase 2: surfacing a constraint is a read_hit (moment plan) on its
+    change_reason twin; LedgerEntries.hit_count stops moving. A decision has
+    no twin and records nothing."""
+    cid = ledger_store.add_entry(conn, project="p", kind="constraint", statement="keep paid", subjects=["nk_a"])
+    did = ledger_store.add_entry(conn, project="p", kind="decision", statement="s")
+    ledger_store.record_hit(conn, cid)
+    ledger_store.record_hit(conn, cid)
+    ledger_store.record_hit(conn, did)
+    assert [r[0] for r in conn.execute("SELECT hit_count FROM LedgerEntries ORDER BY id")] == [0, 0]
+    rows = conn.execute("SELECT reason_id, moment FROM read_hit ORDER BY id").fetchall()
+    assert len(rows) == 2 and {r[1] for r in rows} == {"plan"}
+    assert conn.execute("SELECT statement FROM change_reason WHERE id=?", (rows[0][0],)).fetchone()[0] == "keep paid"
 
 
 def test_add_entry_round_trip(conn):

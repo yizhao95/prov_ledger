@@ -267,13 +267,6 @@ def main() -> None:
                 f"(or set \"project\": \"none\" to opt out of the state-graph review)."
             )
         graph_db = _resolve_project_db(project)
-        impact_context = impact_preflight.compute_impact_context(
-            graph_db, data.get("user_query") or "", declared_targets,
-            project=project, orch_conn=conn)
-        if impact_context.get("degraded"):
-            # FL-020: never silent — the plan publishes, the reader is told.
-            print(f"⚠️  publish-plan: impact analysis degraded ({impact_context['degraded']}): "
-                  f"{impact_context['capability_boundary']}", file=sys.stderr)
 
     skills_activated_input = data.get("skills") or None
     # Translate the user-facing 'name' key to the api's 'skill_name' key.
@@ -305,6 +298,16 @@ def main() -> None:
     # complete_plan when no review row is found.
     review_step_id = db.insert_review_step(conn, result["plan_id"])
     result["review_step_id"] = review_step_id
+    if tracked:
+        # DP phase 2: the impact analysis (and its context pack) runs once the
+        # plan id exists, so every surfaced record is a read_hit of THIS plan.
+        impact_context = impact_preflight.compute_impact_context(
+            graph_db, data.get("user_query") or "", declared_targets,
+            project=project, orch_conn=conn, plan_id=result["plan_id"])
+        if impact_context.get("degraded"):
+            # FL-020: never silent — the plan publishes, the reader is told.
+            print(f"⚠️  publish-plan: impact analysis degraded ({impact_context['degraded']}): "
+                  f"{impact_context['capability_boundary']}", file=sys.stderr)
     # Persist the Phase D impact analysis on the Plan row (atomic with publish).
     if impact_context is not None:
         db.set_plan_impact_context(
@@ -317,6 +320,24 @@ def main() -> None:
             "upstream_assumptions": [u["table"]
                                      for u in impact_context["upstream_assumptions"]],
         }
+    # DP phase 2 (Task 3): the two-layer check → plan headline. Printed for the
+    # person (stderr, so the JSON result on stdout stays parseable), stored on the
+    # plan row and in the headline table. It never blocks: an unanswered blocking
+    # finding is counted; the only exit-5 path is a human constraint with block: true.
+    hard_unanswered = 0
+    pack_dict = (impact_context or {}).get("pack") if impact_context else None
+    if tracked and pack_dict and "degraded" not in pack_dict:
+        from orchestrator import checks, context_pack, extensions, psg_bridge
+        try:
+            hard = extensions.hard_statements(psg_bridge.repo_for(project))
+            doc = checks.headline(conn, project=project, plan_id=result["plan_id"], pack=context_pack.Pack.from_dict(pack_dict),
+                                  notes=data.get("headline_notes") or (), hard_statements=hard)
+        except ValueError as e:                                   # a note citing a record that does not exist (I3)
+            _die(f"headline_notes: {e}")
+        text = checks.render(doc)
+        print(text, file=sys.stderr)
+        result["headline"] = {"headline_id": doc["headline_id"], "summary": doc["summary"], "text": text}
+        hard_unanswered = doc["summary"].get("hard_unanswered", 0)
     if skills_activated_input:
         result["skills_recorded"] = [s["name"] for s in skills_activated_input]
     exps = data.get("expectations") or []
@@ -332,6 +353,10 @@ def main() -> None:
                                   channel=e["channel"])
         result["expectations_recorded"] = len(exps)
     print(json.dumps(result, indent=2, default=str))
+    if hard_unanswered:
+        print(f"❌ publish-plan: {hard_unanswered} finding(s) carry a human constraint declared block: true and have no response — "
+              f"answer them with headline-respond (or `provledger headline ack`) before proceeding", file=sys.stderr)
+        sys.exit(5)
 
 
 if __name__ == "__main__":

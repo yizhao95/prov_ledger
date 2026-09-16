@@ -65,8 +65,10 @@ without declaring what it touches:
   plan-input. `declared_targets` is the symbols/columns you judge the change will
   touch (qualified_name or bare name).
 - `publish_plan.py` then runs `impact_preflight.compute_impact_context` against
-  that project's state-graph BEFORE the Plan row is inserted, and stores the
-  result on `Plans.impact_context`. Missing `declared_targets` → **non-zero exit**.
+  that project's state-graph as part of the same publish (since DP phase 2 right
+  after the Plan row exists, so every record it surfaces is a `read_hit` of
+  that plan) and stores the result on `Plans.impact_context`. Missing
+  `declared_targets` → **non-zero exit**.
 - The analysis unions your declared targets with a deterministic keyword
   reverse-lookup of `user_query`, then per symbol: **existing** → callers /
   output_consumers / dtype_map / lineage_downstream; **missing** → flagged
@@ -125,6 +127,36 @@ the "never repeat a mistake" half of provLedger.
   recall is bounded by the keywords a human recorded — the ledger is only as good
   as what gets written into it. That is by design: grow it gradually from real
   decisions and real failures.
+## 📰 The plan headline (DP phase 2) — read it, answer it, never fear it
+
+Publishing a project-scoped plan now ends with a **headline** on stderr (and
+`result["headline"]` in the JSON): the two-layer pre-change check — the
+targets' own history (active constraints, rejected paths, failed prior claims,
+removed upstream) and their blast radius (consumers, unverified upstream,
+downstream constraints) — as findings with a severity and a **tier label**
+(`stated` / `asserted` / `derived` / `observed`), plus a one-line summary
+(`n findings unanswered · m records shown · k adopted`).
+
+- **It never blocks.** `publish-plan.sh` exits 0 with unanswered findings; they
+  are counted, and at close every blocking finding you proceeded past or left
+  unanswered becomes a survival expectation. The single exception is a **human**
+  constraint declared `block: true` in `provledger-extensions.json` (exit 5 until
+  someone answers it).
+- **Progressive loading.** The headline and the context pack are summaries with
+  counts; what the budget cut appears as `还有 n 条 … provledger why <qn> --all`.
+  Expand (run `provledger why <qn>`) when `blocking > 0`, when a target carries
+  constraints, or when a neighbour carries rejected paths. Do **not** expand when
+  the only cuts are minor reasons.
+- **Answer blocking findings** with `executing-plans/scripts/headline-respond.sh`
+  (`action: revise | proceed`, one sentence of rationale, `cites: [reason_id]`);
+  every record you cite becomes *adopted* (`influence`). A second answer to the
+  same finding is refused — recompute the headline to change your mind.
+- **`headline_notes`** in the plan-input lets you add your own `similar_intent`
+  finding: `[{"finding_kind": "similar_intent", "cites": [reason_id], "text": "…"}]`
+  — the cited records must exist (I3), the finding is tiered `asserted`.
+- Wording: a record was **shown** (`read_hit`) or **adopted** (`influence`).
+  Nothing here says *read*.
+
 ## 📚 Reference index
 
 - [`reference/step-types.md`](reference/step-types.md) — the 6 valid step types (THINKING / ANALYSIS / CODE / COMMAND / DOCUMENTATION / SUB_AGENT)

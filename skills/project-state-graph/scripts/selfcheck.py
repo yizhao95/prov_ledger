@@ -534,6 +534,34 @@ def _check_hook_failures(conn) -> Dict[str, Any]:
             "detail": f"{len(lines)} hook failure(s) in {path}; last: {lines[-1].strip()[:160]}"}
 
 
+def _check_sessions_without_plan(conn) -> Dict[str, Any]:
+    """DP phase 2 (Task 7b): sessions the hooks saw end without a plan (the
+    degraded mode) — how many, and how much of what they changed stayed
+    unstated. Informational (never flips ok); reads the orchestrator DB."""
+    import os
+    path = os.environ.get("ORCH_DB") or os.path.expanduser("~/skill-workspace/orchestrator.db")
+    if not os.path.exists(path):
+        return {"name": "sessions_without_plan", "ok": True, "severity": "warning", "detail": "no orchestrator.db (0 sessions)"}
+    try:
+        oc = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            rows = oc.execute("SELECT session_id, refresh_state FROM session_run WHERE refresh_state IN ('queued', 'done', 'failed') "
+                              "OR note LIKE 'HEAD %' OR note LIKE 'tracked files%' OR note LIKE 'tree unchanged%'").fetchall()
+            n = len(rows)
+            slots = oc.execute("SELECT COUNT(*), SUM(tier = 'unstated') FROM change_reason WHERE plan_id LIKE 'session:%' AND role = 'reason'").fetchone()
+        finally:
+            oc.close()
+    except sqlite3.Error as e:
+        return {"name": "sessions_without_plan", "ok": True, "severity": "warning", "detail": f"orchestrator.db unreadable ({e})"}
+    total, unst = int(slots[0] or 0), int(slots[1] or 0)
+    states = {}
+    for _, st in rows:
+        states[st] = states.get(st, 0) + 1
+    ratio = f"{unst}/{total} unstated" if total else "no reason slots yet"
+    return {"name": "sessions_without_plan", "ok": True, "severity": "warning", "count": n, "unstated": unst, "slots": total,
+            "detail": f"{n} session(s) without a plan ({', '.join(f'{k}={v}' for k, v in sorted(states.items())) or 'none'}); {ratio}"}
+
+
 _CHECKS = [
     _check_node_types_nonempty,
     _check_no_dangling_edges,
@@ -557,6 +585,7 @@ _CHECKS = [
     _check_providers_degraded,
     _check_arbiter_gate,
     _check_hook_failures,
+    _check_sessions_without_plan,
 ]
 
 

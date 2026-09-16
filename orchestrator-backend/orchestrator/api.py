@@ -13,7 +13,7 @@ import sqlite3
 import string
 from datetime import datetime, timezone
 
-from . import circuit_breakers, constraints, db, outcomes, psg_bridge, reasons, state_machine, telemetry, triggers
+from . import checks, circuit_breakers, constraints, db, outcomes, psg_bridge, reasons, state_machine, telemetry, triggers
 from .circuit_breakers import HardStop, SoftStop  # noqa: F401  re-export
 from .state_machine import InvalidTransitionError, StepStatus  # noqa: F401
 
@@ -512,6 +512,9 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         n_unstated = reasons.backstop_unstated(
             conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False,
             state="unknown" if close_mode == "pending" else "active") if psg_db else 0
+        # DP phase 2 (Task 3): blocking findings proceeded past or never answered
+        # become survival expectations, so going past them has an outcome
+        headline_close = checks.close_headline(conn, plan_id=plan_id, commit=False) if project else {}
         n_rejected = reasons.rejected_paths(
             conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False) if psg_db else 0
         n_bypassed = constraints.bypassed_at_close(
@@ -555,6 +558,7 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         "unstated_backstopped": n_unstated,
         "close_mode": close_mode,
         "triggers": triggered,
+        "headline": headline_close,
         "rejected_paths": n_rejected,
         "constraints_bypassed": n_bypassed,
         "outcomes_backfilled": backfilled,
