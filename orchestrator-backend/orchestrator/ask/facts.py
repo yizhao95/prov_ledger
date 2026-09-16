@@ -208,7 +208,8 @@ def facts(conn, psg_db_path: str | None, chosen: list[str], *, project: str) -> 
                 index[r["cite"]] = {"kind": name, "node": node["qn"], **r}
                 for ref in r["references"]:
                     # the cite namespace wins: a source's own kind (doc, meeting, …) is `source_kind`
-                    index[ref["cite"]] = {**ref, "kind": "reference", "source_kind": ref["kind"], "node": node["qn"]}
+                    index[ref["cite"]] = {**ref, "kind": "reference", "source_kind": ref["kind"],
+                                          "node": node["qn"], "reason_id": r["id"]}
         for r in node["influence"]:
             index[r["cite"]] = {"kind": "influence", "node": node["qn"], **r}
         for r in node["changes"]:

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ ui('ask_title', lang) }} — provLedger{% endblock %}
+{#
+  DP phase 2e (Task 4): `/ledger?q=` — ask the ledger, read-only.
+
+  The form is a GET form and stays one even with HTMX: `hx-get` swaps the result
+  block and pushes the URL, so the question is always in the address bar and the
+  page is always reachable without JavaScript. Nothing here can change the
+  ledger; the one row the request appends is the record that the question was
+  asked (spec §21), and when even that is not possible the page says so.
+#}
+{% block content %}
+<section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="ledger">
+  <h2 class="text-sm font-semibold text-gray-900">{{ ui('ask_title', lang) }}
+    <span class="text-brand-muted font-normal text-xs">· {{ ui('read_only', lang) }}</span></h2>
+
+  <form method="get" action="/ledger" class="flex items-center gap-2 mt-3"
+        hx-get="/ledger/results" hx-target="#ledger-results" hx-swap="innerHTML" hx-push-url="true">
+    <input name="q" value="{{ q }}" placeholder="{{ ui('ask_placeholder', lang) }}" autofocus
+           class="flex-1 border border-hairline rounded-lg px-3 py-1.5 text-sm bg-brand-bg">
+    {% if project %}<input type="hidden" name="project" value="{{ project }}">{% endif %}
+    {% if lang != 'en' %}<input type="hidden" name="lang" value="{{ lang }}">{% endif %}
+    <button class="px-3 py-1.5 rounded-lg bg-brand-blue text-white text-sm font-semibold">{{ ui('ask_button', lang) }}</button>
+  </form>
+
+  {% if not q %}
+  <div class="text-xs text-brand-muted mt-3">{{ ui('ask_hint', lang) }}</div>
+  {% endif %}
+
+  <div id="ledger-results" class="mt-4">
+    {% include "_ledger_results.html" %}
+  </div>
+</section>
+{% endblock %}

@@ -200,12 +200,12 @@
        data-project="{{ bar.triple.project or '' }}" data-node="{{ bar.triple.node or '' }}" data-at="{{ bar.triple.at or '' }}">
     <div class="max-w-6xl mx-auto flex items-center justify-between gap-3 flex-wrap text-xs">
       <div class="flex items-center gap-1" hx-boost="true">
-        {% for v, label in [('graph', '🕸 Graph'), ('node', '🧬 Node'), ('task', '📋 Task')] %}
+        {% for v, label in [('graph', '🕸 Graph'), ('node', '🧬 Node'), ('task', '📋 Task'), ('ledger', '🧾 ' ~ ui('ask_button', lang|default('en'))) ] %}
           {% set href = bar.links[v] %}
           {% if href %}
           <a href="{{ href }}" data-view-link="{{ v }}" class="px-3 py-1 rounded-lg border {{ 'bg-brand-blue text-white border-brand-blue' if bar.current == v else 'bg-surface text-brand-blue border-hairline hover:bg-brand-bg' }}">{{ label }}</a>
           {% else %}
-          <span data-view-link="{{ v }}" data-view-disabled="1" class="px-3 py-1 rounded-lg border border-hairline text-brand-muted" title="no {{ 'node' if v == 'node' else 'project' if v == 'graph' else 'plan' }} in the current context">{{ label }}</span>
+          <span data-view-link="{{ v }}" data-view-disabled="1" class="px-3 py-1 rounded-lg border border-hairline text-brand-muted" title="no {{ 'node' if v == 'node' else 'project' if v in ('graph', 'ledger') else 'plan' }} in the current context">{{ label }}</span>
           {% endif %}
         {% endfor %}
       </div>

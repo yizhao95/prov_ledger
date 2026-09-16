@@ -97,6 +97,7 @@ def test_every_cite_id_resolves_and_the_number_set_covers_the_rendering(conn, gr
     assert len(F.sha(ft)) == 64
     ref = ft["ids"][f"#r{seeded['reference']}"]
     assert ref["kind"] == "reference" and ref["source_kind"] == "meeting", "the cite namespace is not shadowed by the source's own kind"
+    assert ref["reason_id"] == seeded["constraint"], "a source with no uri still anchors on the record that cites it"
     assert ft["ids"][f"#{seeded['constraint']}"]["kind"] == "constraints"
 
 

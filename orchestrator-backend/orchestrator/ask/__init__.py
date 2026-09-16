@@ -78,8 +78,10 @@ def _url(project: str, fact: dict) -> str:
     base = dashboard_url()
     node = fact.get("node") or ""
     kind = fact.get("kind")
-    if kind == "reference" and fact.get("uri"):
-        return fact["uri"]
+    if kind == "reference":
+        # a source you can open goes to the source; one you cannot goes to the
+        # record that cites it, because a link with no anchor reads like a dead end
+        return fact["uri"] if fact.get("uri") else f"{base}/node/{project}/{node}?at=reason:{fact.get('reason_id')}"
     if kind in ("influence", "expectation", "outcome") and fact.get("plan_id"):
         return f"{base}/plan/{fact['plan_id']}"
     # DP phase 2d typed the anchor: `at` says WHAT it points at, so a record id
