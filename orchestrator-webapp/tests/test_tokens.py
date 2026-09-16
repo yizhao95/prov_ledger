@@ -196,3 +196,45 @@ def test_the_toolchain_is_pinned_and_locked():
     for dep in ("react", "react-dom", "esbuild", "typescript"):
         assert dep in dev and re.match(r"^\d+\.\d+\.\d+$", dev[dep]), f"{dep} is not pinned exactly"
     assert (DESIGN / "package-lock.json").exists(), "package-lock.json must be committed"
+
+
+# ── DP phase 2d (Task 4): the rules that keep the two copies from drifting ───
+# A design system with two renderers survives on its written rules, not on
+# goodwill. These assert the rules are actually written down where the next
+# person will look, including the one that matters most: never rename a prop to
+# suit a design, because the props ARE the dashboard's query results.
+
+DESIGN_DOC = REPO / "docs" / "design.md"
+README = REPO / "README.md"
+
+
+def test_the_design_doc_exists_and_lists_every_component():
+    assert DESIGN_DOC.exists(), "docs/design.md is missing"
+    text = DESIGN_DOC.read_text(encoding="utf-8")
+    missing = [n for n in COMPONENTS if n not in text]
+    assert missing == [], f"docs/design.md does not mention {missing}"
+
+
+def test_the_doc_states_the_single_source_rule_and_how_to_check_it():
+    text = DESIGN_DOC.read_text(encoding="utf-8")
+    assert "tokens.json" in text
+    assert "gen_tokens.py --check" in text
+    assert "tokens.js" in text and "tokens.ts" in text
+
+
+def test_the_doc_says_how_to_sync_to_claude_design():
+    text = DESIGN_DOC.read_text(encoding="utf-8")
+    assert "/design-sync" in text
+    assert "orchestrator-webapp/design/" in text
+    assert "provLedger Dashboard" in text
+
+
+def test_the_doc_states_the_port_back_rule():
+    """The rule that stops the library becoming a second source of truth."""
+    text = DESIGN_DOC.read_text(encoding="utf-8")
+    assert "prop" in text.lower()
+    assert "tokens.json" in text and ("port" in text.lower() or "搬回" in text)
+
+
+def test_the_readme_points_at_it():
+    assert "docs/design.md" in README.read_text(encoding="utf-8")
