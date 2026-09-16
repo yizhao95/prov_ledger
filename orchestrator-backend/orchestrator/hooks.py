@@ -59,9 +59,21 @@ def _open():
     return conn
 
 
+def command_head(data: dict) -> str | None:
+    """The first 80 chars of a Bash tool's command (DP phase 2, Task 6: what
+    part of a plan is provledger itself); NULL for every other tool."""
+    if str(data.get("tool_name") or "") != "Bash":
+        return None
+    ti = data.get("tool_input")
+    cmd = ti.get("command") if isinstance(ti, dict) else None
+    if not isinstance(cmd, str) or not cmd.strip():
+        return None
+    return cmd.strip().replace("\n", " ")[:80]
+
+
 def record_tool_call(conn, data: dict) -> int:
-    cur = conn.execute("INSERT INTO tool_call_log (session_id, cwd, tool_name) VALUES (?, ?, ?)",
-                       (str(data.get("session_id") or ""), data.get("cwd"), str(data.get("tool_name") or "")))
+    cur = conn.execute("INSERT INTO tool_call_log (session_id, cwd, tool_name, command_head) VALUES (?, ?, ?, ?)",
+                       (str(data.get("session_id") or ""), data.get("cwd"), str(data.get("tool_name") or ""), command_head(data)))
     conn.commit()
     return int(cur.lastrowid)
 

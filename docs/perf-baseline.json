@@ -4,17 +4,579 @@
   "n": 0,
   "p90": null
  },
- "generated_at": "2026-09-15T20:05:15Z",
+ "generated_at": "2026-09-16T00:21:39Z",
  "n_measured": 0,
- "n_plans": 74,
- "n_proxy": 74,
+ "n_plans": 81,
+ "n_proxy": 81,
+ "overhead": {
+  "context_overhead_tokens": {
+   "median": 0.0,
+   "n": 81,
+   "p90": 0.0
+  },
+  "n_measured": 0,
+  "n_plans": 81,
+  "overhead_ratio": {
+   "median": null,
+   "n": 0,
+   "p90": null
+  },
+  "plans": {
+   "dp-t0-20260915161334": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp-t1-20260915163538": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp-t2-20260915165439": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp-t3-20260915171142": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp-t4-20260915173554": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp-t5-20260915181336": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp-t6-20260915184517": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp-t7-20260915190355": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp-t8-20260915195210": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2-t0-20260915211813": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2-t1-20260915215034": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2-t2-20260915221554": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2-t3-20260915224546": {
+    "context_overhead_tokens": 1180,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2-t4-20260915232239": {
+    "context_overhead_tokens": 1787,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "dp2-t5-20260915234959": {
+    "context_overhead_tokens": 1816,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "hist-p1-t1-20260904210010": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "hist-p1-t2-20260904210828": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "hist-p1-t3-20260904211734": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "hist-p1-t4-20260904212314": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "hist-p1-t5-20260904213110": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p2-p2a-20260910190142": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p2-p2b-20260910192009": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p2-t10-20260910193612": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p2-t11-20260910194711": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p2-t12-20260910200245": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p2-t6-20260910183422": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p2-t7-20260910183821": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p2-t8-20260910185250": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t1-20260911012236": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t10-20260911024453": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t11-20260911025451": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t12-20260911030818": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t13-20260911032345": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t2-20260911012632": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t3-20260911014108": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t4-20260911014819": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t5-20260911015148": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t6-20260911020258": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t7-20260911021254": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t8-20260911022241": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p3-t9-20260911023439": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p35-t1-20260913055606": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p35-t2-20260913061846": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p35-t3-20260913063302": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p35-t4-20260913064847": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p35-t5-20260913070026": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p35-t6-20260913071013": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p35-t7-20260913072029": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p4-t0-20260914051852": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p4-t1-20260914053515": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p4-t2-20260914055028": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p4-t3-20260914060452": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p4-t4-20260914061706": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p4-t5-20260914063607": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p4-t6-20260914065302": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p5-t0-20260914151301": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p5-t1-20260914154218": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p5-t2-20260914155455": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p5-t3-20260914161402": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p5-t4-20260914163152": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p5-t5-20260914164645": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p5-t6-20260914165710": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p6-t0-20260914173603": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p6-t1-20260914180140": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p6-t2-20260914181809": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p6-t3-20260914185842": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p6-t4-20260914193025": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p6-t5-20260914194820": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p7-t0-20260914204112": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p7-t1-20260914211005": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p7-t2-20260914214547": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p7-t3-20260914221705": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p7-t4-20260914223919": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p8-t1-20260915053049": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p8-t2-20260915060132": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p8-t3-20260915064930": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p8-t4-20260915070427": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p8-t5-20260915071806": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "p8-t6-20260915074104": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "pitch-kit-20260910145015": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   },
+   "pr35-fixA-20260910150802": {
+    "context_overhead_tokens": 0,
+    "overhead_ratio": null,
+    "provenance_ratio": null,
+    "total_calls": 0
+   }
+  },
+  "provenance_ratio": {
+   "median": null,
+   "n": 0,
+   "p90": null
+  }
+ },
  "plans": {},
  "proxy_calls_per_step": {
   "median": 1.8571,
-  "n": 74,
+  "n": 81,
   "p90": 2.125
  },
  "since": null,
+ "superpowers_only": {
+  "assistant_turns": 10,
+  "context_tokens_total": 266393,
+  "measured_at": "2026-09-15",
+  "method": "one headless session per run: `claude -p --output-format stream-json --permission-mode acceptEdits --settings '{\"enabledPlugins\": {\"provledger@provledger\": false}}'` in a scratch copy of examples/phantom-uplift (not a registered repo; ORCH_DB pointed at a file that was never created — the provledger hooks did not fire), superpowers left on; the task: add weekly_totals(orders) to gen_upstream.py, write tests/test_weekly_totals.py with two cases, run pytest. tool_uses = assistant tool_use blocks in the transcript; tokens = summed message.usage over assistant turns (input + cache_read + cache_creation).",
+  "note": "a reference number, never an assertion — three runs of the same task ranged 5..26 tool calls on permission and interpreter friction alone; re-measure by hand once per version",
+  "reference_run": 3,
+  "runs": [
+   {
+    "assistant_turns": 17,
+    "cache_creation_input_tokens": 39493,
+    "cache_read_input_tokens": 402399,
+    "input_tokens": 454,
+    "note": "acceptEdits only: the three Bash calls (pytest) were denied",
+    "permission_denials": 3,
+    "run": 1,
+    "tool_uses": 7
+   },
+   {
+    "assistant_turns": 49,
+    "cache_creation_input_tokens": 88871,
+    "cache_read_input_tokens": 1435426,
+    "input_tokens": 1448,
+    "note": "Bash(python3:*) allowed; the system python3 has no pytest, so 7 attempts were denied or failed before it found the workspace venv",
+    "permission_denials": 7,
+    "run": 2,
+    "tool_uses": 26,
+    "tools": {
+     "Bash": 13,
+     "Edit": 2,
+     "Glob": 9,
+     "Read": 1,
+     "Write": 1
+    }
+   },
+   {
+    "assistant_turns": 10,
+    "cache_creation_input_tokens": 37854,
+    "cache_read_input_tokens": 228309,
+    "input_tokens": 230,
+    "note": "the prompt names the venv interpreter and it is allowed: the clean run",
+    "permission_denials": 0,
+    "run": 3,
+    "tool_uses": 5,
+    "tools": {
+     "Bash": 1,
+     "Edit": 2,
+     "Read": 1,
+     "Write": 1
+    }
+   }
+  ],
+  "task": "3 steps in examples/phantom-uplift: add a function, write two tests, run pytest",
+  "tool_calls": 5
+ },
  "wall_per_step": {
   "median": null,
   "n": 0,

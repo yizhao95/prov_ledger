@@ -34,7 +34,9 @@ def _metrics(args) -> int:
     conn = _open()
     try:
         if args.sub == "plan":
-            print(json.dumps(plan_metrics.calls_for_plan(conn, args.plan_id), indent=1, sort_keys=True))
+            out = plan_metrics.calls_for_plan(conn, args.plan_id)
+            out["overhead"] = plan_metrics.overhead(conn, args.plan_id)
+            print(json.dumps(out, indent=1, sort_keys=True))
             return 0
         data = plan_metrics.baseline(conn, since=args.since)
         if args.write:
