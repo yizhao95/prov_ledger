@@ -60,6 +60,7 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
             "deviations": [], "data_profiles": [], "data_decisions": [],
             "node_reasons": [], "unstated": {"slots": 0, "unstated": 0, "pct": 0}, "outcomes": [],
             "headline": None, "shown_adopted": {"plan": {"shown": [], "adopted": []}, "steps": {}}, "overhead": None,
+            "changed_by_history": [], "shown_total": 0, "marked_query": None, "at_reason": None,
             "total_plans": 0, "db_size_kb": 0, "viewing_plan_id": plan_id,
             "focus_node": node, "focus_at": at, "bar": queries.view_bar("task", queries.triple(None, node, at), plan_id),
             "plan_session": None, "session_plans": [], "recent_sessions": [],
@@ -111,6 +112,23 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
         plan_session = plan.get("session_id") if plan else None
         session_plans = [dict(r) for r in conn.execute("SELECT plan_id, status FROM Plans WHERE session_id = ? AND plan_id <> ? ORDER BY created_at", (plan_session, plan["plan_id"]))] if plan_session else []
         recent_sessions = queries.recent_sessions(conn) if not plan_id else []
+        # DP phase 2d (Task 3c): the adopted records, the shown count (never derived
+        # from it — I11), and, when the URL points at one record, the user's words
+        # with exactly the cited span marked. These read the DB, so they belong
+        # INSIDE the try: after `finally: conn.close()` they would silently return
+        # empty, which is precisely the kind of quiet nothing this project exists
+        # to stop (and did, in the first run of this suite).
+        changed_by_history = queries.changed_by_history(conn, plan["plan_id"]) if plan else []
+        shown_total = queries.shown_count(conn, plan["plan_id"]) if plan else 0
+        at_parsed = queries.parse_at(at)
+        at_reason = None
+        if at_parsed["kind"] == "reason":
+            at_reason = next((r for r in changed_by_history if r["reason_id"] == at_parsed["id"]), None)
+            if at_reason is None:
+                at_reason = queries.reason_for_mark(conn, at_parsed["id"])
+        marked_query = None
+        if plan and plan.get("user_query") and at_reason and at_reason.get("verbatim_utterance_id"):
+            marked_query = queries.mark_span(plan["user_query"], at_reason.get("verbatim_start"), at_reason.get("verbatim_end"))
     except sqlite3.Error as e:
         return _error_ctx(f"database error: {e}")
     finally:
@@ -136,6 +154,11 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
         "headline": headline,
         "shown_adopted": shown_adopted,
         "overhead": overhead,
+        # DP phase 2d (Task 3c): what history changed about THIS plan, first on the page
+        "changed_by_history": changed_by_history,
+        "shown_total": shown_total,
+        "at_reason": at_reason,
+        "marked_query": marked_query,
         "total_steps": len(steps),
         "progress_pct": int(100 * completed / len(steps)) if steps else 0,
         "total_plans": total_plans,
@@ -230,6 +253,31 @@ def dashboard_partial(request: Request, plan: str | None = None, node: str | Non
     response.headers["ETag"] = etag
     response.headers["Cache-Control"] = "no-store, must-revalidate"
     return response
+
+
+@app.get("/search", response_class=HTMLResponse)
+def search(request: Request, q: str | None = None, project: str | None = None):
+    """DP phase 2d (Task 3c): find the words again. Shares `why --search`'s query,
+    grouped by the node they are recorded on. Read-only in the strict sense: the
+    dashboard's connection is mode=ro, so the FTS5 index cannot be BUILT here and
+    the search degrades to LIKE — which the page states rather than pretending
+    the results are complete."""
+    ctx = {"request": request, "error": None, "q": q or "", "project": project, "groups": [],
+           "degraded": False, "hits": 0, "bar": queries.view_bar("search", queries.triple(project, None, None))}
+    if not (q or "").strip():
+        return TEMPLATES.TemplateResponse(request, "search.html", ctx)
+    try:
+        conn = queries.open_db_readonly()
+    except FileNotFoundError as e:
+        ctx["error"] = f"orchestrator.db not found: {e}"
+        return TEMPLATES.TemplateResponse(request, "search.html", ctx)
+    try:
+        ctx["groups"], ctx["degraded"], ctx["hits"] = queries.search_records(conn, q, project)
+    except sqlite3.Error as e:
+        ctx["error"] = f"database error: {e}"
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse(request, "search.html", ctx)
 
 
 @app.get("/api/health")
@@ -347,7 +395,7 @@ def node_ledger(request: Request, project: str, qualified_name: str):
     ctx = {"request": request, "error": None, "ledger": None, "project": project, "qualified_name": qualified_name,
            # DP phase 2d: `at` is typed — `reason:<id>` highlights one record, `run:<id>` highlights that run,
            # and a bare number still reads as a run for one version. 2b's untyped `at` highlighted both.
-           "at": t["at"], "at_kind": t["at_kind"], "at_id": t["at_id"], "show": show,
+           "at": t["at"], "at_kind": t["at_kind"], "at_id": t["at_id"], "show": show, "strip": [],
            "bar": queries.view_bar("node", t)}
     try:
         conn = queries.open_db_readonly()
@@ -357,6 +405,8 @@ def node_ledger(request: Request, project: str, qualified_name: str):
     try:
         ctx["ledger"] = queries.get_node_ledger(conn, project, qualified_name,
                                                 significant_only=not show["all"], filters=show)
+        # DP phase 2d (Task 3c): the last significant moments, at the very top
+        ctx["strip"] = queries.trace_strip(ctx["ledger"])
     except sqlite3.Error as e:
         ctx["error"] = f"database error: {e}"
     finally:

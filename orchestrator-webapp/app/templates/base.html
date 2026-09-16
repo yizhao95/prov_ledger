@@ -209,8 +209,17 @@
           {% endif %}
         {% endfor %}
       </div>
-      <div class="text-brand-muted font-mono" data-breadcrumb>
-        {{ bar.triple.project or '—' }} › {{ bar.triple.node or '—' }} › {{ bar.triple.at or 'latest' }}
+      <div class="flex items-center gap-3">
+        {# DP phase 2d (Task 3c): find the words again, from anywhere. GET only. #}
+        <form method="get" action="/search" class="flex items-center gap-1">
+          {% if bar.triple.project %}<input type="hidden" name="project" value="{{ bar.triple.project }}">{% endif %}
+          <input name="q" data-search placeholder="搜原话、理由、规矩…"
+                 class="border border-hairline rounded-lg px-2 py-0.5 bg-brand-bg text-xs w-44">
+        </form>
+        <div class="text-brand-muted font-mono" data-breadcrumb
+             title="{{ bar.triple.project or '—' }} / {{ bar.triple.node or '—' }} / {{ bar.triple.at or 'latest' }}">
+          {{ bar.triple.project or '—' }} › {{ (bar.triple.node or '—').split('.')[-1] }} › {{ bar.triple.at or 'latest' }}
+        </div>
       </div>
     </div>
   </nav>

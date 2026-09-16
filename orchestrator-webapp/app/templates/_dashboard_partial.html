@@ -126,6 +126,41 @@
     {% endif %}
   </section>
 
+  {# ── DP phase 2d (Task 3c): 因历史而变的决定 ──────────────────────────────────
+     provLedger's whole claim is that a past decision changed THIS plan. It is
+     the first thing on the page now. A plan that adopted nothing says so: an
+     empty block and a hidden block read identically, and only one is true.
+     被看到 and 改变了计划 stay two separate counts (I11). #}
+  <section class="bg-surface rounded-xl shadow-sm border border-hairline border-l-4 {{ 'border-l-brand-blue' if changed_by_history else 'border-l-hairline' }} mb-4 px-5 py-4"
+           data-panel="changed-by-history" data-shown="{{ shown_total }}" data-adopted="{{ changed_by_history|length }}">
+    <div class="flex items-baseline flex-wrap gap-x-2">
+      <h2 class="text-sm font-semibold text-gray-900">🧭 因历史而变的决定</h2>
+      <span class="text-xs text-brand-muted tnum">被看到 {{ shown_total }} 条 · 改变了这次计划 {{ changed_by_history|length }} 条</span>
+    </div>
+    {% if not changed_by_history %}
+    <div class="text-xs text-brand-muted mt-1">本 plan 未采用任何历史记录。</div>
+    {% else %}
+    {% for h in changed_by_history %}
+    {% set tb = tier_badge(h.tier) %}
+    <div class="text-xs mt-2 border-l-2 border-hairline pl-3" data-adopted-record="{{ h.reason_id }}">
+      <div class="text-gray-800">“{{ h.text }}”
+        {% if h.verbatim %}<span data-verbatim="1" class="text-brand-blue">你的原话</span>{% endif %}
+      </div>
+      <div class="text-brand-muted flex flex-wrap items-baseline gap-x-2">
+        <span data-tier="{{ h.tier }}" class="px-1.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
+        <span>{{ h.source_level }}</span>
+        <span>{{ h.recorded_by }} 记于 {{ (h.recorded_at or '')[:10] }}</span>
+        {% if h.node_key %}<a class="text-brand-blue font-mono" href="/node/{{ plan.project }}/{{ h.qualified_name }}?at=reason:{{ h.reason_id }}" title="{{ h.node_key }}">{{ h.qualified_name.split('.')[-1] }} →</a>{% endif %}
+        {% if h.recorded_in_plan %}
+        <a class="text-brand-blue" href="/plan/{{ h.recorded_in_plan }}?node={{ h.qualified_name or '' }}&at=reason:{{ h.reason_id }}{% if h.recorded_in_step %}#step-{{ h.recorded_in_step }}{% endif %}"
+           title="{{ h.recorded_in_plan }}">回到当时的任务《{{ short_title({'plan_id': h.recorded_in_plan, 'original_goal': h.recorded_in_title}) }}》 →</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </section>
+
   {# Original Query block: full verbatim user_query, shown as a collapsible <details>.
      - On the latest-plan view: collapsed by default — doesn't crowd the dashboard.
      - On the /plan/<id> detail view: open by default — user explicitly clicked into
@@ -138,7 +173,9 @@
                       hover:bg-brand-bg rounded-xl select-none">
         📝 Original Query <span class="text-xs text-brand-muted font-normal ml-2">(verbatim user prompt)</span>
       </summary>
-      <div class="px-5 pb-4 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{{ plan.user_query }}</div>
+      {# Task 3c: landing from a record marks exactly the span it cites, so you
+         see WHICH words caused the decision rather than having to find them. #}
+      <div class="px-5 pb-4 text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{% if marked_query %}{{ marked_query|safe }}{% else %}{{ plan.user_query }}{% endif %}</div>
     </details>
   {% endif %}
 

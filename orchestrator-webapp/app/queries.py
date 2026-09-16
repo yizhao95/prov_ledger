@@ -1280,6 +1280,147 @@ def view_bar(view: str, t: dict, plan_id: str | None = None) -> dict:
             "links": {v: url_for_view(v, t, plan_id) for v in ("graph", "node", "task")}}
 
 
+# ── DP phase 2d (Task 3c): the decisions history changed, first ──────────────
+# provLedger's whole claim is "a past decision changed this plan". Until now you
+# could only find that by scrolling to a stats line on a node page. It is now the
+# Task page's first block — and a plan that adopted nothing SAYS so, because a
+# hidden block and an empty one read identically and only one is true.
+
+def changed_by_history(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
+    """Every record this plan adopted (`influence`), with the words it carries,
+    where they were recorded, and how checkable they are. Empty list on an older
+    DB — the caller renders the spoken empty state either way."""
+    try:
+        rows = conn.execute(
+            "SELECT i.reason_id, i.via, i.by, i.at, i.step_id AS adopted_in_step, i.node_key AS influence_node, "
+            "       r.plan_id AS recorded_in_plan, r.step_id AS recorded_in_step, r.node_key, r.tier, "
+            "       r.role, r.recorded_by, r.recorded_at, r.evidence_level, r.run_id, "
+            "       r.verbatim_utterance_id, r.verbatim_start, r.verbatim_end, "
+            "       COALESCE(substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start), "
+            "                r.interpretation, r.statement) AS text, "
+            "       p.original_goal AS recorded_in_title "
+            "FROM influence i JOIN change_reason_v r ON r.id = i.reason_id "
+            "LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
+            "LEFT JOIN Plans p ON p.plan_id = r.plan_id "
+            "WHERE i.plan_id = ? ORDER BY i.id", (plan_id,)).fetchall()
+    except sqlite3.Error:
+        return []
+    # a link should say the NAME of the thing, not its key (layout spec 8) — the
+    # key stays in the tooltip, so the ledger's identifier is never lost either
+    project = None
+    try:
+        row = conn.execute("SELECT project FROM Plans WHERE plan_id = ?", (plan_id,)).fetchone()
+        project = row[0] if row else None
+    except sqlite3.Error:
+        project = None
+    db_path = _psg.db_path_for(project) if (_psg is not None and project) else None
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["node_key"] = d["node_key"] or d["influence_node"]
+        d["qualified_name"] = d["node_key"]
+        if db_path and d["node_key"] and str(d["node_key"]).startswith("nk_"):
+            try:
+                d["qualified_name"] = _psg.latest_qualified_name(db_path, d["node_key"]) or d["node_key"]
+            except Exception:
+                pass
+        d["source_level"] = SOURCE_LEVELS.get(d.get("evidence_level") or "", d.get("evidence_level") or "—")
+        d["verbatim"] = d["tier"] == "stated"
+        out.append(d)
+    return out
+
+
+def shown_count(conn: sqlite3.Connection, plan_id: str) -> int:
+    """How many records this plan was SHOWN. Never derived from adopted (I11)."""
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM read_hit WHERE plan_id = ?", (plan_id,)).fetchone()[0])
+    except sqlite3.Error:
+        return 0
+
+
+def reason_for_mark(conn: sqlite3.Connection, reason_id: int | None) -> dict | None:
+    """One record's verbatim anchor, for marking the cited span on a plan page the
+    record was NOT adopted by (following a link from somewhere else)."""
+    if reason_id is None:
+        return None
+    try:
+        r = conn.execute("SELECT id AS reason_id, plan_id AS recorded_in_plan, step_id AS recorded_in_step, node_key, tier, "
+                         "       verbatim_utterance_id, verbatim_start, verbatim_end "
+                         "FROM change_reason_v WHERE id = ?", (int(reason_id),)).fetchone()
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+    return dict(r) if r else None
+
+
+SEARCH_LIMIT = 40
+
+
+def search_records(conn: sqlite3.Connection, q: str, project: str | None = None) -> tuple[list[dict], bool, int]:
+    """(groups, degraded, hits) — records whose words match `q`, grouped by the
+    node they are recorded on. `degraded` is True when the FTS5 index was not
+    usable (the dashboard reads mode=ro and cannot build it), so the page can
+    say the result is a plain substring match rather than imply completeness."""
+    like = f"%{q.strip()}%"
+    params: list = [like, like]
+    where = "(COALESCE(r.interpretation, '') LIKE ? OR COALESCE(r.statement, '') LIKE ?"
+    where += " OR COALESCE(substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start), '') LIKE ?)"
+    params.append(like)
+    if project:
+        where += " AND r.project = ?"
+        params.append(project)
+    try:
+        rows = conn.execute(
+            "SELECT r.id AS reason_id, r.project, r.node_key, r.plan_id, r.step_id, r.tier, r.role, "
+            "       r.recorded_by, r.recorded_at, r.evidence_level, "
+            "       COALESCE(substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start), "
+            "                r.interpretation, r.statement) AS text, "
+            "       p.original_goal AS plan_title "
+            "FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
+            "LEFT JOIN Plans p ON p.plan_id = r.plan_id "
+            f"WHERE {where} AND r.state = 'active' AND r.superseded_by IS NULL "
+            "ORDER BY r.id DESC LIMIT ?", (*params, SEARCH_LIMIT)).fetchall()
+    except sqlite3.Error:
+        return [], True, 0
+    grouped: dict[str, dict] = {}
+    for r in rows:
+        d = dict(r)
+        d["source_level"] = SOURCE_LEVELS.get(d.get("evidence_level") or "", "—")
+        d["verbatim"] = d["tier"] == "stated"
+        key = d["node_key"] or "(没有锚点)"
+        g = grouped.setdefault(key, {"node_key": key, "project": d["project"], "hits": []})
+        g["hits"].append(d)
+    # `degraded` is True by construction: the read-only connection cannot build or
+    # trust the FTS index, so this is LIKE, and the page says so.
+    return list(grouped.values()), True, len(rows)
+
+
+TRACE_STRIP_MAX = 8
+
+
+def trace_strip(ledger: dict, limit: int = TRACE_STRIP_MAX) -> list[dict]:
+    """The node's last significant moments, newest first, at most `limit` — the
+    strip at the top of the node page. Everything past the cut is still in the
+    timeline below, so this crops a summary, not the record."""
+    rows = [r for r in (ledger.get("timeline") or []) if r.get("significant", True)]
+    rows.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
+    return rows[:max(0, int(limit))]
+
+
+def mark_span(text: str | None, start: int | None, end: int | None) -> str:
+    """The text with [start, end) wrapped in <mark>, HTML-escaped around it.
+
+    A span that does not fit the text is a data problem, not a reason to mangle
+    the quote: the text comes back escaped and unmarked."""
+    import html as _html
+    if not text:
+        return ""
+    if start is None or end is None or not (0 <= int(start) < int(end) <= len(text)):
+        return _html.escape(text)
+    s, e = int(start), int(end)
+    return (_html.escape(text[:s]) + '<mark class="bg-brand-spark/30 rounded px-0.5" data-span="1">'
+            + _html.escape(text[s:e]) + "</mark>" + _html.escape(text[e:]))
+
+
 # ── DP phase 2b (Task 5): session cards ─────────────────────────────────────────
 
 _ORCH_RE = re.compile(r"run-step|publish-plan|review_run|complete-step|start-step|deviate|fail-step|finish-plan|record-|ledger-")
