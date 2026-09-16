@@ -87,4 +87,4 @@
 | FL-080 | dp-phase2d | DEFERRED | `mode=full` 的 `/graph` 仍是 3.78 MB / 2652 节点：story 与 focus 已经把日常用量降到 260 KB / 66 KB，但"展开全图"这条路本身还需要分页或换渲染（FL-076 的另一半） | DP 3 期 |
 | FL-081 | dp-phase2d | DEFERRED | 脚本自伤：验证脚本里的 `pgrep -f "uvicorn app.main"` 匹配到了**创建该脚本的那个 shell 自己的命令行**（heredoc 把字面量带进了 cmdline），连杀两次步骤（exit 144）。凡是按命令行文本找进程的地方都要排除自身（`pgrep -f … | grep -v $$`）或改按端口/PID 文件定位；run-step 的包装层也可以在执行前把命令写进临时文件、只把路径放进 cmdline | DP 3 期 |
 | FL-082 | dp-phase2d | DEFERRED | 每次 review 的图刷新是**整图重刷**：本期四次 instrumented 测得 12:29 / 12:35 / 12:46 / 12:54（wall），峰值 RSS 122–125 MB，**与本次改动的大小无关**（176 MB 图 / 2652 个函数节点）。一个 task 改 3 个文件和改 30 个文件付一样的 12.7 分钟。应支持增量刷新（只重算受影响文件及其邻域）或让 review 复用同一 commit 上已有的 run | DP 3 期 |
-
+| FL-083 | dp-phase2d | DEFERRED | `removed_upstream` 对**被删除的函数**永远不触发：它走目标 consistency card 的 callees，而节点一消失，那条 callee 就从 card 里消失了——于是「上游被删」这件最该提醒的事，恰恰提醒不了。要么从**上一个 run 的** card 取 callees 再比对本次是否消失，要么让 `node_removed` 事件反查「上一版里谁调用过它」。本期只修了裸名解析那一半（FL-047 的一部分） | DP 3 期 |
