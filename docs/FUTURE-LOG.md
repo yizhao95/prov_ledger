@@ -62,15 +62,22 @@
 | FL-055 | dp-phase0/1 | DEFERRED | `provledger note --ref` 用逗号分隔 key=value，label 里不能含逗号（本期 dogfood 第一次就撞上）；应改成可重复的 `--ref-kind/--ref-label/--ref-uri` 或用不常见的分隔符 | DP 2 期 |
 | FL-056 | dp-phase2 | DEFERRED | R1–R4 零命中的结构原因（Task 0 复盘：104 ask 里 R1 只看 plan 的 declared_targets 与 utterance 的字面交集、R2 读 REVIEW 日志、R3/R4 依赖 profile/outcome 行）——做一张"规则 × 命中前提 × 当前数据源"的覆盖图，缺的前提逐条补（R2 见 FL-052） | DP 3 期 |
 | FL-057 | dp-phase2 | DEFERRED | publish 的 headline 打到 **stderr**，不是计划里的 stdout：`publish-plan.sh` 的 stdout 是被解析的 JSON。要么给脚本加 `--headline-to stdout`，要么让 JSON 里的 `headline.text` 成为唯一渠道并在 SKILL 里说明 | DP 3 期 |
-| FL-058 | dp-phase2 | DEFERRED | 同一条约束在 change_reason 里按 key / 按名 / 规则回声存三份（FL-053 的后果）：why 显示三行、PreToolUse 注入去重后 read_hit 仍记三行、`--never-read` 三行同时消失。根治要等 `reason_anchor` 从表 | DP 3 期 |
+| FL-058 | dp-phase2 | WIP（2b：why / PreToolUse 已按 statement 去重显示，read_hit 仍逐行；根治等 reason_anchor） | 同一条约束在 change_reason 里按 key / 按名 / 规则回声存三份（FL-053 的后果）：why 显示三行、PreToolUse 注入去重后 read_hit 仍记三行、`--never-read` 三行同时消失。根治要等 `reason_anchor` 从表 | DP 3 期 |
 | FL-059 | dp-phase2 | DEFERRED | context_pack 的预算只按 JSON 长度/4 估 token，结构部分（card、身份链）能单独超过 1500；本期改成"每类至少留 1 条 + approx_tokens 如实报超"，下一步应给结构和记录分开的预算，或按真实 tokenizer 计数 | DP 3 期 |
 | FL-060 | dp-phase2 | DEFERRED | user_query 的关键词反查会把普通词（如 `export`）当成目标塞进 pack（status new，白占预算，还曾把 hint 指错）：反查结果应只在能落到图节点时进入 targets | DP 3 期 |
 | FL-061 | dp-phase2 | DEFERRED | superpowers_only 对照三次同任务 5 / 26 / 7 次 tool call——差异全来自权限与解释器（系统 python3 无 pytest）；对照要可比，需要固定 allowedTools 与解释器的"对照协议"写进 docs，并用 ≥ 3 次取中位数 | 下一版 |
-| FL-062 | dp-phase2 | DEFERRED | 降级模式的 dashboard session 卡片（2b）；session_run 目前只在 selfcheck 与 SQL 里可见 | DP 2b |
+| FL-062 | dp-phase2 | DONE (DP 2b 期) | 降级模式的 dashboard session 卡片（2b）；session_run 目前只在 selfcheck 与 SQL 里可见 | DP 2b |
 | FL-063 | dp-phase2 | DEFERRED | PostToolUse 每次 tool call 开一次库写一行；有 H1 数据后评估批量写（每 N 次或每步一次） | 等 H1 数据 |
 | FL-064 | dp-phase2 | DEFERRED | `export --md` 只做了 E1 的一半：无 bundle、无 `verify`、无 git notes；`init --agents-md` 片段不按项目定制 | DP 3 期 |
 | FL-065 | dp-phase2 | DEFERRED | PreToolUse 按最近一次分析的行号反查节点；刷新之后、下一次刷新之前的编辑可能锚错（编辑越靠下越可能）。钩子里可以用 old_string 的 def/class 行做二次校验 | DP 3 期 |
-| FL-066 | dp-phase2 | DEFERRED | R0 把文件 basename 也当字面量：一句"in gen_upstream.py add order_count(...)"同时命中该文件里全部节点 → `ambiguous: sentence names 4 nodes`，真实降级会话里唯一的 stated 机会被判成 unstated。文件名只应用于该句里没有其它节点名时，或按"函数名 > 限定名 > 文件名"分级取最具体的命中 | DP 3 期 |
+| FL-066 | dp-phase2 | DONE (DP 2b 期) | R0 把文件 basename 也当字面量：一句"in gen_upstream.py add order_count(...)"同时命中该文件里全部节点 → `ambiguous: sentence names 4 nodes`，真实降级会话里唯一的 stated 机会被判成 unstated。文件名只应用于该句里没有其它节点名时，或按"函数名 > 限定名 > 文件名"分级取最具体的命中 | DP 3 期 |
 | FL-067 | dp-phase2 | DEFERRED | 每个 task 的 C 步只跑了 5–6 个套件，PSG 三段直到 7b 才跑——Task 3 的 `sys.path.insert` 越界躺了 4 个 task；C 步脚本应固定为验证总表的全部 11 段（哪怕慢 6 分钟） | 下一期 |
 | FL-068 | dp-phase2 | DEFERRED | 会话 harness 会杀 ~10 分钟以上的后台命令（报"内存不足"，机器实际空闲 25 GB）；本期后半段 review_run / 套件改成 `setsid nohup` 脱离进程组 + 轮询 done 标记。review_run 本身应支持分阶段（refresh 可单独跑、可续跑），不必一条命令 10 分钟 | DP 3 期 |
-| FL-069 | dp-phase2 | DEFERRED | R0 在本 PR 的 9 个真实 plan 上零命中（trigger_log 里连 ambiguous 都没有）：唯一的原话是用 `provledger note` 事后记的、没带 `--plan`，occurred_at 早于所有 plan 窗口，`candidate_utterances` 三条路（plan_id / 项目窗口 / 同 session）都不收它。note 应默认成为其后 N 小时内该项目所有 plan 的候选，或 `--plan` 允许在 plan 创建后补挂 | DP 3 期 |
+| FL-069 | dp-phase2 | DONE (DP 2b 期) | R0 在本 PR 的 9 个真实 plan 上零命中（trigger_log 里连 ambiguous 都没有）：唯一的原话是用 `provledger note` 事后记的、没带 `--plan`，occurred_at 早于所有 plan 窗口，`candidate_utterances` 三条路（plan_id / 项目窗口 / 同 session）都不收它。note 应默认成为其后 N 小时内该项目所有 plan 的候选，或 `--plan` 允许在 plan 创建后补挂 | DP 3 期 |
+| FL-070 | dp-phase2b | DEFERRED | 显著性 LLM 判定的校准集与门槛：significance_log 积累 ≥ 50 条带 verdict 的行后，沿用阶段 7 的校准机制评估 runner，再决定是否把 `reasons.significance: llm` 设为默认 | DP 3 期 |
+| FL-071 | dp-phase2b | DEFERRED | Graph 视图历史 run 的边是"今天的边按 node_key 映射"（`edges_from: latest`）：边表没有 run 维度。要真正回放某个 run 的图，需要 edge_snapshot 或在 node_snapshot.attrs_json 里存出边 | DP 3 期 |
+| FL-072 | dp-phase2b | DEFERRED | HTMX 只做了切换栏的 `hx-boost`；三视图之间的局部换页（只换主体区、保留图的布局状态）与面板级刷新未做 | DP 2c |
+| FL-073 | dp-phase2b | DEFERRED | `change_reason.significance` 存储列自 2b 起不再写（视图 `significance_eff` 取代）；0.4 删列并迁移旧值进 significance_log（judged_by human，basis "phase-1 stored column"） | 0.4 |
+| FL-074 | dp-phase2b | DEFERRED | `Plans.session_id` 的 env 回退（`CLAUDE_CODE_SESSION_ID`）在钩子不活的会话里成立，但没有 tool_call_log 交叉验证；下一会话钩子活了之后应对比两条来源是否一致，并在不一致时记 stderr | 下一会话 |
+| FL-075 | dp-phase2b | DEFERRED | 一份迁移在 Task 0 整体落地、Task 1 只补测试：RED 步天然绿，靠 deviation 记录。迁移类 task 的 RED 应改为"对上一版 schema 的 DB 断言缺列/缺表"（用 tmp DB 只跑到 019） | 下一期 |
+| FL-076 | dp-phase2b | DEFERRED | `/graph/prov_ledger` 在自家图上是 2616 个函数节点 / 12093 条边 / 3.7 MB HTML：vis-network 渲染这个量级很慢，节点表也太长。需要子系统层（`graph_viz.build_subsystems` 已有）作默认、按 focus 的邻域裁剪、或分页 | DP 2c |

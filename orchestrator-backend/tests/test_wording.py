@@ -64,3 +64,23 @@ def test_phase2_docs_and_snippets_are_present_and_stay_neutral():
     for argv in (["why", "--help"], ["headline", "--help"], ["export", "--help"], ["init", "--help"]):
         r = subprocess.run([sys.executable, "-m", "orchestrator.cli", *argv], capture_output=True, text=True, cwd=str(REPO / "orchestrator-backend"))
         assert r.returncode == 0 and not any(w in r.stdout for w in BANNED), argv
+
+
+def test_phase2b_docs_and_the_new_views_stay_neutral():
+    """DP phase 2b (Task 6): the three views, the triple and significance are documented;
+    the new templates, queries and significance module keep the neutral wording."""
+    from orchestrator import significance
+    dp = (REPO / "docs" / "decision-provenance.md").read_text(encoding="utf-8")
+    assert "## 9 · Phase 2b" in dp and "9.2 · Significance" in dp and "9.3 · R0" in dp and "(project, node, at)" in dp
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    assert "Three views, one context" in readme and "/session/{id}" in readme
+    fl = (REPO / "docs" / "FUTURE-LOG.md").read_text(encoding="utf-8")
+    assert all(f"| FL-0{n} | dp-phase0/1 | DONE" in fl or f"| FL-0{n} | dp-phase2 | DONE" in fl for n in (66, 69)) and "| FL-062 | dp-phase2 | DONE" in fl and "FL-076" in fl
+    surfaces = [REPO / "orchestrator-webapp" / "app" / "templates" / "graph.html", REPO / "orchestrator-webapp" / "app" / "templates" / "session.html",
+                REPO / "orchestrator-backend" / "orchestrator" / "significance.py", REPO / "orchestrator-backend" / "orchestrator" / "testing" / "prompts" / "significance.md"]
+    hits = [(str(f.relative_to(REPO)), w) for f in surfaces for w in (*BANNED, "证据等级") if w in f.read_text(encoding="utf-8")]
+    hits += [("§9", w) for w in (*BANNED, "证据等级") if w in dp.split("## 9 · Phase 2b", 1)[1]]
+    assert hits == [], hits
+    for argv in (["reason", "--help"], ["significance", "--help"], ["significance", "eval", "--help"]):
+        r = subprocess.run([sys.executable, "-m", "orchestrator.cli", *argv], capture_output=True, text=True, cwd=str(REPO / "orchestrator-backend"))
+        assert r.returncode == 0 and not any(w in r.stdout for w in BANNED), argv
