@@ -615,10 +615,10 @@ def test_node_page_hit_counts_per_moment_and_the_adopting_plan_backlink(client, 
     ids = _seed_headline(client._db, pid, step)
     html = client.get("/node/demo/nk_a").text
     assert f'data-stats="{ids["cid"]}"' in html and "展示 plan 1 · edit 1 · why 0 · 采用 1" in html
-    assert f'href="/plan/{pid}">{pid}</a> 采用' in html                      # 被 <plan> 采用
+    assert f'href="/plan/{pid}?node=pkg.m.load_orders&at={ids["cid"]}">{pid}</a> 采用' in html    # 被 <plan> 采用, carrying the triple (DP 2b)
     assert f'data-stats="{ids["rid"]}"' in html and "展示 plan 1 · edit 0 · why 0 · 采用 0" in html
     hi = client.get(f"/node/demo/nk_a?at={ids['cid']}").text
-    assert f'data-record="{ids["cid"]}" data-at="1"' in hi and hi.count('data-at="1"') == 1
+    assert f'data-record="{ids["cid"]}" data-at="1"' in hi and hi.count(' data-record="') == hi.count('data-record="') and f'data-record="{ids["rid"]}" data-at="1"' not in hi   # only the asked record (the view bar carries its own data-at, DP 2b)
 
 
 def test_footer_carries_the_two_overhead_numbers(client):

@@ -40,7 +40,7 @@ TEMPLATES.env.globals["tier_badge"] = queries.tier_badge
 app = FastAPI(title="provLedger Dashboard", version="0.1.0")
 
 
-def _build_context(request: Request, plan_id: str | None = None) -> dict:
+def _build_context(request: Request, plan_id: str | None = None, node: str | None = None, at: str | None = None) -> dict:
     """Build the template context for one plan.
 
     If `plan_id` is None, the latest plan is shown (default behavior).
@@ -56,6 +56,7 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
             "node_reasons": [], "unstated": {"slots": 0, "unstated": 0, "pct": 0}, "outcomes": [],
             "headline": None, "shown_adopted": {"plan": {"shown": [], "adopted": []}, "steps": {}}, "overhead": None,
             "total_plans": 0, "db_size_kb": 0, "viewing_plan_id": plan_id,
+            "focus_node": node, "focus_at": at, "bar": queries.view_bar("task", queries.triple(None, node, at), plan_id),
         }
 
     try:
@@ -130,6 +131,10 @@ def _build_context(request: Request, plan_id: str | None = None) -> dict:
         "total_plans": total_plans,
         "db_size_kb": db_size_kb,
         "viewing_plan_id": plan_id,  # None = viewing latest; set = viewing a specific historical plan
+        # DP phase 2b (Task 4): the context triple this page carries and the view bar built from it
+        "focus_node": node,
+        "focus_at": at,
+        "bar": queries.view_bar("task", queries.triple(plan.get("project") if plan else None, node, at), plan["plan_id"] if plan else None),
     }
 
 
@@ -141,9 +146,10 @@ def dashboard(request: Request):
 
 
 @app.get("/plan/{plan_id}", response_class=HTMLResponse)
-def view_plan(request: Request, plan_id: str):
-    """View a specific historical plan by id (linked from /history)."""
-    context = _build_context(request, plan_id=plan_id)
+def view_plan(request: Request, plan_id: str, node: str | None = None, at: str | None = None):
+    """View a specific historical plan by id (linked from /history). `node` / `at`
+    are the context triple (DP phase 2b): the node is highlighted, the bar keeps both."""
+    context = _build_context(request, plan_id=plan_id, node=node, at=at)
     return TEMPLATES.TemplateResponse(request, "dashboard.html", context)
 
 
@@ -164,11 +170,12 @@ def history(request: Request):
         "request": request,
         "error": None,
         "plans": plans,
+        "bar": queries.view_bar("history", queries.triple(None, None, None)),
     })
 
 
 @app.get("/api/dashboard", response_class=HTMLResponse)
-def dashboard_partial(request: Request, plan: str | None = None):
+def dashboard_partial(request: Request, plan: str | None = None, node: str | None = None, at: str | None = None):
     """HTMX partial — swappable inner content.
 
     Optional ?plan=<plan_id> query param: poll a specific historical plan
@@ -205,7 +212,7 @@ def dashboard_partial(request: Request, plan: str | None = None):
         )
 
     # 2. Otherwise render the partial and stamp the new ETag
-    context = _build_context(request, plan_id=plan)
+    context = _build_context(request, plan_id=plan, node=node, at=at)
     response = TEMPLATES.TemplateResponse(request, "_dashboard_partial.html", context)
     response.headers["ETag"] = etag
     response.headers["Cache-Control"] = "no-store, must-revalidate"
@@ -236,7 +243,8 @@ def health():
 def outcomes(request: Request, project: str | None = None):
     """Phase 8 (FL-042): every expectation across plans with its latest
     outcome — a claim ledger. Read-only; an old DB renders an empty page."""
-    ctx = {"request": request, "error": None, "rows": [], "stats": queries.outcome_stats([]), "project": project}
+    ctx = {"request": request, "error": None, "rows": [], "stats": queries.outcome_stats([]), "project": project,
+           "bar": queries.view_bar("outcomes", queries.triple(project, None, None))}
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:
@@ -262,7 +270,8 @@ def graph_view(request: Request, project: str, focus: str | None = None, at: str
     badge (records with a story) and the tier of their latest event. PSG only
     through psg_bridge; a missing graph is 200 + "state graph unavailable"."""
     import json as _json
-    ctx = {"request": request, "error": None, "project": project, "focus": focus or None, "graph": None, "graph_json": "{}"}
+    ctx = {"request": request, "error": None, "project": project, "focus": focus or None, "graph": None, "graph_json": "{}",
+           "bar": queries.view_bar("graph", queries.triple(project, focus, at))}
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:
@@ -284,8 +293,10 @@ def graph_view(request: Request, project: str, focus: str | None = None, at: str
 def node_ledger(request: Request, project: str, qualified_name: str):
     """Phase 8 (FL-009): one node's upstream/downstream, history and reasons —
     three dimensions in one read-only query (docs/NORTH-STAR essence #2)."""
+    at = request.query_params.get("at")
     ctx = {"request": request, "error": None, "ledger": None, "project": project, "qualified_name": qualified_name,
-           "at": request.query_params.get("at")}          # DP phase 2: ?at=<reason_id> highlights one record
+           "at": at,                                       # DP phase 2: ?at=<reason_id> highlights one record; 2b: a run id highlights the run
+           "bar": queries.view_bar("node", queries.triple(project, qualified_name, at))}
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:

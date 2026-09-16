@@ -1035,3 +1035,47 @@ def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = Non
     base.update(available=True, nodes=nodes, edges=g["edges"], runs=runs[:50], run=run, edges_from=g["edges_from"],
                 level=g["level"], badged=sum(1 for n in nodes if n["badge"]), latest_run_id=g.get("latest_run_id"))
     return base
+
+
+# ── DP phase 2b (Task 4): the context triple (project, node, at) across the three views ──
+
+def triple(project: str | None = None, node: str | None = None, at: str | None = None) -> dict:
+    """The context every view carries: missing items are simply absent (I12)."""
+    return {"project": project or None, "node": node or None, "at": (str(at) if at not in (None, "") else None)}
+
+
+def url_for_view(view: str, t: dict, plan_id: str | None = None) -> str | None:
+    """graph | node | task → the URL that keeps the triple; None when the view has no anchor to go to."""
+    from urllib.parse import quote, urlencode
+    q = {}
+    project, node, at = t.get("project"), t.get("node"), t.get("at")
+    if view == "graph":
+        if not project:
+            return None
+        if node:
+            q["focus"] = node
+        if at and str(at).isdigit():
+            q["at"] = at
+        return f"/graph/{quote(project, safe='')}" + (f"?{urlencode(q)}" if q else "")
+    if view == "node":
+        if not (project and node):
+            return None
+        if at:
+            q["at"] = at
+        return f"/node/{quote(project, safe='')}/{quote(node, safe='')}" + (f"?{urlencode(q)}" if q else "")
+    if view == "task":
+        pid = plan_id or (at if at and not str(at).isdigit() else None)
+        if not pid:
+            return "/"
+        if node:
+            q["node"] = node
+        if at and at != pid:
+            q["at"] = at
+        return f"/plan/{quote(pid, safe='')}" + (f"?{urlencode(q)}" if q else "")
+    return None
+
+
+def view_bar(view: str, t: dict, plan_id: str | None = None) -> dict:
+    """What base.html renders: the three links (None when unreachable), the current view, the breadcrumb."""
+    return {"current": view, "triple": t, "plan_id": plan_id,
+            "links": {v: url_for_view(v, t, plan_id) for v in ("graph", "node", "task")}}

@@ -155,6 +155,28 @@
       </div>
     </div>
   </header>
+  {# DP phase 2b (Task 4): the view switch bar — Graph · Node · Task on one context triple
+     (project, node, at); every page feeds `bar` (queries.view_bar); the current view is highlighted. #}
+  {% if bar %}
+  <nav class="bg-surface border-b border-hairline px-6 py-2" data-view-bar data-view="{{ bar.current }}"
+       data-project="{{ bar.triple.project or '' }}" data-node="{{ bar.triple.node or '' }}" data-at="{{ bar.triple.at or '' }}">
+    <div class="max-w-6xl mx-auto flex items-center justify-between gap-3 flex-wrap text-xs">
+      <div class="flex items-center gap-1" hx-boost="true">
+        {% for v, label in [('graph', '🕸 Graph'), ('node', '🧬 Node'), ('task', '📋 Task')] %}
+          {% set href = bar.links[v] %}
+          {% if href %}
+          <a href="{{ href }}" data-view-link="{{ v }}" class="px-3 py-1 rounded-lg border {{ 'bg-brand-blue text-white border-brand-blue' if bar.current == v else 'bg-surface text-brand-blue border-hairline hover:bg-brand-bg' }}">{{ label }}</a>
+          {% else %}
+          <span data-view-link="{{ v }}" data-view-disabled="1" class="px-3 py-1 rounded-lg border border-hairline text-brand-muted" title="no {{ 'node' if v == 'node' else 'project' if v == 'graph' else 'plan' }} in the current context">{{ label }}</span>
+          {% endif %}
+        {% endfor %}
+      </div>
+      <div class="text-brand-muted font-mono" data-breadcrumb>
+        {{ bar.triple.project or '—' }} › {{ bar.triple.node or '—' }} › {{ bar.triple.at or 'latest' }}
+      </div>
+    </div>
+  </nav>
+  {% endif %}
 
   <main class="max-w-6xl mx-auto p-6">
     {% block content %}{% endblock %}

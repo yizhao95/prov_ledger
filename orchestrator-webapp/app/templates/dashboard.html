@@ -40,7 +40,7 @@
 
   <!-- Polling div: query param threads through so historical view stays on its plan -->
   <div id="dashboard-content"
-       hx-get="/api/dashboard{% if viewing_plan_id %}?plan={{ viewing_plan_id }}{% endif %}"
+       hx-get="/api/dashboard?{% if viewing_plan_id %}plan={{ viewing_plan_id }}&{% endif %}{% if focus_node %}node={{ focus_node }}&{% endif %}{% if focus_at %}at={{ focus_at }}{% endif %}"
        hx-trigger="load, every 2s"
        hx-swap="innerHTML">
     {% include "_dashboard_partial.html" %}

@@ -52,7 +52,7 @@
     <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="time">
       <h2 class="text-sm font-semibold text-gray-900 mb-2">🕰 Time — {{ ledger.events }} event{{ '' if ledger.events == 1 else 's' }} in {{ ledger.runs|length }} run{{ '' if ledger.runs|length == 1 else 's' }}</h2>
       {% for run in ledger.runs %}
-      <div class="mb-3 border-l-2 border-hairline pl-3" data-run="{{ run.run_id }}">
+      <div class="mb-3 border-l-2 {{ 'border-brand-blue bg-[#eef4fc] rounded' if at and at|string == run.run_id|string else 'border-hairline' }} pl-3" data-run="{{ run.run_id }}"{% if at and at|string == run.run_id|string %} data-at-run="{{ run.run_id }}"{% endif %}>
         <div class="text-xs text-brand-gray">
           <span class="font-semibold">run {{ run.run_id }}</span>
           · <span class="font-mono">{{ (run.commit_sha or '')[:7] or '-' }}</span>
@@ -90,7 +90,7 @@
         <span class="text-brand-muted">{{ r.kind }} · {{ r.source }} · <a class="text-brand-blue font-mono" href="/plan/{{ r.plan_id }}">{{ r.plan_id }}</a></span>
         <span class="text-gray-800">{{ r.text if r.text is not none else '— unstated —' }}</span>
         <span class="text-brand-muted" data-source-level="{{ r.evidence_level }}">{{ r.source_level }}{% if r.rule_id %} · 规则 {{ r.rule_id }}{% endif %}</span>
-        {% if r.stats %}<span class="text-brand-muted tnum" data-stats="{{ r.id }}">展示 plan {{ r.stats.plan }} · edit {{ r.stats.edit }} · why {{ r.stats.why }} · 采用 {{ r.stats.adopted }}{% for pid in r.stats.adopted_by %} · 被 <a class="text-brand-blue font-mono" href="/plan/{{ pid }}">{{ pid }}</a> 采用{% endfor %}</span>{% endif %}
+        {% if r.stats %}<span class="text-brand-muted tnum" data-stats="{{ r.id }}">展示 plan {{ r.stats.plan }} · edit {{ r.stats.edit }} · why {{ r.stats.why }} · 采用 {{ r.stats.adopted }}{% for pid in r.stats.adopted_by %} · 被 <a class="text-brand-blue font-mono" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at={{ r.id }}">{{ pid }}</a> 采用{% endfor %}</span>{% endif %}
       </div>
       {% endfor %}
       <div class="text-[11px] uppercase tracking-wide text-brand-muted mt-3">constraints ({{ ledger.constraints|length }})</div>
@@ -104,7 +104,7 @@
         <div class="text-brand-muted">why: {{ c.rationale or '—' }}{% if c.why_ref %} · <span class="font-mono">{{ c.why_ref }}</span>{% endif %}</div>
         {% endif %}
         <div class="text-brand-muted" data-source-level="{{ c.evidence_level }}">{{ c.source_level }}</div>
-        {% if c.stats %}<div class="text-brand-muted tnum" data-stats="{{ c.id }}">展示 plan {{ c.stats.plan }} · edit {{ c.stats.edit }} · why {{ c.stats.why }} · 采用 {{ c.stats.adopted }}{% for pid in c.stats.adopted_by %} · 被 <a class="text-brand-blue font-mono" href="/plan/{{ pid }}">{{ pid }}</a> 采用{% endfor %}</div>{% endif %}
+        {% if c.stats %}<div class="text-brand-muted tnum" data-stats="{{ c.id }}">展示 plan {{ c.stats.plan }} · edit {{ c.stats.edit }} · why {{ c.stats.why }} · 采用 {{ c.stats.adopted }}{% for pid in c.stats.adopted_by %} · 被 <a class="text-brand-blue font-mono" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at={{ c.id }}">{{ pid }}</a> 采用{% endfor %}</div>{% endif %}
       </div>
       {% endfor %}
     </section>
