@@ -127,6 +127,17 @@ def test_h1_threshold():
     measured = [m for m in recent if m["measured"] and m["calls_per_step"] is not None][:5]
     if not measured:
         pytest.skip("no measured plan yet (tool_call_log is empty for the recent plans) — the PostToolUse hook has not counted a plan")
-    limit = 1.5 * base["calls_per_step"]["p90"]
+    # DP phase 2d: this line used to raise TypeError the first time a session's
+    # hooks were actually live. H1 had SKIPPED since phase 0 because no plan was
+    # ever measured (FL-051: the session that installs the hooks does not count
+    # itself), so nobody noticed that the baseline it compares against was
+    # written from a hook-less run and carries p90 = null. A missing baseline is
+    # a thing to SAY, not to crash on.
+    p90 = (base.get("calls_per_step") or {}).get("p90")
+    if p90 is None:
+        pytest.skip("the baseline carries no measured calls_per_step p90 — regenerate it with "
+                    "`python -m orchestrator.cli metrics baseline --write docs/perf-baseline.json` "
+                    "from a session whose hooks are live")
+    limit = 1.5 * p90
     over = [(m["plan_id"], m["calls_per_step"]) for m in measured if m["calls_per_step"] > limit]
     assert not over, f"calls_per_step above 1.5 × baseline p90 ({limit:.2f}): {over}"

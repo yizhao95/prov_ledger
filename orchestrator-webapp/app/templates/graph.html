@@ -3,34 +3,85 @@
 {% block content %}
   <div class="mb-4 flex items-center justify-between gap-3 flex-wrap">
     <div class="flex items-center gap-2">
-      <a href="/" class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue rounded-lg shadow-sm hover:bg-brand-bg text-sm font-semibold transition">🏠 Home</a>
-      <a href="/outcomes" class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue rounded-lg shadow-sm hover:bg-brand-bg text-sm font-semibold transition">🎯 Outcomes</a>
+      <a href="/" class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue rounded-lg shadow-sm hover:bg-brand-bg text-sm font-semibold transition">🏠 {{ ui('home', lang) }}</a>
+      <a href="/outcomes" class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue rounded-lg shadow-sm hover:bg-brand-bg text-sm font-semibold transition">🎯 {{ ui('outcomes', lang) }}</a>
     </div>
-    <span class="text-xs text-brand-muted italic">🕸 graph view · the project as it is (or was, at a run) · badges = records with a story · read-only</span>
+    <span class="text-xs text-brand-muted italic">🕸 {{ 'graph'|say('term', lang) }} · {{ ui('read_only', lang) }}</span>
   </div>
 
-  <div class="bg-surface rounded-xl shadow-sm border border-hairline px-5 py-4 mb-4" data-panel="graph-head">
+  <div class="bg-surface rounded-xl shadow-sm border border-hairline px-5 py-4 mb-4" data-panel="graph-head"
+       data-mode="{{ graph.mode }}" data-total-nodes="{{ graph.total_nodes }}"
+       data-drawn="{{ graph.nodes|length }}" data-mode-total="{{ graph.mode_total }}"
+       {%- if graph.run %} data-at-run="{{ graph.run.run_id }}"{% endif %}
+       {%- if graph.at_reason %} data-at-reason="{{ graph.at_reason.id }}"{% endif %}>
     <div class="text-[11px] uppercase tracking-wide text-brand-muted">{{ project }}</div>
     {% if graph.available and graph.run %}
     <h1 class="text-lg font-semibold text-gray-900">run {{ graph.run.run_id }} · <span class="font-mono">{{ (graph.run.commit_sha or '')[:7] }}</span> · {{ graph.run.plan_id or '—' }}{% if graph.run.run_id != graph.latest_run_id %} <span class="text-xs text-brand-muted">(historical — edges_from: {{ graph.edges_from }})</span>{% endif %}</h1>
     {% else %}
     <h1 class="text-lg font-semibold text-gray-900">graph</h1>
     {% endif %}
+    {% if graph.at_reason %}
+    {# DP phase 2d: `at=reason:<id>` is a record, not a run — say which run it was resolved to, never hop silently #}
+    <div class="text-xs text-brand-muted mt-1" data-at-note>
+      {{ 'Rendered at the analysis run of record' if lang != 'zh' else '按记录渲染，所属分析批次' }} #{{ graph.at_reason.id }}: {{ graph.at_reason.run_id or '—' }}
+    </div>
+    {% elif graph.at_kind == 'reason' %}
+    <div class="text-xs text-brand-red mt-1" data-at-note>{{ 'Record not found; showing the latest analysis run.' if lang != 'zh' else '未找到该记录，改为显示最新分析批次。' }}</div>
+    {% endif %}
     {% if graph.available %}
     <form method="get" class="mt-2 flex items-center gap-2 text-xs" data-run-selector>
       {% if focus %}<input type="hidden" name="focus" value="{{ focus }}">{% endif %}
-      <label class="text-brand-muted">at run</label>
+      <input type="hidden" name="mode" value="{{ graph.mode }}">
+      <label class="text-brand-muted">{{ 'run'|say('term', lang) }}</label>
       <select name="at" class="border border-hairline rounded px-1 py-0.5 bg-surface" onchange="this.form.submit()">
-        <option value="" {% if not graph.run or graph.run.run_id == graph.latest_run_id %}selected{% endif %}>latest</option>
-        {% for r in graph.runs %}<option value="{{ r.run_id }}" {% if graph.run and graph.run.run_id == r.run_id and r.run_id != graph.latest_run_id %}selected{% endif %}>run {{ r.run_id }} · {{ (r.commit_sha or '')[:7] }} · {{ r.plan_id or r.trigger or '—' }}</option>{% endfor %}
+        <option value="" {% if not graph.run or graph.run.run_id == graph.latest_run_id %}selected{% endif %}>{{ 'latest' if lang != 'zh' else '最新' }}</option>
+        {% for r in graph.runs %}<option value="run:{{ r.run_id }}" {% if graph.run and graph.run.run_id == r.run_id and r.run_id != graph.latest_run_id %}selected{% endif %}>run {{ r.run_id }} · {{ (r.commit_sha or '')[:7] }} · {{ r.plan_id or r.trigger or '—' }}</option>{% endfor %}
       </select>
-      <label class="text-brand-muted ml-2">level</label>
+      <label class="text-brand-muted ml-2">{{ 'detail' if lang != 'zh' else '粒度' }}</label>
       <select name="level" class="border border-hairline rounded px-1 py-0.5 bg-surface" onchange="this.form.submit()">
         <option value="functions" {% if graph.level == 'functions' %}selected{% endif %}>functions</option>
         <option value="full" {% if graph.level == 'full' %}selected{% endif %}>full</option>
       </select>
-      <span class="text-brand-muted ml-2 tnum">{{ graph.nodes|length }} nodes · {{ graph.edges|length }} edges · {{ graph.badged }} with a story</span>
+      {% if graph.clusters %}<span class="text-brand-muted ml-2 tnum" data-clusters="{{ graph.clusters|length }}">{{ ui('clusters', lang, clusters=graph.clusters|length, nodes=graph.mode_total) }}</span>{% endif %}
+      <span class="text-brand-muted ml-2 tnum" data-counts>{{ graph.nodes|length }} / {{ graph.total_nodes }} {{ ui('records', lang) if lang == 'zh' else 'nodes' }} · {{ graph.badged }} {{ 'with records' if lang != 'zh' else '有记录' }} </span>
     </form>
+    {# 渐进加载：裁掉的永远以计数出现，展开是一个链接（用户 2026-09-16：记全是对的，画全是错的）#}
+    <div class="mt-2 flex items-center gap-1 text-xs" data-mode-chips>
+      {% for m, label in [('focus', ui('mode_focus', lang)), ('story', ui('mode_story', lang)), ('data', ui('mode_data', lang)), ('full', ui('mode_full', lang))] %}
+        {% set href = '/graph/' ~ project ~ '?mode=' ~ m ~ ('&focus=' ~ focus if focus else '') ~ ('&at=run:' ~ graph.run.run_id if graph.run and graph.run.run_id != graph.latest_run_id else '') ~ ('&level=' ~ graph.level if graph.level != 'functions' else '') %}
+        {% if m == graph.mode %}
+        <span data-mode-chip="{{ m }}" data-current="1" class="px-2 py-0.5 rounded-lg border bg-brand-blue text-white border-brand-blue">{{ label }}</span>
+        {% elif m == 'focus' and not focus %}
+        <span data-mode-chip="{{ m }}" data-mode-disabled="1" class="px-2 py-0.5 rounded-lg border border-hairline text-brand-muted" title="{{ ui('no_focus', lang) }}">{{ label }}</span>
+        {% else %}
+        <a data-mode-chip="{{ m }}" href="{{ href }}" class="px-2 py-0.5 rounded-lg border bg-surface text-brand-blue border-hairline hover:bg-brand-bg">{{ label }}</a>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% if graph.mode != 'full' and graph.available %}
+    {% if graph.clusters %}
+    <div class="mt-1 text-xs text-brand-muted" data-cluster-notice>
+      {{ 'Clustered by module — module-to-module flow. Open a node for its own dependencies.' if lang != 'zh' else '按模块聚类，显示模块间的流向；单个节点的依赖请打开该节点。' }}
+    </div>
+    {% endif %}
+    <div class="mt-1 text-xs text-brand-gray" data-reduced-notice>
+      {{ ui('reduced_view', lang, drawn=graph.nodes|length, total=graph.total_nodes) }}
+    </div>
+    {% endif %}
+    <div class="mt-1 text-xs text-brand-muted" data-mode-note>
+      {% if graph.mode == 'story' %}
+        {{ ui('graph_nodes_drawn', lang, drawn=graph.nodes|length, selected=graph.mode_total, total=graph.total_nodes) }}
+      {% elif graph.mode == 'data' %}
+        {{ ui('graph_nodes_drawn', lang, drawn=graph.nodes|length, selected=graph.mode_total, total=graph.total_nodes) }}
+      {% elif graph.mode == 'focus' and graph.focus_found %}
+        {{ ui('graph_nodes_drawn', lang, drawn=graph.nodes|length, selected=graph.mode_total, total=graph.total_nodes) }}
+      {% elif graph.mode == 'focus' %}
+        {{ ui('focus_not_found', lang, focus=graph.focus) }}
+      {% else %}
+        {{ ui('graph_nodes_drawn', lang, drawn=graph.nodes|length, selected=graph.mode_total, total=graph.total_nodes) }}
+      {% endif %}
+      {% if graph.mode != 'full' %}<a class="text-brand-blue ml-1" data-expand-full href="/graph/{{ project }}?mode=full{% if focus %}&focus={{ focus }}{% endif %}{% if graph.run and graph.run.run_id != graph.latest_run_id %}&at=run:{{ graph.run.run_id }}{% endif %}{% if graph.level != 'functions' %}&level={{ graph.level }}{% endif %}">{{ ui('expand_full', lang) }} ({{ graph.total_nodes }})</a>{% endif %}
+    </div>
     {% endif %}
   </div>
 
@@ -38,10 +89,10 @@
   <div class="bg-surface rounded-xl border border-hairline p-5 text-sm text-brand-red">{{ error }}</div>
   {% elif not graph.available %}
   <div class="bg-surface rounded-xl border border-hairline border-l-4 border-l-brand-serious p-5 text-sm text-brand-gray" data-state="unavailable">
-    <span class="font-semibold">state graph unavailable</span> — {{ graph.reason }}
+    <span class="font-semibold">{{ ui('graph_unavailable', lang) }}</span> — {{ graph.reason }}
   </div>
   {% else %}
-  <div id="graph-canvas" class="bg-surface rounded-xl shadow-sm border border-hairline mb-4" style="height: 520px" data-canvas>
+  <div id="graph-canvas" class="bg-surface rounded-xl shadow-sm border border-hairline mb-4" style="height: {{ 720 if graph.layout == 'hierarchical' else 520 }}px" data-canvas>
     <div id="graph-fallback" class="p-4 text-xs text-brand-muted">图渲染库加载中… 若此提示不消失，说明 vis-network 不可用（离线或被拦截）——下方节点表仍完整。</div>
   </div>
   <script>
@@ -49,23 +100,92 @@
       var data = {{ graph_json|safe }};
       var focus = {{ focus|tojson }};
       var project = {{ project|tojson }};
-      var at = {{ (graph.run.run_id if graph.run and graph.run.run_id != graph.latest_run_id else '')|tojson }};
+      var at = {{ (('run:' ~ graph.run.run_id) if graph.run and graph.run.run_id != graph.latest_run_id else '')|tojson }};
       var tierColor = {observed: '#2a78d6', derived: '#1baf7a', asserted: '#eda100', stated: '#4a3aa7', unstated: '#898781'};
       function draw() {
         if (typeof vis === 'undefined') { return false; }
-        var nodes = data.nodes.map(function (n) {
-          return {id: n.node_key, label: n.badge ? (n.qualified_name.split('.').pop() + ' [' + n.badge + ']') : n.qualified_name.split('.').pop(),
-                  title: n.qualified_name + '\n' + (n.file_path || '') + '\ntier ' + n.tier + ' · badge ' + n.badge,
-                  color: {background: n.badge ? '#fff3d6' : '#f9f9f7', border: tierColor[n.tier] || '#898781'},
-                  borderWidth: n.node_key === focus || n.qualified_name === focus ? 4 : (n.badge ? 2 : 1),
-                  shape: n.node_type === 'route' ? 'box' : 'dot', size: n.badge ? 12 + Math.min(n.badge, 8) : 10, font: {size: 11}};
+        var clustered = (data.clusters || []).length > 0;
+        var nodes, edges;
+
+        if (clustered) {
+          // The payload already carries module summaries and module-to-module
+          // edges; drawing 1601 individual nodes is what made this canvas an
+          // unreadable smear. Double-click a module to open it.
+          nodes = data.clusters.map(function (c) {
+            return {id: 'cluster:' + c.key, label: c.label + '\n(' + c.nodes + ')', level: c.level,
+                    shape: 'box', margin: 10, color: {background: '#eef4fc', border: '#2a78d6'},
+                    font: {size: 13, multi: true},
+                    title: c.label + ' — ' + c.nodes + ' nodes, ' + c.badged + ' with records'};
+          });
+        } else {
+          // A label on every one of 56 nodes is unreadable at any zoom. The
+          // focus, its direct neighbours and anything carrying records keep
+          // theirs; the rest reveal it on hover (labelWhenHovered).
+          var near = {};
+          data.edges.forEach(function (e) {
+            if (e.src_key === focus) { near[e.dst_key] = true; }
+            if (e.dst_key === focus) { near[e.src_key] = true; }
+          });
+          nodes = data.nodes.map(function (n) {
+            var always = !!n.badge || n.node_key === focus || n.qualified_name === focus || near[n.node_key];
+            var short = n.qualified_name.split('.').pop();
+            return {id: n.node_key, level: n.level,
+                    label: always ? (n.badge ? short + ' [' + n.badge + ']' : short) : undefined,
+                    hidden: false, labelHighlightBold: false,
+                    title: n.qualified_name + '\n' + (n.node_type || '') + (n.file_path ? '\n' + n.file_path : '')
+                           + '\n' + (n.tier || '') + ' · ' + (n.badge || 0) + ' records'
+                           + (n.last_at ? '\nlast change ' + String(n.last_at).slice(0, 10) : '') + '\nopen node',
+                    color: {background: n.badge ? '#fff3d6' : '#f9f9f7', border: tierColor[n.tier] || '#898781'},
+                    borderWidth: n.node_key === focus || n.qualified_name === focus ? 4 : (n.badge ? 2 : 1),
+                    shape: n.node_type === 'route' ? 'box' : 'dot',
+                    size: n.badge ? 12 + Math.min(n.badge, 8) : 10,
+                    font: {size: 11, color: '#52514e'},
+                    labelWhenHovered: short};
+          });
+        }
+        edges = data.edges.map(function (e) {
+          return {from: e.src_key, to: e.dst_key, arrows: 'to', color: {color: '#c9c8c1'},
+                  smooth: {type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4},
+                  width: e.weight ? 1 + Math.min(e.weight / 40, 6) : 1,
+                  title: e.edge_type || (e.weight + ' refs')};
         });
-        var edges = data.edges.map(function (e) { return {from: e.src_key, to: e.dst_key, arrows: 'to', color: {color: '#c9c8c1'}, title: e.edge_type}; });
+
+        var opts = {interaction: {hover: true}};
+        if (data.layout === 'hierarchical') {
+          opts.layout = {hierarchical: {enabled: true, direction: 'UD', sortMethod: 'directed',
+                                        levelSeparation: 140, nodeSpacing: 180, treeSpacing: 200}};
+          opts.physics = false;
+        } else {
+          opts.physics = {stabilization: {iterations: 150}};
+        }
+
         var el = document.getElementById('graph-canvas'); el.innerHTML = '';
-        var net = new vis.Network(el, {nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges)},
-                                  {physics: {stabilization: {iterations: 150}}, interaction: {hover: true}});
+        var net = new vis.Network(el, {nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges)}, opts);
+        window.network = net;   // exposed so the layout can be inspected from the console
+        // a layered graph is taller than it is wide: fit it, or the viewport shows
+        // one band of an otherwise correct picture (which is what it did)
+        // Fit, but never below the point where a node stops being readable: a
+        // level with 25 nodes is 4500px wide, and fitting that into 830px turns a
+        // correct layout into a smear. Below the floor the view stays zoomed and
+        // pannable, which is the honest trade.
+        net.once('afterDrawing', function () {
+          net.fit({animation: false});
+          var MIN = 0.35;
+          if (net.getScale() < MIN) {
+            net.moveTo({scale: MIN, position: net.getViewPosition(), animation: false});
+          }
+        });
+        net.on('doubleClick', function (p) {
+          if (!p.nodes.length) { return; }
+          var id = p.nodes[0];
+          if (net.isCluster && net.isCluster(id)) { net.openCluster(id); return; }
+          if (String(id).indexOf('cluster:') === 0) { return; }
+          window.location = '/node/' + encodeURIComponent(project) + '/' + encodeURIComponent(id) + (at ? '?at=' + at : '');
+        });
         net.on('click', function (p) {
-          if (p.nodes.length) { window.location = '/node/' + encodeURIComponent(project) + '/' + encodeURIComponent(p.nodes[0]) + (at ? '?at=' + at : ''); }
+          if (p.nodes.length && String(p.nodes[0]).indexOf('cluster:') !== 0) {
+            window.location = '/node/' + encodeURIComponent(project) + '/' + encodeURIComponent(p.nodes[0]) + (at ? '?at=' + at : '');
+          }
         });
         return true;
       }
@@ -75,25 +195,38 @@
   <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" async onload="(function(){var e=new Event('load');window.dispatchEvent(e)})()"></script>
 
   <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="graph-table">
-    <h2 class="text-sm font-semibold text-gray-900 mb-2">nodes ({{ graph.nodes|length }}) — badge = records with a story · colour = tier of the latest event</h2>
+    <h2 class="text-sm font-semibold text-gray-900 mb-2">{{ 'node'|say('term', lang) }} ({{ graph.nodes|length }} / {{ graph.total_nodes }})</h2>
     <div class="overflow-x-auto">
       <table class="text-xs w-full">
-        <thead><tr class="text-brand-muted text-left"><th class="pr-3">node</th><th class="pr-3">type</th><th class="pr-3">tier</th><th class="pr-3">badge</th><th class="pr-3">minor</th><th>file</th></tr></thead>
+        <thead><tr class="text-brand-muted text-left"><th class="pr-3">{{ 'node' if lang != 'zh' else '节点' }}</th><th class="pr-3">{{ 'type' if lang != 'zh' else '类型' }}</th><th class="pr-3">{{ 'provenance' if lang != 'zh' else '来源' }}</th><th class="pr-3">{{ 'records' if lang != 'zh' else '记录' }}</th><th class="pr-3">{{ 'minor' if lang != 'zh' else '次要' }}</th><th>{{ 'file' if lang != 'zh' else '文件' }}</th></tr></thead>
         <tbody>
+        {% if graph.clusters %}
+        {% for c in graph.clusters %}
+          <tr data-cluster="{{ c.key }}" data-cluster-nodes="{{ c.nodes }}">
+            <td class="pr-3 font-mono">{{ c.label }}</td>
+            <td class="pr-3">module</td>
+            <td class="pr-3">—</td>
+            <td class="pr-3 tnum">{{ c.badged }}</td>
+            <td class="pr-3 tnum text-brand-muted">—</td>
+            <td class="font-mono text-brand-muted tnum">{{ c.nodes }}</td>
+          </tr>
+        {% endfor %}
+        {% else %}
         {% for n in graph.nodes %}
           <tr class="{{ 'bg-[#fff3d6]' if focus and (focus == n.qualified_name or focus == n.node_key) else '' }}" data-node="{{ n.node_key }}" data-tier="{{ n.tier }}" data-badge="{{ n.badge }}"{% if focus and (focus == n.qualified_name or focus == n.node_key) %} data-focus="1"{% endif %}>
-            <td class="pr-3 font-mono"><a class="text-brand-blue" href="/node/{{ project }}/{{ n.qualified_name }}{% if graph.run and graph.run.run_id != graph.latest_run_id %}?at={{ graph.run.run_id }}{% endif %}">{{ n.qualified_name }}</a></td>
+            <td class="pr-3 font-mono"><a class="text-brand-blue" href="/node/{{ project }}/{{ n.qualified_name }}{% if graph.run and graph.run.run_id != graph.latest_run_id %}?at=run:{{ graph.run.run_id }}{% endif %}">{{ n.qualified_name }}</a></td>
             <td class="pr-3">{{ n.node_type }}</td>
-            <td class="pr-3"><span class="type-dot" style="background: {{ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(n.tier, '#898781') }}"></span> {{ n.tier }}</td>
+            <td class="pr-3"><span class="type-dot" style="background: {{ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(n.tier, '#898781') }}"></span> <span title="{{ vocab.define(n.tier, kind='tier', lang=lang) }}">{{ n.tier|say('tier', lang) }}</span></td>
             <td class="pr-3 tnum">{{ n.badge }}</td>
             <td class="pr-3 tnum text-brand-muted">{{ n.minor }}</td>
             <td class="font-mono text-brand-muted">{{ n.file_path or '' }}</td>
           </tr>
         {% endfor %}
+        {% endif %}
         </tbody>
       </table>
     </div>
-    {% if graph.edges_from == 'latest' %}<div class="text-[11px] text-brand-muted mt-2">edges_from: latest — the graph keeps no edge history; the edges shown are today's, mapped onto the nodes of run {{ graph.run.run_id }}.</div>{% endif %}
+    {% if graph.edges_from == 'latest' %}<div class="text-[11px] text-brand-muted mt-2">{{ 'Edges have no history: the current edges are mapped onto the nodes of analysis run' if lang != 'zh' else '边没有历史维度：当前边映射到该分析批次的节点' }} {{ graph.run.run_id }}.</div>{% endif %}
   </section>
   {% endif %}
 {% endblock %}

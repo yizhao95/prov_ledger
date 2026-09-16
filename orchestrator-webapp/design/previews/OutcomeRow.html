@@ -1,0 +1,40 @@
+<!-- @dsCard group="Provenance" -->
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OutcomeRow — provLedger Design</title>
+<link rel="stylesheet" href="../dist/styles.css">
+<style>
+  main { max-width: 880px; margin: 0 auto; padding: 24px; }
+  header h1 { font-size: 1.125rem; font-weight: 600; margin: 0 0 4px; }
+  header p { font-size: .75rem; color: var(--pl-brand-muted); margin: 0 0 24px; }
+  section[data-variant] { margin: 0 0 28px; }
+  .variant-label { font-size: .6875rem; text-transform: uppercase; letter-spacing: .06em;
+                   color: var(--pl-brand-muted); font-weight: 500; margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>OutcomeRow</h1>
+    <p>一条声明后来怎么样了。“没测过”和“没事”是两件事。</p>
+  </header>
+  <section data-variant="量到了 / 还在 / 没测过">
+    <h2 class="variant-label">量到了 / 还在 / 没测过</h2>
+    <div data-host="0"></div>
+  </section>
+  <section data-variant="没有可观测的后果">
+    <h2 class="variant-label">没有可观测的后果</h2>
+    <div data-host="1"></div>
+  </section>
+</main>
+<script src="../dist/_ds_bundle.js"></script>
+<script>
+  var D = window.ProvLedgerDS, React = D.__React;
+  D.__render(React.createElement('div',null,React.createElement(D.OutcomeRow,{claim:'折扣率口径不变，误差 ±5%',target:'pkg.m.discount_rate',targetKind:'node',latest:{kind:'observed',tier:'observed',delta_pct:23,at:'2026-09-15'}}),React.createElement(D.OutcomeRow,{claim:'clean 仍然吃 load_orders 的输出',target:'pkg.m.clean',latest:{kind:'survival',tier:'observed',signal:'untouched_consumed',at:'2026-09-15'}}),React.createElement(D.OutcomeRow,{claim:'报表数不变',target:'reports.weekly',latest:null})), document.querySelector('[data-host="0"]'));
+  D.__render(React.createElement(D.OutcomeRow,{claim:'重构不改变行为',target:'pkg.m.parse',latest:{kind:'none_available',tier:'derived',at:'2026-09-10'}}), document.querySelector('[data-host="1"]'));
+</script>
+</body>
+</html>

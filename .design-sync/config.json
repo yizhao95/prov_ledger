@@ -1,0 +1,7 @@
+{
+  "projectId": "edae7a78-0f9d-4eab-9f8d-ff2d31459978",
+  "projectName": "provLedger Dashboard",
+  "shape": "package",
+  "notes": "created 2026-09-16 by /design-sync; the component library lives in orchestrator-webapp/design/ (DP phase 2d Task 2) — 9 components, previews/*.html carry the @dsCard tag, dist/ is committed so the sync reads the tree without a build",
+  "pkg": "orchestrator-webapp/design"
+}

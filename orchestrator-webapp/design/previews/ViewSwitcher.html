@@ -1,0 +1,40 @@
+<!-- @dsCard group="Navigation" -->
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ViewSwitcher — provLedger Design</title>
+<link rel="stylesheet" href="../dist/styles.css">
+<style>
+  main { max-width: 880px; margin: 0 auto; padding: 24px; }
+  header h1 { font-size: 1.125rem; font-weight: 600; margin: 0 0 4px; }
+  header p { font-size: .75rem; color: var(--pl-brand-muted); margin: 0 0 24px; }
+  section[data-variant] { margin: 0 0 28px; }
+  .variant-label { font-size: .6875rem; text-transform: uppercase; letter-spacing: .06em;
+                   color: var(--pl-brand-muted); font-weight: 500; margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>ViewSwitcher</h1>
+    <p>三个视野共用一个上下文三元组。去不了的视野是禁用加原因，不是消失。</p>
+  </header>
+  <section data-variant="三个视野都去得了">
+    <h2 class="variant-label">三个视野都去得了</h2>
+    <div data-host="0"></div>
+  </section>
+  <section data-variant="上下文里没有任务">
+    <h2 class="variant-label">上下文里没有任务</h2>
+    <div data-host="1"></div>
+  </section>
+</main>
+<script src="../dist/_ds_bundle.js"></script>
+<script>
+  var D = window.ProvLedgerDS, React = D.__React;
+  D.__render(React.createElement(D.ViewSwitcher,{current:'node',triple:{project:'prov_ledger',node:'app.queries.compute_etag',at:'reason:1414'},links:{graph:'#g',node:'#n',task:'#t'},onSearch:function(){}}), document.querySelector('[data-host="0"]'));
+  D.__render(React.createElement(D.ViewSwitcher,{current:'graph',triple:{project:'prov_ledger',node:'app.queries.compute_etag',at:'run:93'},links:{graph:'#g',node:'#n',task:null}}), document.querySelector('[data-host="1"]'));
+</script>
+</body>
+</html>

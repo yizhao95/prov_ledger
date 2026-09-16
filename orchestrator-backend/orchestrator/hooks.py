@@ -79,6 +79,21 @@ def record_tool_call(conn, data: dict) -> int:
     return int(cur.lastrowid)
 
 
+# DP phase 2d (Task 0): Claude Code delivers some of its OWN text through
+# UserPromptSubmit — a finished subagent's report, a system reminder, the caveat
+# in front of a local command, the name of a slash command. None of it is the
+# user speaking, so none of it may become a `stated` reason's verbatim span.
+# The match is on the PREFIX of the stripped prompt: a person who writes ABOUT
+# `<system-reminder>` is still a person, and their words are still recorded.
+INJECTED_PROMPT_PREFIXES = ("<task-notification>", "<system-reminder>",
+                            "<local-command-caveat>", "<command-name>")
+
+
+def is_injected_prompt(prompt: str | None) -> bool:
+    """True when the prompt is Claude Code's own injected text, not the user's."""
+    return isinstance(prompt, str) and prompt.lstrip().startswith(INJECTED_PROMPT_PREFIXES)
+
+
 def _current_plan_id(conn, project: str | None) -> str | None:
     """The project's most recent IN_PROGRESS plan (None without a project or a plan)."""
     if not project:
@@ -90,10 +105,13 @@ def _current_plan_id(conn, project: str | None) -> str | None:
 
 def record_utterance(conn, data: dict) -> int | None:
     """UserPromptSubmit → one utterance row with the prompt VERBATIM. An empty
-    prompt or a slash command is not a decision and is not recorded."""
+    prompt, a slash command, or text Claude Code itself injected (DP phase 2d,
+    Task 0) is not a decision and is not recorded."""
     from . import provenance, psg_bridge
     prompt = data.get("prompt")
     if not isinstance(prompt, str) or not prompt.strip() or prompt.lstrip().startswith("/"):
+        return None
+    if is_injected_prompt(prompt):
         return None
     project = psg_bridge.project_for_cwd(data.get("cwd"))
     plan_id = _current_plan_id(conn, project)

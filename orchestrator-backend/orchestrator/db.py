@@ -28,6 +28,7 @@ def open_db(path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     _reclass_once(conn)
+    _retract_injected_once(conn)
     return conn
 
 
@@ -47,6 +48,29 @@ def _reclass_once(conn: sqlite3.Connection) -> None:
                 return
             from . import provenance_migrate
             provenance_migrate.run(conn)
+        finally:
+            conn.execute("PRAGMA busy_timeout=5000")
+    except sqlite3.Error:
+        pass
+
+
+def _retract_injected_once(conn: sqlite3.Connection) -> None:
+    """DP phase 2d (Task 0): the utterances the old hook recorded from Claude
+    Code's own injected prompts get one `retract` trigger_log row each — once,
+    on a DB that already carries migration 021's widened verdict CHECK. Same
+    contract as _reclass_once: short busy timeout, never raises, retried on the
+    next open when the DB is locked or read-only."""
+    try:
+        conn.execute("PRAGMA busy_timeout=500")
+        try:
+            have = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('migration_state', 'trigger_log', 'utterance')")}
+            if len(have) < 3:
+                return
+            from . import provenance_migrate
+            if conn.execute("SELECT 1 FROM migration_state WHERE key = ?", (provenance_migrate.RETRACT_KEY,)).fetchone():
+                return
+            provenance_migrate.retract_injected_utterances(conn)
         finally:
             conn.execute("PRAGMA busy_timeout=5000")
     except sqlite3.Error:

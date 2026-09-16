@@ -21,6 +21,11 @@ sys.path.insert(0, str(ORCH_BACKEND))
 from orchestrator import api, db as odb  # noqa: E402
 
 
+def vocab_ui(key):
+    from app import vocab
+    return vocab.ui(key)
+
+
 def _seed_db(path: Path) -> dict:
     conn = odb.open_db(path)
     odb.run_migrations(conn)
@@ -240,7 +245,7 @@ def _insert_reasons(db_path, plan_id):
 def test_e3_1_tier_badges_distinct_without_color(client):
     _insert_reasons(client._db, client._seeded["plan_id"])
     r = client.get("/api/dashboard")
-    assert r.status_code == 200 and "🧭 Reasons" in r.text
+    assert r.status_code == 200 and vocab_ui("reasons_panel") in r.text
     for tier in ("derived", "asserted", "stated", "unstated"):
         assert f'data-tier="{tier}"' in r.text and f">{tier}<" in r.text, tier
     assert "— unstated —" in r.text and "nk_uns" in r.text and 'data-source-level="verbal"' in r.text
@@ -456,21 +461,28 @@ def test_node_page_shows_space_time_and_reasons_in_one_query(client, tmp_path, m
     _, reg = _seed_state_graph(tmp_path)
     monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
     _seed_reasons_and_constraints(client._db)
-    r = client.get("/node/demo/pkg.m.load_orders")
+    # DP 2d (Task 3b): the default timeline carries only the moments that changed
+    # something, so the full event list now lives behind ?show=all — the quiet
+    # events are folded with a count, never dropped.
+    r = client.get("/node/demo/pkg.m.load_orders?show=all")
     assert r.status_code == 200
     t = r.text
-    # time: events grouped by run, each with its plan link and tier label
+    # time: every event on one rail, each with its plan link and tier label
     for ev in ("node_added", "node_matched", "node_renamed", "node_changed", "identity_asserted"):
         assert ev in t
-    assert 'data-tier="asserted"' in t and "main() now calls load_orders" in t and "anthropic.claude_headless" in t
-    assert 'href="/plan/P0"' in t and 'href="/plan/P1"' in t and "run 2" in t
+    # DP 2d: the rail's change rows are one line — the arbiter's evidence rides in
+    # the row rather than as a second paragraph; the tier attribute is unchanged
+    assert 'data-tier="asserted"' in t
+    # DP 2d (Task 3b + layout spec 6): a link back to a task now carries the whole
+    # triple and the step anchor, so it lands on the moment rather than the page top
+    assert 'href="/plan/P0?node=pkg.m.load_orders' in t and 'href="/plan/P1?node=pkg.m.load_orders' in t
     # space: the card
     assert "pkg.m.main" in t and "pkg.m.clean" in t
     # reasons + constraints; the restricted rationale never leaves the ledger
     assert "renamed so the name says which table it reads" in t and 'data-tier="stated"' in t and 'data-tier="unstated"' in t
     assert "load_orders must keep paid orders only" in t and "finance reconciles on paid orders" in t
     assert "never read the raw orders table in prod" in t and "ticket SEC-42" in t and "SECRET-RATIONALE" not in t
-    assert "approx_tokens" in t
+    assert vocab_ui("context_estimate") in t
     from app import queries
     conn = odb.open_db(client._db)
     ledger = queries.get_node_ledger(conn, "demo", "pkg.m.load_orders")
@@ -523,8 +535,10 @@ def test_reasons_panel_shows_source_level_for_migrated_and_new_rows(client):
     pv.insert_reason(conn, project="demo", plan_id=pid, node_key="nk_gap", kind="technical", recorded_by="system")
     conn.close()
     r = client.get("/api/dashboard")
-    assert r.status_code == 200 and "🧭 Reasons" in r.text
-    assert "来源等级" in r.text and "证据等级" not in r.text
+    assert r.status_code == 200 and vocab_ui("reasons_panel") in r.text
+    # DP 2d (Task 3d): the node page says the level in plain words ("有链接可查"),
+    # the plan panels still print the 来源等级 prefix; both are the same column.
+    assert ("linked" in r.text or "verbal" in r.text or "task-context" in r.text) and "证据等级" not in r.text
     assert 'data-tier="asserted"' in r.text and "legacy sentence written as stated" in r.text      # migrated: asserted, not stated
     assert 'data-tier="stated"' in r.text and 'data-source-level="verbal"' in r.text
     assert 'data-tier="unstated"' in r.text and 'data-source-level="unstated"' in r.text
@@ -546,7 +560,9 @@ def test_node_page_constraints_come_from_change_reason(client, tmp_path, monkeyp
     assert r.status_code == 200
     assert "load_orders must keep paid orders only" in r.text and "finance reconciles on paid orders" in r.text
     assert "never read the raw orders table in prod" in r.text and "ticket SEC-42" in r.text and "SECRET-RATIONALE" not in r.text
-    assert "来源等级" in r.text
+    # DP 2d (Task 3d): the node page says how checkable the source is in plain
+    # words instead of printing the column name — same column, a reader's phrasing
+    assert ("linked" in r.text or "verbal" in r.text or "task-context" in r.text or "unstated" in r.text)
     from app import queries
     conn = odb.open_db(client._db)
     ledger = queries.get_node_ledger(conn, "demo", "pkg.m.load_orders")
@@ -595,8 +611,8 @@ def test_headline_block_shows_findings_with_severity_and_the_unanswered_count(cl
     assert 'data-panel="headline"' in html and 'data-unanswered="1"' in html and 'data-findings="3"' in html
     assert html.count('data-severity="blocking"') == 2 and html.count('data-severity="warning"') == 1
     assert 'data-tier="stated"' in html and 'data-agent-proceeded="1"' in html and 'data-unanswered-finding="1"' in html
-    assert "→ proceed (agent) · the filter moves downstream" in html and "未回答" in html and "provledger why pkg.m.load_orders --all" in html
-    assert "2 展示过 · 0 采用了" in html                                # plan-level buckets (the step's rows are the step's)
+    assert "→ proceed (agent) · the filter moves downstream" in html and "unanswered" in html and "provledger why pkg.m.load_orders --all" in html
+    assert "Surfaced 2" in html and "Adopted 0" in html                                # plan-level buckets (the step's rows are the step's)
 
 
 def test_step_panel_has_shown_and_adopted_columns(client):
@@ -605,7 +621,7 @@ def test_step_panel_has_shown_and_adopted_columns(client):
     html = client.get("/api/dashboard").text
     assert f'data-step-records="{step}"' in html and 'data-shown="1"' in html and 'data-adopted="1"' in html
     assert f'href="/node/demo/nk_a?at={ids["cid"]}"' in html               # adopted entries link to the record
-    assert "展示过（1）" in html and "采用了（1）" in html
+    assert "Surfaced 1" in html and "Adopted 1" in html
 
 
 def test_node_page_hit_counts_per_moment_and_the_adopting_plan_backlink(client, tmp_path, monkeypatch):
@@ -614,11 +630,17 @@ def test_node_page_hit_counts_per_moment_and_the_adopting_plan_backlink(client, 
     pid = client._seeded["plan_id"]; step = client._seeded["step_ids"][0]
     ids = _seed_headline(client._db, pid, step)
     html = client.get("/node/demo/nk_a").text
-    assert f'data-stats="{ids["cid"]}"' in html and "展示 plan 1 · edit 1 · why 0 · 采用 1" in html
-    assert f'href="/plan/{pid}?node=pkg.m.load_orders&at={ids["cid"]}">{pid}</a> 采用' in html    # 被 <plan> 采用, carrying the triple (DP 2b)
-    assert f'data-stats="{ids["rid"]}"' in html and "展示 plan 1 · edit 0 · why 0 · 采用 0" in html
-    hi = client.get(f"/node/demo/nk_a?at={ids['cid']}").text
-    assert f'data-record="{ids["cid"]}" data-at="1"' in hi and hi.count(' data-record="') == hi.count('data-record="') and f'data-record="{ids["rid"]}" data-at="1"' not in hi   # only the asked record (the view bar carries its own data-at, DP 2b)
+    # DP 2d (Task 3d): the prose is now plain language; the per-moment counts stay
+    # machine-readable in data-* so the ETag, this suite and any scraper are unaffected
+    assert f'data-stats="{ids["cid"]}"' in html and 'data-shown-plan="1"' in html and 'data-adopted="1"' in html
+    # DP 2d: the link carries the TYPED triple (a record id, not a run); Task 3d
+    # replaced "被 <plan> 采用" with the sentence a person would say, and moved the
+    # plan id into title= (layout spec 8).
+    assert f'href="/plan/{pid}?node=pkg.m.load_orders&at=reason:{ids["cid"]}" title="{pid}"' in html
+    assert "Adopted by plan" in html
+    assert "hits" in html
+    hi = client.get(f"/node/demo/nk_a?at=reason:{ids['cid']}").text
+    assert hi.count("data-hit-here") == 1, "more than one row is lit"        # exactly one thing lit (DP 2d)
 
 
 def test_footer_carries_the_two_overhead_numbers(client):
@@ -662,23 +684,24 @@ def test_graph_page_renders_nodes_with_badge_and_tier_and_links_to_node(client, 
     _, reg = _seed_state_graph(tmp_path)
     monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
     _seed_reasons_and_constraints(client._db)
-    html = client.get("/graph/demo").text
+    html = client.get("/graph/demo?mode=full").text                   # DP 2d: the bare page is the `story` mode now
     assert 'data-panel="graph-table"' in html and 'data-node="nk_a"' in html
     assert 'data-badge="3"' in html                                # 1 stated reason + 2 active constraints (the unstated one has no badge)
     assert 'data-tier="asserted"' in html                          # the latest event of nk_a is identity_asserted
     assert 'href="/node/demo/pkg.m.load_orders"' in html and "run 2" in html and "bbbbbbb" in html
     focused = client.get("/graph/demo?focus=pkg.m.load_orders").text
     assert 'data-focus="1"' in focused and 'name="focus" value="pkg.m.load_orders"' in focused
+    assert 'data-mode="focus"' in focused and 'data-mode="story"' in client.get("/graph/demo").text
 
 
 def test_graph_page_at_a_run_shows_that_runs_nodes_and_says_where_edges_come_from(client, tmp_path, monkeypatch):
     _, reg = _seed_state_graph(tmp_path)
     monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
-    then = client.get("/graph/demo?at=1").text
+    then = client.get("/graph/demo?at=run:1&mode=full").text
     assert "run 1" in then and "aaaaaaa" in then and "edges_from: latest" in then
-    assert 'href="/node/demo/pkg.m.load?at=1"' in then                 # the name it carried at run 1, and the triple carries at
-    now = client.get("/graph/demo").text
-    assert "pkg.m.load_orders" in now and 'href="/node/demo/pkg.m.load?at=1"' not in now
+    assert 'href="/node/demo/pkg.m.load?at=run:1"' in then              # the name it carried at run 1, and the triple carries a TYPED at
+    now = client.get("/graph/demo?mode=full").text
+    assert "pkg.m.load_orders" in now and 'href="/node/demo/pkg.m.load?at=run:1"' not in now
 
 
 def test_graph_page_without_a_graph_is_200_and_says_so(client, tmp_path, monkeypatch):
@@ -691,7 +714,7 @@ def test_graph_page_full_level_includes_data_nodes_and_old_db_stays_200(client, 
     _, reg = _seed_state_graph(tmp_path)
     monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
     conn = odb.open_db(client._db); conn.execute("DROP VIEW node_badge_v"); conn.commit(); conn.close()
-    r = client.get("/graph/demo?level=full")
+    r = client.get("/graph/demo?level=full&mode=full")
     assert r.status_code == 200 and 'data-badge="0"' in r.text                 # no badge view → badges read 0, page still renders
 
 

@@ -6,49 +6,39 @@
   <title>{% block title %}provLedger Dashboard{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC" crossorigin="anonymous"></script>
+  {# DP phase 2d (Task 1): the palette is generated from app/static/tokens.json —
+     the ONE file a human edits. tokens.js defines window.PROVLEDGER_TOKENS and
+     must load before tailwind.config reads it, so both are plain blocking
+     scripts in <head>. No colour literal lives in this template any more. #}
+  <script src="/static/tokens.js"></script>
   <script>
-    /* Design tokens — validated palette (see docs: dataviz reference instance).
-       Chrome is warm-neutral; STATUS colors are fixed and reserved (never reused
-       as series colors); step-TYPE identity uses categorical slots, rendered as
-       a colored dot beside ink text (text never wears the series color). */
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            'brand-blue':   '#2a78d6',   /* categorical slot 1 — links, accents */
-            'brand-spark':  '#fab219',   /* status: warning (in-progress) */
-            'brand-green':  '#0ca30c',   /* status: good (completed) */
-            'brand-red':    '#d03b3b',   /* status: critical (failed) */
-            'brand-serious':'#ec835a',   /* status: serious (needs review) */
-            'brand-gray':   '#52514e',   /* secondary ink */
-            'brand-muted':  '#898781',   /* muted ink (labels, meta) */
-            'brand-bg':     '#f9f9f7',   /* page plane */
-            'surface':      '#fcfcfb',   /* card surface */
-            'hairline':     '#e1e0d9',   /* gridline / card border */
-          },
-        },
-      },
-    };
+    tailwind.config = {theme: {extend: {colors: window.PROVLEDGER_TOKENS.colors}}};
   </script>
   <style>
     /* respect prefers-reduced-motion */
     @media (prefers-reduced-motion: reduce) {
       .animate-pulse, .animate-ping { animation: none !important; }
+      .live-dot { animation: none !important; }
+      /* DP phase 2d (Task 3): the glide is a courtesy, never a requirement. */
+      ::view-transition-old(main), ::view-transition-new(main),
+      ::view-transition-old(switcher), ::view-transition-new(switcher) {
+        animation: none !important;
+      }
     }
-    /* live-dot indicator (status: good) */
+    /* live-dot indicator (status: good) — colour comes from the tokens below */
     .live-dot {
       display: inline-block;
       width: 0.5rem;
       height: 0.5rem;
       border-radius: 50%;
-      background: #0ca30c;
-      box-shadow: 0 0 0 0 rgba(12, 163, 12, 0.45);
+      background: var(--pl-green);
+      box-shadow: 0 0 0 0 var(--pl-green-halo);
       animation: live-pulse 2.4s infinite;
     }
     @keyframes live-pulse {
-      0%   { box-shadow: 0 0 0 0 rgba(12, 163, 12, 0.45); }
-      70%  { box-shadow: 0 0 0 0.4rem rgba(12, 163, 12, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(12, 163, 12, 0); }
+      0%   { box-shadow: 0 0 0 0 var(--pl-green-halo); }
+      70%  { box-shadow: 0 0 0 0.4rem transparent; }
+      100% { box-shadow: 0 0 0 0 transparent; }
     }
     /* preserve scroll on htmx swap */
     .preserve-scroll { overflow-y: auto; max-height: 16rem; }
@@ -62,7 +52,35 @@
     }
     /* columns of figures align (durations, counts, profile tables) */
     .tnum { font-variant-numeric: tabular-nums; }
+
+    /* ── DP phase 2d (Task 3): the three views glide into each other ──────────
+       The body region and the switch bar are named separately so the bar stays
+       put while the body cross-fades: the anchor is what must NOT appear to
+       move. Duration comes from tokens.json (motion.transition_ms). A browser
+       without the API simply swaps — hx-boost already did the useful half. */
+    [data-transition="main"] { view-transition-name: main; }
+    [data-transition="switcher"] { view-transition-name: switcher; }
+
+    @keyframes pl-fade-in  { from { opacity: 0; transform: translateY(4px); } }
+    @keyframes pl-fade-out { to   { opacity: 0; transform: translateY(-4px); } }
+    ::view-transition-old(main) { animation: pl-fade-out 160ms ease-in both; }
+    ::view-transition-new(main) { animation: pl-fade-in  160ms ease-out both; }
+    ::view-transition-old(switcher), ::view-transition-new(switcher) {
+      animation: none;                 /* the bar is the anchor: it does not travel */
+    }
+
+    /* Layout spec 1: one column, read top to bottom, never two. */
+    .pl-column { max-width: var(--pl-column-max); margin-left: auto; margin-right: auto; }
   </style>
+  <script>
+    /* the CSS custom properties the style block above reads — same single source */
+    (function () {
+      var t = window.PROVLEDGER_TOKENS, r = document.documentElement.style;
+      Object.keys(t.colors).forEach(function (k) { r.setProperty('--pl-' + k.replace('brand-', ''), t.colors[k]); });
+      r.setProperty('--pl-green-halo', t.colors['brand-green'] + '73');   /* 45% alpha */
+      r.setProperty('--pl-column-max', t.layout.column_max);
+    })();
+  </script>
   <script>
     // Preserve <details> open state across HTMX swaps.
     // Each <details> must have an id attr for keying.
@@ -139,10 +157,30 @@
           e.detail.isError = false;
         }
       });
+
+      // 5. DP phase 2d (Task 3): wrap a BOOSTED swap in a view transition.
+      //
+      //   htmx:beforeSwap fires for the 2s /api/dashboard poll as well, and a
+      //   dashboard that cross-fades every two seconds is unreadable — so the
+      //   handler asks whether this swap is a navigation (detail.boosted)
+      //   before doing anything. The API is feature-detected: without
+      //   document.startViewTransition the swap happens exactly as before.
+      document.addEventListener('htmx:beforeSwap', (e) => {
+        if (!e.detail.boosted) return;                      // a poll is not a navigation
+        if (!document.startViewTransition) return;          // unsupported → plain swap
+        if (e.detail.shouldSwap === false) return;          // already cancelled (304)
+        const swap = e.detail.swapOverride;
+        e.detail.shouldSwap = false;
+        const target = e.detail.target || document.body;
+        const html = e.detail.serverResponse;
+        document.startViewTransition(() => {
+          window.htmx.swap(target, html, {swapStyle: swap || 'innerHTML'});
+        });
+      });
     })();
   </script>
 </head>
-<body class="bg-brand-bg text-gray-900 font-sans">
+<body class="bg-brand-bg text-gray-900 font-sans" hx-boost="true">
   <header class="bg-surface border-b border-hairline px-6 py-3">
     <div class="max-w-6xl mx-auto flex items-center justify-between">
       <h1 class="text-base font-semibold text-gray-900 flex items-center gap-2">
@@ -158,7 +196,7 @@
   {# DP phase 2b (Task 4): the view switch bar — Graph · Node · Task on one context triple
      (project, node, at); every page feeds `bar` (queries.view_bar); the current view is highlighted. #}
   {% if bar %}
-  <nav class="bg-surface border-b border-hairline px-6 py-2" data-view-bar data-view="{{ bar.current }}"
+  <nav class="bg-surface border-b border-hairline px-6 py-2" data-transition="switcher" data-view-bar data-view="{{ bar.current }}"
        data-project="{{ bar.triple.project or '' }}" data-node="{{ bar.triple.node or '' }}" data-at="{{ bar.triple.at or '' }}">
     <div class="max-w-6xl mx-auto flex items-center justify-between gap-3 flex-wrap text-xs">
       <div class="flex items-center gap-1" hx-boost="true">
@@ -171,14 +209,24 @@
           {% endif %}
         {% endfor %}
       </div>
-      <div class="text-brand-muted font-mono" data-breadcrumb>
-        {{ bar.triple.project or '—' }} › {{ bar.triple.node or '—' }} › {{ bar.triple.at or 'latest' }}
+      <div class="flex items-center gap-3">
+        {# DP phase 2d (Task 3c): find the words again, from anywhere. GET only. #}
+        <form method="get" action="/search" class="flex items-center gap-1">
+          {% if bar.triple.project %}<input type="hidden" name="project" value="{{ bar.triple.project }}">{% endif %}
+          <input name="q" data-search placeholder="{{ ui('search_placeholder', lang) }}"
+                 class="border border-hairline rounded-lg px-2 py-0.5 bg-brand-bg text-xs w-44">
+        </form>
+        <div class="text-brand-muted font-mono" data-breadcrumb
+             title="{{ bar.triple.project or '—' }} / {{ bar.triple.node or '—' }} / {{ bar.triple.at or 'latest' }}">
+          {{ bar.triple.project or '—' }} › {{ (bar.triple.node or '—').split('.')[-1] }} › {{ bar.triple.at or 'latest' }}
+        </div>
       </div>
     </div>
   </nav>
   {% endif %}
 
-  <main class="max-w-6xl mx-auto p-6">
+  {# Layout spec 1: one column, 880px, read top to bottom. #}
+  <main class="pl-column p-6" data-transition="main" style="max-width: var(--pl-column-max)">
     {% block content %}{% endblock %}
   </main>
 

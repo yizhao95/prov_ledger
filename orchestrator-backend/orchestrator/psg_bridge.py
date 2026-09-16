@@ -279,13 +279,103 @@ def runs_of(psg_db_path: str | None) -> list[dict]:
             for r in _query(psg_db_path, "SELECT id, commit_sha, plan_id, started_at, trigger FROM analysis_run ORDER BY id DESC")]
 
 
-def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "functions") -> dict:
+# DP phase 2d (Task 0, FL-076): a whole project is too much graph for one page.
+# User feedback on the 2b screenshots (2026-09-16): 记全是对的，画全是错的 — recording
+# every node is right, DRAWING every node is wrong. So the reader has four modes
+# and the biggest one is never what a page asks for by default:
+#
+#   focus — the focus node's ±hops neighbourhood
+#   story — the nodes that have a story (the caller passes their keys, since the
+#           badge lives in the orchestrator DB, not here) plus the data nodes
+#           they directly produce or consume
+#   data  — every data node plus the functions that directly produce or consume it
+#   full  — everything at `level` (the 2b behaviour, and this reader's default:
+#           the UX default belongs to the view, not to the bridge)
+GRAPH_MODES = ("focus", "story", "data", "full")
+DATA_TYPES = ("dataset", "column", "sql_table", "api_source", "bq_dataset", "data_var")
+NEIGHBOURHOOD_HOPS = 2
+NEIGHBOURHOOD_MAX_NODES = 400
+# Past this many selected nodes the view CLUSTERS by module instead of dropping
+# nodes. The previous flat cap of 200 silently discarded three quarters of a
+# 1601-node selection, which is not a reduced view but a wrong one: the count in
+# the corner said 1601 and the picture showed 200.
+CLUSTER_ABOVE = 600
+# past this many nodes on one level, the level is split into sub-rows by module
+CROWDED_LEVEL = 12
+# level 0 of the data-flow layout: where data comes from
+SOURCE_TYPES = ("sql_table", "bq_dataset", "api_source", "dataset", "file")
+# story / data pick their nodes from the whole project rather than from one
+# neighbourhood, so they need their own, tighter cap: on prov_ledger 1163 nodes
+# carry a story and an uncapped story page is 2 MB. The cut is reported as
+# `mode_total` (what the mode selected) beside `total_nodes` (the whole graph).
+MODE_MAX_NODES = 200
+
+
+def subsystem_of(file_path: str | None) -> str:
+    """Top two path segments → module key. No path → '(external)'.
+
+    A deliberate copy of skills/update-project-state-graph/scripts/graph_viz.py
+    ::subsystem_of — the backend never imports the analyzer (module docstring),
+    and this is four lines of convention, not logic worth a dependency."""
+    if not file_path:
+        return "(external)"
+    parts = file_path.replace("\\", "/").lstrip("./").split("/")
+    if len(parts) >= 3:
+        return parts[0] + "/" + parts[1]
+    if len(parts) == 2:
+        return parts[0]
+    return "(root)"
+
+
+def _adjacency(edges: list[dict]) -> dict[str, set[str]]:
+    adj: dict[str, set[str]] = {}
+    for e in edges:
+        adj.setdefault(e["src_key"], set()).add(e["dst_key"])
+        adj.setdefault(e["dst_key"], set()).add(e["src_key"])
+    return adj
+
+
+def _neighbourhood(nodes: list[dict], edges: list[dict], focus: str,
+                   hops: int, max_nodes: int) -> tuple[set[str] | None, str | None, bool]:
+    """(keys to keep, the focus node_key, truncated) — (None, None, False) when
+    `focus` names nothing in this graph, so the caller can show the whole thing
+    and SAY the focus was not found rather than render an empty canvas."""
+    by_key = {n["node_key"]: n for n in nodes}
+    key = focus if focus in by_key else next((n["node_key"] for n in nodes if n["qualified_name"] == focus), None)
+    if key is None:
+        return None, None, False
+    adj = _adjacency(edges)
+    seen, frontier, truncated = {key}, {key}, False
+    for _ in range(max(0, int(hops))):
+        nxt = {k for f in frontier for k in adj.get(f, ()) if k not in seen and k in by_key}
+        if not nxt:
+            break
+        room = max_nodes - len(seen)
+        if len(nxt) > room:
+            nxt = set(sorted(nxt, key=lambda k: by_key[k]["qualified_name"])[:room])
+            truncated = True
+        seen |= nxt
+        frontier = nxt
+        if truncated:
+            break
+    return seen, key, truncated or len(seen) < len(nodes)
+
+
+def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "functions",
+             mode: str = "full", focus: str | None = None, hops: int = NEIGHBOURHOOD_HOPS,
+             story_keys=None, max_nodes: int | None = None,
+             cluster_above: int = CLUSTER_ABOVE, crowd: int = CROWDED_LEVEL) -> dict:
     """{nodes: [{node_key, qualified_name, node_type, file_path}], edges: [{src_key, dst_key, edge_type}],
-    run_id, edges_from, level}. Nodes come from node_snapshot of `run_id` (the
-    newest run when None). Edges have no run dimension in the graph — they are
-    the latest graph's, mapped through node_key, and the result says so
-    (`edges_from: 'latest'`), never silently. level=functions keeps
-    function / method / route and calls / downstream_data_feed; full keeps all."""
+    run_id, edges_from, level, mode, total_nodes, mode_total, truncated, focus_key, focus_found, hops}.
+
+    Nodes come from node_snapshot of `run_id` (the newest run when None). Edges
+    have no run dimension in the graph — they are the latest graph's, mapped
+    through node_key, and the result says so (`edges_from: 'latest'`), never
+    silently. `level` filters node TYPES (functions keeps function / method /
+    route and calls / downstream_data_feed; full keeps all); `mode` decides how
+    much of that graph is drawn (see GRAPH_MODES). `total_nodes` is always the
+    full count at `level` and `mode_total` what the mode picked before the cap,
+    so a cropped view can always say exactly what it cropped."""
     if not psg_db_path:
         return {"nodes": [], "edges": [], "run_id": None, "edges_from": "none", "level": level}
     latest = _query(psg_db_path, "SELECT MAX(run_id) AS r FROM node_snapshot")
@@ -293,19 +383,195 @@ def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "f
     run = int(run_id) if run_id is not None else latest_run
     if run is None:
         return {"nodes": [], "edges": [], "run_id": None, "edges_from": "none", "level": level}
-    type_filter = f"AND node_type IN ({','.join('?' * len(APP_FUNC_TYPES))})" if level == "functions" else ""
-    params: tuple = (run, *APP_FUNC_TYPES) if level == "functions" else (run,)
-    rows = _query(psg_db_path, f"SELECT node_key, qualified_name, node_type, file_path FROM node_snapshot WHERE run_id = ? AND node_key <> '' {type_filter} ORDER BY qualified_name", params)
-    nodes = [{"node_key": r["node_key"], "qualified_name": r["qualified_name"], "node_type": r["node_type"], "file_path": r["file_path"]} for r in rows]
-    keep = {n["node_key"] for n in nodes}
-    edge_filter = f"AND t.name IN ({','.join('?' * len(FLOW_EDGES))})" if level == "functions" else ""
+    mode = mode if mode in GRAPH_MODES else "full"
+    if max_nodes is None:
+        max_nodes = NEIGHBOURHOOD_MAX_NODES
+    rows = _query(psg_db_path, "SELECT node_key, qualified_name, node_type, file_path FROM node_snapshot "
+                               "WHERE run_id = ? AND node_key <> '' ORDER BY qualified_name", (run,))
+    every = [{"node_key": r["node_key"], "qualified_name": r["qualified_name"], "node_type": r["node_type"],
+              "file_path": r["file_path"]} for r in rows]
+    at_level = [n for n in every if level != "functions" or n["node_type"] in APP_FUNC_TYPES]
+    total_nodes = len(at_level)
     erows = _query(psg_db_path,
-                   f"SELECT s.node_key AS src_key, d.node_key AS dst_key, t.name AS edge_type FROM edge e "
-                   f"JOIN edge_type t ON t.id = e.edge_type_id JOIN node s ON s.id = e.src_node_id JOIN node d ON d.id = e.dst_node_id "
-                   f"WHERE s.node_key IS NOT NULL AND d.node_key IS NOT NULL {edge_filter}", FLOW_EDGES if level == "functions" else ())
-    edges = [{"src_key": r["src_key"], "dst_key": r["dst_key"], "edge_type": r["edge_type"]} for r in erows if r["src_key"] in keep and r["dst_key"] in keep]
+                   "SELECT s.node_key AS src_key, d.node_key AS dst_key, t.name AS edge_type FROM edge e "
+                   "JOIN edge_type t ON t.id = e.edge_type_id JOIN node s ON s.id = e.src_node_id JOIN node d ON d.id = e.dst_node_id "
+                   "WHERE s.node_key IS NOT NULL AND d.node_key IS NOT NULL")
+    all_edges = [{"src_key": r["src_key"], "dst_key": r["dst_key"], "edge_type": r["edge_type"]} for r in erows]
+
+    focus_key, focus_found, truncated = None, False, False
+    if mode in ("story", "data"):
+        # story / data reason over every node type and every edge type: a data node
+        # is invisible at level=functions, and `reads_sql` is not a flow edge.
+        nodes, pool_edges = every, all_edges
+        present = {n["node_key"] for n in nodes}
+        edges = [e for e in pool_edges if e["src_key"] in present and e["dst_key"] in present]
+        adj = _adjacency(edges)
+        data_keys = {n["node_key"] for n in nodes if n["node_type"] in DATA_TYPES}
+        if mode == "story":
+            # story_keys may be an ORDERED sequence (queries sorts it by badge,
+            # most-storied first) so the cap keeps the nodes with the most to say
+            ranked = list(dict.fromkeys(story_keys or ()))
+            rank = {k: i for i, k in enumerate(ranked)}
+            wanted = set(ranked)
+            seeds = [n["node_key"] for n in nodes if n["node_key"] in wanted or n["qualified_name"] in wanted]
+            seeds.sort(key=lambda k: rank.get(k, len(rank)))
+            order = {k: i for i, k in enumerate(seeds)}
+            neighbours = [k for s in seeds for k in sorted(adj.get(s, ())) if k in data_keys]
+            for k in dict.fromkeys(neighbours):
+                order.setdefault(k, len(order))
+            keep = set(seeds) | set(neighbours)
+        else:
+            # data nodes first, the functions that touch them after: a cap eats the tail
+            ordered_data = sorted(data_keys)
+            order = {k: i for i, k in enumerate(ordered_data)}
+            touching = [k for d in ordered_data for k in sorted(adj.get(d, ())) if k not in data_keys]
+            for k in dict.fromkeys(touching):
+                order.setdefault(k, len(order))
+            keep = data_keys | set(touching)
+        nodes = [n for n in nodes if n["node_key"] in keep]
+        mode_total = len(nodes)
+        edges = [e for e in edges if e["src_key"] in keep and e["dst_key"] in keep]
+        truncated = len(nodes) < total_nodes
+    else:
+        nodes = at_level
+        mode_total = len(nodes)
+        keep = {n["node_key"] for n in nodes}
+        edge_types = FLOW_EDGES if level == "functions" else None
+        edges = [e for e in all_edges if e["src_key"] in keep and e["dst_key"] in keep
+                 and (edge_types is None or e["edge_type"] in edge_types)]
+        if mode == "focus" and focus:
+            neigh, focus_key, truncated = _neighbourhood(nodes, edges, focus, hops, max_nodes)
+            focus_found = neigh is not None
+            if neigh is not None:
+                nodes = [n for n in nodes if n["node_key"] in neigh]
+                edges = [e for e in edges if e["src_key"] in neigh and e["dst_key"] in neigh]
+                mode_total = len(nodes)
+    # Past the threshold the picture is clustered by module, never cropped: the
+    # clusters' node counts add up to exactly what the mode selected.
+    layout = "physics" if mode == "full" else "hierarchical"
+    _assign_levels(nodes, edges, focus_key if mode == "focus" else None)
+    _split_crowded_levels(nodes, crowd)
+    clusters = _cluster_by_module(nodes, edges) if len(nodes) > cluster_above else []
     return {"nodes": nodes, "edges": edges, "run_id": run, "edges_from": "latest" if run != latest_run else "run",
-            "latest_run_id": latest_run, "level": level}
+            "latest_run_id": latest_run, "level": level, "mode": mode, "focus": focus or None,
+            "focus_key": focus_key, "focus_found": focus_found, "hops": hops,
+            "total_nodes": total_nodes, "mode_total": mode_total, "truncated": truncated,
+            "clusters": clusters, "layout": layout}
+
+
+def _cluster_by_module(nodes: list[dict], edges: list[dict] | None = None) -> list[dict]:
+    """Group the drawn nodes by module (the top two path segments) so a large
+    selection renders as a handful of expandable bubbles. Every node belongs to
+    exactly one cluster, so the totals still reconcile."""
+    buckets: dict[str, list[dict]] = {}
+    for n in nodes:
+        buckets.setdefault(subsystem_of(n.get("file_path")), []).append(n)
+    out = [{"key": k, "label": k, "nodes": len(v), "members": [x["node_key"] for x in v],
+            "badged": sum(1 for x in v if x.get("badge")), "level": 0}
+           for k, v in sorted(buckets.items())]
+    # A cluster's layer is its depth in the MODULE-to-module flow. Taking the
+    # minimum member level put every module on row 0, because nearly every module
+    # contains something that reads a source — one row is not a layered picture.
+    of = {m: c["key"] for c in out for m in c["members"]}
+    proj = [{"src_key": of[e["src_key"]], "dst_key": of[e["dst_key"]]}
+            for e in (edges or []) if e["src_key"] in of and e["dst_key"] in of
+            and of[e["src_key"]] != of[e["dst_key"]]]
+    stand = [{"node_key": c["key"], "node_type": "module"} for c in out]
+    _assign_levels(stand, proj)
+    lv = {n["node_key"]: n["level"] for n in stand}
+    for c in out:
+        c["level"] = lv.get(c["key"], 0)
+    return out
+
+
+def _assign_levels(nodes: list[dict], edges: list[dict], focus_key: str | None = None) -> None:
+    """Give every node a LAYER, so the picture reads top to bottom.
+
+    The first version bucketed by node_type, which put every function on level 1
+    and drew 56 nodes on one horizontal line — a hierarchical layout with one
+    level is just a list. A layer has to be a depth:
+
+      with a focus  signed BFS distance from it. Callers are negative (above),
+                    the focus is 0, callees positive (below), so the thing you
+                    asked about sits in the middle and the flow runs through it.
+      otherwise     topological depth: a node with no incoming edge is 0, every
+                    other node is max(level of its predecessors) + 1. Cycles are
+                    collapsed to their entry depth rather than looping forever —
+                    a call cycle is real and must not hang the page.
+    """
+    by_key = {n["node_key"]: n for n in nodes}
+    out: dict[str, set[str]] = {}
+    inc: dict[str, set[str]] = {}
+    for e in edges:
+        a, b = e["src_key"], e["dst_key"]
+        if a not in by_key or b not in by_key or a == b:
+            continue
+        # A read edge points AT the table (`f3 --reads_sql--> orders`) but the
+        # data flows the other way. For layering, reverse it: a source a function
+        # reads is upstream of that function, which is the whole point of the
+        # data-flow picture.
+        if by_key[b].get("node_type") in SOURCE_TYPES and by_key[a].get("node_type") not in SOURCE_TYPES:
+            a, b = b, a
+        out.setdefault(a, set()).add(b)
+        inc.setdefault(b, set()).add(a)
+
+    if focus_key and focus_key in by_key:
+        level = {focus_key: 0}
+        for adj, sign in ((out, 1), (inc, -1)):
+            frontier, depth = {focus_key}, 0
+            while frontier:
+                depth += sign
+                nxt = {k for f in frontier for k in adj.get(f, ()) if k not in level}
+                for k in nxt:
+                    level[k] = depth
+                frontier = nxt
+        for k, n in by_key.items():
+            n["level"] = level.get(k, 0)
+        return
+
+    # Kahn's algorithm, with the remainder (the cycles) placed at the depth they
+    # were reached from instead of being dropped
+    remaining = {k: set(inc.get(k, set())) for k in by_key}
+    level = {k: 0 for k in by_key if not remaining[k]}
+    queue = list(level)
+    while queue:
+        k = queue.pop(0)
+        for nxt in out.get(k, ()):
+            remaining[nxt].discard(k)
+            level[nxt] = max(level.get(nxt, 0), level[k] + 1)
+            if not remaining[nxt] and nxt not in queue and nxt not in level.keys() - set(queue):
+                queue.append(nxt)
+            elif not remaining[nxt] and nxt not in queue:
+                queue.append(nxt)
+    for k in by_key:
+        if k not in level:                      # inside a cycle: one below its shallowest entry
+            preds = [level[p] for p in inc.get(k, ()) if p in level]
+            level[k] = (min(preds) + 1) if preds else 0
+    for k, n in by_key.items():
+        n["level"] = int(level.get(k, 0))
+
+
+def _split_crowded_levels(nodes: list[dict], crowd: int = CROWDED_LEVEL) -> None:
+    """Give every node `level * 10 + sub-row`, splitting a crowded level by module.
+
+    A level holding 25 nodes is 4500px wide and renders as a smear whatever the
+    zoom. Splitting it by module keeps the band's meaning (same depth) while
+    giving the nodes somewhere to go, and grouping by module means the sub-rows
+    are not arbitrary — they are the thing the nodes have in common."""
+    bands: dict[int, list[dict]] = {}
+    for n in nodes:
+        bands.setdefault(int(n.get("level", 0)), []).append(n)
+    for level, members in bands.items():
+        if len(members) <= crowd:
+            for n in members:
+                n["level"] = level * 10
+            continue
+        by_mod: dict[str, list[dict]] = {}
+        for n in members:
+            by_mod.setdefault(subsystem_of(n.get("file_path")), []).append(n)
+        for row, mod in enumerate(sorted(by_mod, key=lambda m: (-len(by_mod[m]), m))):
+            for n in by_mod[mod]:
+                n["level"] = level * 10 + min(row, 9)
 
 
 def latest_tier_of(psg_db_path: str | None, run_id: int | None = None) -> dict[str, str]:

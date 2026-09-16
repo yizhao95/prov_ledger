@@ -35,7 +35,9 @@ def client(tmp_path, monkeypatch):
 
 
 def _bar(html: str) -> dict:
-    m = re.search(r'<nav class="[^"]*" data-view-bar data-view="([^"]*)"\s+data-project="([^"]*)" data-node="([^"]*)" data-at="([^"]*)"', html)
+    # the nav carries other attributes too (DP 2d added data-transition) — match on
+    # the data-* the bar is identified by, not on their position after class=
+    m = re.search(r'<nav [^>]*data-view-bar data-view="([^"]*)"\s+data-project="([^"]*)" data-node="([^"]*)" data-at="([^"]*)"', html)
     assert m, "no view bar"
     links = dict(re.findall(r'<a href="([^"]+)" data-view-link="(\w+)"', html))
     return {"view": m.group(1), "project": m.group(2), "node": m.group(3), "at": m.group(4),
@@ -43,21 +45,24 @@ def _bar(html: str) -> dict:
 
 
 def test_round_trip_keeps_the_triple(client):
+    """DP phase 2d: the bare `at=2` of 2b is normalised to `run:2` on the first
+    hop and then carried verbatim — the round trip still loses nothing, and now
+    every link says what its anchor IS."""
     pid = client._seeded["plan_id"]
     conn = odb.open_db(client._db); conn.execute("UPDATE Plans SET project='demo' WHERE plan_id=?", (pid,)); conn.commit(); conn.close()
     g = _bar(client.get("/graph/demo?focus=pkg.m.load_orders&at=2").text)
-    assert g["view"] == "graph" and (g["project"], g["node"], g["at"]) == ("demo", "pkg.m.load_orders", "2")
-    assert g["links"]["node"] == "/node/demo/pkg.m.load_orders?at=2"
+    assert g["view"] == "graph" and (g["project"], g["node"], g["at"]) == ("demo", "pkg.m.load_orders", "run:2")
+    assert g["links"]["node"] == "/node/demo/pkg.m.load_orders?at=run%3A2"
     n = _bar(client.get(g["links"]["node"]).text)
-    assert n["view"] == "node" and (n["project"], n["node"], n["at"]) == ("demo", "pkg.m.load_orders", "2")
-    assert n["links"]["graph"] == "/graph/demo?focus=pkg.m.load_orders&at=2"
+    assert n["view"] == "node" and (n["project"], n["node"], n["at"]) == ("demo", "pkg.m.load_orders", "run:2")
+    assert n["links"]["graph"] == "/graph/demo?focus=pkg.m.load_orders&at=run%3A2"
     # Task: the node page knows the plans that touched the node; follow its Task link with the node carried along
-    t_url = f"/plan/{pid}?node=pkg.m.load_orders&at=2"
+    t_url = f"/plan/{pid}?node=pkg.m.load_orders&at=run:2"
     t = _bar(client.get(t_url).text)
-    assert t["view"] == "task" and (t["project"], t["node"], t["at"]) == ("demo", "pkg.m.load_orders", "2")
-    assert t["links"]["graph"] == "/graph/demo?focus=pkg.m.load_orders&at=2" and t["links"]["node"] == "/node/demo/pkg.m.load_orders?at=2"
+    assert t["view"] == "task" and (t["project"], t["node"], t["at"]) == ("demo", "pkg.m.load_orders", "run:2")
+    assert t["links"]["graph"] == "/graph/demo?focus=pkg.m.load_orders&at=run%3A2" and t["links"]["node"] == "/node/demo/pkg.m.load_orders?at=run%3A2"
     back = _bar(client.get(t["links"]["graph"]).text)
-    assert (back["project"], back["node"], back["at"]) == ("demo", "pkg.m.load_orders", "2")     # the round trip loses nothing
+    assert (back["project"], back["node"], back["at"]) == ("demo", "pkg.m.load_orders", "run:2")     # the round trip loses nothing
 
 
 def test_task_view_highlights_the_focused_node(client):
@@ -84,4 +89,4 @@ def test_bar_survives_a_missing_graph(client, tmp_path, monkeypatch):
     html = client.get("/graph/demo?focus=x&at=3").text
     assert 'data-state="unavailable"' in html
     b = _bar(html)
-    assert b["view"] == "graph" and b["node"] == "x" and b["at"] == "3" and b["links"]["node"] == "/node/demo/x?at=3"
+    assert b["view"] == "graph" and b["node"] == "x" and b["at"] == "run:3" and b["links"]["node"] == "/node/demo/x?at=run%3A3"

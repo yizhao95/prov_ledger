@@ -638,13 +638,28 @@ def outcome_badge(outcome: str | None) -> tuple[str, str]:
 # The LABEL is the differentiator (E3-1): every tier reads as its own word, the
 # tint only reinforces it. `unstated` is the display tier of a reason row whose
 # text is NULL — an explicit gap, shown as such, never blended into the rest.
-TIER_BADGES = {
-    "observed": ("observed", "bg-brand-green/10 text-brand-green"),
-    "derived":  ("derived",  "bg-brand-blue/10 text-brand-blue"),
-    "asserted": ("asserted", "bg-brand-spark/15 text-[#7a5200]"),
-    "stated":   ("stated",   "bg-brand-gray/10 text-brand-gray"),
-    "unstated": ("unstated", "bg-brand-red/10 text-brand-red"),
-}
+# DP phase 2d (Task 1): the five rows come from app/static/tokens.json, the same
+# file the Jinja chrome and the React library are generated from — a palette kept
+# by hand in two languages drifts, and a drifting tier colour is a drifting claim.
+TOKENS_PATH = Path(__file__).resolve().parent / "static" / "tokens.json"
+
+
+def _load_tokens() -> dict:
+    """Read the token file once at import. A missing or broken file is not a
+    reason to render a blank dashboard, so the five tiers keep a literal
+    fallback — and say, in the returned dict, that it is one."""
+    try:
+        doc = json.loads(TOKENS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"tiers": {t: {"label": t, "classes": "bg-brand-red/10 text-brand-red"}
+                          for t in ("observed", "derived", "asserted", "stated", "unstated")},
+                "colors": {}, "severities": {}, "degraded": True}
+    doc["degraded"] = False
+    return doc
+
+
+TOKENS = _load_tokens()
+TIER_BADGES = {tier: (row["label"], row["classes"]) for tier, row in TOKENS["tiers"].items()}
 
 
 def tier_badge(tier: str | None) -> tuple[str, str]:
@@ -800,7 +815,151 @@ except Exception:                      # pragma: no cover — "state graph unava
     _psg = None
 
 
-def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str) -> dict:
+# ── DP phase 2d (Task 3b): one timeline of significant moments ───────────────
+# A real node carries hundreds of events and most of them are `node_matched` —
+# "the analyser recognised this again", true and silent. The timeline keeps the
+# moments where something actually changed and FOLDS the rest behind a count:
+# a count is the difference between "nothing happened" and "we stopped showing
+# you", and only one of those is honest.
+SIGNIFICANT_EVENTS = ("node_added", "node_changed", "node_renamed", "node_moved",
+                      "column_dropped", "node_removed", "removed", "identity_asserted")
+QUIET_EVENTS = ("node_matched", "identity_kept")
+SHOW_TIERS = ("observed", "derived", "asserted", "stated", "unstated")
+SHOW_SINCE = {"7d": 7, "30d": 30}
+
+
+def parse_show(show: str | None) -> dict:
+    """The chip state, from `?show=`. Comma-separated; `key:value` narrows,
+    a bare word is a flag. Unknown keys and values are IGNORED rather than
+    emptying the page — a filter nobody can spell should not look like a node
+    with no history."""
+    state = {"all": False, "adopted": False, "events": [], "tier": [], "since": None, "raw": show or ""}
+    for part in (show or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if part == "all":
+            state["all"] = True
+        elif part == "adopted":
+            state["adopted"] = True
+        elif part.startswith("events:"):
+            state["events"] += [e for e in part[7:].split("|") if e]
+        elif part.startswith("tier:"):
+            state["tier"] += [t for t in part[5:].split("|") if t in SHOW_TIERS]
+        elif part.startswith("since:") and part[6:] in SHOW_SINCE:
+            state["since"] = part[6:]
+    return state
+
+
+def _within(ts: str | None, since: str | None) -> bool:
+    if not since or not ts:
+        return True
+    from datetime import datetime, timedelta, timezone
+    try:
+        when = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when >= datetime.now(timezone.utc) - timedelta(days=SHOW_SINCE[since])
+
+
+def _timeline_rows(base: dict) -> list[dict]:
+    """Events, reasons, rejected paths and constraints merged into one rail,
+    newest first — layout spec 2: one row per moment, on one line."""
+    rows: list[dict] = []
+    for run in base["runs"]:
+        for e in run["events"]:
+            rows.append({"kind": "event", "event_type": e["event_type"], "tier": e["tier"],
+                         "run_id": run["run_id"], "plan_id": run.get("plan_id"), "step_id": run.get("step_id"),
+                         "commit_sha": run.get("commit_sha"), "at": e.get("created_at"),
+                         "payload": e.get("payload") or {}, "significant": e["event_type"] in SIGNIFICANT_EVENTS})
+    for r in base["reasons"]:
+        rows.append({"kind": "reason", "event_type": None, "tier": r.get("display_tier") or r.get("tier"),
+                     "run_id": r.get("run_id"), "plan_id": r.get("plan_id"), "step_id": r.get("step_id"),
+                     "at": r.get("created_at"), "record": r,
+                     "significant": (r.get("significance_eff") or "major") != "minor"})
+    for c in base["constraints"]:
+        rows.append({"kind": "constraint", "event_type": None, "tier": c.get("tier"), "run_id": None,
+                     "plan_id": c.get("plan_id"), "at": c.get("created_at"), "record": c, "significant": True})
+    rows.sort(key=lambda r: (str(r.get("at") or ""), r.get("run_id") or 0), reverse=True)
+    return rows
+
+
+def merge_decisions(rows: list[dict], hits: dict[int, int] | None = None) -> list[dict]:
+    """The rail: one row per CHANGE, one row per DECISION, and a decision appears
+    once no matter how often it was activated.
+
+    A constraint being in force, or a reason having been given, is a fact about
+    the node. Every later plan that meets it ACTIVATES it — and an activation is
+    a hit, not another line of text. Rules no longer write a second record
+    (triggers._existing_rule_reason), but 16 identical rows already exist on this
+    repo's own compute_etag, so the merge also happens here on read: rows with
+    the same (role, text, tier) become one, and each merged row counts as an
+    activation because that is what it was. The merge is reported on the row, not
+    hidden: `merged` and the plans are part of the result."""
+    hits = hits or {}
+    out: list[dict] = []
+    seen: dict[tuple, dict] = {}
+    for r in rows:
+        rec = r.get("record") or {}
+        text = (rec.get("text") or rec.get("statement") or "").strip()
+        if r.get("kind") == "event" or not text:
+            out.append({**r, "row": "change", "text": text, "hits": 0, "merged": 0, "plans": []})
+            continue
+        sig = (r.get("kind"), r.get("tier"), text)
+        if sig in seen:
+            g = seen[sig]
+            g["merged"] += 1
+            # N identical writes are N activations — including the first one, which
+            # only becomes "a write among many" once a second arrives
+            g["hits"] += 2 if g["merged"] == 1 else 1
+            if r.get("plan_id"):
+                g["plans"] = sorted(set(g["plans"] + [r["plan_id"]]))
+            g["first_at"] = min(x for x in (g["first_at"], r.get("at")) if x)
+            continue
+        stats = rec.get("stats") or {}
+        base_hits = hits.get(rec.get("id")) if rec.get("id") in hits else \
+            (stats.get("plan") or 0) + (stats.get("edit") or 0) + (stats.get("why") or 0) + (stats.get("close") or 0)
+        g = {**r, "row": "decision", "text": text, "hits": int(base_hits or 0), "merged": 0,
+             "plans": [r["plan_id"]] if r.get("plan_id") else [], "first_at": r.get("at")}
+        seen[sig] = g
+        out.append(g)
+    return out
+
+
+def filter_timeline(rows: list[dict], show: dict) -> tuple[list[dict], dict]:
+    """(kept, folded counts). Folding is always reported per reason it folded."""
+    folded = {"events": 0, "minor": 0, "filtered": 0}
+    kept = []
+    for r in rows:
+        if not show["all"]:
+            if r["kind"] == "event" and r["event_type"] in QUIET_EVENTS:
+                folded["events"] += 1
+                continue
+            if not r["significant"]:
+                folded["minor"] += 1
+                continue
+        if show["events"] and r.get("event_type") not in show["events"]:
+            folded["filtered"] += 1
+            continue
+        if show["tier"] and r.get("tier") not in show["tier"]:
+            folded["filtered"] += 1
+            continue
+        if show["since"] and not _within(r.get("at"), show["since"]):
+            folded["filtered"] += 1
+            continue
+        if show["adopted"]:
+            stats = (r.get("record") or {}).get("stats") or {}
+            if not stats.get("adopted"):
+                folded["filtered"] += 1
+                continue
+        kept.append(r)
+    return kept, folded
+
+
+def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str,
+                    significant_only: bool = True, filters: dict | None = None) -> dict:
     """Everything the dashboard shows about one node, read in one go:
     space (the consistency card: callers / output_consumers), time (every
     history event grouped by analysis run, with plan / tier), and intent (the
@@ -879,6 +1038,17 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str)
     stats = record_stats(conn, [c["id"] for c in base["constraints"]])
     for c in base["constraints"]:
         c["stats"] = stats.get(c["id"])
+    # DP phase 2d (Task 3b): one rail instead of three columns
+    show = dict(filters or parse_show(None))
+    if not significant_only:
+        show["all"] = True
+    rows = _timeline_rows(base)
+    base["timeline_all"] = rows
+    base["timeline"], base["folded"] = filter_timeline(rows, show)
+    base["rail"] = merge_decisions(base["timeline"], _read_hit_counts(conn, base))
+    base["show"] = show
+    base["upstream"] = list(base["card"].get("callers") or [])
+    base["downstream"] = list(base["card"].get("output_consumers") or [])
     base["approx_tokens"] = len(json.dumps(base, default=str)) // 4
     return base
 
@@ -1001,13 +1171,52 @@ def node_badges(conn: sqlite3.Connection, project: str) -> dict[str, dict]:
         return {}
 
 
-def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = None, level: str = "functions") -> dict:
-    """The project as it is (or was, at run `at`): nodes with their badge (how
-    many records have a story) and the tier of their latest event, edges, the
-    run list for the selector. PSG only through psg_bridge (ro); a missing
-    graph is `available: False`, never a 500."""
+NEIGHBOURHOOD_MAX_NODES = _psg.NEIGHBOURHOOD_MAX_NODES if _psg is not None else 400
+NEIGHBOURHOOD_HOPS = _psg.NEIGHBOURHOOD_HOPS if _psg is not None else 2
+# There is deliberately no flat node cap any more: a selection past this many
+# nodes is CLUSTERED by module, never cropped (the old 200 drew a quarter of a
+# 1601-node selection while the corner still said 1601).
+CLUSTER_ABOVE = _psg.CLUSTER_ABOVE if _psg is not None else 600
+GRAPH_MODES = _psg.GRAPH_MODES if _psg is not None else ("focus", "story", "data", "full")
+
+
+def resolve_mode(mode: str | None, focus: str | None) -> str:
+    """DP phase 2d: which of the four modes a request means. With a focus the
+    default is that focus's neighbourhood; without one it is `story` — the nodes
+    that have a story. An unrecognised mode falls back to the same defaults, never
+    to `full`: the whole graph is only ever drawn because someone asked for it."""
+    if mode in GRAPH_MODES:
+        return mode
+    return "focus" if focus else "story"
+
+
+def reason_run(conn: sqlite3.Connection, reason_id: int) -> dict | None:
+    """The record `at=reason:<id>` points at: its run and the node it is anchored
+    on, so the Graph view can render that run and SAY why (DP phase 2d, Task 0)."""
+    try:
+        r = conn.execute("SELECT id, run_id, node_key, project, plan_id FROM change_reason_v WHERE id = ?", (int(reason_id),)).fetchone()
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+    return dict(r) if r else None
+
+
+def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = None, level: str = "functions",
+              focus: str | None = None, mode: str | None = None, cluster_above: int | None = None) -> dict:
+    """The project as it is (or was, at `at`): nodes with their badge (how many
+    records have a story) and the tier of their latest event, edges, the run list
+    for the selector. `at` is typed (`run:` / `reason:`); a reason id is resolved
+    to the run it belongs to and the result says so. `mode` decides how much graph
+    is drawn — focus / story / data / full — and the result always carries
+    `total_nodes` so a cropped view can name what it cropped. PSG only through
+    psg_bridge (ro); a missing graph is `available: False`, never a 500."""
+    mode = resolve_mode(mode, focus)
     base = {"project": project, "available": False, "reason": None, "nodes": [], "edges": [], "runs": [], "run": None,
-            "edges_from": "none", "level": level, "badged": 0}
+            "edges_from": "none", "level": level, "badged": 0, "focus": focus or None, "mode": mode,
+            "total_nodes": 0, "mode_total": 0, "truncated": False, "focus_found": False, "hops": NEIGHBOURHOOD_HOPS,
+            "at_kind": None, "at_reason": None, "at_id": None, "story_keys": 0,
+            "clusters": [], "layout": "physics"}
+    a = parse_at(at)
+    base.update(at_kind=a["kind"], at_id=a["id"])
     if _psg is None:
         base["reason"] = "state graph unavailable: provledger.psg_bridge cannot be imported in this environment"
         return base
@@ -1015,15 +1224,20 @@ def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = Non
     if not db_path or not os.path.exists(db_path):
         base["reason"] = f"state graph unavailable: project {project!r} is not registered or its graph file is missing"
         return base
-    run_id = None
-    if at not in (None, ""):
-        try:
-            run_id = int(at)
-        except (TypeError, ValueError):
-            run_id = None
-    g = _psg.graph_at(db_path, run_id=run_id, level=level if level in ("functions", "full") else "functions")
-    tiers = _psg.latest_tier_of(db_path, run_id=g["run_id"])
+    run_id = a["id"] if a["kind"] == "run" else None
+    if a["kind"] == "reason":
+        rec = reason_run(conn, a["id"])
+        base["at_reason"] = rec
+        run_id = rec["run_id"] if rec and rec["run_id"] is not None else None
     badges = node_badges(conn, project)
+    # the badge lives in the orchestrator DB, so `story` mode's seeds are computed here —
+    # ordered by badge descending so the cap keeps the nodes with the most to say
+    story_keys = [k for k, _ in sorted(((k, int(b.get("badge") or 0)) for k, b in badges.items()),
+                                       key=lambda kv: (-kv[1], kv[0])) if _ > 0]
+    g = _psg.graph_at(db_path, run_id=run_id, level=level if level in ("functions", "full") else "functions",
+                      mode=mode, focus=focus, hops=NEIGHBOURHOOD_HOPS, story_keys=story_keys,
+                      cluster_above=CLUSTER_ABOVE if cluster_above is None else cluster_above)
+    tiers = _psg.latest_tier_of(db_path, run_id=g["run_id"])
     nodes = []
     for n in g["nodes"]:
         # a record may be anchored by node_key or by qualified name (a constraint declared by name): both count
@@ -1033,15 +1247,48 @@ def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = Non
     runs = _psg.runs_of(db_path)
     run = next((r for r in runs if r["run_id"] == g["run_id"]), None)
     base.update(available=True, nodes=nodes, edges=g["edges"], runs=runs[:50], run=run, edges_from=g["edges_from"],
-                level=g["level"], badged=sum(1 for n in nodes if n["badge"]), latest_run_id=g.get("latest_run_id"))
+                level=g["level"], badged=sum(1 for n in nodes if n["badge"]), latest_run_id=g.get("latest_run_id"),
+                total_nodes=g.get("total_nodes", len(nodes)), mode_total=g.get("mode_total", len(nodes)),
+                truncated=bool(g.get("truncated")),
+                focus_found=bool(g.get("focus_found")), hops=g.get("hops", NEIGHBOURHOOD_HOPS),
+                mode=g.get("mode", mode), story_keys=len(story_keys),
+                clusters=g.get("clusters") or [], layout=g.get("layout", "physics"))
     return base
 
 
 # ── DP phase 2b (Task 4): the context triple (project, node, at) across the three views ──
 
+AT_PREFIXES = ("run", "reason")
+
+
+def parse_at(at) -> dict:
+    """DP phase 2d (Task 0): `at` says WHAT it points at — `run:<id>` (a state-graph
+    analysis run) or `reason:<id>` (one recorded record). 2b shipped a bare id and
+    the three views disagreed about what it meant: Node treated it as both, Graph
+    always as a run, so the "被 <plan> 采用" link sent a reason id to a run lookup.
+
+    A bare number still reads as a run for one version (compatibility). Anything
+    else — a plan id, a malformed prefix — stays untyped rather than being guessed
+    into a type it does not have."""
+    if at in (None, ""):
+        return {"kind": None, "id": None, "at": None}
+    s = str(at)
+    for kind in AT_PREFIXES:
+        if s.startswith(kind + ":"):
+            rest = s[len(kind) + 1:]
+            return {"kind": kind, "id": int(rest), "at": f"{kind}:{int(rest)}"} if rest.isdigit() \
+                else {"kind": None, "id": None, "at": s}
+    if s.isdigit():
+        return {"kind": "run", "id": int(s), "at": f"run:{int(s)}"}     # compatibility: a bare id was always a run
+    return {"kind": None, "id": None, "at": s}
+
+
 def triple(project: str | None = None, node: str | None = None, at: str | None = None) -> dict:
-    """The context every view carries: missing items are simply absent (I12)."""
-    return {"project": project or None, "node": node or None, "at": (str(at) if at not in (None, "") else None)}
+    """The context every view carries: missing items are simply absent (I12).
+    `at` is normalised to its typed form (DP phase 2d) and carries its kind."""
+    a = parse_at(at)
+    return {"project": project or None, "node": node or None, "at": a["at"],
+            "at_kind": a["kind"], "at_id": a["id"]}
 
 
 def url_for_view(view: str, t: dict, plan_id: str | None = None) -> str | None:
@@ -1049,12 +1296,13 @@ def url_for_view(view: str, t: dict, plan_id: str | None = None) -> str | None:
     from urllib.parse import quote, urlencode
     q = {}
     project, node, at = t.get("project"), t.get("node"), t.get("at")
+    kind = t.get("at_kind", parse_at(at)["kind"])
     if view == "graph":
         if not project:
             return None
         if node:
             q["focus"] = node
-        if at and str(at).isdigit():
+        if at and kind in AT_PREFIXES:                  # a typed at: Graph resolves a reason to its run, never guesses
             q["at"] = at
         return f"/graph/{quote(project, safe='')}" + (f"?{urlencode(q)}" if q else "")
     if view == "node":
@@ -1064,7 +1312,7 @@ def url_for_view(view: str, t: dict, plan_id: str | None = None) -> str | None:
             q["at"] = at
         return f"/node/{quote(project, safe='')}/{quote(node, safe='')}" + (f"?{urlencode(q)}" if q else "")
     if view == "task":
-        pid = plan_id or (at if at and not str(at).isdigit() else None)
+        pid = plan_id or (at if at and kind is None else None)
         if not pid:
             return "/"
         if node:
@@ -1079,6 +1327,198 @@ def view_bar(view: str, t: dict, plan_id: str | None = None) -> dict:
     """What base.html renders: the three links (None when unreachable), the current view, the breadcrumb."""
     return {"current": view, "triple": t, "plan_id": plan_id,
             "links": {v: url_for_view(v, t, plan_id) for v in ("graph", "node", "task")}}
+
+
+# ── DP phase 2d (Task 3c): the decisions history changed, first ──────────────
+# provLedger's whole claim is "a past decision changed this plan". Until now you
+# could only find that by scrolling to a stats line on a node page. It is now the
+# Task page's first block — and a plan that adopted nothing SAYS so, because a
+# hidden block and an empty one read identically and only one is true.
+
+def changed_by_history(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
+    """Every record this plan adopted (`influence`), with the words it carries,
+    where they were recorded, and how checkable they are. Empty list on an older
+    DB — the caller renders the spoken empty state either way."""
+    try:
+        rows = conn.execute(
+            "SELECT i.reason_id, i.via, i.by, i.at, i.step_id AS adopted_in_step, i.node_key AS influence_node, "
+            "       r.plan_id AS recorded_in_plan, r.step_id AS recorded_in_step, r.node_key, r.tier, "
+            "       r.role, r.recorded_by, r.recorded_at, r.evidence_level, r.run_id, "
+            "       r.verbatim_utterance_id, r.verbatim_start, r.verbatim_end, "
+            "       COALESCE(substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start), "
+            "                r.interpretation, r.statement) AS text, "
+            "       p.original_goal AS recorded_in_title "
+            "FROM influence i JOIN change_reason_v r ON r.id = i.reason_id "
+            "LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
+            "LEFT JOIN Plans p ON p.plan_id = r.plan_id "
+            "WHERE i.plan_id = ? ORDER BY i.id", (plan_id,)).fetchall()
+    except sqlite3.Error:
+        return []
+    # a link should say the NAME of the thing, not its key (layout spec 8) — the
+    # key stays in the tooltip, so the ledger's identifier is never lost either
+    project = None
+    try:
+        row = conn.execute("SELECT project FROM Plans WHERE plan_id = ?", (plan_id,)).fetchone()
+        project = row[0] if row else None
+    except sqlite3.Error:
+        project = None
+    db_path = _psg.db_path_for(project) if (_psg is not None and project) else None
+    # Three influence rows citing the same constraint are three ADOPTIONS of one
+    # record, not three decisions. The record is listed once with its count; the
+    # individual adoptions (and how each was made) ride along for the expand.
+    out: list[dict] = []
+    by_id: dict[int, dict] = {}
+    for r in rows:
+        d = dict(r)
+        if d["reason_id"] in by_id:
+            g = by_id[d["reason_id"]]
+            g["adoptions"] += 1
+            g["vias"].append({"via": d.get("via"), "by": d.get("by"), "at": d.get("at"),
+                              "step_id": d.get("adopted_in_step")})
+            continue
+        d["adoptions"] = 1
+        d["vias"] = [{"via": d.get("via"), "by": d.get("by"), "at": d.get("at"),
+                      "step_id": d.get("adopted_in_step")}]
+        by_id[d["reason_id"]] = d
+        d["node_key"] = d["node_key"] or d["influence_node"]
+        d["qualified_name"] = d["node_key"]
+        if db_path and d["node_key"] and str(d["node_key"]).startswith("nk_"):
+            try:
+                d["qualified_name"] = _psg.latest_qualified_name(db_path, d["node_key"]) or d["node_key"]
+            except Exception:
+                pass
+        d["source_level"] = SOURCE_LEVELS.get(d.get("evidence_level") or "", d.get("evidence_level") or "—")
+        d["verbatim"] = d["tier"] == "stated"
+        out.append(d)
+    return out
+
+
+def shown_count(conn: sqlite3.Connection, plan_id: str) -> int:
+    """How many records this plan was SHOWN. Never derived from adopted (I11)."""
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM read_hit WHERE plan_id = ?", (plan_id,)).fetchone()[0])
+    except sqlite3.Error:
+        return 0
+
+
+def reason_for_mark(conn: sqlite3.Connection, reason_id: int | None) -> dict | None:
+    """One record's verbatim anchor, for marking the cited span on a plan page the
+    record was NOT adopted by (following a link from somewhere else)."""
+    if reason_id is None:
+        return None
+    try:
+        r = conn.execute("SELECT id AS reason_id, plan_id AS recorded_in_plan, step_id AS recorded_in_step, node_key, tier, "
+                         "       verbatim_utterance_id, verbatim_start, verbatim_end "
+                         "FROM change_reason_v WHERE id = ?", (int(reason_id),)).fetchone()
+    except (sqlite3.Error, TypeError, ValueError):
+        return None
+    return dict(r) if r else None
+
+
+SEARCH_LIMIT = 40
+
+
+def _qualified_for(project: str | None, node_key: str | None) -> str | None:
+    """A node's name for a key — a reader wants the name, the key belongs in the
+    tooltip (layout spec 8)."""
+    if not (project and node_key and str(node_key).startswith("nk_") and _psg is not None):
+        return node_key
+    db_path = _psg.db_path_for(project)
+    if not db_path or not os.path.exists(db_path):
+        return node_key
+    try:
+        return _psg.latest_qualified_name(db_path, node_key) or node_key
+    except Exception:
+        return node_key
+
+
+def search_records(conn: sqlite3.Connection, q: str, project: str | None = None) -> tuple[list[dict], bool, int]:
+    """(groups, degraded, hits) — records whose words match `q`, grouped by the
+    node they are recorded on. `degraded` is True when the FTS5 index was not
+    usable (the dashboard reads mode=ro and cannot build it), so the page can
+    say the result is a plain substring match rather than imply completeness."""
+    like = f"%{q.strip()}%"
+    params: list = [like, like]
+    where = "(COALESCE(r.interpretation, '') LIKE ? OR COALESCE(r.statement, '') LIKE ?"
+    where += " OR COALESCE(substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start), '') LIKE ?)"
+    params.append(like)
+    if project:
+        where += " AND r.project = ?"
+        params.append(project)
+    try:
+        rows = conn.execute(
+            "SELECT r.id AS reason_id, r.project, r.node_key, r.plan_id, r.step_id, r.tier, r.role, "
+            "       r.recorded_by, r.recorded_at, r.evidence_level, "
+            "       COALESCE(substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start), "
+            "                r.interpretation, r.statement) AS text, "
+            "       p.original_goal AS plan_title "
+            "FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
+            "LEFT JOIN Plans p ON p.plan_id = r.plan_id "
+            f"WHERE {where} AND r.state = 'active' AND r.superseded_by IS NULL "
+            "ORDER BY r.id DESC LIMIT ?", (*params, SEARCH_LIMIT)).fetchall()
+    except sqlite3.Error:
+        return [], True, 0
+    grouped: dict[str, dict] = {}
+    for r in rows:
+        d = dict(r)
+        d["source_level"] = SOURCE_LEVELS.get(d.get("evidence_level") or "", "—")
+        d["verbatim"] = d["tier"] == "stated"
+        key = d["node_key"] or "(没有锚点)"
+        g = grouped.setdefault(key, {"node_key": key, "project": d["project"], "hits": [],
+                                     "qualified_name": _qualified_for(d["project"], key)})
+        g["hits"].append(d)
+    # `degraded` is True by construction: the read-only connection cannot build or
+    # trust the FTS index, so this is LIKE, and the page says so.
+    return list(grouped.values()), True, len(rows)
+
+
+def _read_hit_counts(conn: sqlite3.Connection, base: dict) -> dict[int, int]:
+    """How often each of this node's records was surfaced. Counted from read_hit,
+    never inferred from how many rows exist."""
+    ids = [r["id"] for r in (base.get("reasons") or []) + (base.get("constraints") or []) if r.get("id")]
+    if not ids:
+        return {}
+    ph = ",".join("?" * len(ids))
+    try:
+        return {r[0]: r[1] for r in conn.execute(
+            f"SELECT reason_id, COUNT(*) FROM read_hit WHERE reason_id IN ({ph}) GROUP BY reason_id", ids)}
+    except sqlite3.Error:
+        return {}
+
+
+TRACE_STRIP_MAX = 8
+
+
+def trace_strip(ledger: dict, limit: int = TRACE_STRIP_MAX) -> list[dict]:
+    """The latest moment of each KIND, newest first — at most one structural
+    change, one stated reason, one asserted reason, one constraint, one outcome.
+
+    Taking the latest N rows instead put the same repeated sentence in every
+    line, which told the reader nothing. Everything past the cut is still in the
+    timeline below: this crops a summary, not the record."""
+    rows = [r for r in (ledger.get("timeline") or []) if r.get("significant", True)]
+    rows.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
+    seen: dict[str, dict] = {}
+    for r in rows:
+        seen.setdefault(_recent_kind(r), r)
+    out = [seen[k] for k in RECENT_KINDS if k in seen]
+    out.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
+    return out[:max(0, min(int(limit), 5))]
+
+
+def mark_span(text: str | None, start: int | None, end: int | None) -> str:
+    """The text with [start, end) wrapped in <mark>, HTML-escaped around it.
+
+    A span that does not fit the text is a data problem, not a reason to mangle
+    the quote: the text comes back escaped and unmarked."""
+    import html as _html
+    if not text:
+        return ""
+    if start is None or end is None or not (0 <= int(start) < int(end) <= len(text)):
+        return _html.escape(text)
+    s, e = int(start), int(end)
+    return (_html.escape(text[:s]) + '<mark class="bg-brand-spark/30 rounded px-0.5" data-span="1">'
+            + _html.escape(text[s:e]) + "</mark>" + _html.escape(text[e:]))
 
 
 # ── DP phase 2b (Task 5): session cards ─────────────────────────────────────────

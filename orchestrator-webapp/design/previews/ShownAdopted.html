@@ -1,0 +1,40 @@
+<!-- @dsCard group="Provenance" -->
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShownAdopted — provLedger Design</title>
+<link rel="stylesheet" href="../dist/styles.css">
+<style>
+  main { max-width: 880px; margin: 0 auto; padding: 24px; }
+  header h1 { font-size: 1.125rem; font-weight: 600; margin: 0 0 4px; }
+  header p { font-size: .75rem; color: var(--pl-brand-muted); margin: 0 0 24px; }
+  section[data-variant] { margin: 0 0 28px; }
+  .variant-label { font-size: .6875rem; text-transform: uppercase; letter-spacing: .06em;
+                   color: var(--pl-brand-muted); font-weight: 500; margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>ShownAdopted</h1>
+    <p>被看到 ≠ 改变了计划。两个计数永不互相推导。</p>
+  </header>
+  <section data-variant="看到过，也被采用了">
+    <h2 class="variant-label">看到过，也被采用了</h2>
+    <div data-host="0"></div>
+  </section>
+  <section data-variant="看到了，但没被采用">
+    <h2 class="variant-label">看到了，但没被采用</h2>
+    <div data-host="1"></div>
+  </section>
+</main>
+<script src="../dist/_ds_bundle.js"></script>
+<script>
+  var D = window.ProvLedgerDS, React = D.__React;
+  D.__render(React.createElement(D.ShownAdopted,{shown:[{reason_id:1414,text:'load_orders 只保留已付款的订单',moment:'plan'},{reason_id:1414,text:'load_orders 只保留已付款的订单',moment:'edit'}],adopted:[{reason_id:1414,text:'load_orders 只保留已付款的订单',via:'headline_response',by:'agent'}]}), document.querySelector('[data-host="0"]'));
+  D.__render(React.createElement(D.ShownAdopted,{shown:[{reason_id:99,text:'按自然周切分上次试过，财务对不上',moment:'plan'}],adopted:[]}), document.querySelector('[data-host="1"]'));
+</script>
+</body>
+</html>

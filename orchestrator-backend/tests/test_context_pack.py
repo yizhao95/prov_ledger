@@ -160,3 +160,38 @@ def test_structure_folds_into_counts_when_records_alone_cannot_reach_the_budget(
     big = cp.build(conn, project="proj", targets=["pkg.m.load_orders"], psg_db_path=graph, budget_tokens=100000, record=False)
     assert len(big.targets[0].callers) == cp.CAP_CALLERS and big.targets[0].counts["callers"] == 120        # callers are always capped
     assert big.targets[0].dtype_map and big.targets[0].lineage_downstream                                  # nothing else folds under a large budget
+
+
+# ── DP phase 2d (Task 5): the cards store BARE names (FL-047) ────────────────
+# consistency_card records callees as `discount_rate`, not
+# `pkg.rollup.discount_rate`. _node_key resolved exact names and dotted
+# suffixes, so a bare name never matched anything — which meant
+# removed_upstream could not fire on a real graph at all. A bare name now
+# resolves when it is UNAMBIGUOUS, and stays unresolved when it is not:
+# guessing which `__init__` a card meant would be worse than saying nothing.
+
+def test_a_bare_callee_name_resolves_when_it_is_unambiguous(tmp_path):
+    from orchestrator import context_pack as cp
+    path = tmp_path / "g.db"
+    c = ps.build(path)
+    ps.add_run(c, 1)
+    ps.add_snapshot(c, 1, "nk_one", "pkg.rollup.discount_rate")
+    c.commit(); c.close()
+    psg = sqlite3.connect(str(path))
+    assert cp._node_key(psg, "discount_rate") == "nk_one"
+    assert cp._node_key(psg, "pkg.rollup.discount_rate") == "nk_one"
+    psg.close()
+
+
+def test_an_ambiguous_bare_name_stays_unresolved(tmp_path):
+    from orchestrator import context_pack as cp
+    path = tmp_path / "g.db"
+    c = ps.build(path)
+    ps.add_run(c, 1)
+    ps.add_snapshot(c, 1, "nk_a", "pkg.a.__init__")
+    ps.add_snapshot(c, 1, "nk_b", "pkg.b.__init__")
+    c.commit(); c.close()
+    psg = sqlite3.connect(str(path))
+    assert cp._node_key(psg, "__init__") is None
+    assert cp._node_key(psg, "nothing_like_this") is None
+    psg.close()

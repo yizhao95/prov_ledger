@@ -6,7 +6,7 @@ Routes:
   GET /api/health       — JSON ping for uptime monitoring
   GET /outcomes         — every claim across plans with its latest outcome (phase 8, FL-042)
   GET /node/{project}/{qualified_name} — one node's space / time / intent ledger (phase 8, FL-009)
-  GET /graph/{project}?focus=&at=&level= — the project as it is, or was at a run (DP phase 2b)
+  GET /graph/{project}?focus=&at=&level=&mode= — the project, cropped to focus | story | data | full (DP phase 2b/2d)
   GET /session/{session_id} — what a session said, cost, changed, published (DP phase 2b)
 
 Read-only access to ~/skill-workspace/orchestrator.db. Never mutates.
@@ -18,9 +18,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app import queries
+from app import queries, vocab
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -37,8 +38,22 @@ TEMPLATES.env.globals["relative_time"] = queries.relative_time
 TEMPLATES.env.globals["outcome_badge"] = queries.outcome_badge
 TEMPLATES.env.globals["db_path_display"] = queries.db_path_display
 TEMPLATES.env.globals["tier_badge"] = queries.tier_badge
+# DP phase 2d (Task 3d): the reader's words. `|say` translates one of the ledger's
+# tokens for display; every data-* attribute keeps the token itself.
+TEMPLATES.env.filters["say"] = lambda token, kind="term", lang="zh": vocab.say(token, kind=kind, lang=lang)
+TEMPLATES.env.globals["vocab"] = vocab
+TEMPLATES.env.globals["ui"] = vocab.ui
 
 app = FastAPI(title="provLedger Dashboard", version="0.1.0")
+# DP phase 2d (Task 1): the generated tokens.js the chrome reads. StaticFiles
+# serves GET and HEAD only — the read-only dashboard stays read-only.
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+
+def _lang(request: Request) -> str:
+    """DP phase 2d (Task 3d): `?lang=en` switches the words for this request.
+    An unrecognised value falls back to the default rather than blanking the page."""
+    return vocab.lang_of(request.query_params.get("lang"))
 
 
 def _build_context(request: Request, plan_id: str | None = None, node: str | None = None, at: str | None = None) -> dict:
@@ -56,6 +71,7 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
             "deviations": [], "data_profiles": [], "data_decisions": [],
             "node_reasons": [], "unstated": {"slots": 0, "unstated": 0, "pct": 0}, "outcomes": [],
             "headline": None, "shown_adopted": {"plan": {"shown": [], "adopted": []}, "steps": {}}, "overhead": None,
+            "changed_by_history": [], "shown_total": 0, "marked_query": None, "at_reason": None, "lang": _lang(request),
             "total_plans": 0, "db_size_kb": 0, "viewing_plan_id": plan_id,
             "focus_node": node, "focus_at": at, "bar": queries.view_bar("task", queries.triple(None, node, at), plan_id),
             "plan_session": None, "session_plans": [], "recent_sessions": [],
@@ -107,6 +123,23 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
         plan_session = plan.get("session_id") if plan else None
         session_plans = [dict(r) for r in conn.execute("SELECT plan_id, status FROM Plans WHERE session_id = ? AND plan_id <> ? ORDER BY created_at", (plan_session, plan["plan_id"]))] if plan_session else []
         recent_sessions = queries.recent_sessions(conn) if not plan_id else []
+        # DP phase 2d (Task 3c): the adopted records, the shown count (never derived
+        # from it — I11), and, when the URL points at one record, the user's words
+        # with exactly the cited span marked. These read the DB, so they belong
+        # INSIDE the try: after `finally: conn.close()` they would silently return
+        # empty, which is precisely the kind of quiet nothing this project exists
+        # to stop (and did, in the first run of this suite).
+        changed_by_history = queries.changed_by_history(conn, plan["plan_id"]) if plan else []
+        shown_total = queries.shown_count(conn, plan["plan_id"]) if plan else 0
+        at_parsed = queries.parse_at(at)
+        at_reason = None
+        if at_parsed["kind"] == "reason":
+            at_reason = next((r for r in changed_by_history if r["reason_id"] == at_parsed["id"]), None)
+            if at_reason is None:
+                at_reason = queries.reason_for_mark(conn, at_parsed["id"])
+        marked_query = None
+        if plan and plan.get("user_query") and at_reason and at_reason.get("verbatim_utterance_id"):
+            marked_query = queries.mark_span(plan["user_query"], at_reason.get("verbatim_start"), at_reason.get("verbatim_end"))
     except sqlite3.Error as e:
         return _error_ctx(f"database error: {e}")
     finally:
@@ -132,6 +165,12 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
         "headline": headline,
         "shown_adopted": shown_adopted,
         "overhead": overhead,
+        # DP phase 2d (Task 3c): what history changed about THIS plan, first on the page
+        "changed_by_history": changed_by_history,
+        "shown_total": shown_total,
+        "at_reason": at_reason,
+        "marked_query": marked_query,
+        "lang": _lang(request),
         "total_steps": len(steps),
         "progress_pct": int(100 * completed / len(steps)) if steps else 0,
         "total_plans": total_plans,
@@ -228,6 +267,32 @@ def dashboard_partial(request: Request, plan: str | None = None, node: str | Non
     return response
 
 
+@app.get("/search", response_class=HTMLResponse)
+def search(request: Request, q: str | None = None, project: str | None = None):
+    """DP phase 2d (Task 3c): find the words again. Shares `why --search`'s query,
+    grouped by the node they are recorded on. Read-only in the strict sense: the
+    dashboard's connection is mode=ro, so the FTS5 index cannot be BUILT here and
+    the search degrades to LIKE — which the page states rather than pretending
+    the results are complete."""
+    ctx = {"request": request, "error": None, "q": q or "", "project": project, "groups": [],
+           "degraded": False, "hits": 0, "lang": _lang(request),
+           "bar": queries.view_bar("search", queries.triple(project, None, None))}
+    if not (q or "").strip():
+        return TEMPLATES.TemplateResponse(request, "search.html", ctx)
+    try:
+        conn = queries.open_db_readonly()
+    except FileNotFoundError as e:
+        ctx["error"] = f"orchestrator.db not found: {e}"
+        return TEMPLATES.TemplateResponse(request, "search.html", ctx)
+    try:
+        ctx["groups"], ctx["degraded"], ctx["hits"] = queries.search_records(conn, q, project)
+    except sqlite3.Error as e:
+        ctx["error"] = f"database error: {e}"
+    finally:
+        conn.close()
+    return TEMPLATES.TemplateResponse(request, "search.html", ctx)
+
+
 @app.get("/api/health")
 def health():
     """JSON ping. Useful for `curl` smoke tests + monitoring."""
@@ -297,26 +362,64 @@ def session_card(request: Request, session_id: str):
     return TEMPLATES.TemplateResponse(request, "session.html", ctx)
 
 
+# Removing the node cap must not move the cost from the picture to the payload:
+# a clustered page carries the cluster summaries and the minimum each node needs
+# to be drawn and expanded, not 1601 full records.
+COMPACT_NODE_FIELDS = ("node_key", "qualified_name", "node_type", "level", "badge", "tier")
+
+
+def graph_payload(graph: dict) -> dict:
+    nodes, edges = graph["nodes"], graph["edges"]
+    clusters = graph.get("clusters") or []
+    if clusters:
+        nodes = [{k: n[k] for k in COMPACT_NODE_FIELDS if k in n} for n in nodes]
+        # module-to-module flow, aggregated. 1601 nodes drag ~12k edges behind
+        # them and that is most of the payload; a clustered picture is about
+        # which module feeds which, and the per-node detail is one click away in
+        # the focused view — which the page says rather than leaving it implied.
+        of = {m: f"cluster:{c['key']}" for c in clusters for m in c["members"]}
+        weights: dict[tuple[str, str], int] = {}
+        for e in edges:
+            a, b = of.get(e["src_key"]), of.get(e["dst_key"])
+            if a and b and a != b:
+                weights[(a, b)] = weights.get((a, b), 0) + 1
+        edges = [{"src_key": a, "dst_key": b, "weight": w} for (a, b), w in sorted(weights.items())]
+    return {"nodes": nodes, "edges": edges, "clusters": clusters,
+            "layout": graph.get("layout", "physics")}
+
+
 @app.get("/graph/{project}", response_class=HTMLResponse)
-def graph_view(request: Request, project: str, focus: str | None = None, at: str | None = None, level: str = "functions"):
+def graph_view(request: Request, project: str, focus: str | None = None, at: str | None = None,
+               level: str = "functions", mode: str | None = None):
     """DP phase 2b (Task 3): the project as it is (or was, at a run) — nodes with a
-    badge (records with a story) and the tier of their latest event. PSG only
-    through psg_bridge; a missing graph is 200 + "state graph unavailable"."""
+    badge (records with a story) and the tier of their latest event. DP phase 2d
+    (Task 0): `at` is typed (`run:` / `reason:`) and `mode` decides how much graph
+    is drawn — the focus neighbourhood by default, `story` with no focus, `data`
+    or the whole thing on request. PSG only through psg_bridge; a missing graph
+    is 200 + "state graph unavailable"."""
     import json as _json
+    resolved = queries.resolve_mode(mode, focus)
+    at_parsed = queries.parse_at(at)
+    empty = {"available": False, "reason": None, "nodes": [], "edges": [], "runs": [], "run": None, "level": level,
+             "badged": 0, "focus": focus or None, "mode": resolved, "total_nodes": 0, "mode_total": 0, "truncated": False,
+             "focus_found": False, "at_reason": None, "at_kind": at_parsed["kind"], "at_id": at_parsed["id"],
+             "hops": queries.NEIGHBOURHOOD_HOPS, "edges_from": "none", "story_keys": 0,
+             "clusters": [], "layout": "physics"}
     ctx = {"request": request, "error": None, "project": project, "focus": focus or None, "graph": None, "graph_json": "{}",
+           "mode": resolved, "level": level, "lang": _lang(request),
            "bar": queries.view_bar("graph", queries.triple(project, focus, at))}
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:
         ctx["error"] = f"orchestrator.db not found: {e}"
-        ctx["graph"] = {"available": False, "reason": ctx["error"], "nodes": [], "edges": [], "runs": [], "run": None, "level": level, "badged": 0}
+        ctx["graph"] = {**empty, "reason": ctx["error"]}
         return TEMPLATES.TemplateResponse(request, "graph.html", ctx)
     try:
-        ctx["graph"] = queries.get_graph(conn, project, at=at, level=level)
-        ctx["graph_json"] = _json.dumps({"nodes": ctx["graph"]["nodes"], "edges": ctx["graph"]["edges"]}, default=str)
+        ctx["graph"] = queries.get_graph(conn, project, at=at, level=level, focus=focus, mode=mode)
+        ctx["graph_json"] = _json.dumps(graph_payload(ctx["graph"]), default=str)
     except sqlite3.Error as e:
         ctx["error"] = f"database error: {e}"
-        ctx["graph"] = {"available": False, "reason": ctx["error"], "nodes": [], "edges": [], "runs": [], "run": None, "level": level, "badged": 0}
+        ctx["graph"] = {**empty, "reason": ctx["error"]}
     finally:
         conn.close()
     return TEMPLATES.TemplateResponse(request, "graph.html", ctx)
@@ -327,16 +430,22 @@ def node_ledger(request: Request, project: str, qualified_name: str):
     """Phase 8 (FL-009): one node's upstream/downstream, history and reasons —
     three dimensions in one read-only query (docs/NORTH-STAR essence #2)."""
     at = request.query_params.get("at")
+    show = queries.parse_show(request.query_params.get("show"))
+    t = queries.triple(project, qualified_name, at)
     ctx = {"request": request, "error": None, "ledger": None, "project": project, "qualified_name": qualified_name,
-           "at": at,                                       # DP phase 2: ?at=<reason_id> highlights one record; 2b: a run id highlights the run
-           "bar": queries.view_bar("node", queries.triple(project, qualified_name, at))}
+           # DP phase 2d: `at` is typed — `reason:<id>` highlights one record, `run:<id>` highlights that run,
+           # and a bare number still reads as a run for one version. 2b's untyped `at` highlighted both.
+           "at": t["at"], "at_kind": t["at_kind"], "at_id": t["at_id"], "show": show, "lang": _lang(request),
+           "bar": queries.view_bar("node", t)}
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:
         ctx["error"] = f"orchestrator.db not found: {e}"
         return TEMPLATES.TemplateResponse(request, "node.html", ctx)
     try:
-        ctx["ledger"] = queries.get_node_ledger(conn, project, qualified_name)
+        ctx["ledger"] = queries.get_node_ledger(conn, project, qualified_name,
+                                                significant_only=not show["all"], filters=show)
+
     except sqlite3.Error as e:
         ctx["error"] = f"database error: {e}"
     finally:

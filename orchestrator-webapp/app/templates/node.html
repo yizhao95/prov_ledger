@@ -1,117 +1,197 @@
 {% extends "base.html" %}
 {% block title %}{{ qualified_name }} — node ledger{% endblock %}
+{#
+  DP phase 2d (Task 3b + layout spec 1–6): one column, one rail, one timeline.
+
+  2b put space / time / intent in three columns and printed every event of every
+  run — hundreds of rows on a real node, most of them "the analyser recognised
+  this again". Now: a header line (space collapsed behind a disclosure), one
+  timeline of the moments where something actually changed, and the constraints
+  as an aside. What is folded always carries its count.
+#}
+{% macro chip(key, label, on) -%}
+<a data-chip="{{ key }}"{% if on %} data-on="1"{% endif %}
+   href="?{% if at %}at={{ at }}&{% endif %}show={{ key }}"
+   class="px-2 py-0.5 rounded-lg border text-[11px] {{ 'bg-brand-blue text-white border-brand-blue' if on else 'bg-surface text-brand-blue border-hairline hover:bg-brand-bg' }}">{{ label }}</a>
+{%- endmacro %}
+
 {% block content %}
   <div class="mb-4 flex items-center justify-between gap-3 flex-wrap">
     <div class="flex items-center gap-2">
-      <a href="/" class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue rounded-lg shadow-sm hover:bg-brand-bg text-sm font-semibold transition">🏠 Home</a>
-      <a href="/outcomes" class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue rounded-lg shadow-sm hover:bg-brand-bg text-sm font-semibold transition">🎯 Outcomes</a>
+      <a href="/" class="inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-hairline text-brand-blue rounded-lg text-xs font-semibold">🏠 {{ ui('home', lang) }}</a>
+      <a href="/outcomes" class="inline-flex items-center gap-2 px-3 py-1.5 bg-surface border border-hairline text-brand-blue rounded-lg text-xs font-semibold">🎯 {{ ui('outcomes', lang) }}</a>
     </div>
-    <span class="text-xs text-brand-muted italic">🧬 node ledger · space / time / intent in one query · read-only</span>
+    <span class="text-xs text-brand-muted italic">🧬 {{ ui('node_ledger', lang) }} · {{ ui('read_only', lang) }}</span>
   </div>
 
-  <div class="bg-surface rounded-xl shadow-sm border border-hairline px-5 py-4 mb-4">
+  {# ── the header line: name, type, file, upstream/downstream counts (spec 4: one focus) ── #}
+  <div class="bg-surface rounded-xl shadow-sm border border-hairline px-5 py-4 mb-4" data-panel="node-head">
     <div class="text-[11px] uppercase tracking-wide text-brand-muted">{{ project }}</div>
     <h1 class="text-lg font-semibold font-mono text-gray-900 break-all">{{ ledger.qualified_name if ledger else qualified_name }}</h1>
-    {% if ledger and ledger.node_key %}<div class="text-xs text-brand-muted font-mono">{{ ledger.node_key }}</div>{% endif %}
+    {% if ledger and ledger.found %}
+    <div class="text-xs text-brand-muted mt-1 flex flex-wrap items-center gap-x-3">
+      <span title="{{ ledger.node_key }}" data-node-key="{{ ledger.node_key }}">{{ ledger.card.get('file_path') or '' }}</span>
+      <span>{{ ui('upstream', lang) }} {{ ledger.upstream|length }} · {{ ui('downstream', lang) }} {{ ledger.downstream|length }}</span>
+      <span>{{ ledger.events }} {{ ui('records', lang) }} · {{ ledger.runs|length }} {{ ui('analysis_runs', lang) }}</span>
+    </div>
+    {# "will this break something" is the header's job: downstream consumers are
+       printed, upstream folds. Layout spec 6. #}
+    {% if ledger.downstream %}
+    <div class="text-xs mt-2" data-downstream="1">
+      <span class="text-[11px] uppercase tracking-wide text-brand-muted">{{ ui('downstream_consumers', lang) }} ({{ ledger.downstream|length }})</span>
+      <span class="font-mono">{% for name in ledger.downstream %}<a class="text-brand-blue" href="/node/{{ project }}/{{ name }}">{{ name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</span>
+    </div>
+    {% endif %}
+    {% if ledger.card %}
+    <details class="mt-2 text-xs" data-disclose="space">
+      <summary class="cursor-pointer text-brand-blue">{{ ui('dependencies', lang) }}</summary>
+      <div class="mt-2 grid grid-cols-2 gap-3">
+        {% for key, label in [("callers", "callers"), ("callees", "callees"), ("output_consumers", "output consumers"), ("reads", "reads"), ("writes", "writes"), ("lineage_downstream", "lineage downstream")] %}
+          {% if ledger.card.get(key) %}
+          <div>
+            <div class="text-[11px] uppercase tracking-wide text-brand-muted">{{ label }}</div>
+            <ul class="font-mono">{% for name in ledger.card[key] %}<li><a class="text-brand-blue" href="/node/{{ project }}/{{ name }}">{{ name }}</a></li>{% endfor %}</ul>
+          </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
+    {% endif %}
   </div>
 
   {% if error %}
   <div class="bg-surface rounded-xl border border-hairline p-5 text-sm text-brand-red">{{ error }}</div>
   {% elif not ledger.available %}
   <div class="bg-surface rounded-xl border border-hairline border-l-4 border-l-brand-serious p-5 text-sm text-brand-gray" data-state="unavailable">
-    <span class="font-semibold">state graph unavailable</span> — {{ ledger.reason }}
+    <span class="font-semibold">{{ ui('graph_unavailable', lang) }}</span> — {{ ledger.reason }}
   </div>
   {% elif not ledger.found %}
   <div class="bg-surface rounded-xl border border-hairline border-l-4 border-l-brand-serious p-5 text-sm text-brand-gray" data-state="not-found">
     {{ ledger.reason }}
   </div>
   {% else %}
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-    {# ── space: who feeds me, whom I feed ── #}
-    <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="space">
-      <h2 class="text-sm font-semibold text-gray-900 mb-2">🧭 Space — upstream / downstream</h2>
-      {% if not ledger.card %}<div class="text-xs text-brand-muted">no consistency card (the graph was built with --no-cards, or the symbol is not a function)</div>{% endif %}
-      {% for key, label in [("callers", "callers"), ("callees", "callees"), ("output_consumers", "output consumers"), ("reads", "reads"), ("writes", "writes"), ("lineage_upstream", "lineage ↑"), ("lineage_downstream", "lineage ↓")] %}
-        {% if ledger.card.get(key) %}
-        <div class="mb-2">
-          <div class="text-[11px] uppercase tracking-wide text-brand-muted">{{ label }}</div>
-          <ul class="text-xs font-mono">
-            {% for name in ledger.card[key] %}<li><a class="text-brand-blue" href="/node/{{ project }}/{{ name }}">{{ name }}</a></li>{% endfor %}
-          </ul>
+  {# ── the chips: the filter state IS the URL, so a filtered view is a link ── #}
+  <div class="flex flex-wrap items-center gap-1 mb-3" data-chips>
+    {{ chip('', ui('chip_significant', lang), not show.all and not show.events and not show.tier and not show.since and not show.adopted) }}
+    {{ chip('all', ui('chip_all', lang), show.all) }}
+    {{ chip('adopted', ui('chip_adopted', lang), show.adopted) }}
+    {{ chip('since:7d', ui('chip_7d', lang), show.since == '7d') }}
+    {{ chip('since:30d', ui('chip_30d', lang), show.since == '30d') }}
+    {{ chip('tier:stated', ui('chip_stated', lang), 'stated' in show.tier) }}
+    {% for ev in ['node_changed', 'node_renamed', 'column_dropped'] %}
+      {{ chip('events:' ~ ev, ev|say('event', lang), ev in show.events) }}
+    {% endfor %}
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    {# ── the one timeline (layout spec 2): a line, a dot per row, a start and an end ── #}
+    <section class="lg:col-span-2 bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="time" data-timeline>
+      <h2 class="text-sm font-semibold text-gray-900 mb-3">{{ ui('change_history', lang) }}（{{ ledger.timeline|length }}）</h2>
+
+      {% if not ledger.timeline %}
+      <div class="text-xs text-brand-muted" data-empty="1">{{ ui('no_match', lang) }} 
+        <a class="text-brand-blue" href="?{% if at %}at={{ at }}&{% endif %}show=all">{{ ui('expand', lang) }}</a></div>
+      {% endif %}
+
+      {#
+        Two kinds of row and nothing else. A DECISION is the subject of its row:
+        body colour, normal weight, the text first. A CHANGE is context: muted,
+        one line. The tier and the hit count are the faintest thing on the row,
+        right-aligned, plain text — they qualify the row, they are not the row.
+        Only the row the URL points at is lit.
+      #}
+      {% for row in ledger.rail %}
+      {% set is_decision = row.row == 'decision' %}
+      {% set record_hit = at_kind == 'reason' and row.record and at_id == row.record.id %}
+      {% set run_hit = at_kind == 'run' and row.run_id and at_id == row.run_id and not row.record %}
+      {% set lit = record_hit or run_hit %}
+      <div class="group relative pl-5 py-1 {{ 'bg-[#eef4fc] rounded' if lit else '' }} {{ 'text-gray-800' if is_decision else 'text-brand-muted text-[11px]' }}"
+           data-row="{{ row.row }}" data-event="{{ row.event_type or row.kind }}" data-tier="{{ row.tier }}"
+           {%- if row.record %} data-record="{{ row.record.id }}"{% endif %}
+           {%- if row.run_id %} data-run="{{ row.run_id }}"{% endif %}
+           {%- if row.merged %} data-merged="{{ row.merged }}"{% endif %}
+           {%- if record_hit %} data-hit-here="1" data-at="1"{% endif %}
+           {%- if run_hit %} data-hit-here="1" data-at-run="{{ row.run_id }}"{% endif %}
+           {%- if row.merged %} title="{{ row.merged }} identical records merged — each write was an activation, counted in hits"{% endif %}>
+        <span class="absolute left-0 top-2 w-2 h-2 rounded-full {{ '' if lit else 'bg-surface' }}"
+              style="{{ 'background: ' ~ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(row.tier, '#898781') if lit else 'border: 1.5px solid ' ~ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(row.tier, '#898781') }}"></span>
+        {% if not loop.last %}<span class="absolute left-[3px] top-4 bottom-0 w-px bg-hairline"></span>{% endif %}
+
+        <div class="flex items-baseline gap-x-2" {% if row.text %}title="{{ row.text }}"{% endif %}>
+          <span class="text-brand-muted tnum shrink-0">{{ (row.at or '')[:10] }}</span>
+          <span class="{{ 'font-medium' if is_decision else '' }} shrink-0">
+            {%- if row.kind == 'event' %}{{ row.event_type|say('event', lang) }}
+            {%- elif row.kind == 'constraint' %}{{ 'constraint'|say('role', lang) }}
+            {%- else %}{{ row.record.kind if false else ('rejected_path'|say('role', lang) if row.record and row.record.kind == 'rejected_path' else 'reason'|say('role', lang)) }}{% endif -%}
+          </span>
+          <span class="flex-1 {{ 'line-clamp-2' if is_decision else 'truncate' }}">
+            {%- if is_decision %}{{ row.text }}
+            {%- elif row.payload %}{% if row.event_type in ('node_renamed', 'node_moved') %}{{ row.payload.get('from') }} → {{ row.payload.get('to') }}{% elif row.event_type == 'node_changed' %}{{ (row.payload.get('changed') or [])|join(', ') }}{% elif row.event_type == 'column_dropped' %}{{ row.payload.get('column') }}{% endif %}{% endif -%}
+          </span>
+          <span class="text-brand-muted text-[11px] tnum shrink-0"{% if row.tier %} data-tier="{{ row.tier }}"{% endif %}
+                title="{{ vocab.define(row.tier, kind='tier', lang=lang) }}{% if row.record and row.record.stats %} — surfaced at plan/edit/why: {{ row.record.stats.plan }}/{{ row.record.stats.edit }}/{{ row.record.stats.why }}{% endif %}{% if row.merged %} · {{ row.merged }} identical records merged{% endif %}">
+            {{ row.tier|say('tier', lang) }}{% if is_decision %} · {{ row.hits }} hits{% if lit %} <span class="text-brand-blue font-semibold">+1</span>{% endif %}{% endif %}
+          </span>
+        </div>
+
+        {# the way back is on every row, but it appears on hover: a link on every
+           line, always, is a link nobody reads #}
+        {% if row.plan_id %}
+        <div class="opacity-0 group-hover:opacity-100 transition text-[11px]" data-row-actions>
+          <a class="text-brand-blue" href="/plan/{{ row.plan_id }}?node={{ ledger.qualified_name }}{% if row.record %}&at=reason:{{ row.record.id }}{% elif row.run_id %}&at=run:{{ row.run_id }}{% endif %}{% if row.step_id %}#step-{{ row.step_id }}{% endif %}" title="{{ row.plan_id }}">{{ ui('back_to_task', lang) }} →</a>
+          {% if row.record and row.record.stats and row.record.stats.adopted_by %}
+          {% for pid in row.record.stats.adopted_by %}<span class="text-brand-muted"> · {{ vocab.adopted_by(short_title({'plan_id': pid, 'original_goal': None}), lang) }}</span>{% endfor %}
+          {% endif %}
         </div>
         {% endif %}
+      </div>
       {% endfor %}
-      {% if ledger.card.get("dtype_map") %}
-      <div class="text-[11px] uppercase tracking-wide text-brand-muted">dtypes</div>
-      <div class="text-xs font-mono">{% for k, v in ledger.card.dtype_map.items() %}{{ k }}: {{ v }}<br>{% endfor %}</div>
+
+      {# what was folded, as a count and a way back — never a silence ── #}
+      {% set folded_total = ledger.folded.events + ledger.folded.minor + ledger.folded.filtered %}
+      {% if folded_total %}
+      <div class="text-xs text-brand-muted border-t border-hairline pt-2 mt-1"
+           data-folded="{{ ledger.folded.events }}" data-folded-minor="{{ ledger.folded.minor }}" data-folded-filtered="{{ ledger.folded.filtered }}">
+        {% if ledger.folded.events %}{{ ledger.folded.events }} {{ ui('unchanged_matches', lang) }}{% endif %}
+        {%- if ledger.folded.minor %}{% if ledger.folded.events %} · {% endif %}{{ ledger.folded.minor }} {{ ui('minor_records', lang) }}{% endif %}
+        {%- if ledger.folded.filtered %}{% if ledger.folded.events or ledger.folded.minor %} · {% endif %}{{ ledger.folded.filtered }} {{ ui('filtered_out', lang) }}{% endif %}
+        · <a class="text-brand-blue" href="?{% if at %}at={{ at }}&{% endif %}show=all">{{ ui('expand', lang) }}</a>
+      </div>
       {% endif %}
     </section>
 
-    {# ── time: every event, grouped by analysis run; tier is a LABEL ── #}
-    <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="time">
-      <h2 class="text-sm font-semibold text-gray-900 mb-2">🕰 Time — {{ ledger.events }} event{{ '' if ledger.events == 1 else 's' }} in {{ ledger.runs|length }} run{{ '' if ledger.runs|length == 1 else 's' }}</h2>
-      {% for run in ledger.runs %}
-      <div class="mb-3 border-l-2 {{ 'border-brand-blue bg-[#eef4fc] rounded' if at and at|string == run.run_id|string else 'border-hairline' }} pl-3" data-run="{{ run.run_id }}"{% if at and at|string == run.run_id|string %} data-at-run="{{ run.run_id }}"{% endif %}>
-        <div class="text-xs text-brand-gray">
-          <span class="font-semibold">run {{ run.run_id }}</span>
-          · <span class="font-mono">{{ (run.commit_sha or '')[:7] or '-' }}</span>
-          · {{ run.trigger or '-' }}
-          {% if run.plan_id %}· plan <a class="text-brand-blue font-mono" href="/plan/{{ run.plan_id }}">{{ run.plan_id }}</a>{% else %}· plan -{% endif %}
-        </div>
-        {% for e in run.events %}
-        {% set tb = tier_badge(e.tier) %}
-        <div class="text-xs flex flex-wrap items-baseline gap-x-2 mt-1">
-          <span data-tier="{{ e.tier }}" class="px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
-          <span class="font-semibold">{{ e.event_type }}</span>
-          <span class="text-brand-muted font-mono break-all">
-            {%- if e.event_type == 'node_renamed' %}{{ e.payload.get('from') }} → {{ e.payload.get('to') }}
-            {%- elif e.event_type == 'node_moved' %}{{ e.payload.get('from') }} → {{ e.payload.get('to') }}
-            {%- elif e.event_type == 'node_changed' %}changed: {{ e.payload.get('changed')|join(', ') }}
-            {%- elif e.event_type == 'node_matched' %}via {{ e.payload.get('via') }}
-            {%- elif e.event_type == 'identity_asserted' %}{{ e.payload.get('cur') }} — {{ e.payload.get('evidence') }} <span class="not-italic">[{{ e.payload.get('arbiter') }}]</span>
-            {%- else %}{{ e.payload | tojson }}{% endif -%}
-          </span>
-        </div>
-        {% endfor %}
-      </div>
-      {% endfor %}
-    </section>
-
-    {# ── intent: reasons and constraints ── #}
-    <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="intent">
-      <h2 class="text-sm font-semibold text-gray-900 mb-2">🧠 Intent — reasons &amp; constraints</h2>
-      <div class="text-[11px] uppercase tracking-wide text-brand-muted">reasons ({{ ledger.reasons|length }})</div>
-      {% if not ledger.reasons %}<div class="text-xs text-brand-muted mb-2">no close-time reason recorded for this node</div>{% endif %}
-      {% for r in ledger.reasons %}
-      {% set tb = tier_badge(r.display_tier) %}
-      <div class="text-xs flex flex-wrap items-baseline gap-x-2 mb-1 {{ 'ring-2 ring-brand-blue rounded px-1' if at and at|string == r.id|string else '' }}" data-record="{{ r.id }}"{% if at and at|string == r.id|string %} data-at="1"{% endif %}>
-        <span data-tier="{{ r.display_tier }}" class="px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
-        <span class="text-brand-muted">{{ r.kind }} · {{ r.source }} · <a class="text-brand-blue font-mono" href="/plan/{{ r.plan_id }}">{{ r.plan_id }}</a></span>
-        <span class="text-gray-800">{{ r.text if r.text is not none else '— unstated —' }}</span>
-        <span class="text-brand-muted" data-source-level="{{ r.evidence_level }}">{{ r.source_level }}{% if r.rule_id %} · 规则 {{ r.rule_id }}{% endif %}</span>
-        {% if r.stats %}<span class="text-brand-muted tnum" data-stats="{{ r.id }}">展示 plan {{ r.stats.plan }} · edit {{ r.stats.edit }} · why {{ r.stats.why }} · 采用 {{ r.stats.adopted }}{% for pid in r.stats.adopted_by %} · 被 <a class="text-brand-blue font-mono" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at={{ r.id }}">{{ pid }}</a> 采用{% endfor %}</span>{% endif %}
-      </div>
-      {% endfor %}
-      <div class="text-[11px] uppercase tracking-wide text-brand-muted mt-3">constraints ({{ ledger.constraints|length }})</div>
-      {% if not ledger.constraints %}<div class="text-xs text-brand-muted">no active constraint anchored on this node</div>{% endif %}
+    {# ── the aside: the rules that still apply to this node ── #}
+    <aside class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="constraints">
+      <h2 class="text-sm font-semibold text-gray-900 mb-2">{{ ui('active_constraints', lang) }}（{{ ledger.constraints|length }}）</h2>
+      {% if not ledger.constraints %}<div class="text-xs text-brand-muted">{{ ui('no_active_constraints', lang) }}</div>{% endif %}
       {% for c in ledger.constraints %}
-      <div class="text-xs mb-2 border-l-2 border-hairline pl-2 {{ 'ring-2 ring-brand-blue rounded' if at and at|string == c.id|string else '' }}" data-visibility="{{ c.why_visibility }}" data-record="{{ c.id }}"{% if at and at|string == c.id|string %} data-at="1"{% endif %}>
-        <div class="text-gray-900">{{ c.statement }}</div>
-        {% if c.why_visibility == 'restricted' %}
-        <div class="text-brand-muted">why: restricted — see <span class="font-mono">{{ c.why_ref or '(no reference)' }}</span></div>
-        {% else %}
-        <div class="text-brand-muted">why: {{ c.rationale or '—' }}{% if c.why_ref %} · <span class="font-mono">{{ c.why_ref }}</span>{% endif %}</div>
-        {% endif %}
-        <div class="text-brand-muted" data-source-level="{{ c.evidence_level }}">{{ c.source_level }}</div>
-        {% if c.stats %}<div class="text-brand-muted tnum" data-stats="{{ c.id }}">展示 plan {{ c.stats.plan }} · edit {{ c.stats.edit }} · why {{ c.stats.why }} · 采用 {{ c.stats.adopted }}{% for pid in c.stats.adopted_by %} · 被 <a class="text-brand-blue font-mono" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at={{ c.id }}">{{ pid }}</a> 采用{% endfor %}</div>{% endif %}
+      <div class="text-xs mb-2 {{ 'bg-[#eef4fc] rounded px-1' if at_kind == 'reason' and at_id == c.id else '' }}"
+           data-visibility="{{ c.why_visibility }}" data-record="{{ c.id }}"{% if at_kind == 'reason' and at_id == c.id %} data-at="1"{% endif %}>
+        <div class="text-gray-800">{{ c.statement }}</div>
+        <div class="text-brand-muted text-[11px] tnum" data-stats="{{ c.id }}"
+             data-shown-plan="{{ c.stats.plan if c.stats else 0 }}" data-shown-edit="{{ c.stats.edit if c.stats else 0 }}"
+             data-shown-why="{{ c.stats.why if c.stats else 0 }}" data-adopted="{{ c.stats.adopted if c.stats else 0 }}"
+             data-tier="{{ c.tier }}"
+             title="{{ vocab.define(c.tier, kind='tier', lang=lang) }}{% if c.stats %} — surfaced at plan/edit/why: {{ c.stats.plan }}/{{ c.stats.edit }}/{{ c.stats.why }}{% endif %}">
+          {{ c.tier|say('tier', lang) }}{% if c.stats %} · {{ (c.stats.plan or 0) + (c.stats.edit or 0) + (c.stats.why or 0) }} hits{% endif %}
+        </div>
+        <details class="text-[11px]">
+          <summary class="cursor-pointer text-brand-blue">{{ ui('expand', lang) }}</summary>
+          <div class="text-brand-muted">
+            {% if c.rationale %}{{ ui('because', lang) }}: {{ c.rationale }}{% elif c.why_visibility == 'restricted' %}{{ 'restricted rationale — reference only' if lang != 'zh' else '理由受限，仅保留出处' }}{% endif %}
+            {% if c.why_ref %}· <span title="{{ c.why_ref }}">{{ c.why_ref }}</span>{% endif %}
+            {% if c.stats %}{% for pid in c.stats.adopted_by %} · <a class="text-brand-blue" href="/plan/{{ pid }}?node={{ ledger.qualified_name }}&at=reason:{{ c.id }}" title="{{ pid }}">{{ vocab.adopted_by(short_title({'plan_id': pid, 'original_goal': None}), lang) }}</a>{% endfor %}{% endif %}
+          </div>
+        </details>
       </div>
       {% endfor %}
-    </section>
+    </aside>
+  </div>
+
+  <div class="text-[11px] text-brand-muted mt-3" data-approx="{{ ledger.approx_tokens if ledger else 0 }}">
+    {{ ui('context_estimate', lang) }}: ~{{ ledger.approx_tokens if ledger else 0 }} tokens
   </div>
   {% endif %}
-
-  <div class="text-[11px] text-brand-muted mt-4 tnum">
-    approx_tokens={{ ledger.approx_tokens if ledger else 0 }} — the whole ledger above, as one JSON, at ~4 chars per token (v2 criterion: one query, small enough to read before deciding)
-  </div>
 {% endblock %}
