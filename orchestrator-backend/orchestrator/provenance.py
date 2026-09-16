@@ -205,7 +205,7 @@ def verify_chain(conn, table: str) -> dict:
     """Recompute every row's hash from its stored columns and the previous
     row's hash. {ok, rows, first_bad_id}: the first row whose hash or prev_hash
     does not match — a tampered row, or a row inserted around the store."""
-    if table not in ("utterance", "reference", "change_reason"):
+    if table not in ("utterance", "reference", "change_reason", "declared_node"):
         raise ValueError(f"no hash chain on {table!r}")
     prev: str | None = None
     n = 0
