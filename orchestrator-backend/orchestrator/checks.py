@@ -68,20 +68,31 @@ def _reason_at(conn, node_key: str | None, *, run_id: int | None = None, plan_id
     there is nothing on record (or no connection to ask)."""
     if conn is None or not node_key or (run_id is None and plan_id is None):
         return None
-    where, params = ["r.node_key = ?", "r.role = 'reason'", "r.state = 'active'", "r.superseded_by IS NULL"], [node_key]
+    # The ordering is the honesty rule: a reason recorded FOR this run (or this
+    # plan) beats a looser one, the user's own words beat an agent's reading, and
+    # the newest beats the older. The fallback to "any live reason on this node"
+    # matters because `provledger note` — how a PERSON records a sentence — writes
+    # no run_id, so a strict run/plan match would print 当时未说明 for exactly the
+    # case this feature exists for. The finding always names the plan the words
+    # were recorded in, so a reader can see how contemporaneous they are.
+    params: list = [node_key]
+    rank = "0"
     if run_id is not None and plan_id is not None:
-        where.append("(r.run_id = ? OR r.plan_id = ?)"); params += [int(run_id), plan_id]
+        rank = "CASE WHEN r.run_id = ? OR r.plan_id = ? THEN 0 ELSE 1 END"
+        params += [int(run_id), plan_id]
     elif run_id is not None:
-        where.append("r.run_id = ?"); params.append(int(run_id))
-    else:
-        where.append("r.plan_id = ?"); params.append(plan_id)
+        rank = "CASE WHEN r.run_id = ? THEN 0 ELSE 1 END"
+        params.append(int(run_id))
+    elif plan_id is not None:
+        rank = "CASE WHEN r.plan_id = ? THEN 0 ELSE 1 END"
+        params.append(plan_id)
     try:
         row = conn.execute(
             "SELECT r.id, r.plan_id, r.tier, r.rule_id, r.recorded_by, "
             "       COALESCE(substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start), r.interpretation, r.statement) AS text "
             "FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
-            f"WHERE {' AND '.join(where)} "
-            "ORDER BY (r.tier = 'stated') DESC, r.id DESC LIMIT 1", params).fetchone()
+            "WHERE r.node_key = ? AND r.role = 'reason' AND r.state = 'active' AND r.superseded_by IS NULL "
+            f"ORDER BY {rank}, (r.tier = 'stated') DESC, r.id DESC LIMIT 1", params).fetchone()
     except Exception:                      # an older DB has no change_reason_v: say nothing, invent nothing
         return None
     if not row or not row["text"]:

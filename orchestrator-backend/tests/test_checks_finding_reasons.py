@@ -108,3 +108,38 @@ def test_layer_self_without_a_connection_still_works_and_says_nothing_it_cannot_
     _plans(conn)
     f = _finding(checks.layer_self(_pack(conn, graph)), "removed_upstream")
     assert "was removed in run 2" in f.text and "因为" not in f.text and "当时未说明" not in f.text
+
+
+# ── the human path: `provledger note` records no run_id (DP 2d, Task 5) ──────
+# The scenario this whole feature exists for is a PERSON explaining a removal in
+# their own words. `provledger note --node <qn>` is the documented way to record
+# that, and it writes no run_id — so a lookup keyed only on run/plan would print
+# 当时未说明 for exactly the case that matters. The fallback is the node itself.
+
+def test_a_note_with_no_run_id_is_still_the_reason_for_the_removal(conn, graph):
+    _plans(conn)
+    u = pv.insert_utterance(conn, session_id="s", project="proj", plan_id="P0",
+                            text=VERBATIM, occurred_at="2026-09-15 10:00:00")
+    rid = pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_u", kind="technical",
+                           verbatim=(u, 0, len(VERBATIM)), recorded_by="human")   # no run_id, as note does
+    f = _finding(checks.layer_self(_pack(conn, graph), conn=conn), "removed_upstream")
+    assert VERBATIM in f.text and "用户原话" in f.text and "P0" in f.text
+    assert f.evidence["reason_id"] == rid
+
+
+def test_a_reason_tied_to_the_run_still_wins_over_a_loose_one(conn, graph):
+    _plans(conn)
+    pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_u", kind="technical",
+                     interpretation="一条没有 run 的旧记录", recorded_by="human")
+    tied = pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_u", kind="technical", run_id=2,
+                            interpretation="就是这次 run 记的", recorded_by="agent")
+    f = _finding(checks.layer_self(_pack(conn, graph), conn=conn), "removed_upstream")
+    assert "就是这次 run 记的" in f.text and f.evidence["reason_id"] == tied
+
+
+def test_a_reason_on_a_different_node_is_never_borrowed(conn, graph):
+    _plans(conn)
+    pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_x", kind="technical",
+                     interpretation="这是别的节点的理由", recorded_by="agent")
+    f = _finding(checks.layer_self(_pack(conn, graph), conn=conn), "removed_upstream")
+    assert "这是别的节点的理由" not in f.text and "当时未说明" in f.text

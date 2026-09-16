@@ -131,8 +131,13 @@ def _node_key(psg, qn: str) -> str | None:
     rows = _psg_rows(psg, "SELECT node_key FROM node_snapshot WHERE qualified_name = ? AND node_key <> '' ORDER BY run_id DESC, id DESC LIMIT 1", (qn,))
     if rows:
         return rows[0][0]
-    if not qn or "." not in qn:
+    if not qn:
         return None
+    # A BARE name is the consistency card's own spelling (FL-047: cards record
+    # callees as `discount_rate`, not `pkg.rollup.discount_rate`). Before this it
+    # resolved to nothing, which meant removed_upstream could never fire on a real
+    # graph. It resolves when the suffix is unique and stays unresolved when it is
+    # not — guessing which `__init__` a card meant is worse than saying nothing.
     rows = _psg_rows(psg, "SELECT DISTINCT node_key FROM node_snapshot WHERE qualified_name LIKE ? AND node_key <> '' "
                           "AND run_id = (SELECT MAX(run_id) FROM node_snapshot x WHERE x.node_key = node_snapshot.node_key)", ("%." + qn,))
     return rows[0][0] if len(rows) == 1 else None
