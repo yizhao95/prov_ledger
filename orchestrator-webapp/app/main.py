@@ -342,11 +342,12 @@ def node_ledger(request: Request, project: str, qualified_name: str):
     """Phase 8 (FL-009): one node's upstream/downstream, history and reasons —
     three dimensions in one read-only query (docs/NORTH-STAR essence #2)."""
     at = request.query_params.get("at")
+    show = queries.parse_show(request.query_params.get("show"))
     t = queries.triple(project, qualified_name, at)
     ctx = {"request": request, "error": None, "ledger": None, "project": project, "qualified_name": qualified_name,
            # DP phase 2d: `at` is typed — `reason:<id>` highlights one record, `run:<id>` highlights that run,
            # and a bare number still reads as a run for one version. 2b's untyped `at` highlighted both.
-           "at": t["at"], "at_kind": t["at_kind"], "at_id": t["at_id"],
+           "at": t["at"], "at_kind": t["at_kind"], "at_id": t["at_id"], "show": show,
            "bar": queries.view_bar("node", t)}
     try:
         conn = queries.open_db_readonly()
@@ -354,7 +355,8 @@ def node_ledger(request: Request, project: str, qualified_name: str):
         ctx["error"] = f"orchestrator.db not found: {e}"
         return TEMPLATES.TemplateResponse(request, "node.html", ctx)
     try:
-        ctx["ledger"] = queries.get_node_ledger(conn, project, qualified_name)
+        ctx["ledger"] = queries.get_node_ledger(conn, project, qualified_name,
+                                                significant_only=not show["all"], filters=show)
     except sqlite3.Error as e:
         ctx["error"] = f"database error: {e}"
     finally:

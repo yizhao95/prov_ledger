@@ -815,7 +815,109 @@ except Exception:                      # pragma: no cover — "state graph unava
     _psg = None
 
 
-def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str) -> dict:
+# ── DP phase 2d (Task 3b): one timeline of significant moments ───────────────
+# A real node carries hundreds of events and most of them are `node_matched` —
+# "the analyser recognised this again", true and silent. The timeline keeps the
+# moments where something actually changed and FOLDS the rest behind a count:
+# a count is the difference between "nothing happened" and "we stopped showing
+# you", and only one of those is honest.
+SIGNIFICANT_EVENTS = ("node_added", "node_changed", "node_renamed", "node_moved",
+                      "column_dropped", "node_removed", "removed", "identity_asserted")
+QUIET_EVENTS = ("node_matched", "identity_kept")
+SHOW_TIERS = ("observed", "derived", "asserted", "stated", "unstated")
+SHOW_SINCE = {"7d": 7, "30d": 30}
+
+
+def parse_show(show: str | None) -> dict:
+    """The chip state, from `?show=`. Comma-separated; `key:value` narrows,
+    a bare word is a flag. Unknown keys and values are IGNORED rather than
+    emptying the page — a filter nobody can spell should not look like a node
+    with no history."""
+    state = {"all": False, "adopted": False, "events": [], "tier": [], "since": None, "raw": show or ""}
+    for part in (show or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if part == "all":
+            state["all"] = True
+        elif part == "adopted":
+            state["adopted"] = True
+        elif part.startswith("events:"):
+            state["events"] += [e for e in part[7:].split("|") if e]
+        elif part.startswith("tier:"):
+            state["tier"] += [t for t in part[5:].split("|") if t in SHOW_TIERS]
+        elif part.startswith("since:") and part[6:] in SHOW_SINCE:
+            state["since"] = part[6:]
+    return state
+
+
+def _within(ts: str | None, since: str | None) -> bool:
+    if not since or not ts:
+        return True
+    from datetime import datetime, timedelta, timezone
+    try:
+        when = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when >= datetime.now(timezone.utc) - timedelta(days=SHOW_SINCE[since])
+
+
+def _timeline_rows(base: dict) -> list[dict]:
+    """Events, reasons, rejected paths and constraints merged into one rail,
+    newest first — layout spec 2: one row per moment, on one line."""
+    rows: list[dict] = []
+    for run in base["runs"]:
+        for e in run["events"]:
+            rows.append({"kind": "event", "event_type": e["event_type"], "tier": e["tier"],
+                         "run_id": run["run_id"], "plan_id": run.get("plan_id"), "step_id": run.get("step_id"),
+                         "commit_sha": run.get("commit_sha"), "at": e.get("created_at"),
+                         "payload": e.get("payload") or {}, "significant": e["event_type"] in SIGNIFICANT_EVENTS})
+    for r in base["reasons"]:
+        rows.append({"kind": "reason", "event_type": None, "tier": r.get("display_tier") or r.get("tier"),
+                     "run_id": r.get("run_id"), "plan_id": r.get("plan_id"), "step_id": r.get("step_id"),
+                     "at": r.get("created_at"), "record": r,
+                     "significant": (r.get("significance_eff") or "major") != "minor"})
+    for c in base["constraints"]:
+        rows.append({"kind": "constraint", "event_type": None, "tier": c.get("tier"), "run_id": None,
+                     "plan_id": c.get("plan_id"), "at": c.get("created_at"), "record": c, "significant": True})
+    rows.sort(key=lambda r: (str(r.get("at") or ""), r.get("run_id") or 0), reverse=True)
+    return rows
+
+
+def filter_timeline(rows: list[dict], show: dict) -> tuple[list[dict], dict]:
+    """(kept, folded counts). Folding is always reported per reason it folded."""
+    folded = {"events": 0, "minor": 0, "filtered": 0}
+    kept = []
+    for r in rows:
+        if not show["all"]:
+            if r["kind"] == "event" and r["event_type"] in QUIET_EVENTS:
+                folded["events"] += 1
+                continue
+            if not r["significant"]:
+                folded["minor"] += 1
+                continue
+        if show["events"] and r.get("event_type") not in show["events"]:
+            folded["filtered"] += 1
+            continue
+        if show["tier"] and r.get("tier") not in show["tier"]:
+            folded["filtered"] += 1
+            continue
+        if show["since"] and not _within(r.get("at"), show["since"]):
+            folded["filtered"] += 1
+            continue
+        if show["adopted"]:
+            stats = (r.get("record") or {}).get("stats") or {}
+            if not stats.get("adopted"):
+                folded["filtered"] += 1
+                continue
+        kept.append(r)
+    return kept, folded
+
+
+def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str,
+                    significant_only: bool = True, filters: dict | None = None) -> dict:
     """Everything the dashboard shows about one node, read in one go:
     space (the consistency card: callers / output_consumers), time (every
     history event grouped by analysis run, with plan / tier), and intent (the
@@ -894,6 +996,16 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str)
     stats = record_stats(conn, [c["id"] for c in base["constraints"]])
     for c in base["constraints"]:
         c["stats"] = stats.get(c["id"])
+    # DP phase 2d (Task 3b): one rail instead of three columns
+    show = dict(filters or parse_show(None))
+    if not significant_only:
+        show["all"] = True
+    rows = _timeline_rows(base)
+    base["timeline_all"] = rows
+    base["timeline"], base["folded"] = filter_timeline(rows, show)
+    base["show"] = show
+    base["upstream"] = list(base["card"].get("callers") or [])
+    base["downstream"] = list(base["card"].get("output_consumers") or [])
     base["approx_tokens"] = len(json.dumps(base, default=str)) // 4
     return base
 

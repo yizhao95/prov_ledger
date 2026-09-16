@@ -456,14 +456,19 @@ def test_node_page_shows_space_time_and_reasons_in_one_query(client, tmp_path, m
     _, reg = _seed_state_graph(tmp_path)
     monkeypatch.setenv("PSG_REGISTRY_PATH", str(reg))
     _seed_reasons_and_constraints(client._db)
-    r = client.get("/node/demo/pkg.m.load_orders")
+    # DP 2d (Task 3b): the default timeline carries only the moments that changed
+    # something, so the full event list now lives behind ?show=all — the quiet
+    # events are folded with a count, never dropped.
+    r = client.get("/node/demo/pkg.m.load_orders?show=all")
     assert r.status_code == 200
     t = r.text
-    # time: events grouped by run, each with its plan link and tier label
+    # time: every event on one rail, each with its plan link and tier label
     for ev in ("node_added", "node_matched", "node_renamed", "node_changed", "identity_asserted"):
         assert ev in t
     assert 'data-tier="asserted"' in t and "main() now calls load_orders" in t and "anthropic.claude_headless" in t
-    assert 'href="/plan/P0"' in t and 'href="/plan/P1"' in t and "run 2" in t
+    # DP 2d (Task 3b + layout spec 6): a link back to a task now carries the whole
+    # triple and the step anchor, so it lands on the moment rather than the page top
+    assert 'href="/plan/P0?node=pkg.m.load_orders' in t and 'href="/plan/P1?node=pkg.m.load_orders' in t
     # space: the card
     assert "pkg.m.main" in t and "pkg.m.clean" in t
     # reasons + constraints; the restricted rationale never leaves the ledger
