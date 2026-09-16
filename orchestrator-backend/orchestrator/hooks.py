@@ -6,7 +6,8 @@ UserPromptSubmit → the user's words verbatim into utterance (phase 1, Task 3);
 PreToolUse (Edit | Write | MultiEdit) → the active constraints anchored on the
 lines about to change (and one hop downstream) as additionalContext (phase 2,
 Task 5) — additive, never a veto unless a HUMAN constraint is declared
-block: true in the extensions file.
+block: true in the extensions file; Stop → session_run and, in the degraded
+mode (no plan in the session), a queued background graph refresh (Task 7b).
 
 A hook process must never get in Claude Code's way: stdout stays EMPTY (a
 UserPromptSubmit hook's stdout is injected as context), the exit code is
@@ -28,7 +29,7 @@ from . import db
 
 DEFAULT_ERROR_LOG = Path.home() / "skill-workspace" / "hook-errors.log"
 BUSY_TIMEOUT_MS = 2000
-EVENTS = ("PostToolUse", "UserPromptSubmit", "PreToolUse")
+EVENTS = ("PostToolUse", "UserPromptSubmit", "PreToolUse", "Stop")
 
 
 def error_log_path() -> Path:
@@ -116,6 +117,16 @@ def handle(event: str, data: dict) -> dict | None:
             record_utterance(conn, data)
         finally:
             conn.close()
+    elif event == "Stop":
+        # DP phase 2 (Task 7b): the degraded mode — record the session, queue a graph
+        # refresh when nothing else will; stdout stays empty
+        from . import session
+        conn = _open()
+        try:
+            session.on_stop(conn, data, orch_db_path=str(db_path()))
+        finally:
+            conn.close()
+        return None
     elif event == "PreToolUse":
         # the registry decides first (no DB, no PSG for a file outside every registered repo)
         tool = data.get("tool_name")

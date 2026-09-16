@@ -99,6 +99,7 @@ class Extensions:
     providers: tuple[ProviderDecl, ...] = ()
     outcome_channels: tuple[ChannelDecl, ...] = ()
     reasons_close_mode: str = "ask"        # DP phase 1: ask (default) | pending
+    reasons_session_refresh: str = "on"    # DP phase 2: on (default) | off — the Stop hook's background refresh
 
     def fingerprint(self) -> dict | None:
         """The shape written to analysis_run.extensions_json; None without a file."""
@@ -329,8 +330,12 @@ def load(path: str | None) -> Extensions:
     close_mode = reasons_cfg.get("close_mode", "ask")
     if close_mode not in ("ask", "pending"):
         raise ExtensionsError(f"{path}: reasons.close_mode must be ask or pending, got {close_mode!r}")
+    session_refresh = reasons_cfg.get("session_refresh", "on")
+    if session_refresh not in ("on", "off"):
+        raise ExtensionsError(f"{path}: reasons.session_refresh must be on or off, got {session_refresh!r}")
     return Extensions(path=path, sha256=hashlib.sha256(raw).hexdigest(), drift_kinds=kinds, namesets=sets,
-                      constraints=cons, providers=provs, outcome_channels=chans, reasons_close_mode=close_mode)
+                      constraints=cons, providers=provs, outcome_channels=chans, reasons_close_mode=close_mode,
+                      reasons_session_refresh=session_refresh)
 
 
 def current(repo_root: str | None = None) -> Extensions:

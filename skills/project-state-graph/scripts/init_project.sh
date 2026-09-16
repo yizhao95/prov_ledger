@@ -9,6 +9,7 @@
 #
 # Usage:
 #   init_project.sh --name NAME --repo REPO_PATH [--out-dir DIR]
+#                   [--trigger session --session-id SID --notify-orch-db ORCH_DB]   (Stop hook, DP phase 2)
 #
 # Defaults:
 #   --out-dir  ~/skill-workspace/project-graphs/<name>
@@ -21,12 +22,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAME=""
 REPO=""
 OUT_DIR=""
+SESSION_ID=""
+NOTIFY_ORCH_DB=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --name)    NAME="$2";    shift 2 ;;
         --repo)    REPO="$2";    shift 2 ;;
         --out-dir) OUT_DIR="$2"; shift 2 ;;
+        # DP phase 2 (Task 7b): a session refresh — trigger, the session it belongs to,
+        # and the orchestrator DB to report done|failed back to (session_run).
+        --trigger)        PROVLEDGER_TRIGGER="$2"; shift 2 ;;
+        --session-id)     SESSION_ID="$2";         shift 2 ;;
+        --notify-orch-db) NOTIFY_ORCH_DB="$2";     shift 2 ;;
         -h|--help)
             grep '^#' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0 ;;
@@ -57,6 +65,29 @@ fi
 
 DB_PATH="${OUT_DIR}/${NAME}-state-graph.db"
 ARCH_PATH="${OUT_DIR}/ARCHITECTURE.md"
+
+# DP phase 2 (Task 7b): report back to the orchestrator DB when asked — done on a clean
+# exit, failed otherwise — and drop the refresh lock the Stop hook wrote. Never fatal.
+_notify() {
+    local rc=$?
+    if [[ -n "$SESSION_ID" && -n "$NOTIFY_ORCH_DB" ]]; then
+        local state="failed"; [[ $rc -eq 0 ]] && state="done"
+        local pybin="${PROVLEDGER_PYBIN:-}"
+        if [[ -z "$pybin" ]]; then
+            for _cand in "${PROVLEDGER_VENV:-${HOME}/skill-workspace/.venv}/bin/python" "${SCRIPT_DIR}/../../../.venv/bin/python" "$(command -v python3 || true)"; do
+                if [[ -n "${_cand}" && -x "${_cand}" ]]; then pybin="${_cand}"; break; fi
+            done
+        fi
+        if [[ -n "$pybin" ]]; then
+            PYTHONPATH="${SCRIPT_DIR}/../../../orchestrator-backend${PYTHONPATH:+:${PYTHONPATH}}" \
+                "$pybin" -m orchestrator.session refreshed --session-id "$SESSION_ID" --state "$state" \
+                    --orch-db "$NOTIFY_ORCH_DB" --psg-db "$DB_PATH" >/dev/null 2>&1 \
+                || echo "    WARNING: could not notify ${NOTIFY_ORCH_DB} (session ${SESSION_ID}, ${state})" >&2
+        fi
+        rm -f "${OUT_DIR}/.refresh.lock" 2>/dev/null || true
+    fi
+}
+trap _notify EXIT
 # Registry + index locations (env-overridable for isolated testing).
 PSG_REGISTRY_ROOT="${PSG_REGISTRY_ROOT:-${HOME}/skill-workspace/project-graphs}"
 REGISTRY_PATH="${PSG_REGISTRY_PATH:-${PSG_REGISTRY_ROOT}/projects.json}"
@@ -90,6 +121,7 @@ uv run python -m analyzer "$REPO" --project "$NAME" --db-path "$DB_PATH" \
     ${PROVLEDGER_PLAN_ID:+--plan-id "$PROVLEDGER_PLAN_ID"} \
     ${PROVLEDGER_STEP_ID:+--step-id "$PROVLEDGER_STEP_ID"} \
     --trigger "${PROVLEDGER_TRIGGER:-manual}" \
+    ${SESSION_ID:+--session-id "$SESSION_ID"} \
     ${PROVLEDGER_ISOLATE:+--isolate "$PROVLEDGER_ISOLATE"}
 
 # Capture the commit sha that was analyzed (best-effort).

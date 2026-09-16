@@ -148,6 +148,10 @@ def candidate_utterances(ctx: Ctx) -> list[dict]:
     same session(s) as those (before a plan exists the hook cannot attribute)."""
     created = ctx.plan.get("created_at") or "0000-00-00 00:00:00"
     completed = ctx.plan.get("completed_at") or "9999-12-31 23:59:59"
+    if ctx.plan.get("session_id"):                     # a session's placeholder plan: only what was said in that session
+        return [dict(r) for r in ctx.conn.execute(
+            "SELECT id, session_id, text FROM utterance WHERE session_id = ? OR plan_id = ? ORDER BY id",
+            (ctx.plan["session_id"], ctx.plan_id))]
     return [dict(r) for r in ctx.conn.execute(
         "SELECT id, session_id, text FROM utterance WHERE plan_id = ? "
         "OR (project = ? AND occurred_at BETWEEN ? AND ?) "
@@ -352,9 +356,21 @@ def rejected_paths(conn, *, project: str, plan_id: str, psg_db_path: str | None,
 
 # ── evaluate ──────────────────────────────────────────────────────────────────
 
+def _session_plan(conn, plan_id: str) -> dict:
+    """DP phase 2 (Task 7b): `session:<sid>` is not a Plans row — its window and
+    project come from session_run, its words from that session only."""
+    sid = plan_id.split(":", 1)[1]
+    r = conn.execute("SELECT project, started_at, ended_at FROM session_run WHERE session_id = ?", (sid,)).fetchone()
+    return {"plan_id": plan_id, "session_id": sid, "project": r[0] if r else None,
+            "created_at": r[1] if r else None, "completed_at": r[2] if r else None}
+
+
 def _ctx(conn, project, plan_id, psg_db_path) -> Ctx:
+    plan = db.get_plan(conn, plan_id) or {}
+    if not plan and str(plan_id).startswith("session:"):
+        plan = _session_plan(conn, plan_id)
     return Ctx(conn=conn, project=project, plan_id=plan_id, psg_db_path=psg_db_path,
-               plan=db.get_plan(conn, plan_id) or {}, steps=db.get_steps(conn, plan_id),
+               plan=plan, steps=db.get_steps(conn, plan_id),
                deviations=db.get_deviations(conn, plan_id), touched=touched_nodes(psg_db_path, plan_id))
 
 

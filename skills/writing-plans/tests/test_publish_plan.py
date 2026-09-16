@@ -498,9 +498,7 @@ def test_cwd_in_unregistered_nested_repo_is_not_attributed(tmp_path, tmp_db, scr
 
 # ── DP phase 2 Task 3: the headline is printed, stored, and never blocks (except block: true) ──
 def _orch_constraint(db_path: Path, subjects, statement, recorded_by="human"):
-    import sys as _sys
-    _sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "orchestrator-backend"))
-    from orchestrator import db as _odb, provenance as _pv
+    from orchestrator import db as _odb, provenance as _pv          # conftest already put the bundled package on sys.path
     c = _odb.open_db(db_path); _odb.run_migrations(c)
     ids = [_pv.insert_reason(c, project="demoproj", plan_id="ledger", node_key=s, kind="organizational", role="constraint",
                              statement=statement, recorded_by=recorded_by) for s in subjects]

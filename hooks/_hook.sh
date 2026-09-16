@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # _hook.sh <event> — shared body of the provLedger Claude Code hooks (toolcall.sh,
-# utterance.sh, anchor_check.sh). Runs `python -m orchestrator.hooks <event>` with the hook's JSON
+# utterance.sh, anchor_check.sh, session_close.sh). Runs `python -m orchestrator.hooks <event>` with the hook's JSON
 # on stdin. Contract: stdout is ALWAYS empty (a UserPromptSubmit hook's stdout is
 # injected as context) — except PreToolUse, which prints the hook JSON or nothing —
 # exit is ALWAYS 0; problems go to the error log.

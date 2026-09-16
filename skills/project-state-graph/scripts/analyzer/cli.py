@@ -2,7 +2,7 @@
 
 Usage:
     python -m analyzer <repo_path> --project <name> [--db-path PATH | --out-dir DIR]
-                       [--plan-id ID] [--step-id ID] [--trigger manual|review|update]
+                       [--plan-id ID] [--step-id ID] [--trigger manual|review|update|session] [--session-id S]
     python -m analyzer history <db_path> <qualified_name|node_key>
 """
 from __future__ import annotations
@@ -69,7 +69,8 @@ def git_info(repo_path: str) -> dict:
 
 def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
         plan_id: Optional[str] = None, step_id: Optional[str] = None,
-        trigger: str = "manual", isolate: str = "thread", commit_sha: Optional[str] = None) -> str:
+        trigger: str = "manual", isolate: str = "thread", commit_sha: Optional[str] = None,
+        session_id: Optional[str] = None) -> str:
     """Build the graph of repo_path into db_path as one analysis run.
     commit_sha (phase 7 backfill) overrides the sha git_info reads — a detached
     worktree's HEAD is that sha already, but the record says so explicitly."""
@@ -88,6 +89,12 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
     ext_fp = namesets.extensions_fingerprint(repo_path)
     ext_obj = namesets.current_extensions(repo_path)
     plist, prov_records = _providers.load_providers(ext_obj)
+    if session_id:
+        # DP phase 2 (Task 7b): a session refresh is attributed to the placeholder plan
+        # `session:<sid>` (so changed_node_keys / the rules find its nodes) and the
+        # session id travels in extensions_json alongside the extension fingerprint
+        plan_id = plan_id or f"session:{session_id}"
+        ext_fp = dict(ext_fp or {}, session_id=session_id)
     conn = store.init_db(db_path)
     run_id = store.start_run(conn, project_name=project, commit_sha=info["commit_sha"],
                              plan_id=plan_id, step_id=step_id, trigger=trigger,
@@ -350,7 +357,8 @@ def main(argv=None) -> int:
                         help="skip building consistency/symbol cards")
     parser.add_argument("--plan-id", default=None, help="orchestrator plan that caused this run")
     parser.add_argument("--step-id", default=None, help="orchestrator step that caused this run")
-    parser.add_argument("--trigger", default="manual", help="manual | review | update | ...")
+    parser.add_argument("--trigger", default="manual", help="manual | review | update | session | ...")
+    parser.add_argument("--session-id", default=None, help="the Claude Code session a `--trigger session` refresh belongs to (plan_id becomes session:<id>)")
     parser.add_argument("--isolate", default="thread", choices=list(_providers.ISOLATE_MODES),
                         help="how each provider's extract() is isolated: thread (default; a timed-out "
                              "provider is abandoned) or subprocess (forked and killed on timeout)")
@@ -358,7 +366,8 @@ def main(argv=None) -> int:
 
     db_path = _resolve_db_path(args.project, args.db_path, args.out_dir)
     out = run(args.repo_path, args.project, db_path, build_cards=not args.no_cards,
-              plan_id=args.plan_id, step_id=args.step_id, trigger=args.trigger, isolate=args.isolate)
+              plan_id=args.plan_id, step_id=args.step_id, trigger=args.trigger, isolate=args.isolate,
+              session_id=args.session_id)
     print(f"state-graph written to {out}")
     return 0
 
