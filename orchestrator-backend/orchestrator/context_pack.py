@@ -144,7 +144,7 @@ def _records(conn, project: str, anchors: list[str]) -> list[dict]:
     ph = ",".join("?" * len(anchors))
     return [dict(r) for r in conn.execute(
         f"SELECT r.id, r.node_key, r.plan_id, r.step_id, r.role, r.tier, r.evidence_level, r.rule_id, r.state, r.superseded_by, "
-        f"       r.recorded_by, r.significance, r.occurred_at, r.statement, "
+        f"       r.recorded_by, r.significance_eff AS significance, r.occurred_at, r.statement, "
         f"       COALESCE(r.interpretation, r.statement, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS text "
         f"FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
         f"WHERE r.project = ? AND r.node_key IN ({ph}) ORDER BY r.id DESC", (project, *anchors))]
