@@ -99,6 +99,16 @@ def snapshot_run(conn, repo_root: str, run_id: int, providers=None, report: dict
                                      "schema_version": getattr(p, "schema_version", 1)}
             for o in obs:
                 emit(o)
+            # Commit BETWEEN providers, not only at the end. `emit` writes on
+            # `conn` while the next provider reads the same file through
+            # `ctx.conn_ro`; an uncommitted write transaction grows with the
+            # graph, and on a 222 MB graph it outlived the reader's busy
+            # timeout — provledger.owned degraded with "database is locked",
+            # 129 dataframe/column nodes lost their node_key and selfcheck's
+            # history_key_coverage failed a refresh that had otherwise worked.
+            # The docstring above already says the read-only view must see the
+            # rebuild; this is the rest of that sentence.
+            conn.commit()
     finally:
         ctx.conn_ro.close()
     conn.commit()
