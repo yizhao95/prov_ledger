@@ -10,7 +10,7 @@ provLedger helps you remember what was decided, who said it, and why — and rem
 
 A Claude Code plugin that keeps the reasons behind a project's changes — your words, the email, the agent's reading, kept apart — and puts them in front of whoever is about to change the thing again.
 
-![tests](https://img.shields.io/badge/tests-1829-brightgreen)
+![tests](https://img.shields.io/badge/tests-1831-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -393,19 +393,20 @@ Read-only, no non-GET route.
 
 ### Tests
 
-Seven suites, each with its own pyproject and pythonpath — run them separately.
+Eight suites, each with its own pyproject and pythonpath — run them separately.
 
 | suite | tests |
 |---|---|
-| `scripts/tests` | 22 |
-| `orchestrator-backend` | 751 |
-| `orchestrator-webapp` | 260 |
+| `scripts/tests` | 27 |
+| `orchestrator-backend` | 830 |
+| `orchestrator-webapp` | 267 |
 | `skills/writing-plans/tests` | 93 |
 | `skills/executing-plans` | 77 |
 | `skills/update-project-state-graph/scripts/tests` | 90 |
-| `skills/project-state-graph/scripts/tests` | 425 |
+| `examples` | 18 |
+| `skills/project-state-graph/scripts/tests` | 429 |
 
-Total **1829 collected** across the eight suites (`scripts/count_tests.sh`), plus a few deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
+Total **1831 collected** across the eight suites (`scripts/count_tests.sh`), plus a few deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
 
 ### Origin
 

@@ -158,7 +158,7 @@ Run each test suite **separately** (each has its own pyproject/pythonpath —
 one combined invocation breaks). A healthy install passes all of them:
 
 ```bash
-python3 -m pytest scripts/tests                         -q   #   25
+python3 -m pytest scripts/tests                         -q   #   27
 python3 -m pytest orchestrator-backend                  -q   #  830, 4 deselected
 python3 -m pytest orchestrator-webapp                   -q   #  267
 python3 -m pytest skills/writing-plans/tests            -q   #   93
@@ -168,7 +168,7 @@ python3 -m pytest examples                              -q   #   18
 (cd skills/project-state-graph/scripts && python3 -m pytest tests -q)   #  429, 1 deselected
 ```
 
-Total: **1829 collected** across the eight suites (run `scripts/count_tests.sh` to
+Total: **1831 collected** across the eight suites (run `scripts/count_tests.sh` to
 re-derive; a few are deselected by default). A healthy install passes all of
 them. The project-state-graph suite is the long one (~8 min); run it in three
 segments if you want to see progress — scenarios + runner, the corpus, and the
@@ -195,7 +195,7 @@ The failure class itself, with numbers, is written up in
 | level | command | expect |
 |---|---|---|
 | quickest — end to end | `make demo` | MISMATCH → revise → VERIFIED, `SELF-CHECK OK`, exit 0 |
-| full — every suite | the eight `pytest` commands above, **run separately** | 1829 tests, all passing |
+| full — every suite | the eight `pytest` commands above, **run separately** | 1831 tests, all passing |
 | packaging — the pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
 
 ---
