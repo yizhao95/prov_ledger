@@ -96,3 +96,9 @@
 | FL-089 | dp-phase2e | DEFERRED | `/ledger` 的问答不写 `read_hit`：一次提问不是一次 plan，把它记成"展示过"会污染"被看到 / 改变了计划"两个数。但这也意味着一条只在 `/ledger` 里被看到的约束，仍然出现在 `why --never-read` 的"从未展示过"名单里。应给 `read_hit.moment` 加一个 `ask` 档，或让 D3 名单显式说明它不含问答 | DP 3 期 |
 | FL-090 | dp-phase2e | DEFERRED | FTS5 只覆盖 `change_reason` 的 `interpretation` / `statement`：`utterance.text` 与 `reference.label` 的匹配是**逐 token 的 LIKE**，既不缩放也没有词形归并（问 "hashing" 找不到 "hash"）。应把这两张表并进同一个外部内容索引，或建各自的 FTS5 表 | DP 3 期 |
 | FL-091 | dp-phase2e | DEFERRED | `scope.line(lang="zh")` 与 `/ledger?lang=zh` 的中文范围行只有页面级断言，没有对 `line()` 本身的单元断言；中文一行里的名词（"有影响记录"）也没进 vocab 表，改词表时不会被那条"每个值两列都要有"的测试抓到 | DP 3 期 |
+| FL-092 | dp-phase2c | DEFERRED | 两条描述是不是同一个对象——本期按 spec §18 明确不判（改描述 = 同节点属性变，新 declare = 新节点，重名 slug 自动加 `-2` 后缀）。真实使用里一定会出现"同一条规矩被声明两遍"，需要一个**人来合并**的入口（`provledger node merge <a> <b> --words …`，只追加、两边都留 supersede 记录），而不是让模型猜 | DP 3 期 |
+| FL-093 | dp-phase2c | DEFERRED | 批量导入：一份会议纪要 / 一张 Confluence 表里有十几条规矩，现在只能一条条 `node declare`。需要 `node declare --from file.json`（严格 JSON、逐条 draft、一次确认全部或逐条确认），并明确"不从文档自动抽取"这条边界在批量口子上怎么守 | DP 3 期 |
+| FL-094 | dp-phase2c | DEFERRED | 声明式节点还没有 outcome 通道：一条 `manual_figure` 声明了"手算是 3.5%"，后来代码算出 3.7%，系统应该能把这当成一次 expectation → outcome 的对照（阶段 7 的通道机制现成）。现在只能靠人看 | DP 3 期 |
+| FL-095 | dp-phase2c | WIP（declared 的一半已关：retired 的声明会作为 removed_upstream 出现，因为 declared_node 只追加，退休那一行仍然记得它约束过谁） | FL-083 的代码那一半仍然开着：一个被删掉的函数，它的调用者的 consistency card 里已经没有它了，所以「上游被删」对代码节点仍然触发不了。要么从**上一个 run 的** card 取 callees 再比对，要么让 node_removed 事件反查上一版里谁调用过它 | DP 3 期 |
+| FL-096 | dp-phase2c | DEFERRED | `provledger node declare` 无模型时必须 `--type`，有模型时整句交给无头 claude。中间地带没做：用户给了 `--type` 但描述里还有日期/范围/负责人，模型本可以只整理 attrs 而不碰类型。需要一个"只补 attrs，不改用户已说的字段"的受限模式 | DP 3 期 |
+

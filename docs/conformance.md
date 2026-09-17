@@ -2,8 +2,13 @@
 
 provLedger's code graph is built from **node-type providers**. The built-in
 ones (`provledger.symbol` for functions / methods / classes,
-`provledger.owned` for dataframes / columns) are ordinary providers written
-against the same public API a third party gets. A provider *extracts*: it
+`provledger.owned` for dataframes / columns, and since DP phase 2c
+`provledger.declared` for the things a person declared — business rules,
+external systems, stakeholder decisions, external datasets, hand-computed
+figures) are ordinary providers written against the same public API a third
+party gets. `provledger.declared` is worth reading as an example of a provider
+whose subject is not source code: it observes rows another part of the system
+wrote, and it still has to satisfy the same six contracts. A provider *extracts*: it
 looks at a repository and returns observations. The **host owns identity,
 history, tier and propagation** — matching across runs, node keys, events and
 tiers are never a provider's business.

@@ -301,3 +301,103 @@ else — no edits, no other tools, no answering from memory or from the source
 tree. A read that can edit is not a read, and the rule only holds if it is
 written where the model reads it; `tests/test_skill_bundle.py` asserts it stays
 written.
+
+## 11 · Phase 2c — declaring the world outside the code
+
+The third core (NORTH-STAR): *a user says one sentence and the meeting
+decision, the external system, the hand-computed figure enters the graph, and
+from then on it has exactly the same provenance as a function.*
+
+### 11.1 The table (migration 026, `declared_node`)
+
+Append-only like `utterance` / `reference` / `change_reason`: one INSERT per
+version, `superseded_by` is the only column an UPDATE may touch, DELETE is
+refused, and every row carries the sha256 chain `provenance.verify_chain` walks.
+One column carries the whole design:
+
+```sql
+tier TEXT NOT NULL CHECK (tier IN ('stated', 'asserted'))
+```
+
+`observed` is absent on purpose. Nobody observed a steering-group decision:
+somebody said it, or a model tidied up what somebody said.
+
+`node_type` is one of `external_system`, `business_rule`,
+`stakeholder_decision`, `external_dataset`, `manual_figure`. `§9`'s
+`manual_figure` is one of them; `business_rule` is the node form of a
+constraint.
+
+### 11.2 Who said what decides the tier
+
+`declared.declare()` has **no tier parameter**, and the rule is mechanical:
+
+| what | tier |
+|---|---|
+| a field you typed (`--type`, `--attr`, `--links-to`) | `stated` |
+| a field the model tidied out of your sentence | `asserted` |
+| the ROW, once you confirm it with your own words | `stated` |
+| the edges the model proposed, after that confirmation | still `asserted` |
+
+The last row is the point. `field_tiers_json` keeps the per-field answer next to
+the row-level one, so confirming a draft never rewrites who wrote which part.
+The confirming sentence is recorded as an `utterance`, and the row points at it
+— which is what gives `stated` something to be true about.
+
+The model's whole job is turning one sentence into
+`{node_type, name, attrs, links}`. It may not name a node that is not already in
+the graph, and **one bad name discards the entire answer**, naming what was
+wrong: a partly-believed tidy-up is worse than none. The runner is injected
+(headless `claude -p --tools ""`), so tests never call a model.
+
+### 11.3 In the graph, computed like everything else
+
+The analyzer's declared stage reads the project's ACTIVE declarations and writes
+one node plus its `declared_feeds` / `declared_constrains` / `declared_depends_on`
+edges; a link whose target is missing or ambiguous is counted, never guessed.
+`provledger.declared` — the third built-in provider — projects those rows, and
+the host does the rest. Identity in three layers:
+
+| layer | what it is | so |
+|---|---|---|
+| qualname | `declared:<slug>` | revising a declaration is the same node; declaring a second one is a new node (§18: we never judge whether two descriptions mean the same object) |
+| struct | the declaration's attributes | edit them → the next run computes `node_changed` |
+| dataflow | the links, *and whether each target is still in the graph* | delete the function a rule constrains → the rule's footing moved, and it is recorded |
+
+Retiring a declaration appends a `retired` row; the next run computes
+`node_removed`. Because `declared_node` is append-only, the retired row still
+names what it pointed at — so a retired declaration DOES appear as
+`removed_upstream` of the nodes it constrained. That is the half of FL-083 this
+phase can close honestly; the code half (who called a deleted function) still
+needs the previous run's card.
+
+The provider passes all six conformance contracts over a graph built from the
+mutation corpus, so `rename_function`, `delete_function` and `move_file`
+actually reach the declared node and "preserved for every mutation" is tested
+rather than skipped past.
+
+### 11.4 A rule is a node AND a reason
+
+Confirming a `business_rule` or a `stakeholder_decision` that constrains
+something also writes one **active constraint** per target, carrying the same
+words as its span. So the rule is a node you can point at in the graph and a
+record the next plan's heads-up finds — which is what makes the walkthrough's
+last step work: one sentence, said once, turns up as a blocking finding in the
+next plan that touches what it governs. An `external_system` anchors nothing: it
+is a fact, not a rule.
+
+### 11.5 In the three views
+
+Node: a `declared` marker with the declared type and the DECLARATION's tier,
+printed **beside** the event tier the graph computed — they answer different
+questions. Graph: external systems, datasets and hand-computed figures sit at
+level 0 (they are where things come from); rules and decisions get a constraint
+lane, excluded from the topological sort, drawn as a panel that links each rule
+to what it governs — a rule must not push the code it governs down a level, or
+the picture claims the rule produces it.
+
+### 11.6 What this deliberately does not do
+
+No extraction of nodes from documents. No judging whether two descriptions mean
+the same object: changing a description is an attribute change on the same node,
+a new `declare` is a new node. The model never produces a result number and
+never labels its own output as the user's words.
