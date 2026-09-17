@@ -257,15 +257,19 @@ OFF_BASIS = "external trigger off — no model was asked"
 
 
 def evaluate_external(conn, *, project: str, plan_id: str, psg_db_path: str | None = None, runner=None,
-                      model: str | None = None, mode: str = "on", commit: bool = False) -> dict:
+                      model: str | None = None, mode: str = "on", ctx=None, commit: bool = False) -> dict:
     """Judge every external candidate of this plan exactly once.
 
     With `mode='off'` no model is called and every candidate still gets its
     row, basis `external trigger off`: the rates in C5 need a denominator, and
     a switch that also switches off the record would make the switch
     unmeasurable — which is the one thing this module exists to prevent.
+
+    `ctx` is the caller's own context when it has one — `triggers.evaluate`
+    already built it, and building it twice means re-reading the graph, the
+    steps and the deviations for the same plan (H2: retrieve once).
     """
-    ctx = triggers._ctx(conn, project, plan_id, psg_db_path)
+    ctx = ctx if ctx is not None else triggers._ctx(conn, project, plan_id, psg_db_path)
     out = {"plan_id": plan_id, "mode": mode, "judged": 0, "auto": 0, "ask": 0, "silent": 0, "nodes": []}
     for node in candidates(ctx):
         key = node["node_key"]
@@ -291,3 +295,55 @@ def evaluate_external(conn, *, project: str, plan_id: str, psg_db_path: str | No
     if commit:
         conn.commit()
     return out
+
+
+# ── the two rates the judge is measured by (C5) ──────────────────────────────
+#
+# An LLM verdict's problem is not that it is sometimes wrong; it is that when it
+# is wrong nobody finds out. These two numbers are what the log is for, and both
+# are computed from what actually happened afterwards, never from a self-report:
+#
+#   false ask   the judge asked, the person answered, and the answer was
+#               `unstated` — they had nothing to say, so the question cost
+#               trust and bought nothing
+#   miss        the judge stayed silent and the person came back on their own
+#               and recorded a reason — the change was odd after all
+#
+# Both print their denominator. A rate over two answers is not the same
+# statement as a rate over two hundred, and rounding that difference away is how
+# a calibration number starts lying.
+
+_RATE_SQL_ASKS = """
+SELECT t.node_key,
+       (SELECT COUNT(*) FROM change_reason r WHERE r.plan_id = t.plan_id AND r.node_key = t.node_key
+          AND r.role = 'reason' AND r.state = 'active' AND r.superseded_by IS NULL) AS answers,
+       (SELECT COUNT(*) FROM change_reason r WHERE r.plan_id = t.plan_id AND r.node_key = t.node_key
+          AND r.role = 'reason' AND r.tier = 'unstated' AND r.state = 'active' AND r.superseded_by IS NULL) AS unstated
+FROM trigger_log t WHERE t.path = 'external' AND t.verdict = 'ask'
+"""
+
+_RATE_SQL_SILENCES = """
+SELECT t.node_key,
+       (SELECT COUNT(*) FROM change_reason r WHERE r.plan_id = t.plan_id AND r.node_key = t.node_key
+          AND r.role = 'reason' AND r.recorded_by = 'human' AND r.tier <> 'unstated'
+          AND r.state = 'active' AND r.superseded_by IS NULL) AS volunteered
+FROM trigger_log t WHERE t.path = 'external' AND t.verdict = 'silent'
+"""
+
+
+def rates(conn, project: str | None = None) -> dict:
+    """{asks, asks_answered, false_asks, external_false_ask_rate,
+        silences, misses, external_miss_rate} — the rates are None, not 0.0,
+    when nothing has been answered yet: never asked is not the same statement
+    as never wrong."""
+    where = " AND t.project = ?" if project else ""
+    args: tuple = (project,) if project else ()
+    asks = conn.execute(_RATE_SQL_ASKS + where, args).fetchall()
+    silences = conn.execute(_RATE_SQL_SILENCES + where, args).fetchall()
+    answered = [r for r in asks if r[1]]
+    false_asks = sum(1 for r in answered if r[2])
+    misses = sum(1 for r in silences if r[1])
+    return {"asks": len(asks), "asks_answered": len(answered), "false_asks": false_asks,
+            "external_false_ask_rate": round(false_asks / len(answered), 4) if answered else None,
+            "silences": len(silences), "misses": misses,
+            "external_miss_rate": round(misses / len(silences), 4) if silences else None}

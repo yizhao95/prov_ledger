@@ -684,6 +684,62 @@ def _check_anchor_lost(conn) -> Dict[str, Any]:
                        f"{unchecked} never checked")}
 
 
+def _check_external_trigger_rates(conn) -> Dict[str, Any]:
+    """DP phase 5 (spec §4, C5): the two rates the external-artifact judge is
+    measured by.
+
+    An LLM verdict's problem is not that it is sometimes wrong — it is that when
+    it is wrong nobody finds out. `trigger_log` records every verdict; these two
+    numbers are what the record is for. A **false ask** is an ask the person
+    answered with `unstated`: they had nothing to say, so the question spent
+    trust and bought nothing. A **miss** is a silence the person came back to on
+    their own and recorded a reason for: the change was odd after all.
+
+    Both informational, neither flips `ok` — a judge asking too much is a judge
+    to recalibrate, not a build to stop. Both print their denominator, because a
+    rate over two answers is not the same statement as a rate over two hundred;
+    with no answers behind it a rate is None, not 0.0.
+    """
+    import os
+    path = _orch_db_path()
+    empty = {"name": "external_trigger_rates", "ok": True, "severity": "warning",
+             "asks": 0, "asks_answered": 0, "false_asks": 0, "external_false_ask_rate": None,
+             "silences": 0, "misses": 0, "external_miss_rate": None}
+    if not os.path.exists(path):
+        return dict(empty, detail="no orchestrator.db (0 of 0 asks answered, 0 of 0 silences)")
+    try:
+        oc = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            asks = oc.execute(
+                "SELECT (SELECT COUNT(*) FROM change_reason r WHERE r.plan_id = t.plan_id AND r.node_key = t.node_key "
+                "          AND r.role = 'reason' AND r.state = 'active' AND r.superseded_by IS NULL), "
+                "       (SELECT COUNT(*) FROM change_reason r WHERE r.plan_id = t.plan_id AND r.node_key = t.node_key "
+                "          AND r.role = 'reason' AND r.tier = 'unstated' AND r.state = 'active' AND r.superseded_by IS NULL) "
+                "FROM trigger_log t WHERE t.path = 'external' AND t.verdict = 'ask'").fetchall()
+            silences = oc.execute(
+                "SELECT (SELECT COUNT(*) FROM change_reason r WHERE r.plan_id = t.plan_id AND r.node_key = t.node_key "
+                "          AND r.role = 'reason' AND r.recorded_by = 'human' AND r.tier <> 'unstated' "
+                "          AND r.state = 'active' AND r.superseded_by IS NULL) "
+                "FROM trigger_log t WHERE t.path = 'external' AND t.verdict = 'silent'").fetchall()
+        finally:
+            oc.close()
+    except sqlite3.Error as e:
+        return dict(empty, detail=f"orchestrator.db unreadable ({e})")
+    answered = [r for r in asks if r[0]]
+    false_asks = sum(1 for r in answered if r[1])
+    misses = sum(1 for r in silences if r[0])
+    fa = round(false_asks / len(answered), 4) if answered else None
+    mr = round(misses / len(silences), 4) if silences else None
+    return {"name": "external_trigger_rates", "ok": True, "severity": "warning",
+            "asks": len(asks), "asks_answered": len(answered), "false_asks": false_asks,
+            "external_false_ask_rate": fa, "silences": len(silences), "misses": misses,
+            "external_miss_rate": mr,
+            "detail": (f"false ask: {false_asks} of {len(answered)} answered ask(s) "
+                       f"({'n/a' if fa is None else format(fa, '.1%')}) · "
+                       f"miss: {misses} of {len(silences)} silence(s) "
+                       f"({'n/a' if mr is None else format(mr, '.1%')})")}
+
+
 _CHECKS = [
     _check_node_types_nonempty,
     _check_no_dangling_edges,
@@ -712,6 +768,7 @@ _CHECKS = [
     _check_unanchored_closes,
     _check_manual_figures,
     _check_anchor_lost,
+    _check_external_trigger_rates,
 ]
 
 

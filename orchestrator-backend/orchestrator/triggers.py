@@ -452,11 +452,17 @@ def _logged(conn, plan_id: str, node_key: str) -> bool:
                         (plan_id, node_key)).fetchone() is not None
 
 
-def evaluate(conn, *, project: str, plan_id: str, psg_db_path: str | None, ask: bool = True, commit: bool = False) -> dict:
+def evaluate(conn, *, project: str, plan_id: str, psg_db_path: str | None, ask: bool = True,
+             external_mode: str = "off", external_runner=None, commit: bool = False) -> dict:
     """Try R0..R5 on every node the plan's runs touched. First hit → a stated
     (R0, the user's words) or derived reason + trigger_log auto; no hit on a node the plan CHANGED → trigger_log
     ask (or silent when the project closes in pending mode); no hit on a
-    merely-touched node → nothing (it was never a slot). Idempotent."""
+    merely-touched node → nothing (it was never a slot). Idempotent.
+
+    DP phase 5: the rules go first and the model goes last. Whatever is left
+    that lives outside the code — a number in a deck, a figure nobody can trace
+    — goes to `external_trigger.evaluate_external`, which judges it only when
+    `external_mode == "on"` and logs its verdict either way."""
     ctx = _ctx(conn, project, plan_id, psg_db_path)
     changed = {c["node_key"] for c in psg_bridge.changed_node_keys(psg_db_path, plan_id)}
     result = {"auto": 0, "ask": 0, "silent": 0, "by_rule": {r.id: 0 for r in RULES}, "nodes": []}
@@ -506,6 +512,13 @@ def evaluate(conn, *, project: str, plan_id: str, psg_db_path: str | None, ask: 
             conn.execute("INSERT INTO trigger_log (project, plan_id, node_key, path, rule_id, verdict, basis) VALUES (?, ?, ?, 'code', NULL, ?, ?)",
                          (project, plan_id, key, verdict, "no rule recognised the change"))
             result[verdict] += 1
+    # DP phase 5 (Task 1): the external path, last and only on what no rule
+    # recognised. Off by default — and off still writes one row per candidate,
+    # because a switch that also switches off the record cannot be measured.
+    from . import external_trigger
+    result["external"] = external_trigger.evaluate_external(
+        conn, project=project, plan_id=plan_id, psg_db_path=psg_db_path,
+        runner=external_runner, mode=external_mode, ctx=ctx, commit=False)
     if commit:
         conn.commit()
     return result

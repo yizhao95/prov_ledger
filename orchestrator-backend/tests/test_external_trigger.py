@@ -24,6 +24,7 @@ Every test injects a stub runner. No test here reaches a model.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -230,3 +231,121 @@ def test_the_prompt_carries_the_words_and_the_places_the_number_turned_up(ledger
     prompt = et.prompt_for(_ctx(ledger), _node("metric:q3_conv"))
     assert text in prompt and str(uid) in prompt
     assert "slide 4" in prompt and DECK in prompt
+# ── Task 1: the switch, the wiring, and the two rates (C5) ───────────────────
+
+
+def test_with_the_switch_off_no_model_is_asked_and_the_verdict_is_still_logged(ledger):
+    _said(ledger, "slide 4 转化率改成 2.8%")
+    calls = []
+
+    def never(prompt, *, model=None, timeout_s=None):
+        calls.append(prompt)
+        return _answer(True, "this runner should never have been called")
+
+    out = et.evaluate_external(ledger, project=PROJECT, plan_id=PLAN, psg_db_path=None,
+                               runner=never, mode="off", commit=True)
+    assert calls == []                                    # off means no model call
+    assert out["judged"] == 1 and out["silent"] == 1
+    path, verdict, basis = ledger.execute(
+        "SELECT path, verdict, basis FROM trigger_log WHERE plan_id = ?", (PLAN,)).fetchone()
+    assert (path, verdict) == ("external", "silent")      # but the row is still there (C5 needs a denominator)
+    assert "off" in basis
+
+
+def test_with_the_switch_on_the_runner_is_asked_once_per_candidate(ledger):
+    text = "slide 4 转化率改成 2.8%"
+    uid = _said(ledger, text)
+    calls = []
+    oracle = _oracle({text: uid})
+
+    def counted(prompt, *, model=None, timeout_s=None):
+        calls.append(prompt)
+        return oracle(prompt, model=model, timeout_s=timeout_s)
+
+    et.evaluate_external(ledger, project=PROJECT, plan_id=PLAN, psg_db_path=None,
+                         runner=counted, mode="on", commit=True)
+    assert len(calls) == 1
+
+
+def test_c5_the_false_ask_rate_is_the_share_of_asks_the_person_had_nothing_to_say_to(ledger):
+    _said(ledger, "slide 4 转化率改成 2.8%")
+    for key, tier in (("metric:q3_conv", "unstated"), ("declared:emea-growth", "stated")):
+        et._log(ledger, project=PROJECT, plan_id=PLAN, node_key=key, rule_id=None, verdict="ask", basis="odd")
+    pv.insert_reason(ledger, project=PROJECT, plan_id=PLAN, node_key="metric:q3_conv", kind="technical",
+                     recorded_by="human", commit=False)                       # nothing to say -> unstated
+    uid = _said(ledger, "Sam 说 EMEA 不算在 Q3 里")
+    pv.insert_reason(ledger, project=PROJECT, plan_id=PLAN, node_key="declared:emea-growth", kind="organizational",
+                     verbatim=(uid, 0, 19), recorded_by="human", commit=True)
+    r = et.rates(ledger, project=PROJECT)
+    assert r["asks"] == 2 and r["asks_answered"] == 2 and r["false_asks"] == 1
+    assert r["external_false_ask_rate"] == 0.5
+
+
+def test_c5_the_miss_rate_is_the_share_of_silences_the_person_came_back_to(ledger):
+    _said(ledger, "slide 4 转化率改成 2.8%")
+    for key in ("metric:q3_conv", "declared:emea-growth"):
+        et._log(ledger, project=PROJECT, plan_id=PLAN, node_key=key, rule_id=None, verdict="silent", basis="not odd")
+    uid = _said(ledger, "其实那个数字是因为 Sam 把 EMEA 拿掉了")
+    pv.insert_reason(ledger, project=PROJECT, plan_id=PLAN, node_key="metric:q3_conv", kind="organizational",
+                     verbatim=(uid, 0, 10), recorded_by="human", commit=True)
+    r = et.rates(ledger, project=PROJECT)
+    assert r["silences"] == 2 and r["misses"] == 1
+    assert r["external_miss_rate"] == 0.5
+
+
+def test_the_rates_print_their_denominators_instead_of_dividing_by_zero(conn):
+    r = et.rates(conn, project=PROJECT)
+    assert r["asks"] == 0 and r["silences"] == 0
+    assert r["external_false_ask_rate"] is None and r["external_miss_rate"] is None
+
+
+def test_the_external_switch_is_off_until_the_extensions_say_on(tmp_path):
+    from orchestrator import extensions
+    assert extensions.EMPTY.reasons_external_trigger == "off"
+    p = tmp_path / "provledger-extensions.json"
+    p.write_text(json.dumps({"version": 1, "reasons": {"external_trigger": "on"}}), encoding="utf-8")
+    assert extensions.load(str(p)).reasons_external_trigger == "on"
+
+
+def test_the_external_switch_refuses_a_value_that_is_neither_off_nor_on(tmp_path):
+    from orchestrator import extensions
+    p = tmp_path / "provledger-extensions.json"
+    p.write_text(json.dumps({"version": 1, "reasons": {"external_trigger": "sometimes"}}), encoding="utf-8")
+    with pytest.raises(extensions.ExtensionsError) as e:
+        extensions.load(str(p))
+    assert "external_trigger" in str(e.value)
+
+
+def test_the_code_rules_answer_first_and_the_judge_only_sees_what_is_left(ledger, tmp_path):
+    """One close, two paths: the analyzer's node is judged by R0–R6 and logged
+    path='code'; the deck's number is in no snapshot at all and is judged by the
+    model and logged path='external'."""
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import _psg_schema as ps
+    graph = tmp_path / "proj-state-graph.db"
+    g = ps.build(graph)
+    ps.add_run(g, 1, plan_id=PLAN)
+    ps.add_snapshot(g, 1, "nk_code", "pkg.mod.load_orders")
+    ps.add_event(g, 1, 1, "node_added", "nk_code")
+    g.commit()
+    g.close()
+    text = "slide 4 转化率改成 2.8%"
+    uid = _said(ledger, text)
+    out = triggers.evaluate(ledger, project=PROJECT, plan_id=PLAN, psg_db_path=str(graph),
+                            external_mode="on", external_runner=_oracle({text: uid}), commit=True)
+    rows = dict(ledger.execute("SELECT node_key, path FROM trigger_log WHERE plan_id = ?", (PLAN,)).fetchall())
+    assert rows["nk_code"] == "code"
+    assert rows["metric:q3_conv"] == "external"
+    assert out["external"]["ask"] == 1
+
+
+def test_a_node_a_code_rule_already_answered_is_not_judged_again_by_the_model(ledger):
+    text = "slide 4 转化率改成 2.8%"
+    uid = _said(ledger, text)
+    pv.insert_reason(ledger, project=PROJECT, plan_id=PLAN, node_key="metric:q3_conv", kind="technical",
+                     interpretation="a rule already answered for this node", rule_id="R5",
+                     recorded_by="system", commit=True)
+    out = et.evaluate_external(ledger, project=PROJECT, plan_id=PLAN, psg_db_path=None,
+                               runner=_oracle({text: uid}), mode="on", commit=True)
+    assert out["judged"] == 0
