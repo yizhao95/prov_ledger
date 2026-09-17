@@ -422,6 +422,45 @@ def _significance_cmd(args) -> int:
         conn.close()
 
 
+def _trigger_cmd(args) -> int:
+    """MANUAL, never CI: the external judge's calibration and the mark a person
+    puts on a verdict. `eval` replays the five paired examples against a runner
+    and prints the gate's verdict; `label` marks one real verdict right or
+    wrong by APPENDING a row — trigger_log refuses UPDATE on purpose."""
+    from .testing import calibration_external as cx
+    conn = _open()
+    try:
+        if args.sub == "label":
+            rid = cx.label(conn, args.trigger_log_id, args.mark, note=args.note)
+            row = conn.execute("SELECT project, plan_id, node_key, verdict, basis FROM trigger_log WHERE id = ?",
+                               (rid,)).fetchone()
+            print(json.dumps({"label_id": rid, "marks": args.trigger_log_id, "user_action": args.mark,
+                              "project": row[0], "plan_id": row[1], "node_key": row[2], "verdict": row[3],
+                              "basis": row[4]}, indent=1, ensure_ascii=False))
+            return 0
+        if args.runner == "claude":
+            from .testing.claude_arbiter import default_runner as runner
+        elif args.runner == "stub-truthful":
+            runner = cx.truthful_runner()
+        elif args.runner == "stub-silent":
+            def runner(prompt, *, model=None, timeout_s=None):
+                return '{"trigger": false, "reason_in_utterance": null, "basis": "stub: never odd"}'
+        else:
+            def runner(prompt, *, model=None, timeout_s=None):
+                return "I could not tell."
+        rep = cx.run(runner, n_runs=args.n_runs, conn=conn, project=args.project,
+                     out_dir=args.out_dir, model=args.model)
+        ok, detail = cx.gate(out_dir=args.out_dir)
+        out = json.loads(rep.to_json())
+        out["runner"] = args.runner
+        out["report_path"] = str(cx.report_path(args.out_dir))
+        out["gate"] = {"ok": ok, "detail": detail}
+        print(json.dumps(out, indent=1, ensure_ascii=False, default=str))
+        return 0
+    finally:
+        conn.close()
+
+
 def _reasons_cmd(args) -> int:
     conn = _open()
     try:
@@ -943,6 +982,21 @@ def build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--model", default=None)
     dis = sgs.add_parser("disagreements", help="hint = major but the latest verdict says minor")
     dis.add_argument("--project", default=None)
+    tg = sub.add_parser("trigger", help="the external-artifact judge: its calibration, its gate, and a person's mark on one verdict")
+    tgs = tg.add_subparsers(dest="sub", required=True)
+    te = tgs.add_parser("eval", help="MANUAL: replay the five paired examples against a runner, add every marked verdict, "
+                                     "write the report and print whether it clears the gate — never run in CI")
+    te.add_argument("--runner", default="stub-truthful",
+                    choices=["claude", "stub-truthful", "stub-silent", "stub-prose"],
+                    help="claude = headless claude (the arbiter's runner); the stubs never call a model")
+    te.add_argument("--n-runs", type=int, default=3, dest="n_runs", help="replays per example; consistency is measured across them")
+    te.add_argument("--project", default=None, help="only this project's marked verdicts count as labels")
+    te.add_argument("--out-dir", default=None, dest="out_dir", help="where the report is written (default: the arbiter eval dir)")
+    te.add_argument("--model", default=None)
+    tl = tgs.add_parser("label", help="mark one verdict right or wrong — appended next to it, never written over it")
+    tl.add_argument("trigger_log_id", type=int)
+    tl.add_argument("mark", choices=["right", "wrong"])
+    tl.add_argument("--note", default=None, help="one sentence: what made it right or wrong")
     r = sub.add_parser("reasons", help="the reasons ledger")
     rs = r.add_subparsers(dest="sub", required=True)
     rs.add_parser("reclass-status", help="whether the legacy node_reason / ledger rows were migrated into change_reason, and the tier counts")
@@ -967,6 +1021,8 @@ def main(argv=None) -> int:
         return _reason_cmd(args)
     if args.cmd == "significance":
         return _significance_cmd(args)
+    if args.cmd == "trigger":
+        return _trigger_cmd(args)
     if args.cmd == "ask":
         return _ask_cmd(args)
     if args.cmd == "verify":
