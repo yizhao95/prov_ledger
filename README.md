@@ -31,9 +31,9 @@ This is its own kind of failure, and the usual tools each miss it by one step. `
 
 ### A project database with a full map and a full history
 
-![A data-flow picture of a real repository: 2,892 nodes folded into 11 modules and laid out in three bands — what is read, what processes it, what is produced — with the nodes that carry records marked](docs/media/graph-data.png)
+![A data-flow picture of a real repository, switching between two views: 3,568 nodes folded into modules and laid out in three bands — what is read, what processes it, what is produced — with the count of nodes that carry records changing as the view changes](docs/media/readme-graph.gif)
 
-*Data flow, not a call graph: 2,892 nodes folded into 11 modules and laid out in three bands — what gets read on one side, what processes it in the middle, what comes out on the other. Only what has a story is drawn, and the page says how much it left out.*
+*Data flow, not a call graph: 3,568 nodes folded into 11 modules and laid out in three bands — what gets read on one side, what processes it in the middle, what comes out on the other. Only what has a story is drawn, and the page says how much it left out.*
 
 Functions are the least of it. A column in a dataset is a thing in this map. So is a SQL table, a feed arriving from someone else's system, a metric you track, and anything you put there by describing it in a sentence. They are all first-class: each one has its own page, its own history and its own rules.
 
@@ -45,7 +45,17 @@ That is *what changed*. The rest of the record is *why*: around each thing the m
 
 ### A dashboard a person can audit
 
-![Three views of one context: the node page, the task page with its findings, and the transitions between them](docs/media/readme-views.gif)
+![A task page with its findings block in red: two blocking findings, one of them an upstream column that stopped arriving, and one finding still unanswered](docs/media/readme-task.png)
+
+*Task — the check runs before the edit, not after it. Here the block is red because an upstream feed has quietly stopped sending a column the work depends on, and a standing rule about the Q3 rollup has not been answered. Underneath sit the decisions this piece of work relied on.*
+
+![A node page: one thing's change history, with the record this change touched marked in place and its hit count raised by one, and the constraints panel highlighted in step](docs/media/readme-node.png)
+
+*Node — one thing's timeline, and which of its past decisions this change touched. A rule that comes up again raises its hit count by one; the text is never written a second time.*
+
+![A data-flow graph of the whole project, modules laid out in three bands with the arrows between them](docs/media/readme-state-graph.png)
+
+*Graph — the same project as a map, so a change can be read against what is upstream and downstream of it. This is the part a diff cannot show, and it is what the warning before an edit is reading.*
 
 *Graph, Node, Task — one anchor, three angles. One record per decision; a hit count, never a repeat.*
 

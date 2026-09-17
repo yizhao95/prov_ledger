@@ -30,8 +30,10 @@ HOOK_LINES = (
 
 IMAGES = (
     "docs/media/readme-hook.gif",
-    "docs/media/graph-data.png",
-    "docs/media/readme-views.gif",
+    "docs/media/readme-graph.gif",
+    "docs/media/readme-task.png",
+    "docs/media/readme-node.png",
+    "docs/media/readme-state-graph.png",
     "docs/media/readme-ask.gif",
     "docs/media/readme-cli.gif",
 )

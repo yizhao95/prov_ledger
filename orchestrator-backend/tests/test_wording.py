@@ -91,7 +91,10 @@ def test_phase2b_docs_and_the_new_views_stay_neutral():
     dp = (REPO / "docs" / "decision-provenance.md").read_text(encoding="utf-8")
     assert "## 9 · Phase 2b" in dp and "9.2 · Significance" in dp and "9.3 · R0" in dp and "(project, node, at)" in dp
     readme = (REPO / "README.md").read_text(encoding="utf-8")
-    assert "Three views of one context" in readme and "`/session/{id}`" in readme
+    # The three views are documented by what the section says, not by one image's alt text:
+    # the images in section 2 are replaced from time to time, the claim is not.
+    assert "one anchor, three angles" in readme and "The three share one anchor" in readme
+    assert "`/session/{id}`" in readme
     ki = _known_issues()
     assert "The full graph view is slow" in ki               # the view's one known limit is still published
     surfaces = [REPO / "orchestrator-webapp" / "app" / "templates" / "graph.html", REPO / "orchestrator-webapp" / "app" / "templates" / "session.html",
