@@ -70,41 +70,32 @@ def check(sentence: str, *, ids, numbers) -> tuple[bool, str | None, list[str]]:
     return True, None, []
 
 
-def summarize(question: str, ft: dict, *, absences=(), scope_line: str = "", runner=None, model: str | None = None,
-              timeout_s: float | None = None, max_sentences: int = MAX_SENTENCES) -> dict:
-    """The checked answer. Without a runner: degraded, and the fact table stands."""
-    facts_text = F.render(ft)
-    absences = list(absences or ())
-    allowed_numbers = set(ft.get("numbers") or F.numbers_in(facts_text))
-    allowed_numbers |= F.numbers_in(scope_line)
-    for a in absences:
-        allowed_numbers |= F.numbers_in(a["text"])
-    base = {"facts_text": facts_text, "scope_line": scope_line, "model": model,
-            "dropped": {"uncited": 0, "unknown_id": 0, "number": 0, "over_limit": 0}, "dropped_detail": []}
-    if runner is None:
-        return {**base, "answer": "", "sentences": [], "cites": [], "degraded": True, "note": NO_MODEL_NOTE, "raw": None}
+def allowed_numbers(ft: dict, absences=(), scope_line: str = "") -> set[str]:
+    """Every number an answer may contain: the fact table's, plus the ones the
+    code itself printed in the scope line and the absence sentences."""
+    nums = set(ft.get("numbers") or F.numbers_in(F.render(ft)))
+    nums |= F.numbers_in(scope_line)
+    for a in absences or ():
+        nums |= F.numbers_in(a["text"])
+    return nums
 
-    kwargs = {"model": model}
-    if timeout_s is not None:
-        kwargs["timeout_s"] = timeout_s
-    try:
-        raw = runner(prompt_for(question, facts_text, absences, scope_line), **kwargs)
-    except Exception:
-        return {**base, "answer": "", "sentences": [], "cites": [], "degraded": True,
-                "note": NO_MODEL_NOTE, "raw": None}
-    if not (raw or "").strip():
-        return {**base, "answer": "", "sentences": [], "cites": [], "degraded": True,
-                "note": NO_MODEL_NOTE, "raw": raw}
 
+def review(draft: str, ft: dict, *, absences=(), scope_line: str = "",
+           max_sentences: int = MAX_SENTENCES) -> dict:
+    """The checks, and the ONLY implementation of them: whoever wrote the draft —
+    a headless model, or the session's own model through `provledger ask submit`
+    — it is read back the same way. Returns {answer, sentences, cites, dropped,
+    dropped_detail, note}."""
+    numbers = allowed_numbers(ft, absences, scope_line)
     kept: list[str] = []
-    dropped = dict(base["dropped"])
+    dropped = {"uncited": 0, "unknown_id": 0, "number": 0, "over_limit": 0}
     detail: list[dict] = []
-    for s in split_sentences(raw):
+    for s in split_sentences(draft):
         if len(kept) >= max_sentences:
             dropped["over_limit"] += 1
             detail.append({"text": s, "reason": "over_limit", "numbers": []})
             continue
-        ok, reason, bad = check(s, ids=ft["ids"], numbers=allowed_numbers)
+        ok, reason, bad = check(s, ids=ft["ids"], numbers=numbers)
         if ok:
             kept.append(s)
         else:
@@ -122,5 +113,31 @@ def summarize(question: str, ft: dict, *, absences=(), scope_line: str = "", run
                           ("number not in the fact table", dropped["number"]), ("over the limit", dropped["over_limit"]))
                          if n)
         note = f"{sum(dropped.values())} sentence(s) dropped: {note}"
-    return {**base, "answer": " ".join(kept), "sentences": kept, "cites": cites, "dropped": dropped,
-            "dropped_detail": detail, "degraded": False, "note": note, "raw": raw}
+    return {"answer": " ".join(kept), "sentences": kept, "cites": cites, "dropped": dropped,
+            "dropped_detail": detail, "note": note}
+
+
+def summarize(question: str, ft: dict, *, absences=(), scope_line: str = "", runner=None, model: str | None = None,
+              timeout_s: float | None = None, max_sentences: int = MAX_SENTENCES) -> dict:
+    """The checked answer. Without a runner: degraded, and the fact table stands."""
+    facts_text = F.render(ft)
+    absences = list(absences or ())
+    base = {"facts_text": facts_text, "scope_line": scope_line, "model": model,
+            "dropped": {"uncited": 0, "unknown_id": 0, "number": 0, "over_limit": 0}, "dropped_detail": []}
+    if runner is None:
+        return {**base, "answer": "", "sentences": [], "cites": [], "degraded": True, "note": NO_MODEL_NOTE, "raw": None}
+
+    kwargs = {"model": model}
+    if timeout_s is not None:
+        kwargs["timeout_s"] = timeout_s
+    try:
+        raw = runner(prompt_for(question, facts_text, absences, scope_line), **kwargs)
+    except Exception:
+        return {**base, "answer": "", "sentences": [], "cites": [], "degraded": True,
+                "note": NO_MODEL_NOTE, "raw": None}
+    if not (raw or "").strip():
+        return {**base, "answer": "", "sentences": [], "cites": [], "degraded": True,
+                "note": NO_MODEL_NOTE, "raw": raw}
+
+    checked = review(raw, ft, absences=absences, scope_line=scope_line, max_sentences=max_sentences)
+    return {**base, **checked, "degraded": False, "raw": raw}

@@ -269,3 +269,35 @@ stopwords, > 3 nodes per sentence = generic) is unchanged: 挂错比不挂糟.
 - The session that installs the hooks does not fire them; the phase-2b
   dogfood ran in such a session, so its cost numbers are the stored packs
   only and its R0 material entered through `provledger note --session`.
+
+### 10.6 · `/ledger` as a slash command (phase 2e, Task 6)
+
+The dashboard page is the second entry point. The first is a slash command in
+the session you are already working in — `/ledger why is our train/test split
+80/20?` — because the question usually arrives *while* you are changing the
+thing, and because there is already a model in the room:
+
+```
+a.  provledger ask "<question>" --json --no-model     # code locates + computes
+b.  the SESSION's model drafts ≤ 8 sentences, each ending in [#id] or [scope]
+c.  provledger ask submit <ask_id> --answer-file <f>  # code checks and records
+d.  the checked answer, the scope line, the cited records, two follow-up reads
+```
+
+`--no-model` in step (a) is deliberate: spawning a second, headless model to
+answer a question the session's model can answer is a round trip nobody asked
+for. What must not change is step (c): the draft goes back through the same
+`summarize.review` the headless path uses — same J1, same J2, same counted
+deletions. **A draft that is never checked is a model talking to itself**, and
+it does not matter which model wrote it.
+
+`ask_log` is append-only, so a second draft is not an update: `ask_answer(ask_id,
+version, answer, cites, dropped, model)` (migration 024) keeps every version,
+including the ones that were rewritten. `model='session'` distinguishes them
+from the headless runner's.
+
+`skills/ledger/SKILL.md` states the two commands the skill may run and nothing
+else — no edits, no other tools, no answering from memory or from the source
+tree. A read that can edit is not a read, and the rule only holds if it is
+written where the model reads it; `tests/test_skill_bundle.py` asserts it stays
+written.

@@ -164,8 +164,14 @@ def render_text(doc: dict) -> str:
             out.append(f"  [{r['cite']}] {r['kind']} · {r['node']} · {r['url']}")
             if text:
                 out.append(f"      {text[:160]}")
+    if doc.get("facts_changed"):
+        out += ["", "⚠ the fact table changed between the question and this answer "
+                    f"({(doc.get('facts_sha_asked') or '')[:12]} → {(doc.get('facts_sha') or '')[:12]}): "
+                    "the sentences above were checked against the newer table, not the one they were written from"]
     if doc.get("ask_id"):
-        out += ["", f"ask id {doc['ask_id']} · say `provledger ask feedback {doc['ask_id']} wrong` if this is wrong"]
+        out += ["", f"ask id {doc['ask_id']}" + (f" · answer v{doc['version']}" if doc.get("version") else "")
+                + f" · say `provledger ask feedback {doc['ask_id']} wrong` if this is wrong"]
+        out += ["", "Next"] + [f"  {c}" for c in next_commands(doc)]
     return "\n".join(out)
 
 
@@ -179,3 +185,82 @@ def as_json(doc: dict) -> dict:
     out["candidates"] = [{k: c[k] for k in ("qn", "node_key", "why", "score")} for c in doc.get("candidates", [])]
     out["chosen"] = doc.get("chosen")
     return out
+
+
+# ── the session path: /ledger as a slash command (DP phase 2e, Task 6) ───────
+# Inside a Claude Code session there is already a model in the room, so the
+# skill hands it the computed fact table and asks for a draft. That changes WHO
+# writes the sentence and nothing else: `submit` reads the draft back through
+# the same `summarize.review` the headless path uses, deletes what does not cite
+# and what carries a number the table never stated, and counts every deletion.
+# A draft that is never checked is a model talking to itself.
+
+def rebuild(conn, ask_id: int, *, psg_db_path: str | None = None, lang: str = "en") -> dict:
+    """The fact table, absences and scope of a logged question, exactly as they
+    were computed when it was asked — a draft is checked against what it saw."""
+    from . import absence as absence_mod, facts as facts_mod, scope as scope_mod
+
+    row = get_ask(conn, ask_id)
+    if row is None:
+        raise ValueError(f"no logged question with ask id {ask_id}")
+    chosen = (row.get("chosen") or {}).get("chosen") or []
+    ft = facts_mod.facts(conn, psg_db_path, chosen, project=row["project"])
+    absences = absence_mod.absences(conn, ft)
+    sc = row.get("scope") or scope_mod.scope(ft)
+    return {"row": row, "facts": ft, "facts_text": facts_mod.render(ft), "facts_sha": facts_mod.sha(ft),
+            "absences": absences, "scope": sc, "scope_line": scope_mod.line(sc, lang)}
+
+
+def latest_answer(conn, ask_id: int) -> dict | None:
+    """The newest draft of one question. Older versions are never overwritten."""
+    row = conn.execute("SELECT id, ask_id, version, answer, cites_json, dropped_json, model, at "
+                       "FROM ask_answer WHERE ask_id = ? ORDER BY version DESC LIMIT 1", (ask_id,)).fetchone()
+    if row is None:
+        return None
+    d = dict(row)
+    for k in ("cites_json", "dropped_json"):
+        try:
+            d[k[:-5]] = json.loads(d[k]) if d.get(k) else None
+        except ValueError:
+            d[k[:-5]] = None
+    return d
+
+
+def submit(conn, ask_id: int, draft: str, *, psg_db_path: str | None = None, model: str = "session",
+           lang: str = "en", commit: bool = True) -> dict:
+    """Check a session model's draft and append it as the next version."""
+    from . import summarize as summarize_mod
+
+    base = rebuild(conn, ask_id, psg_db_path=psg_db_path, lang=lang)
+    checked = summarize_mod.review(draft, base["facts"], absences=base["absences"],
+                                   scope_line=base["scope_line"])
+    version = int(conn.execute("SELECT COALESCE(MAX(version), 0) + 1 FROM ask_answer WHERE ask_id = ?",
+                               (ask_id,)).fetchone()[0])
+    conn.execute("INSERT INTO ask_answer (ask_id, version, answer, cites_json, dropped_json, model) "
+                 "VALUES (?, ?, ?, ?, ?, ?)",
+                 (ask_id, version, checked["answer"],
+                  json.dumps(checked["cites"], ensure_ascii=False),
+                  json.dumps(checked["dropped"], ensure_ascii=False), model))
+    if commit:
+        conn.commit()
+    logged_sha = base["row"].get("facts_sha")
+    doc = {"ask_id": ask_id, "version": version, "model": model, "runner": "session",
+           "facts_changed": bool(logged_sha and logged_sha != base["facts_sha"]),
+           "facts_sha_asked": logged_sha,
+           "project": base["row"]["project"], "question": base["row"]["question"],
+           "facts": base["facts"], "facts_text": base["facts_text"], "facts_sha": base["facts_sha"],
+           "absences": base["absences"], "scope": base["scope"], "scope_line": base["scope_line"],
+           "degraded": False, "lang": lang, "draft": draft, **checked}
+    doc["records"] = records(base["facts"], checked["cites"])
+    return doc
+
+
+NEXT_COMMANDS = ("[Open records] provledger why {node}",
+                 "[Export] provledger ask card {ask_id} --out card.md")
+
+
+def next_commands(doc: dict) -> list[str]:
+    """The two reads that follow an answer — never a write, never a button."""
+    nodes = [n["qn"] for n in doc["facts"]["nodes"]] or ["<node>"]
+    return [NEXT_COMMANDS[0].format(node=nodes[0]),
+            NEXT_COMMANDS[1].format(ask_id=doc["ask_id"])]

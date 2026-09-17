@@ -338,36 +338,54 @@ the phase-2b PR). See [`docs/decision-provenance.md`](docs/decision-provenance.m
 
 ### `/ledger` — ask the ledger (decision provenance, phase 2e)
 
-Ask in words — *"why does compute_etag hash close-time rows?"*, *"did we ever
-try the other split?"* — from `GET /ledger?q=` or `provledger ask "<question>"`.
-The division of labour is the feature: **code** finds the candidate nodes by
-literal match (full text over the reasons, the words they quote and the sources
-they link; the names the graph knows; the identifiers and numbers written in the
-question), a **model** may only pick among those candidates and restate the fact
-table code computed, and **code** then deletes any sentence that cites nothing,
-cites an id the table does not hold, or carries a number the table does not
-state — counting every deletion on the page. "Nothing was found" is computed,
-never generated, and it is marked `[scope]` next to the range that was searched.
-Every conclusion links back to the record it rests on, and `[Export card]` hands
-you a markdown evidence card: the timeline, each record's hash, the three hash
-chains walked at export time (a tampered row reads `chain broken at #1414`), the
-scope and the export time. With no model the fact table *is* the answer and the
-page says why. Read-only in the strict sense — `/ledger` has no non-GET route,
-and the only row a question appends is its own trace in `ask_log`.
+Ask, in your own words, inside the session you are already working in:
 
-```console
-$ provledger ask "why does compute_etag hash close-time rows?" --project prov_ledger
-compute_etag hashes close-time rows because of an asserted constraint that the dashboard ETag
-must change whenever a close-time row (node_reason / outcomes) lands, since polling clients rely
-on it [#1414][#1415]. That constraint is sourced from the spec at
-docs/superpowers/specs/2026-09-10-essence-alignment-review.md#E3 [#r2]. The constraint was adopted
-by plan dp2-t7-20260916005300, which changed via headline_response and reason_because citing it
-[#1414][#i4][#i5][#i6]. `orchestrator-webapp.app.queries.compute_etag` has never been verified:
+```
+/ledger why is our train/test split 80/20?
+/ledger why does compute_etag hash close-time rows?
+/ledger did we ever try the other join key?
+```
+
+The answer comes back in the terminal, and **every sentence ends with the id of
+the record it rests on**:
+
+```
+A constraint requires that the dashboard ETag change whenever a close-time row
+(node_reason / outcomes) lands, because polling clients rely on it [#1414].
+That constraint is sourced from the spec at
+docs/superpowers/specs/2026-09-10-essence-alignment-review.md#E3 [#r2].
+Plan dp2-t7-20260916005300 changed because of it, citing it in a check response
+and in a change reason [#i4][#i6].
+`orchestrator-webapp.app.queries.compute_etag` has never been verified:
 no outcome is recorded for it in scope. [scope]
 
-Scope: 1 node, 3 constraints, 3 influencing records, 3 changes, 2026-09-10 to 2026-09-16;
-41 candidates, 1 chosen; 1 candidates truncated, 7 reasons truncated.
+Scope: 1 node, 3 constraints, 3 influencing records, 3 changes,
+2026-09-10 to 2026-09-16; 41 candidates, 1 chosen; 7 reasons truncated.
+
+Next
+  [Open records] provledger why orchestrator-webapp.app.queries.compute_etag
+  [Export]       provledger ask card 12 --out card.md
 ```
+
+The division of labour is the feature, not an implementation detail. **Code**
+finds the candidate nodes by literal match (full text over the reasons, the
+words they quote and the sources they link; the names the graph knows; the
+identifiers and numbers written in the question), computes the fact table, and
+computes the absences — because "there is no record of that" is the one answer
+a model is worst at giving unprompted. **A model** may only restate that table.
+Then **code** reads the answer back and deletes any sentence that cites nothing,
+cites an id the table does not hold, or carries a number the table does not
+state — counting every deletion, so a trimmed answer never reads like a complete
+one. Nothing is written except the question's own append-only trace.
+
+The same thing is a command (`provledger ask "<question>"`, with `--json`,
+`--no-model`, `--export card.md`) and a page: **`GET /ledger?q=`** on the
+dashboard, where each `[#id]` is a link back to the record, absence sentences
+carry `data-absence`, and `[Export card]` hands you a markdown evidence card —
+the timeline, each record's hash, the three hash chains walked at export time
+(a tampered row reads `chain broken at #1414`), the scope and the export time.
+The page has no non-GET route; with no model it shows the fact table and says
+why.
 
 See [`docs/decision-provenance.md`](docs/decision-provenance.md) §10.
 

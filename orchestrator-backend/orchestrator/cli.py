@@ -7,6 +7,8 @@ in the repo, `provledger ...` once installed.
   reasons reclass-status                  the state of the legacy-reason migration
   why <node|nk_…|file:line> [...]         one bounded read: history, constraints, rejected paths, blast radius
   ask "<question>" [--project] [...]      ask the ledger: fact table, cited summary, scope, evidence card
+  ask submit <ask_id> --answer-file F     check a draft written by the session's model and record it
+  ask card <ask_id> --out FILE            the evidence card of a logged question
   ask feedback <ask_id> wrong|partial|right   a person's word on one answer
   export <project> --md DIR               one markdown per node (shareable rows only)
   init --agents-md                        drop the two verbs into ./AGENTS.md
@@ -267,8 +269,73 @@ def _ask_runner(args):
     return default_runner, "claude"
 
 
+def _ask_submit(args, ask_mod, psg_bridge) -> int:
+    """`ask submit <ask_id> --answer-file F` — the session model's draft, checked."""
+    if not args.rest or not args.answer_file:
+        print("usage: provledger ask submit <ask_id> --answer-file <file>", file=sys.stderr)
+        return 2
+    try:
+        draft = open(args.answer_file, encoding="utf-8").read()
+    except OSError as e:
+        print(f"provledger ask submit: {e}", file=sys.stderr)
+        return 2
+    conn = _open()
+    try:
+        try:
+            ask_id = int(args.rest[0])
+            psg = psg_bridge.db_path_for(ask_mod.get_ask(conn, ask_id)["project"]) if ask_mod.get_ask(conn, ask_id) else None
+            doc = ask_mod.submit(conn, ask_id, draft, psg_db_path=psg, lang=args.lang)
+        except (ValueError, TypeError) as e:
+            print(f"provledger ask submit: {e}", file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(ask_mod.as_json(doc), indent=1, ensure_ascii=False, default=str))
+        else:
+            print(ask_mod.render_text(doc))
+        return 0
+    finally:
+        conn.close()
+
+
+def _ask_card(args, ask_mod, psg_bridge) -> int:
+    """`ask card <ask_id> --out FILE` — the evidence card of a logged question."""
+    from .ask import card as card_mod
+    if not args.rest:
+        print("usage: provledger ask card <ask_id> --out <file>", file=sys.stderr)
+        return 2
+    conn = _open()
+    try:
+        try:
+            ask_id = int(args.rest[0])
+            row = ask_mod.get_ask(conn, ask_id)
+            if row is None:
+                raise ValueError(f"no logged question with ask id {ask_id}")
+            base = ask_mod.rebuild(conn, ask_id, psg_db_path=psg_bridge.db_path_for(row["project"]), lang=args.lang)
+        except (ValueError, TypeError) as e:
+            print(f"provledger ask card: {e}", file=sys.stderr)
+            return 2
+        latest = ask_mod.latest_answer(conn, ask_id)
+        answer = (latest or {}).get("answer") or row.get("answer") or ""
+        doc = {"ask_id": ask_id, "project": row["project"], "question": row["question"],
+               "facts": base["facts"], "facts_text": base["facts_text"], "facts_sha": row.get("facts_sha") or base["facts_sha"],
+               "answer": answer, "cites": (latest or {}).get("cites") or row.get("cites") or [],
+               "absences": base["absences"], "scope_line": base["scope_line"], "degraded": not answer,
+               "note": None, "model": (latest or {}).get("model") or row.get("model"), "runner": row.get("runner")}
+        out_path = args.out or f"evidence-card-{ask_id}.md"
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(card_mod.card_md(conn, doc))
+        print(json.dumps({"ask_id": ask_id, "card": out_path, "answer_version": (latest or {}).get("version")}))
+        return 0
+    finally:
+        conn.close()
+
+
 def _ask_cmd(args) -> int:
     from . import ask as ask_mod, psg_bridge
+    if args.question == "submit":
+        return _ask_submit(args, ask_mod, psg_bridge)
+    if args.question == "card":
+        return _ask_card(args, ask_mod, psg_bridge)
     if args.question == "feedback":
         if len(args.rest) < 2:
             print("usage: provledger ask feedback <ask_id> wrong|partial|right [--note …]", file=sys.stderr)
@@ -385,6 +452,10 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--runner", default="claude", choices=["claude", "stub"], help="stub never calls a model (tests)")
     a.add_argument("--lang", default="en", choices=["en", "zh"], help="language of the scope line")
     a.add_argument("--note", default=None, help="feedback only: a sentence saying what was wrong")
+    a.add_argument("--answer-file", default=None, metavar="FILE",
+                   help="`ask submit <ask_id> --answer-file F`: a draft written by the session's own model; the same "
+                        "checks apply — every sentence cites, no number outside the fact table, drops are counted")
+    a.add_argument("--out", default=None, metavar="FILE", help="`ask card <ask_id> --out F`: write the evidence card here")
     e = sub.add_parser("export", help="export a project's shareable records as markdown, one file per node")
     e.add_argument("project")
     e.add_argument("--md", required=True, metavar="DIR", help="output directory")
