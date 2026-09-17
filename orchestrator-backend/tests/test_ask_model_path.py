@@ -21,6 +21,7 @@ import pytest
 
 from orchestrator import ask, cli, provenance as pv
 from orchestrator.ask import facts as F, locate, runner as R, summarize as SU
+from orchestrator.testing import claude_arbiter as ca
 
 sys.path.insert(0, str(Path(__file__).parent))
 import _psg_schema as ps  # noqa: E402
@@ -70,9 +71,11 @@ def ft(conn, graph, seeded):
     return F.facts(conn, graph, ["pkg.rollup.discount_rate"], project="proj")
 
 
-def _runner(answer):
+def _runner(answer, noise: str = ""):
+    """A stub summarize model. It answers in the JSON shape the prompt demands,
+    optionally behind the preamble a host plugin injects into `result`."""
     def run(prompt, *, model=None, timeout_s=None):
-        return answer
+        return noise + json.dumps({"sentences": [answer]})
     return run
 
 
@@ -187,19 +190,19 @@ def test_ask_log_keeps_the_runner_detail_of_a_failed_summary(conn, graph, seeded
     assert detail and detail["summarize"]["outcome"] == reason
     assert detail["summarize"]["note"] == doc["note"]
     assert isinstance(detail["summarize"]["detail"].get("elapsed_ms"), int)
-    assert detail["choose"]["outcome"] in ("ok", "empty", "failed", "timeout")
+    assert detail["choose"]["outcome"] in R.OUTCOMES
 
 
 def test_ask_log_keeps_the_raw_and_the_wall_time_of_a_good_summary(conn, graph, seeded):
     def spy(prompt, *, model=None, timeout_s=None):
         if "picking which nodes" in prompt:
             return '{"chosen": ["pkg.rollup.discount_rate"], "basis": "named"}'
-        return f"The column was dropped [#{1}]."
+        return json.dumps({"sentences": [f"The column was dropped [#{1}]."]})
 
     doc = ask.run(conn, project="proj", question=QUESTION, psg_db_path=graph, runner=spy, runner_name="stub")
     row = ask.get_ask(conn, doc["ask_id"])
     assert row["runner_detail"]["summarize"]["outcome"] == "ok"
-    assert row["runner_detail"]["summarize"]["raw"].startswith("The column was dropped")
+    assert "The column was dropped" in row["runner_detail"]["summarize"]["raw"]
     assert row["runner_detail"]["summarize"]["detail"]["raw_len"] > 0
 
 
@@ -286,49 +289,212 @@ def test_call_passes_the_timeout_through():
 # felt like answering in Chinese did, against a prompt that asks for English,
 # and no check noticed. Now it is a drop, counted like every other drop.
 
-def test_a_chinese_sentence_is_dropped_from_an_english_answer(conn, ft, seeded):
+def test_a_sentence_in_another_language_is_kept_and_flagged_not_deleted(conn, ft, seeded):
+    """Deleting for language deleted a CORRECT answer — `(nothing survived the
+    checks)` over a paragraph whose every citation was right. Language is not
+    correctness; citations and numbers are."""
     rid = seeded["reason"]
     answer = (f"The column was dropped because the upstream feed stopped providing it [#{rid}]. "
               f"上游在 v2 之后不再提供该列 [#{rid}].")
     got = SU.summarize(QUESTION, ft, runner=_runner(answer), candidates=3)
-    assert len(got["sentences"]) == 1 and "上游" not in got["answer"]
-    assert got["dropped"]["language"] == 1
-    assert got["dropped_detail"][0]["reason"] == "language"
-    assert "not in the language asked for" in got["note"]
+    assert len(got["sentences"]) == 2 and "上游" in got["answer"]
+    assert got["dropped"] == SU.no_drops() and sum(got["dropped"].values()) == 0
+    assert got["language_mismatch"] == "some"
+    assert "not in English" in got["note"] and "--lang zh" in got["note"]
 
 
-def test_the_same_sentence_is_kept_when_the_reader_asked_in_chinese(conn, ft, seeded):
+def test_a_whole_answer_in_another_language_is_still_an_answer(conn, ft, seeded):
     rid = seeded["reason"]
-    answer = f"上游在 v2 之后不再提供该列 [#{rid}]."
-    assert SU.summarize(QUESTION, ft, runner=_runner(answer), candidates=3, lang="zh")["sentences"]
-    assert SU.summarize(QUESTION, ft, runner=_runner(answer), candidates=3, lang="en")["sentences"] == []
+    got = SU.summarize(QUESTION, ft, runner=_runner(f"上游在 v2 之后不再提供该列 [#{rid}]."), candidates=3)
+    assert got["sentences"] and got["answer"], "the reader gets the content, not an empty page"
+    assert got["language_mismatch"] == "all"
+    assert "the whole answer" in got["note"] and "settings.json" in got["note"]
 
 
-def test_japanese_and_korean_count_as_not_english(conn, ft, seeded):
+def test_the_same_answer_asked_for_in_chinese_is_not_flagged(conn, ft, seeded):
     rid = seeded["reason"]
-    for s in (f"この列は削除されました [#{rid}].", f"이 컬럼은 삭제되었습니다 [#{rid}]."):
-        got = SU.summarize(QUESTION, ft, runner=_runner(s), candidates=3)
-        assert got["sentences"] == [] and got["dropped"]["language"] == 1
+    got = SU.summarize(QUESTION, ft, runner=_runner(f"上游在 v2 之后不再提供该列 [#{rid}]."), candidates=3, lang="zh")
+    assert got["sentences"] and got["language_mismatch"] is None and got["note"] is None
 
 
-def test_ask_run_passes_the_language_down_to_the_check(conn, graph, seeded):
+def test_japanese_and_korean_also_count_as_not_english(conn, ft, seeded):
+    rid = seeded["reason"]
+    for text in (f"この列は削除されました [#{rid}].", f"이 컬럼은 삭제되었습니다 [#{rid}]."):
+        got = SU.summarize(QUESTION, ft, runner=_runner(text), candidates=3)
+        assert got["sentences"] and got["language_mismatch"] == "all"
+
+
+def test_ask_run_carries_the_language_flag_without_emptying_the_answer(conn, graph, seeded):
     rid = seeded["reason"]
 
     def spy(prompt, *, model=None, timeout_s=None):
         if "picking which nodes" in prompt:
             return '{"chosen": ["pkg.rollup.discount_rate"], "basis": "named"}'
-        return f"上游不再提供该列 [#{rid}]."
+        return json.dumps({"sentences": [f"上游不再提供该列 [#{rid}]."]})
 
     en = ask.run(conn, project="proj", question=QUESTION, psg_db_path=graph, runner=spy, record=False, lang="en")
     zh = ask.run(conn, project="proj", question=QUESTION, psg_db_path=graph, runner=spy, record=False, lang="zh")
-    assert en["answer"] == "" and en["dropped"]["language"] == 1
-    assert zh["answer"] and zh["dropped"]["language"] == 0
+    assert en["answer"] and en["language_mismatch"] == "all"
+    assert zh["answer"] and zh["language_mismatch"] is None
 
 
-def test_the_prompt_asks_for_english_first_and_shows_one(conn):
+# ── the host's own settings and the host's own plugins stay out of the call ──
+
+def test_the_headless_command_carries_a_settings_file_of_our_own(monkeypatch):
+    """`~/.claude/settings.json` on this machine says `"language": "Chinese"`,
+    so every headless call answered in Chinese — and asking for English IN THE
+    PROMPT does not override it. An isolated `--settings` file does."""
+    monkeypatch.delenv("PROVLEDGER_CLAUDE_SETTINGS", raising=False)
+    cmd = ca.claude_command("sonnet")
+    assert "--settings" in cmd, "the host's settings are not ours to inherit"
+    path = cmd[cmd.index("--settings") + 1]
+    assert json.load(open(path, encoding="utf-8")) == ca.ISOLATED_SETTINGS == {"language": "en"}
+    assert ca.claude_command("sonnet")[cmd.index("--settings") + 1] == path, "one file per process, not per call"
+
+
+def test_the_settings_file_can_be_pointed_somewhere_else(tmp_path, monkeypatch):
+    mine = tmp_path / "mine.json"
+    mine.write_text('{"language": "fr"}', encoding="utf-8")
+    monkeypatch.setenv("PROVLEDGER_CLAUDE_SETTINGS", str(mine))
+    cmd = ca.claude_command()
+    assert cmd[cmd.index("--settings") + 1] == str(mine)
+
+
+PLUGIN_NOISE = ("Memory capture is currently paused due to a quota cooldown (until ~17:37 UTC) "
+                "— this doesn't affect my answer below.\n\n")
+
+
+def test_a_plugin_preamble_in_result_never_reaches_the_reader(conn, ft, seeded):
+    """A host plugin prepends its own paragraph to `result`. Parsed as prose it
+    became "a sentence the model made up with no citation"; it was never the
+    model's. The answer is strict JSON, so the noise falls off."""
+    rid = seeded["reason"]
+    got = SU.summarize(QUESTION, ft, candidates=3,
+                       runner=_runner(f"The column was dropped [#{rid}].", noise=PLUGIN_NOISE))
+    assert got["sentences"] == [f"The column was dropped [#{rid}]."]
+    assert "Memory capture" not in got["answer"]
+    assert got["dropped"] == SU.no_drops(), "the plugin's paragraph is not a drop against the model"
+    assert got["degraded"] is False
+
+
+def test_an_answer_that_is_not_the_json_shape_says_so_and_keeps_the_raw(conn, ft, seeded):
+    got = SU.summarize(QUESTION, ft, candidates=3,
+                       runner=lambda p, *, model=None, timeout_s=None: "Sure! Here is a paragraph about it.")
+    assert got["degraded_reason"] == "not_json"
+    assert "did not answer in the JSON shape" in got["note"]
+    assert got["runner_detail"]["raw_head"].startswith("Sure! Here is a paragraph")
+
+
+def test_the_json_answer_survives_a_code_fence(conn, ft, seeded):
+    rid = seeded["reason"]
+    fenced = "```json\n" + json.dumps({"sentences": [f"It was dropped [#{rid}]."]}) + "\n```"
+    got = SU.summarize(QUESTION, ft, candidates=3,
+                       runner=lambda p, *, model=None, timeout_s=None: fenced)
+    assert got["sentences"] == [f"It was dropped [#{rid}]."]
+
+
+def test_the_prompt_asks_for_json_and_for_english_before_anything_else(conn):
     text = SU.prompt_text()
     rules = text.split("## Hard rules", 1)[1]
-    assert rules.index("English") < rules.index("cites") if "cites" in rules else True
     first_rule = rules.split("\n2.", 1)[0]
-    assert "English" in first_rule, "the language rule is the first rule"
-    assert "[#3]" in first_rule and "[#r2]" in first_rule, "the first rule carries an English example sentence"
+    assert '"sentences"' in first_rule, "the answer shape is the first rule"
+    assert "English" in rules
+    assert "[#3]" in rules and "[#r2]" in rules, "the prompt carries an English example sentence"
+
+
+# ── what the model itself said, and which model said it ──────────────────────
+# Real, on this machine: the account's Fable budget ran out. `claude -p` exited
+# 1, printed perfectly good JSON, and the one useful sentence in the whole run
+# was inside it. The note said "model returned nothing (rc 1; non-zero exit)"
+# and threw that sentence away.
+
+FABLE_LIMIT = ("You've reached your Fable limit. Switch to another model, or manage usage credits "
+               "at https://claude.ai/settings/usage")
+FABLE_LIMIT_JSON = json.dumps({"type": "result", "subtype": "error_during_execution", "is_error": True,
+                               "duration_ms": 1183, "num_turns": 0, "result": FABLE_LIMIT,
+                               "session_id": "5f0f2c3a-0000-4000-8000-000000000000"})
+
+
+def _refusing_runner(model_seen=None):
+    def refused(prompt, *, model=None, timeout_s=None):
+        if model_seen is not None:
+            model_seen.append(model)
+        doc = json.loads(FABLE_LIMIT_JSON)
+        return "", {"rc": 1, "refused": True, "is_error": True, "model": model or "fable",
+                    "result": doc["result"], "stderr_head": ""}
+    return refused
+
+
+def test_a_refusal_repeats_the_sentence_the_model_refused_with(conn, graph, seeded):
+    doc = ask.run(conn, project="proj", question=QUESTION, psg_db_path=graph,
+                  runner=_refusing_runner(), record=False)
+    assert doc["degraded_reason"] == "refused"
+    assert doc["note"].startswith("summary unavailable: model call refused")
+    assert "You've reached your Fable limit" in doc["note"]
+    assert "rc 1" not in doc["note"], "the return code is not the interesting part; what it said is"
+
+
+def test_a_refusal_names_the_model_and_offers_another_without_switching(conn, graph, seeded):
+    doc = ask.run(conn, project="proj", question=QUESTION, psg_db_path=graph, model="fable",
+                  runner=_refusing_runner(), record=False)
+    assert "[fable]" in doc["note"]
+    assert "try --model sonnet" in doc["note"]
+    assert doc["model"] == "fable", "nothing is substituted behind the reader's back"
+
+
+def test_the_refusal_is_cut_to_a_pointer_not_a_body(conn, ft):
+    long = "x" * 900
+    got = SU.summarize(QUESTION, ft, candidates=1,
+                       runner=lambda p, *, model=None, timeout_s=None: ("", {"rc": 1, "refused": True, "result": long}))
+    assert got["degraded_reason"] == "refused"
+    assert len(got["note"]) < 400 and ("x" * SU.REFUSAL_HEAD) in got["note"]
+
+
+def test_a_refusal_is_logged_with_what_was_said(conn, graph, seeded):
+    doc = ask.run(conn, project="proj", question=QUESTION, psg_db_path=graph, model="fable",
+                  runner=_refusing_runner(), runner_name="claude")
+    row = ask.get_ask(conn, doc["ask_id"])
+    detail = row["runner_detail"]["summarize"]
+    assert detail["outcome"] == "refused"
+    assert detail["detail"]["result"].startswith("You've reached your Fable limit")
+    assert detail["detail"]["model"] == "fable" and detail["detail"]["rc"] == 1
+    assert row["model"] == "fable"
+
+
+def test_rc_non_zero_without_parseable_json_still_reads_as_nothing(conn, ft):
+    got = SU.summarize(QUESTION, ft, candidates=1,
+                       runner=lambda p, *, model=None, timeout_s=None: ("", {"rc": 3, "reason": "non-zero exit"}))
+    assert got["degraded_reason"] == "empty"
+    assert got["note"] == "summary unavailable: model returned nothing (rc 3; non-zero exit)"
+
+
+# ── PROVLEDGER_ASK_MODEL: choosable, never substituted ───────────────────────
+
+def test_the_runner_takes_the_model_from_the_environment(monkeypatch):
+    seen = []
+    spy = lambda p, *, model=None, timeout_s=None: (seen.append(model) or "x")  # noqa: E731
+    monkeypatch.setenv("PROVLEDGER_ASK_MODEL", "sonnet")
+    text, detail, outcome = R.call(spy, "p")
+    assert seen == ["sonnet"] and detail["model"] == "sonnet" and outcome == "ok"
+    R.call(spy, "p", model="haiku")
+    assert seen[-1] == "haiku", "an explicit model wins over the environment"
+    monkeypatch.delenv("PROVLEDGER_ASK_MODEL")
+    R.call(spy, "p")
+    assert seen[-1] is None
+
+
+def test_ask_run_resolves_the_model_once_so_the_log_says_which_one(conn, graph, seeded, monkeypatch):
+    monkeypatch.setenv("PROVLEDGER_ASK_MODEL", "sonnet")
+    seen = []
+    doc = ask.run(conn, project="proj", question=QUESTION, psg_db_path=graph, record=False,
+                  runner=_refusing_runner(seen))
+    assert doc["model"] == "sonnet" and seen and set(seen) == {"sonnet"}
+
+
+def test_cli_ask_model_defaults_to_PROVLEDGER_ASK_MODEL(monkeypatch):
+    monkeypatch.delenv("PROVLEDGER_ASK_RUNNER", raising=False)
+    monkeypatch.delenv("PROVLEDGER_ASK_MODEL", raising=False)
+    assert cli.build_parser().parse_args(["ask", "q"]).model is None
+    monkeypatch.setenv("PROVLEDGER_ASK_MODEL", "sonnet")
+    assert cli.build_parser().parse_args(["ask", "q"]).model == "sonnet"
+    assert cli.build_parser().parse_args(["ask", "q", "--model", "haiku"]).model == "haiku"

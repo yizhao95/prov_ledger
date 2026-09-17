@@ -13,10 +13,12 @@ it never runs in CI: tests inject a stub `runner`.
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
 import subprocess
+import tempfile
 from importlib import resources
 from pathlib import Path
 
@@ -28,6 +30,51 @@ DEFAULT_TIMEOUT_S = 120.0
 CONTEXT_LINES = 10
 _JSON_RE = re.compile(r"\{.*\}", re.S)
 
+# ── the host's environment is not ours ───────────────────────────────────────
+# `claude -p` reads the user's own `~/.claude/settings.json`. On the machine
+# this was found on it says `"language": "Chinese"`, so EVERY headless call —
+# ask, the arbiter, significance, the external trigger — answered in Chinese
+# against prompts written in English. Asking for English in the prompt does not
+# override it; a settings file of our own does. A headless call is a tool call,
+# not a conversation, and it must not inherit the preferences of whoever
+# happens to be logged in.
+#
+# What it does NOT fix, and what every caller must therefore assume: the host's
+# plugins still run, and they write into the answer. claude-mem prepends its own
+# paragraph ("Memory capture is currently paused due to a quota cooldown…") to
+# `result` on every call, and `enabledPlugins: {}` here does not stop it. So the
+# rule for anything parsing `result` is: expect noise in front of the answer and
+# take a structured object out of it, never the whole string (see
+# `ask.summarize.parse_sentences` and `parse_answer` below).
+CLAUDE_SETTINGS_ENV = "PROVLEDGER_CLAUDE_SETTINGS"
+ISOLATED_SETTINGS = {"language": "en"}
+_SETTINGS_PATH: str | None = None
+
+
+def _drop_settings_file(path: str) -> None:
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def settings_path() -> str:
+    """The settings file every headless call runs with: ours, not the user's.
+    `$PROVLEDGER_CLAUDE_SETTINGS` points somewhere else; otherwise one temp file
+    per process, removed at exit."""
+    override = (os.environ.get(CLAUDE_SETTINGS_ENV) or "").strip()
+    if override:
+        return override
+    global _SETTINGS_PATH
+    if _SETTINGS_PATH and os.path.exists(_SETTINGS_PATH):
+        return _SETTINGS_PATH
+    fd, path = tempfile.mkstemp(prefix="provledger-claude-", suffix=".settings.json")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(ISOLATED_SETTINGS, f)
+    atexit.register(_drop_settings_file, path)
+    _SETTINGS_PATH = path
+    return path
+
 
 def prompt_text() -> str:
     return resources.files(__package__).joinpath("prompts/arbiter.md").read_text(encoding="utf-8")
@@ -37,7 +84,7 @@ def claude_command(model: str | None = None) -> list[str]:
     cmd = ["claude", "-p", "--output-format", "json", "--max-turns", "1", "--tools", "", "--no-session-persistence"]
     if model:
         cmd += ["--model", model]
-    return cmd
+    return cmd + ["--settings", settings_path()]
 
 
 def default_runner(prompt: str, *, model: str | None = None,
@@ -69,18 +116,29 @@ def default_runner(prompt: str, *, model: str | None = None,
     except OSError as e:
         raise R.RunnerError(f"could not run claude: {e}", {**timed(), "error": f"{type(e).__name__}: {e}"}) from e
     d = {**timed(), "rc": p.returncode, "stderr_head": R.head(p.stderr), "stdout_chars": len(p.stdout or "")}
-    if p.returncode != 0:
-        return "", {**d, "reason": "non-zero exit"}
+    # Read the answer BEFORE judging the exit code. A model that declines —
+    # "You've reached your Fable limit. Switch to another model…" — exits 1 and
+    # prints that sentence as perfectly good JSON with `is_error`. Judging rc
+    # first threw away the only useful line in the run and left "non-zero exit".
     try:
         doc = json.loads(p.stdout)
     except ValueError:
+        doc = None
+    if isinstance(doc, dict):
+        said = doc["result"] if isinstance(doc.get("result"), str) else ""
+        if doc.get("is_error") or (said and p.returncode != 0):
+            return "", {**d, "refused": True, "is_error": bool(doc.get("is_error")), "result": said,
+                        "reason": "the model answered about itself, not about the question"}
+        if p.returncode != 0:
+            return "", {**d, "reason": "non-zero exit"}
+        if not said:
+            d["reason"] = "the JSON answer had no `result`"
+        return said, d
+    if p.returncode != 0:
+        return "", {**d, "reason": "non-zero exit", "stdout_head": R.head(p.stdout)}
+    if doc is None:
         return "", {**d, "reason": "output was not JSON", "stdout_head": R.head(p.stdout)}
-    if not isinstance(doc, dict):
-        return "", {**d, "reason": "output was not a JSON object"}
-    text = doc.get("result") or ""
-    if not text:
-        d["reason"] = "the JSON answer had no `result`"
-    return text, d
+    return "", {**d, "reason": "output was not a JSON object"}
 
 
 def text_runner(prompt: str, *, model: str | None = None, timeout_s: float = DEFAULT_TIMEOUT_S) -> str:

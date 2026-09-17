@@ -12,17 +12,25 @@ the outcome:
 
     ok       the model answered
     empty    the model was reached and said nothing (rc / stderr say why)
+    refused  the model answered ABOUT ITSELF — a quota, a login, a policy — and
+             that sentence is the most useful thing in the whole run
     failed   the call raised — the exception is kept verbatim
     timeout  the budget ran out
 
-Before this module the four collapsed into one sentence, "summary unavailable:
-no model", and a packaging bug (`prompt_text` asking for a module name the
-wheel does not install) read to the person at the terminal as a missing model.
-The detail this returns is written to `ask_log.runner_detail`, append-only, so
-the next person does not have to guess either.
+Before this module they collapsed into one sentence, "summary unavailable: no
+model", and a packaging bug (`prompt_text` asking for a module name the wheel
+does not install) read to the person at the terminal as a missing model. The
+detail this returns is written to `ask_log.runner_detail`, append-only, so the
+next person does not have to guess either.
+
+`PROVLEDGER_ASK_MODEL` names the model, and `--model` beats it. Nothing here
+ever retries with a different one: an answer whose model was swapped in
+silently is an answer whose provenance is a guess. The note says which model
+declined and suggests one, and a person decides.
 """
 from __future__ import annotations
 
+import os
 import time
 
 # The budget a person waits through for one headless model call. `ask.BUDGET_S`
@@ -31,7 +39,15 @@ import time
 DEFAULT_TIMEOUT_S = 180.0
 STDERR_HEAD = 400
 
-OUTCOMES = ("ok", "empty", "failed", "timeout")
+ASK_MODEL_ENV = "PROVLEDGER_ASK_MODEL"
+OUTCOMES = ("ok", "empty", "refused", "failed", "timeout")
+# outcomes of the ANSWER rather than of the call, decided by the caller
+ANSWER_OUTCOMES = ("not_json", "no_model", "no_candidates")
+
+
+def model_for(model: str | None = None) -> str | None:
+    """The model this call runs on: the argument, else $PROVLEDGER_ASK_MODEL."""
+    return model or ((os.environ.get(ASK_MODEL_ENV) or "").strip() or None)
 
 
 class RunnerError(Exception):
@@ -61,6 +77,7 @@ def head(text: str | None, limit: int = STDERR_HEAD) -> str:
 
 def call(runner, prompt: str, *, model: str | None = None, timeout_s: float | None = None) -> tuple[str, dict, str]:
     """(text, detail, outcome) for one model call. Never raises for the caller."""
+    model = model_for(model)
     kwargs = {"model": model}
     if timeout_s is not None:
         kwargs["timeout_s"] = timeout_s
@@ -83,8 +100,12 @@ def call(runner, prompt: str, *, model: str | None = None, timeout_s: float | No
         return "", detail, "failed"
     detail.setdefault("elapsed_ms", ms())
     detail.setdefault("prompt_chars", len(prompt or ""))
+    detail.setdefault("model", model)
     detail["raw_len"] = len(text)
-    return text, detail, ("ok" if text.strip() else "empty")
+    if text.strip():
+        return text, detail, "ok"
+    # the runner heard the model talk about itself rather than about the question
+    return text, detail, ("refused" if detail.get("refused") else "empty")
 
 
 def why_empty(detail: dict) -> str:

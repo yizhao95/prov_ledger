@@ -23,6 +23,15 @@ from test_routes import _seed_db, _seed_reasons_and_constraints, _seed_state_gra
 QUESTION = "why must load_orders keep paid orders only?"
 
 
+def _a_cite_from_the_fact_table(prompt: str) -> str:
+    """A real id, taken from the fact table half of the prompt. The RULES half
+    carries `[#3]` as an example, and a stub that grabs that one is testing the
+    example, not the ledger."""
+    table = prompt.split("## Fact table", 1)[-1]
+    m = re.search(r"\[#(\d+)\] asserted", table) or re.search(r"\[#(\d+)\]", table)
+    return m.group(1) if m else "1"
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     dbp = tmp_path / "orch.db"
@@ -46,11 +55,13 @@ def with_model(monkeypatch):
     def runner(prompt, *, model=None, timeout_s=None):
         if '"chosen"' in prompt:
             return json.dumps({"chosen": ["pkg.m.load_orders"], "basis": "the question names it"})
-        rid = re.search(r"\[#(\d+)\] asserted", prompt) or re.search(r"\[#(\d+)\]", prompt)
-        cite = rid.group(1) if rid else "1"
-        return (f"Finance reconciles on paid orders, so load_orders keeps only those [#{cite}]. "
-                f"This sentence has no id and must not survive. "
-                f"It removed 4127 rows last week [#{cite}].")
+        cite = _a_cite_from_the_fact_table(prompt)
+        # the JSON shape the prompt demands, behind the paragraph a host plugin
+        # prepends to `result` on this machine — it must fall off, not be judged
+        return "Memory capture is paused due to a quota cooldown.\n\n" + json.dumps({"sentences": [
+            f"Finance reconciles on paid orders, so load_orders keeps only those [#{cite}].",
+            "This sentence has no id and must not survive.",
+            f"It removed 4127 rows last week [#{cite}]."]})
     monkeypatch.setattr(main, "_ask_runner", lambda request: (runner, "stub"))
     return runner
 
@@ -142,6 +153,12 @@ def test_j7_without_a_model_the_page_shows_the_fact_table_and_says_why(client):
      "empty", "model returned nothing (rc 3; stderr: Invalid API key)"),
     (lambda p, *, model=None, timeout_s=None: (_ for _ in ()).throw(RuntimeError("claude not on PATH")),
      "failed", "model call failed: RuntimeError: claude not on PATH"),
+    # the real one: the account's budget for that model ran out, `claude -p`
+    # exited 1 and said so in good JSON. The sentence is the answer here.
+    (lambda p, *, model=None, timeout_s=None: ("", {"rc": 1, "refused": True, "is_error": True, "model": "fable",
+                                                    "result": "Your Fable limit is reached. Switch to another model."}),
+     "refused", "model call refused [fable]: Your Fable limit is reached. Switch to another model. — "
+                "try --model sonnet"),
 ])
 def test_the_page_names_which_failure_it_was_not_just_no_model(client, monkeypatch, runner, reason, says):
     """Four different failures printed one sentence, and a packaging bug went out
@@ -160,23 +177,35 @@ def test_a_question_nothing_matches_says_there_were_no_candidates(client, with_m
     assert "no candidate nodes matched the question" in t
 
 
-def test_a_chinese_sentence_is_dropped_from_an_english_answer(client, monkeypatch):
-    """`?lang=` used to switch the scope line only; a model answering in Chinese
-    against an English prompt went straight through."""
+def test_a_chinese_sentence_is_kept_and_flagged_not_deleted(client, monkeypatch):
+    """The host's `~/.claude/settings.json` says `"language": "Chinese"`, so the
+    headless model answered in Chinese. Deleting for that emptied a correct
+    answer; language is a preference, citations are correctness."""
     from app import main
 
     def runner(prompt, *, model=None, timeout_s=None):
         if '"chosen"' in prompt:
             return json.dumps({"chosen": ["pkg.m.load_orders"], "basis": "the question names it"})
-        cite = (re.search(r"\[#(\d+)\]", prompt) or re.match("1", "1")).group(1)
-        return f"Finance reconciles on paid orders [#{cite}]. 财务只核对已付款订单 [#{cite}]."
+        cite = _a_cite_from_the_fact_table(prompt)
+        return json.dumps({"sentences": [f"Finance reconciles on paid orders [#{cite}].",
+                                         f"财务只核对已付款订单 [#{cite}]."]})
 
     monkeypatch.setattr(main, "_ask_runner", lambda request: (runner, "stub"))
     en = client.get(f"/ledger?q={QUESTION}&project=demo").text
-    assert "财务只核对已付款订单" not in en
-    assert "not in the language asked for" in en and 'data-drop="not in the language asked for"' in en
+    assert "财务只核对已付款订单" in en, "a correct sentence is not deleted for its language"
+    assert 'data-language-mismatch="some"' in en and "--lang zh" in en
+    assert 'data-drop=' not in en
     zh = client.get(f"/ledger?q={QUESTION}&project=demo&lang=zh").text
-    assert "财务只核对已付款订单" in zh
+    assert "财务只核对已付款订单" in zh and "Finance reconciles on paid orders" in zh
+    assert "--lang en" in zh, "asked in Chinese, the English half is the odd one — and it is still kept"
+
+
+def test_a_plugin_preamble_never_becomes_a_sentence_the_model_is_blamed_for(client, with_model):
+    """claude-mem prepends its own paragraph to every `result`. Read as prose it
+    counted as an uncited sentence the model had invented. It never was."""
+    t = client.get(f"/ledger?q={QUESTION}&project=demo").text
+    assert "Memory capture is paused" not in t
+    assert re.search(r'data-dropped="(\d+)"', t).group(1) == "2", "the two bad sentences, not the plugin's"
 
 
 def test_the_page_logs_why_the_model_said_nothing(client, monkeypatch):

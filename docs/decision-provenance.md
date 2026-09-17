@@ -308,6 +308,8 @@ happened — `ok`, `empty`, `failed` or `timeout` — and the reader is told whi
 | no runner | `summary unavailable: no model configured` |
 | the code found nothing to ask about | `summary unavailable: no candidate nodes matched the question` |
 | the model was reached and said nothing | `summary unavailable: model returned nothing (rc 3; stderr: …)` |
+| the model answered about itself | `summary unavailable: model call refused [fable]: You've reached your Fable limit… — try --model sonnet` |
+| the answer was not the JSON shape | `summary unavailable: the model did not answer in the JSON shape the prompt requires (it said: …)` |
 | the call raised | `summary unavailable: model call failed: <exception>` |
 | the budget ran out (`--timeout`, default 180 s) | `summary unavailable: model call timed out after 180 s` |
 
@@ -321,18 +323,72 @@ model. Building the prompt is now outside that `try`, the package name is
 derived from `__package__`, and `scripts/pkg_smoke_test.py` loads the prompt
 from the installed wheel, where the repo suite cannot see it.
 
+The refusal row is the one that cost the most. When the account's budget for
+one model ran out, `claude -p` exited 1 and printed a perfectly good JSON object
+carrying `is_error` and the one sentence in the whole run worth reading. The
+runner judged the exit code first, so that sentence was discarded and the note
+said `model returned nothing (rc 1; non-zero exit)`. The JSON is read before the
+exit code now.
+
+`PROVLEDGER_ASK_MODEL` names the model and `--model` beats it; `ask.run`
+resolves it once so both calls, the note and `ask_log.model` agree on which
+model answered. When one declines, the run stops and names another to try — it
+does **not** retry with it. An answer whose model was substituted behind the
+reader's back is an answer whose provenance is a guess, which is the one thing
+this page may not produce.
+
 What each call actually reported — the command, rc, the head of stderr, the
 wall time, the prompt and answer sizes, the head of the raw answer — is
 appended to `ask_log.runner_detail` (migration 029). A tool that fails without
 saying why is the thing this project exists to prevent, and that applies to the
 tool itself.
 
+### 10.8 · Calling a model on someone else's machine
+
+Two rules, both learned the hard way, both applying to every headless call this
+project makes (`ask`, `ClaudeArbiter`, `significance`, the external trigger):
+
+**Isolate the host's settings.** `claude -p` reads the user's own
+`~/.claude/settings.json`. On the machine this was found on it says
+`"language": "Chinese"`, so every headless call answered in Chinese against
+prompts written in English — and *asking for English in the prompt does not
+override it*, which was measured, not assumed. `claude_command()` therefore
+passes `--settings` pointing at a file of ours (`{"language": "en"}`, one temp
+file per process, removed at exit; `$PROVLEDGER_CLAUDE_SETTINGS` overrides it).
+A headless call is a tool call, not a conversation: it must not inherit the
+preferences of whoever happens to be logged in.
+
+**Assume the answer is noisy.** The host's plugins still run, and they write
+into the answer. claude-mem prepends its own paragraph — "Memory capture is
+currently paused due to a quota cooldown…" — to `result` on every call, and
+putting `enabledPlugins: {}` in our settings file does not stop it. Read as
+prose, that paragraph became *a sentence the model had invented with no
+citation*: it was counted as a drop and the reader was told the model had
+guessed. It never was the model.
+
+So nothing here parses `result` as prose. The summarize prompt demands one JSON
+object, `{"sentences": [...]}`, and `summarize.parse_sentences` takes that
+object out of the reply (`ClaudeArbiter.parse_answer` has always done the same
+with `{"pairs": …}`). Anything a plugin wrote in front of it falls off by
+construction, and the J1 / J2 checks then run per sentence exactly as before.
+
+### 10.9 · Language is not correctness
+
 The answer is also in the language that was asked for: `--lang` / `?lang=`
 switched the scope line only, so a model that answered in Chinese against an
-English prompt went through unremarked. The language rule is now the first rule
-in `prompts/ask.md`, with an English example sentence, and a sentence carrying
-CJK characters in an `en` answer is deleted and counted like every other drop
-(`dropped["language"]`).
+English prompt went through unremarked. `prompts/ask.md` now asks for English
+right after the answer shape, with an English example.
+
+It is **reported, never deleted**. The first version of this check deleted a
+CJK sentence the way it deletes an uncited one, and the result was
+`(nothing survived the checks)` printed over a paragraph whose every citation
+was correct — the whole answer destroyed by a setting on the machine. A machine
+cannot tell a wrong answer from a right one in the wrong language; it can tell
+an uncited sentence, and it can tell an invented number. Those are correctness
+and they still delete. Language is a preference, so `language_mismatch`
+(`None` | `some` | `all`) travels with the answer, the note names the fix
+(`--lang zh`, or the `language` key in `~/.claude/settings.json`), and the
+sentences stay.
 
 `skills/ledger/SKILL.md` states the two commands the skill may run and nothing
 else — no edits, no other tools, no answering from memory or from the source

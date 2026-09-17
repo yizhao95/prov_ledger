@@ -72,11 +72,15 @@
     {{ ui('ask_dropped', lang).replace('{n}', d.dropped.values()|sum|string) }} —
     {% for label, n in [('uncited', d.dropped.uncited), ('unknown id', d.dropped.unknown_id),
                         ('number not in the fact table', d.dropped.number),
-                        ('not in the language asked for', d.dropped.language),
                         ('over the limit', d.dropped.over_limit)] %}
       {%- if n %}<span data-drop="{{ label }}">{{ n }} {{ label }}</span>{% if not loop.last %} · {% endif %}{% endif -%}
     {% endfor %}
   </div>
+  {% endif %}
+  {# Language is not correctness. Deleting a sentence for it deleted a CORRECT
+     answer, so a mismatch is said and the sentences stay. #}
+  {% if d.language_mismatch %}
+  <div class="text-xs text-brand-muted mt-1" data-language-mismatch="{{ d.language_mismatch }}">{{ d.note }}</div>
   {% endif %}
 
   {# ── the records themselves ─────────────────────────────────────────────── #}

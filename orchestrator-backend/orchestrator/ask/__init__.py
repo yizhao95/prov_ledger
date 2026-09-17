@@ -147,6 +147,7 @@ def runner_trace(chosen: dict, summary: dict, candidates: int) -> dict:
                        "rejected": chosen.get("rejected"), "basis": chosen.get("basis"),
                        "detail": chosen.get("runner_detail") or {}, "raw": _raw_head(chosen.get("raw"))},
             "summarize": {"outcome": summary.get("degraded_reason") or "ok", "note": summary.get("note"),
+                          "language_mismatch": summary.get("language_mismatch"),
                           "detail": summary.get("runner_detail") or {}, "raw": _raw_head(summary.get("raw"))}}
 
 
@@ -161,10 +162,15 @@ def run(conn, *, project: str, question: str, psg_db_path: str | None = None, ru
     detail is logged; it never says "no model" about a model that was there."""
     import time
 
-    from . import absence as absence_mod, facts as facts_mod, locate, scope as scope_mod, summarize as summarize_mod
+    from . import absence as absence_mod, facts as facts_mod, locate, runner as runner_mod, \
+        scope as scope_mod, summarize as summarize_mod
     from .. import psg_bridge
 
     started = time.perf_counter()
+    # resolved ONCE, here, so both model calls, the note and `ask_log.model` all
+    # name the same model — `--model`, else $PROVLEDGER_ASK_MODEL, else the
+    # runner's own default. Never a second model after the first declines.
+    model = runner_mod.model_for(model)
     psg = psg_db_path if psg_db_path is not None else psg_bridge.db_path_for(project)
     pool = locate.candidates(conn, psg, question, project=project, limit=10 ** 9)
     cands = pool[:locate.MAX_CANDIDATES]
@@ -188,6 +194,7 @@ def run(conn, *, project: str, question: str, psg_db_path: str | None = None, ru
            "answer": summary["answer"], "sentences": summary["sentences"], "cites": summary["cites"],
            "dropped": summary["dropped"], "dropped_detail": summary["dropped_detail"],
            "degraded": summary["degraded"], "degraded_reason": summary.get("degraded_reason"),
+           "language_mismatch": summary.get("language_mismatch"),
            "note": summary["note"], "runner_detail": trace, "model": model,
            "runner": runner_name or ("none" if runner is None else "stub"), "lang": lang}
     doc["records"] = records(ft, summary["cites"])
@@ -234,8 +241,8 @@ def render_text(doc: dict) -> str:
 def as_json(doc: dict) -> dict:
     """The machine-readable answer — the fact table as text, not as a nested blob."""
     keep = ("ask_id", "project", "question", "answer", "sentences", "cites", "scope", "scope_line",
-            "facts_text", "facts_sha", "dropped", "dropped_detail", "degraded", "degraded_reason", "note",
-            "runner_detail", "model", "runner", "records", "lang")
+            "facts_text", "facts_sha", "dropped", "dropped_detail", "degraded", "degraded_reason",
+            "language_mismatch", "note", "runner_detail", "model", "runner", "records", "lang")
     out = {k: doc.get(k) for k in keep}
     out["absences"] = doc.get("absences")
     out["candidates"] = [{k: c[k] for k in ("qn", "node_key", "why", "score")} for c in doc.get("candidates", [])]

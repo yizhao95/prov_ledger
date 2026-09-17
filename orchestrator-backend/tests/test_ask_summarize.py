@@ -47,8 +47,10 @@ def ft(conn, graph, seeded):
 
 
 def _runner(answer):
+    """The summarize model answers in the JSON shape the prompt demands — the
+    host's plugins write prose into `result`, so prose is not the contract."""
     def run(prompt, *, model=None, timeout_s=None):
-        return answer
+        return json.dumps({"sentences": [answer]})
     return run
 
 

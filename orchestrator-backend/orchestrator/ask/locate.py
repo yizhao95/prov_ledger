@@ -334,7 +334,8 @@ def choose(question: str, cands: list[dict], *, runner=None, model: str | None =
     raw, detail, outcome = R.call(runner, prompt_for(question, cands, max_chosen), model=model, timeout_s=timeout_s)
     if outcome != "ok":                                      # a runner that dies is a missing model, not a crash —
         # but WHICH death it died now travels with the answer and into ask_log.
-        return _fallback(cands, "fallback: runner failed", detail.get("error") or R.why_empty(detail) or outcome,
+        return _fallback(cands, "fallback: runner failed",
+                         detail.get("error") or R.head(detail.get("result"), 200) or R.why_empty(detail) or outcome,
                          raw or None, detail, outcome)
     m = _JSON_RE.search(raw or "")
     if not m:

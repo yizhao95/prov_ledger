@@ -468,6 +468,7 @@ def _why_cmd(args) -> int:
 # ── ask: the read-only question entry (DP phase 2e, Task 2) ──────────────────
 
 ASK_RUNNER_ENV = "PROVLEDGER_ASK_RUNNER"
+ASK_MODEL_ENV = "PROVLEDGER_ASK_MODEL"
 ASK_RUNNERS = ("claude", "stub", "none")
 ASK_TIMEOUT_S = 180.0
 
@@ -918,14 +919,17 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--json", action="store_true", help="machine-readable answer, fact table included as text")
     a.add_argument("--export", default=None, metavar="FILE", help="also write the evidence card (markdown) here")
     a.add_argument("--no-model", action="store_true", help="no model at all: print the fact table, the absences and the scope")
-    a.add_argument("--model", default=None, help="model for the headless claude runner")
+    a.add_argument("--model", default=os.environ.get(ASK_MODEL_ENV) or None, metavar="NAME",
+                   help=f"model for the headless claude runner (default: ${ASK_MODEL_ENV}, else the runner's own); "
+                        "when one model declines the answer says so and stops — no model is substituted for another")
     a.add_argument("--runner", default=_ask_runner_default(), choices=list(ASK_RUNNERS),
                    help=f"which model runs (default: ${ASK_RUNNER_ENV}, else claude); "
                         "stub is reached and says nothing (tests), none is the no-model path")
     a.add_argument("--timeout", type=float, default=ASK_TIMEOUT_S, metavar="S",
                    help=f"seconds one model call may take before the answer says it timed out (default {ASK_TIMEOUT_S:g})")
     a.add_argument("--lang", default="en", choices=["en", "zh"],
-                   help="the language of the answer and the scope line; a sentence in another language is dropped")
+                   help="the language of the answer and the scope line; an answer in another language is "
+                        "reported, never deleted — language is a preference, citations are correctness")
     a.add_argument("--note", default=None, help="feedback only: a sentence saying what was wrong")
     a.add_argument("--answer-file", default=None, metavar="FILE",
                    help="`ask submit <ask_id> --answer-file F`: a draft written by the session's own model; the same "

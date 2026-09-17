@@ -137,6 +137,50 @@ def test_default_runner_says_why_it_came_back_empty(tmp_path, monkeypatch):
     assert ca.text_runner("x", timeout_s=5) == ""
 
 
+# Real, on this machine: the account's Fable budget ran out. `claude -p` exited
+# 1 and printed exactly this — good JSON, `is_error`, and the only sentence in
+# the whole run worth reading. It used to be discarded as "non-zero exit".
+FABLE_LIMIT_JSON = '{"type": "result", "subtype": "error_during_execution", "is_error": true, "duration_ms": 1183, "num_turns": 0, "result": "You\'ve reached your Fable limit. Switch to another model, or manage usage credits at https://claude.ai/settings/usage", "session_id": "5f0f2c3a-0000-4000-8000-000000000000"}'
+
+
+def test_default_runner_keeps_the_sentence_the_model_refused_with(tmp_path, monkeypatch):
+    fake = tmp_path / "claude"
+    fake.write_text("#!/usr/bin/env bash\ncat > /dev/null\ncat <<'JSONEOF'\n" + FABLE_LIMIT_JSON + "\nJSONEOF\nexit 1\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+
+    text, detail = ca.default_runner("x", timeout_s=10)
+    assert text == ""
+    assert detail["refused"] is True and detail["is_error"] is True and detail["rc"] == 1
+    assert detail["result"].startswith("You've reached your Fable limit")
+    assert R.call(ca.default_runner, "x", timeout_s=10)[2] == "refused"
+    assert ca.text_runner("x", timeout_s=10) == "", "the arbiter still sees a plain empty string"
+
+
+def test_an_is_error_answer_is_a_refusal_even_on_a_zero_exit(tmp_path, monkeypatch):
+    fake = tmp_path / "claude"
+    fake.write_text("#!/usr/bin/env bash\ncat > /dev/null\ncat <<'JSONEOF'\n" + FABLE_LIMIT_JSON + "\nJSONEOF\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    text, detail = ca.default_runner("x", timeout_s=10)
+    assert text == "" and detail["refused"] is True and detail["rc"] == 0
+
+
+def test_the_model_from_the_environment_reaches_the_command_line(tmp_path, monkeypatch):
+    fake = tmp_path / "claude"
+    fake.write_text('#!/usr/bin/env bash\ncat > /dev/null\nprintf \'{"type":"result","result":"args: %s"}\' "$*"\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("PROVLEDGER_ASK_MODEL", "sonnet")
+
+    text, detail, outcome = R.call(ca.default_runner, "x", timeout_s=10)
+    assert outcome == "ok" and "--model sonnet" in text
+    assert detail["model"] == "sonnet"
+
+    text, detail, _ = R.call(ca.default_runner, "x", model="haiku", timeout_s=10)
+    assert "--model haiku" in text and detail["model"] == "haiku"
+
+
 def _stub_by_suffix(prompt):
     payload = json.loads(prompt.split("Material:\n", 1)[1])
     by_suffix = {r["qualified_name"].rsplit("_", 1)[-1]: r["qualified_name"] for r in payload["previous"]}
