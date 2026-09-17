@@ -12,6 +12,7 @@ in the repo, `provledger ...` once installed.
   ask submit <ask_id> --answer-file F     check a draft written by the session's model and record it
   ask card <ask_id> --out FILE            the evidence card of a logged question
   ask feedback <ask_id> wrong|partial|right   a person's word on one answer
+  verify [--against-notes] [--project]    walk the three hash chains, and the git anchors they must agree with
   export <project> --md DIR               one markdown per node (shareable rows only)
   init --agents-md                        drop the two verbs into ./AGENTS.md
   reason mark <id> major|minor            a person's word on a reason's significance
@@ -526,6 +527,39 @@ def _ask_cmd(args) -> int:
         conn.close()
 
 
+def _verify_repo(args) -> str | None:
+    """--repo, else the repo of --project / the cwd's registered project, else the
+    cwd when it is itself a git work tree. None means "there is nothing to ask"."""
+    if getattr(args, "repo", None):
+        return args.repo
+    from . import psg_bridge
+    project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+    if project:
+        repo = psg_bridge.repo_for(project, None)
+        if repo:
+            return repo
+    cwd = os.getcwd()
+    return cwd if os.path.isdir(os.path.join(cwd, ".git")) else None
+
+
+def _verify_cmd(args) -> int:
+    """Exit 0 when every chain walks and every anchor still describes this
+    ledger, 3 when one does not (spec §7, G1). A missing anchor is printed, not
+    punished: it lowers what the ledger can claim, it does not break it."""
+    from . import integrity
+    repo = _verify_repo(args) if args.against_notes else None
+    conn = _open()
+    try:
+        report = integrity.verify(conn, against_notes=args.against_notes, repo=repo)
+    finally:
+        conn.close()
+    if args.json:
+        print(json.dumps(report, indent=1, sort_keys=True, ensure_ascii=False, default=str))
+    else:
+        print(integrity.render(report))
+    return 0 if report["ok"] else 3
+
+
 def _export_cmd(args) -> int:
     from . import why
     conn = _open()
@@ -631,6 +665,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="`ask submit <ask_id> --answer-file F`: a draft written by the session's own model; the same "
                         "checks apply — every sentence cites, no number outside the fact table, drops are counted")
     a.add_argument("--out", default=None, metavar="FILE", help="`ask card <ask_id> --out F`: write the evidence card here")
+    v = sub.add_parser("verify", help="walk the three hash chains and, with --against-notes, the git anchors they must agree with (exit 3 on a broken chain)")
+    v.add_argument("--against-notes", action="store_true", help="also compare the chain heads with the anchors in refs/notes/provledger")
+    v.add_argument("--project", default=None, help="registered project whose repo holds the notes (default: the one containing the cwd)")
+    v.add_argument("--repo", default=None, metavar="DIR", help="the git work tree to read the notes from")
+    v.add_argument("--json", action="store_true", help="machine-readable report")
     e = sub.add_parser("export", help="export a project's shareable records as markdown, one file per node")
     e.add_argument("project")
     e.add_argument("--md", required=True, metavar="DIR", help="output directory")
@@ -677,6 +716,8 @@ def main(argv=None) -> int:
         return _significance_cmd(args)
     if args.cmd == "ask":
         return _ask_cmd(args)
+    if args.cmd == "verify":
+        return _verify_cmd(args)
     if args.cmd == "export":
         return _export_cmd(args)
     if args.cmd == "init":
