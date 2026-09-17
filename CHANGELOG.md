@@ -47,6 +47,17 @@ reference, a rule the system applied, or an admitted gap — never by the writer
   reported lost, and are never silently moved; figures with no source are
   declared as such and counted.
 
+### Implemented, and not switched on
+- **A judge for changes to decks and reports**: when a change lands on a figure
+  or a conclusion rather than on code, a model decides — from five worked pairs,
+  and under the rule that it stays quiet when unsure — whether the change is one
+  nobody explained, and whether the reason is already in what you said. Every
+  verdict is logged so the false-question and missed-change rates can be counted.
+  It must clear the same numeric gate as the identity arbiter before it may ask
+  anyone anything; on this release's evaluation it did not (consistency 0.60,
+  accuracy 0.60), so it stays off. A refusal is a result, not a failure.
+- The identity arbiter (0.2.0) is still behind its own gate for the same reason.
+
 ### Design and packaging
 - A shared token file feeds both the dashboard and a React component library;
   the interface reads in plain professional English, with Chinese under
