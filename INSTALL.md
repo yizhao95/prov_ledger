@@ -7,15 +7,28 @@ install, and launching the dashboard.
 
 ## 0 · Fastest path — install as a Claude Code plugin
 
+Inside a Claude Code session:
+
 ```text
 /plugin marketplace add yizhao95/prov_ledger
 /plugin install provledger@provledger
 ```
 
-Dependencies install themselves on first session (a background `SessionStart`
-bootstrap builds one venv at `~/skill-workspace/.venv` and installs
-`requirements.txt`; warm sessions are a no-op). Launch the dashboard with
-`/provledger-dashboard`.
+Or from a shell:
+
+```bash
+claude plugin marketplace add yizhao95/prov_ledger
+claude plugin install provledger@provledger
+claude plugin list          # provledger@provledger · Version: 0.2.0 · Status: ✔ enabled
+```
+
+Dependencies install themselves on first session: a background `SessionStart`
+bootstrap builds **one** venv at `~/skill-workspace/.venv` (override with
+`PROVLEDGER_VENV`) and installs `requirements.txt`. It is idempotent — warm
+sessions are a no-op. Launch the dashboard with `/provledger-dashboard`, or
+`bash orchestrator-webapp/launch_dashboard.sh` (port 8765 by default,
+`PROVLEDGER_DASH_PORT` to change it, `PROVLEDGER_WEBAPP_DIR` to point at a
+checkout other than the script's own).
 
 **Companion (recommended):** install the
 [`superpowers`](https://github.com/obra/superpowers) plugin. provLedger treats it
@@ -145,27 +158,40 @@ Run each test suite **separately** (each has its own pyproject/pythonpath —
 one combined invocation breaks). A healthy install passes all of them:
 
 ```bash
-python3 -m pytest scripts/tests                         -q   #   5 passed
-python3 -m pytest orchestrator-backend                  -q   # 348 passed
-python3 -m pytest orchestrator-webapp                   -q   #  36 passed
-python3 -m pytest skills/writing-plans/tests            -q   #  87 passed
-python3 -m pytest skills/executing-plans                -q   #  73 passed
-(cd skills/project-state-graph/scripts && python3 -m pytest tests -q)   # 409 passed, 1 skipped, 1 deselected
-python3 -m pytest skills/update-project-state-graph/scripts/tests -q   #  90 passed
+python3 -m pytest scripts/tests                         -q   #   22
+python3 -m pytest orchestrator-backend                  -q   #  751
+python3 -m pytest orchestrator-webapp                   -q   #  260
+python3 -m pytest skills/writing-plans/tests            -q   #   93
+python3 -m pytest skills/executing-plans                -q   #   77
+python3 -m pytest skills/update-project-state-graph/scripts/tests -q   #   90
+(cd skills/project-state-graph/scripts && python3 -m pytest tests -q)   #  425, 1 deselected
 ```
 
-Total: **1048 passed, 1 skipped** (0.2.0). The project-state-graph suite is
-the long one (~8 min); run it in three segments if you want to see progress —
-scenarios + runner, the corpus, and the rest (see the phase-8 PR for the
-exact commands). The `llm_consistency` marker is deselected by default and
-never runs in CI.
+Total: **1718 tests** (collected on `main`, 2026-09-17; 5 more are deselected by default). A healthy install passes all of them. The project-state-graph
+suite is the long one (~8 min); run it in three segments if you want to see
+progress — scenarios + runner, the corpus, and the rest. The
+`llm_consistency` marker and the manual arbiter evaluations are deselected by
+default and never run in CI.
 
 The quickest end-to-end check is the demo — one command, deterministic,
-self-verifying:
+self-verifying. It runs `examples/phantom-uplift`: a revenue number that jumps
++23.2% because an upstream column silently stopped arriving.
 
 ```bash
-make demo    # v1 MISMATCH (purity 0.31) → revise → v2 VERIFIED (0.91)
+make demo    # 🔴 MISMATCH (column_dropped: promo_discount) → revise → ✅ VERIFIED → SELF-CHECK OK
 ```
+
+The failure class itself, with numbers, is written up in
+[`docs/benchmark-silent-class-drop.md`](docs/benchmark-silent-class-drop.md)
+(segment purity 0.31 against 0.91 on the same green pipeline).
+
+### Three levels of verification
+
+| level | command | expect |
+|---|---|---|
+| quickest — end to end | `make demo` | MISMATCH → revise → VERIFIED, `SELF-CHECK OK`, exit 0 |
+| full — every suite | the seven `pytest` commands above, **run separately** | 1718 tests, all passing |
+| packaging — the pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
 
 ---
 
@@ -176,9 +202,13 @@ detection, decision ledger — stdlib-only) is published on PyPI as
 [`provledger`](https://pypi.org/project/provledger/):
 
 ```bash
-pip install provledger
+pip install provledger                  # or, from a clone: pip install ./orchestrator-backend
 python3 -c "from provledger import api, db; print('ok')"
 ```
+
+The published release is **0.1.0** (the library core). The `provledger`
+command-line entry point, the skills, the hooks and the dashboard ship with
+the plugin / this repository at 0.2.0.
 
 The wheel ships the SQL migrations inside the package, so
 `db.run_migrations()` works from a plain install — no clone needed.
