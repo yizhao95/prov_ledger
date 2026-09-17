@@ -6,6 +6,9 @@ in the repo, `provledger ...` once installed.
   note "<words>" --at <when> [...]        record something that was said, after the fact
   node declare "<sentence>" [...]         put something outside the code into the graph (draft -> --confirm)
   node list|show|retire                   the project's declared nodes
+  anchor <file> --at … --node … --value …   pin a number in a deck / workbook / report to its data source
+  anchor check [--project] [--occurrence N]  look at every anchor again: ok, or anchor_lost with the reason
+  anchor candidates <file>                  what auto-discovery would propose (off by default; proposes only)
   reasons reclass-status                  the state of the legacy-reason migration
   why <node|nk_…|file:line> [...]         one bounded read: history, constraints, rejected paths, blast radius
   ask "<question>" [--project] [...]      ask the ledger: fact table, cited summary, scope, evidence card
@@ -615,6 +618,138 @@ def _init_cmd(args) -> int:
     return 0
 
 
+def _project_of(args) -> str | None:
+    from . import psg_bridge
+    return args.project or psg_bridge.project_for_cwd(os.getcwd())
+
+
+def _repo_of(project: str | None) -> str | None:
+    from . import psg_bridge
+    try:
+        return psg_bridge.repo_for(project) if project else None
+    except Exception:       # a registry that cannot be read is "no repo", never a crash
+        return None
+
+
+def _path_as_recorded(path: str, repo: str | None) -> str:
+    """A file inside the project's repo is recorded by its path inside it, so a
+    checkout somewhere else still finds it. Anything outside keeps its absolute
+    path — the row says where the bytes actually were."""
+    full = os.path.abspath(path)
+    if repo:
+        root = os.path.abspath(repo)
+        if full == root or full.startswith(root + os.sep):
+            return os.path.relpath(full, root)
+    return full
+
+
+def _auto_discover_on() -> bool:
+    """Spec §9, F5: `reasons.auto_discover` in provledger-extensions.json."""
+    from . import extensions
+    try:
+        return bool(extensions.current(os.getcwd()).reasons_auto_discover)
+    except Exception:
+        return False
+
+
+def _anchor_set(args, conn, project: str, repo: str | None) -> int:
+    from .artifacts import anchor as an
+    from .artifacts import extract as ex
+    if not (args.at and args.node and args.value):
+        print("provledger anchor: give --at, --node and --value, e.g.\n"
+              '  provledger anchor decks/q3.pptx --at "slide 4" --node metric:q3_conv --value 3.2', file=sys.stderr)
+        return 2
+    try:
+        row = an.anchor(conn, project, args.target, args.at, args.node, args.value,
+                        by=args.by, seen_at=_check_at(args.at_time) if args.at_time else None,
+                        stored_path=_path_as_recorded(args.target, repo))
+    except ex.ExtractError as e:
+        print(f"provledger anchor: {e}", file=sys.stderr)
+        return 1
+    except an.AnchorError as e:
+        print(f"provledger anchor: {e}", file=sys.stderr)
+        return 1
+    out = {"occurrence_id": row["id"], "project": project, "node_key": row["node_key"], "value": row["value_text"],
+           "locator": row["locator"], "where": row["where"], "tier": row["tier"], "by": row["by"],
+           "seen_at": row["seen_at"], "file": row["file"]["path"], "sha256": row["file"]["sha256"],
+           "kind": row["file"]["kind"]}
+    _print(out, args.json,
+           f"{row['node_key']} ← {row['value_text']} at {row['where']} in {row['file']['path']}\n"
+           f"  occurrence {row['id']} · tier {row['tier']} · by {row['by']} · seen {row['seen_at']}\n"
+           f"  file {row['file']['kind']} sha256 {row['file']['sha256'][:12]}…\n"
+           f"  the node is the data source; this file is one place it turned up\n"
+           f"  check it later: provledger anchor check --project {project}")
+    return 0
+
+
+def _anchor_check(args, conn, project: str, repo: str | None) -> int:
+    from .artifacts import anchor as an
+    if args.occurrence:
+        try:
+            rows = [an.check(conn, int(args.occurrence), root=repo)]
+        except an.AnchorError as e:
+            print(f"provledger anchor: {e}", file=sys.stderr)
+            return 1
+    else:
+        rows = an.check_project(conn, project, root=repo)
+    lost = [r for r in rows if r["state"] == "anchor_lost"]
+    lines = []
+    for r in rows:
+        line = f"{r['state']:12} {r['node_key']:24} {r['value']:>8}  {r['where']:<18} {r['file']}"
+        if r["reason"]:
+            line += f"\n             {r['reason']}"
+        if r["found_instead"]:
+            line += f"\n             what is there now: {r['found_instead']}"
+        lines.append(line)
+    lines.append(f"{len(rows)} anchor(s) checked · {len(rows) - len(lost)} ok · {len(lost)} anchor_lost")
+    if lost:
+        lines.append("a lost anchor is never re-pointed: where the number went is not something this tool decides")
+    _print({"project": project, "checked": len(rows), "ok": len(rows) - len(lost), "anchor_lost": len(lost),
+            "anchors": rows}, args.json, "\n".join(lines) if rows else f"no anchors in {project}")
+    # an anchor_lost lowers what the ledger can claim; it does not break the ledger, so the exit code stays 0
+    return 0
+
+
+def _anchor_candidates(args, conn, project: str, repo: str | None) -> int:
+    from .artifacts import anchor as an
+    from .artifacts import extract as ex
+    if not args.file:
+        print("provledger anchor candidates: name the file to look at", file=sys.stderr)
+        return 2
+    enabled = args.i_know_this_is_off_by_default or _auto_discover_on()
+    try:
+        rows = an.candidates(conn, project, args.file, enabled=enabled)
+    except ex.ExtractError as e:
+        print(f"provledger anchor: {e}", file=sys.stderr)
+        return 1
+    except an.AnchorError as e:
+        print(f"provledger anchor: {e}", file=sys.stderr)
+        return 2
+    _print({"project": project, "file": args.file, "candidates": rows, "written": 0}, args.json,
+           "\n".join(f"{c['where']:<18} {c['value']:>8}  {c['node_key']}\n             {c['preview']}\n"
+                     f"             {c['anchor_with']}" for c in rows)
+           + f"\n{len(rows)} candidate(s) · tier asserted · nothing was written"
+           if rows else f"no candidate in {args.file} matches a metric {project} has recorded")
+    return 0
+
+
+def _anchor_cmd(args) -> int:
+    conn = _open()
+    try:
+        project = _project_of(args)
+        if not project:
+            print("provledger anchor: no --project and the cwd is not inside a registered project", file=sys.stderr)
+            return 2
+        repo = _repo_of(project)
+        if args.target == "check":
+            return _anchor_check(args, conn, project, repo)
+        if args.target == "candidates":
+            return _anchor_candidates(args, conn, project, repo)
+        return _anchor_set(args, conn, project, repo)
+    finally:
+        conn.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="provledger",
                                 description="provLedger decision provenance: what changed, why, and where the why came from.")
@@ -663,6 +798,22 @@ def build_parser() -> argparse.ArgumentParser:
     for q in (nl, ns, nr):
         q.add_argument("--project", default=None); q.add_argument("--plan", default=None, help=argparse.SUPPRESS)
         q.add_argument("--session", default=None, help=argparse.SUPPRESS); q.add_argument("--json", action="store_true")
+    an_ = sub.add_parser("anchor", help="pin a number in a deck, a workbook or a report to the node it is a reading of; "
+                                       "check those anchors; a lost anchor is reported, never re-pointed")
+    an_.add_argument("target", help='the file to anchor in — or the word "check" / "candidates"')
+    an_.add_argument("file", nargs="?", default=None, help="`anchor candidates <file>`: the file to look at")
+    an_.add_argument("--at", default=None, metavar="PLACE",
+                     help='where in the file: "slide 4", "slide 4 shape 2", "Q3!B7", "paragraph 3", "row 2 col 2", "line 3"')
+    an_.add_argument("--node", default=None, metavar="NODE",
+                     help="the data source this number is a reading of: metric:<name>, <dataset>.<column> or declared:<slug>")
+    an_.add_argument("--value", default=None, help="the value as it is written in the file")
+    an_.add_argument("--by", default="human", choices=["human", "agent", "system"], help="who read it off the page")
+    an_.add_argument("--at-time", default=None, metavar="WHEN", help="when the file said this (YYYY-MM-DD HH:MM[:SS]); default now")
+    an_.add_argument("--occurrence", default=None, metavar="ID", help="`anchor check --occurrence N`: check just this one")
+    an_.add_argument("--i-know-this-is-off-by-default", action="store_true",
+                     help="`anchor candidates`: auto-discovery is off (spec §9, F5) and even on it only proposes")
+    an_.add_argument("--project", default=None, help="registered project (default: the one whose repo contains the cwd)")
+    an_.add_argument("--json", action="store_true", help="machine-readable output")
     h = sub.add_parser("headline", help="the plan headline: what the two-layer check found, and how it was answered")
     hs = h.add_subparsers(dest="sub", required=True)
     hshow = hs.add_parser("show", help="print a plan's latest headline"); hshow.add_argument("plan_id")
@@ -763,6 +914,8 @@ def main(argv=None) -> int:
         return _export_cmd(args)
     if args.cmd == "init":
         return _init_cmd(args)
+    if args.cmd == "anchor":
+        return _anchor_cmd(args)
     if args.cmd == "headline":
         return _headline_cmd(args)
     return 2
