@@ -6,6 +6,7 @@ in the repo, `provledger ...` once installed.
   note "<words>" --at <when> [...]        record something that was said, after the fact
   node declare "<sentence>" [...]         put something outside the code into the graph (draft -> --confirm)
   node list|show|retire                   the project's declared nodes
+  node add --manual-figure <name> --value <n>   a figure nobody can trace, marked as such and counted
   anchor <file> --at … --node … --value …   pin a number in a deck / workbook / report to its data source
   anchor check [--project] [--occurrence N]  look at every anchor again: ok, or anchor_lost with the reason
   anchor candidates <file>                  what auto-discovery would propose (off by default; proposes only)
@@ -222,10 +223,64 @@ def _node_declare(args) -> int:
         conn.close()
 
 
+def _node_add(args) -> int:
+    """`node add --manual-figure <name> --value <n> --note "…"` — spec §9 and
+    §18: a figure with no traceable data source is a declared node of type
+    `manual_figure`, tier stated, because the person typed the number. It is
+    marked as having no source everywhere it appears, and selfcheck counts it."""
+    from . import db, declared, provenance, psg_bridge
+    conn = _open()
+    try:
+        project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+        if not project:
+            print("provledger node: no --project and the cwd is not inside a registered project", file=sys.stderr)
+            return 2
+        if not args.manual_figure:
+            print("provledger node add: pass --manual-figure <name> (this is the entry for figures with no "
+                  "traceable data source; everything else is `provledger node declare`)", file=sys.stderr)
+            return 2
+        if args.value is None:
+            print("provledger node add: --value is the number itself", file=sys.stderr)
+            return 2
+        description = args.note or f"{args.manual_figure} = {args.value}, computed by hand"
+        attrs = {"value": args.value, "note": args.note or ""}
+        try:
+            with db.transaction(conn):
+                draft = declared.declare(conn, project, description, node_type="manual_figure",
+                                         name=args.manual_figure, attrs=attrs, known_names=_known_names(project),
+                                         occurred_at=_check_at(args.at) if args.at else None,
+                                         recorded_by="human", commit=False)
+                row, uid = draft, None
+                if args.note:
+                    uid = provenance.insert_utterance(conn, session_id=args.session or "node-add", project=project,
+                                                      plan_id=args.plan, text=args.note,
+                                                      occurred_at=_check_at(args.at) if args.at else provenance._db_now(conn),
+                                                      commit=False)
+                    row = declared.confirm(conn, draft["id"], uid, commit=False)
+        except ValueError as e:
+            print(f"provledger node: {e}", file=sys.stderr)
+            return 2
+        extra = {"utterance_id": uid, "traceable_source": False}
+        if uid is None:
+            extra["confirm_with"] = (f"provledger node declare --confirm {row['id']} "
+                                     f"--words \"<how you computed it>\" --project {project}")
+        out = _declared_row(row, extra)
+        text = (f"{row['qualified_name']} = {args.value} (manual_figure, tier {row['tier']}, "
+                f"state {row['state']}, version {row['version']})\n"
+                f"  no traceable data source — this number was typed in, not measured\n"
+                f"  {'said: ' + args.note if args.note else 'nothing is in the graph yet: ' + extra.get('confirm_with', '')}")
+        _print(out, args.json, text)
+        return 0
+    finally:
+        conn.close()
+
+
 def _node_cmd(args) -> int:
     from . import declared, provenance, psg_bridge
     if args.sub == "declare":
         return _node_declare(args)
+    if args.sub == "add":
+        return _node_add(args)
     conn = _open()
     try:
         project = args.project or psg_bridge.project_for_cwd(os.getcwd())
@@ -791,11 +846,17 @@ def build_parser() -> argparse.ArgumentParser:
     for q in (dec,):
         q.add_argument("--project", default=None); q.add_argument("--plan", default=None, help=argparse.SUPPRESS)
         q.add_argument("--session", default=None, help=argparse.SUPPRESS); q.add_argument("--json", action="store_true")
+    nadd = nds.add_parser("add", help="a figure with no traceable data source: `node add --manual-figure <name> "
+                                      "--value <n> --note \"how you worked it out\"` (tier stated, marked everywhere)")
+    nadd.add_argument("--manual-figure", default=None, metavar="NAME", help="the figure's name; the node is declared:<name>")
+    nadd.add_argument("--value", default=None, help="the number itself")
+    nadd.add_argument("--note", default=None, help="how you worked it out, verbatim — these words are what make it stated")
+    nadd.add_argument("--at", default=None, help="when it was computed (YYYY-MM-DD HH:MM[:SS])")
     nl = nds.add_parser("list", help="the project's active declared nodes")
     ns = nds.add_parser("show", help="every version of one declared node"); ns.add_argument("slug")
     nr = nds.add_parser("retire", help="retire a declared node (append-only: a new version, state retired)")
     nr.add_argument("slug"); nr.add_argument("--words", default=None); nr.add_argument("--at", default=None)
-    for q in (nl, ns, nr):
+    for q in (nl, ns, nr, nadd):
         q.add_argument("--project", default=None); q.add_argument("--plan", default=None, help=argparse.SUPPRESS)
         q.add_argument("--session", default=None, help=argparse.SUPPRESS); q.add_argument("--json", action="store_true")
     an_ = sub.add_parser("anchor", help="pin a number in a deck, a workbook or a report to the node it is a reading of; "

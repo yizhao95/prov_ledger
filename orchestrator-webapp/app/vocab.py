@@ -225,6 +225,20 @@ UI: dict[str, dict[str, str]] = {
     "declares": {"en": "declares", "zh": "声明"},
     "constrains": {"en": "constrains", "zh": "约束"},
     "level_help": {"en": "how checkable the source is", "zh": "来源的可核对程度"},
+    # DP phase 4: the numbers that live in decks and reports
+    "no_source": {"en": "no traceable data source", "zh": "无可追溯数据来源"},
+    "no_source_help": {"en": "this number was typed in, not measured — nothing in the graph produces it",
+                       "zh": "这个数字是人填进来的，不是算出来的——图里没有任何东西产出它"},
+    "occurrences": {"en": "Occurrences", "zh": "出现位置"},
+    "occurrences_help": {"en": "where this number turned up — a file is a place, not the node itself",
+                         "zh": "这个数字出现过的地方——文件是位置，不是节点本身"},
+    "no_occurrences": {"en": "no file is anchored to this node yet", "zh": "还没有文件锚定到这个节点"},
+    "anchor_ok": {"en": "ok", "zh": "有效"},
+    "anchor_lost": {"en": "anchor lost", "zh": "锚点失效"},
+    "anchor_unchecked": {"en": "never checked", "zh": "未检查过"},
+    "anchor_never_moved": {"en": "a lost anchor is reported, never re-pointed",
+                           "zh": "失效的锚点只报告，绝不改指"},
+    "seen_at": {"en": "seen", "zh": "看到时间"},
 }
 
 # One-line definitions for the tooltips. The tier and source-level labels are the

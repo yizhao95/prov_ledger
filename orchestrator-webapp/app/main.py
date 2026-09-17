@@ -446,6 +446,7 @@ def outcomes(request: Request, project: str | None = None):
     """Phase 8 (FL-042): every expectation across plans with its latest
     outcome — a claim ledger. Read-only; an old DB renders an empty page."""
     ctx = {"request": request, "error": None, "rows": [], "stats": queries.outcome_stats([]), "project": project,
+           "lang": _lang(request),
            "bar": queries.view_bar("outcomes", queries.triple(project, None, None))}
     try:
         conn = queries.open_db_readonly()

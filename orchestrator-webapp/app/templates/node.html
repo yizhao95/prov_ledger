@@ -38,6 +38,11 @@
       <span class="ml-1">{{ ledger.declared.node_type|say('declared_type', lang) }}</span>
       <span class="ml-1 text-brand-muted" title="{{ vocab.define(ledger.declared.tier, kind='tier', lang=lang) }}">·
         {{ ledger.declared.tier|say('tier', lang) }}</span>
+      {% if ledger.declared.node_type == 'manual_figure' %}
+      {# DP phase 4 (§9): a figure nobody can trace says so wherever it is shown #}
+      <span class="ml-1 px-1.5 py-0.5 rounded bg-brand-serious/10 text-brand-serious text-[10px] uppercase tracking-wide"
+            data-no-source="1" title="{{ ui('no_source_help', lang) }}">{{ ui('no_source', lang) }}</span>
+      {% endif %}
       <div class="mt-1 text-brand-gray">{{ ledger.declared.description }}</div>
       {% if ledger.declared.attrs %}
       <div class="mt-1 font-mono text-[11px] text-brand-muted">{% for k, v in ledger.declared.attrs.items() %}{{ k }}={{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</div>

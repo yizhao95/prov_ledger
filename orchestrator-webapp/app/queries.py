@@ -777,9 +777,18 @@ def get_expectations_with_latest_outcome(conn: sqlite3.Connection, project: str 
         rows = conn.execute(sql, params).fetchall()
     except sqlite3.Error:
         return []
+    # DP phase 4 (§9): which of these targets is a figure nobody can trace. One
+    # query for the page, read-only; an older DB simply has no such node.
+    try:
+        manual = {q for (q,) in conn.execute(
+            "SELECT DISTINCT qualified_name FROM declared_node WHERE node_type = 'manual_figure' "
+            "AND state = 'active' AND superseded_by IS NULL")}
+    except sqlite3.Error:
+        manual = set()
     out = []
     for r in rows:
         d = dict(r)
+        d["no_source"] = d["target"] in manual
         try:
             value = json.loads(d["value_json"]) if d["value_json"] else {}
         except ValueError:

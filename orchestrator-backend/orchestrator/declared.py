@@ -200,13 +200,18 @@ def history(conn, project: str, slug: str) -> list[dict]:
 
 def declare(conn, project: str, description: str, *, node_type: str | None = None, links=(), attrs=None,
             runner=None, model: str | None = None, known_names=None, occurred_at: str | None = None,
-            recorded_by: str = "human", commit: bool = True) -> dict:
+            recorded_by: str = "human", name: str | None = None, commit: bool = True) -> dict:
     """Write the DRAFT row for one sentence and return it.
 
     With a `runner` the model tidies the sentence into {node_type, name, attrs,
     links}; those fields are `asserted` and so is the draft row. Without one
     the user must say the type themselves (nothing is guessed) and every field
     is `stated`. There is no tier parameter: see the module docstring.
+
+    `name` is for the callers who already have one — `node add --manual-figure
+    q3_conv` names the figure, so the slug should be `q3-conv` and not a slug
+    of the sentence that explains it. It is `stated` like anything else the
+    person typed, and it is ignored when a model is doing the naming.
     """
     description = (description or "").strip()
     if not description:
@@ -230,7 +235,7 @@ def declare(conn, project: str, description: str, *, node_type: str | None = Non
         if node_type is None:
             raise ValueError("without a model there is nothing to read the node_type out of: "
                              f"pass --type ({' | '.join(NODE_TYPES)})")
-        name = description
+        name = name or description
         link_rows = _normalise_links(links, "user", known_names)
         field_tiers["node_type"] = "stated"
         field_tiers["name"] = "stated"

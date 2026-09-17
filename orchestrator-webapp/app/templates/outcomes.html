@@ -55,7 +55,10 @@
         <tr class="border-b border-hairline align-top" data-expectation="{{ r.expectation_id }}">
           <td class="px-4 py-2 text-gray-900">{{ r.claim }}
             <div class="text-[11px] text-brand-muted">{{ relative_time(r.claimed_at) }} · {{ r.project }}</div></td>
-          <td class="px-4 py-2 font-mono text-xs">{{ r.target }} <span class="text-brand-muted">({{ r.target_kind }})</span></td>
+          <td class="px-4 py-2 font-mono text-xs">{{ r.target }} <span class="text-brand-muted">({{ r.target_kind }})</span>
+            {% if r.no_source %}<div class="text-[11px] text-brand-serious" data-no-source="1"
+                 title="{{ ui('no_source_help', lang) }}">{{ ui('no_source', lang) }}</div>{% endif %}
+          </td>
           <td class="px-4 py-2 font-mono text-xs">{{ r.channel }}</td>
           <td class="px-4 py-2">
             <span data-tier="{{ r.latest.tier }}" class="text-xs px-2 py-0.5 rounded {{ tb[1] }}">{{ tb[0] }}</span>
