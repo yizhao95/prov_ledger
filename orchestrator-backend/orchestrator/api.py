@@ -515,7 +515,9 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         # recognises gets a derived reason and is never asked about (C1); the
         # rest of the changed nodes are logged as ask / silent (C2, C4).
         triggered = triggers.evaluate(conn, project=project, plan_id=plan_id, psg_db_path=psg_db,
-                                      ask=(close_mode != "pending"), commit=False) if psg_db else {}
+                                      ask=(close_mode != "pending"),
+                                      external_mode=_external_trigger_mode(project, registry_path),
+                                      commit=False) if psg_db else {}
         n_unstated = reasons.backstop_unstated(
             conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False,
             state="unknown" if close_mode == "pending" else "active") if psg_db else 0
@@ -650,6 +652,21 @@ def _anchor_close(conn: sqlite3.Connection, project: str | None, plan_id: str,
             f"[ANCHOR] not anchored: {exc} — {plan_id} closed anyway (spec §7: a notes failure is a warning, "
             "never a block). The ledger still verifies; it just has no outside witness for this close.")
         return {"anchored": False, "mode": mode, "reason": str(exc)}
+
+
+def _external_trigger_mode(project: str | None, registry_path) -> str:
+    """provledger-extensions.json → reasons.external_trigger (off | on); off
+    whenever in doubt. The judge may not ask anyone anything until a gate report
+    says it is calibrated, and an unreadable extensions file is doubt."""
+    if not project:
+        return "off"
+    try:
+        from . import extensions
+        repo = psg_bridge.repo_for(project, _resolve_registry_path(registry_path))
+        path = extensions.discover(repo) if repo else None
+        return extensions.load(path).reasons_external_trigger if path else "off"
+    except Exception:
+        return "off"
 
 
 def _significance_mode(project: str | None, registry_path) -> str:
