@@ -59,7 +59,7 @@ def test_card_carries_question_answer_timeline_scope_and_the_ask_id(conn, graph,
     assert f"ask id {doc['ask_id']}" in md and doc["facts_sha"][:16] in md
     assert doc["scope_line"] in md
     assert "stub-model" in md and "exported at" in md
-    assert "not anchored" in md, "git notes anchoring is honest about not existing yet"
+    assert "not anchored" in md, "with no repository to read notes from, the card says so instead of implying a witness"
     assert "does not show that they are true" in md
     row = [ln for ln in md.splitlines() if f"| #{cid} " in ln]
     assert row and "2026-09-01" in row[0]
@@ -121,3 +121,55 @@ def test_cli_export_writes_the_card(conn, graph, seeded, tmp_path, capsys, monke
     text = out_file.read_text(encoding="utf-8")
     assert text.startswith("# Evidence card") and "Scope:" in text
     assert str(out_file) in capsys.readouterr().out
+
+
+# ── DP phase 3 (Task 3): the card quotes the anchor, or says there is none ────
+
+def _git_repo(tmp_path):
+    import subprocess
+    d = tmp_path / "anchor-repo"
+    d.mkdir()
+    for args in (["init", "-q", "-b", "main"], ["config", "user.email", "t@example.com"],
+                 ["config", "user.name", "t"]):
+        subprocess.run(["git", *args], cwd=str(d), check=True, capture_output=True)
+    (d / "a.txt").write_text("one\n")
+    subprocess.run(["git", "add", "a.txt"], cwd=str(d), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "one"], cwd=str(d), check=True, capture_output=True)
+    return d
+
+
+def test_the_card_quotes_the_anchor_the_close_wrote(conn, graph, seeded, tmp_path):
+    from orchestrator import integrity as I
+    repo = _git_repo(tmp_path)
+    note = I.anchor_heads(repo, I.anchor_payload(conn, plan_id="P0"))
+    commit = I.head_commit(repo)
+    doc = _doc(conn, graph, answer=f"A constraint requires the null-label drop [#{seeded['constraint']}].")
+    md = C.card_md(conn, doc, repo=repo)
+    assert f"git note {note[:12]} @ {commit[:12]}" in md
+    assert "not anchored" not in md
+    assert "plan P0" in md
+    html = C.card_html(conn, doc, repo=repo)
+    assert note[:12] in html and commit[:12] in html
+    integ = C.integrity(conn, repo=repo)
+    assert integ["anchor"]["note_sha"] == note and integ["ok"] is True
+
+
+def test_the_card_says_not_anchored_and_why_when_the_repo_has_no_note(conn, graph, seeded, tmp_path):
+    repo = _git_repo(tmp_path)
+    doc = _doc(conn, graph, answer=f"A constraint requires the null-label drop [#{seeded['constraint']}].")
+    md = C.card_md(conn, doc, repo=repo)
+    assert "not anchored" in md and "refs/notes/provledger" in md
+    assert C.integrity(conn, repo=repo)["anchor"] is None
+
+
+def test_an_anchor_that_no_longer_describes_this_ledger_is_named_on_the_card(conn, graph, seeded, tmp_path):
+    """The chains can walk and the witness can still disagree. That is a third
+    state, and the card must not round it down to `ok`."""
+    from orchestrator import integrity as I
+    repo = _git_repo(tmp_path)
+    payload = I.anchor_payload(conn, plan_id="P0")
+    payload["change_reason"]["hash"] = "0" * 64
+    I.anchor_heads(repo, payload)
+    md = C.card_md(conn, doc := _doc(conn, graph, answer=f"Constraint [#{seeded['constraint']}]."), repo=repo)
+    assert "anchor mismatch" in md
+    assert C.integrity(conn, repo=repo)["ok"] is False
