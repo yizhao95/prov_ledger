@@ -533,3 +533,123 @@ chain — state, rows walked, head id and head hash — then one anchor line:
 
 The third line is the state that matters most and is easiest to lose: the chains
 walk **and** the witness disagrees. The card does not round it down to `ok`.
+
+## 13 · Phase 4 — the numbers that live in decks and reports
+
+A figure on a slide is not a string on a slide. `Q3 conv 3.2%` on slide 4 is a
+reading of something: a metric the pipeline recorded, a column in the state
+graph, or a number somebody worked out by hand. Phase 4 puts that reading in
+the ledger, and the shape it chose for it decides everything that follows.
+
+### 13.1 The node is the data source; the file is a place
+
+`occurrence` (migration 028) points at the node and merely names the file:
+
+| column | what it says |
+|---|---|
+| `node_key` | the data source — `metric:<name>`, `<dataset>.<column>`, `declared:<slug>` |
+| `file_id` | an `artifact_file` row: a path and the sha256 of the bytes that were read |
+| `locator_json` | the place inside it, and the words the person typed for it |
+| `value_text` / `value_num` | the value as the file writes it, and as a number when it is one |
+| `seen_at`, `tier`, `by` | when the file said this, `observed`, and who read it |
+
+`node_key` therefore holds the data-source identity, **not** the analyser's
+`nk_…` content hash. Those answer different questions, and a figure in a deck
+has an answer to the first one before any analysis run has ever seen it. The
+node page's Occurrences section follows the same rule: it renders for
+`metric:q3_conv` whether or not the graph has heard of it.
+
+Rename the deck, ship a v2, send it to a client — the node's history is
+untouched, because the file was never the subject. The same number in two decks
+is two occurrences of one node.
+
+`occurrence.tier` is CHECKed to the single value `observed`. The single-value
+CHECK is the feature: a number somebody *claimed* cannot be written here at
+all, so "read off a page" and "asserted" can never be read off the same row.
+
+### 13.2 A person anchors; an anchor can be lost; an anchor is never moved
+
+```
+provledger anchor decks/q3.pptx --at "slide 4" --node metric:q3_conv --value 3.2
+provledger anchor check [--project P] [--occurrence N]
+```
+
+`anchor` refuses more than it accepts, and says why each time: the node must
+already exist (the refusal names the three shapes of name that do), the place
+must exist (the refusal lists the places the file holds), and the value must
+really be at that place (the refusal quotes the first 80 characters of what is
+there instead). A number needs a boundary before it counts: `3.2` is not inside
+`13.28`, or an anchor would report `ok` for ever while pointing at somebody
+else's figure.
+
+`check` re-reads the file and looks at the place the person **typed** — `--at
+"slide 4"` means the slide, so a text box added above the figure does not lose
+an anchor nobody broke, while `slide 4 shape 2` asks a narrower question and
+gets the narrower answer. Three things make it `anchor_lost`, each with the
+reason in words: the file is gone, the place is gone, the value is gone. Every
+verdict is appended to `anchor_state`, so `anchor_lost` has a date and a reason
+rather than being an opinion the next check can quietly reverse.
+
+**It never re-points (F4, veto).** When the number turns up two slides later
+the verdict is still `anchor_lost`. `anchor_state` has two values and
+deliberately no `moved`; `occurrence` refuses UPDATE in SQL so no future caller
+can re-aim a locator either. Where the figure went is a question this tool
+refuses to answer, because answering it wrongly is how a ledger starts citing
+the wrong slide. `anchor_lost` never changes an exit code: like a missing git
+anchor in §12, it lowers what the ledger can claim, it does not break it.
+
+### 13.3 Auto-discovery is off, and even on it only proposes
+
+```
+provledger anchor candidates decks/q3.pptx --i-know-this-is-off-by-default
+```
+
+`reasons.auto_discover` defaults to false (F5). Switched on, `candidates()`
+lists the intersection of the numbers in the file and the metrics this project
+has actually recorded, marks them `asserted`, prints the command a person would
+run — and writes no `occurrence` and no `artifact_file`. `observed` means
+somebody looked.
+
+### 13.4 Extraction locates, and stores nothing
+
+`orchestrator.artifacts.extract` reads pptx, xlsx, docx, csv, markdown and text
+with `zipfile` and `xml.etree` alone — zero dependencies. It has no connection
+parameter and no import that could reach a database, and a test asserts both
+facts plus "every table holds the same number of rows after a full extraction".
+A deck's wording belongs to the deck; a provenance store that accumulates other
+people's prose has become a copy of the documents it was meant to point at.
+
+It never guesses either. An archive with no slides, a Word file with no
+document part, a suffix nobody taught it, a file that is not there — each
+raises `ExtractError` naming the file, because an empty list would read as
+"this file says nothing", which is a different and more dangerous statement.
+
+### 13.5 Figures nobody can trace
+
+```
+provledger node add --manual-figure q3_conv --value 3.2 --note "how you worked it out"
+```
+
+Some numbers come from nowhere the machine can reach. Refusing them loses the
+figure; letting them sit beside measured metrics looking the same loses the
+truth. A manual figure takes the third path: the phase 2c declared store, node
+type `manual_figure`, tier `stated` because the person typed the number, and
+their own words recorded as the utterance that makes it stated. Without the
+words it stays a draft with the confirm line printed — the 2c rule holds here
+too. The node page and `/outcomes` both print **no traceable data source**
+beside it.
+
+Two numbers join `selfcheck`, both informational, neither flipping `ok`:
+`manual_figures` (the share of metric-like nodes with no traceable source) and
+`anchor_lost` (anchors lost the last time anyone looked, with never-checked
+counted separately — never checked is not the same statement as ok).
+
+### 13.6 What this does not prove
+
+An anchor says a value was at a place in a file with those bytes at that
+moment, and that the place still says so, or no longer does. It does not say
+the number is right, that the deck was the one that was sent, or where a lost
+figure went. File identity across versions — "is this the same deck?" — is
+phase 6 (`file_identity_claim`); until then a revised deck is a new
+`artifact_file` row and the anchors on the old one are checked against the path
+they were given.

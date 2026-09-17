@@ -610,6 +610,80 @@ def _check_unanchored_closes(conn) -> Dict[str, Any]:
                        f"{switched_off} had anchoring switched off")}
 
 
+def _orch_db_path() -> str:
+    import os
+    return os.environ.get("ORCH_DB") or os.path.expanduser("~/skill-workspace/orchestrator.db")
+
+
+def _check_manual_figures(conn) -> Dict[str, Any]:
+    """DP phase 4 (§9): the share of this ledger's metric-like nodes that came
+    out of somebody's head rather than a pipeline.
+
+    Not a failure — a hand-computed figure that says so is honest. But a deck
+    whose numbers are mostly manual is a different thing from one whose numbers
+    came from a run, and nobody notices unless the ratio is printed.
+
+    Metric-like nodes are the union of three names: `metric:<name>` for every
+    metric recorded, every node an occurrence points at, and every active
+    `manual_figure` declared. The third set is the numerator.
+    """
+    import os
+    path = _orch_db_path()
+    if not os.path.exists(path):
+        return {"name": "manual_figures", "ok": True, "severity": "warning", "count": 0, "metric_like": 0,
+                "ratio": 0.0, "detail": "no orchestrator.db (0 figures of 0 metric-like nodes)"}
+    try:
+        oc = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            metrics = {(p, "metric:" + n) for p, n in oc.execute("SELECT DISTINCT project, name FROM metrics")}
+            seen = {(p, k) for p, k in oc.execute("SELECT DISTINCT project, node_key FROM occurrence")}
+            manual = {(p, q) for p, q in oc.execute(
+                "SELECT DISTINCT project, qualified_name FROM declared_node WHERE node_type = 'manual_figure' "
+                "AND state = 'active' AND superseded_by IS NULL")}
+        finally:
+            oc.close()
+    except sqlite3.Error as e:
+        return {"name": "manual_figures", "ok": True, "severity": "warning",
+                "detail": f"orchestrator.db unreadable ({e})"}
+    total = metrics | seen | manual
+    ratio = round(len(manual) / len(total), 4) if total else 0.0
+    return {"name": "manual_figures", "ok": True, "severity": "warning", "count": len(manual),
+            "metric_like": len(total), "ratio": ratio,
+            "detail": (f"{len(manual)} of {len(total)} metric-like node(s) have no traceable data source "
+                       f"(hand-computed figures), {ratio:.1%}")}
+
+
+def _check_anchor_lost(conn) -> Dict[str, Any]:
+    """DP phase 4 (§9, F4): anchors that were lost the last time anyone looked.
+
+    A lost anchor never blocks anything — it lowers what the ledger can claim,
+    it does not break the ledger — so this count is the only place it is
+    visible. Anchors nobody has checked yet are counted separately: never
+    checked is not the same statement as ok.
+    """
+    import os
+    path = _orch_db_path()
+    if not os.path.exists(path):
+        return {"name": "anchor_lost", "ok": True, "severity": "warning", "count": 0, "anchors": 0,
+                "unchecked": 0, "detail": "no orchestrator.db (0 of 0 anchors lost)"}
+    try:
+        oc = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            rows = oc.execute("SELECT (SELECT s.state FROM anchor_state s WHERE s.occurrence_id = o.id "
+                              "ORDER BY s.id DESC LIMIT 1) FROM occurrence o").fetchall()
+        finally:
+            oc.close()
+    except sqlite3.Error as e:
+        return {"name": "anchor_lost", "ok": True, "severity": "warning", "detail": f"orchestrator.db unreadable ({e})"}
+    states = [r[0] for r in rows]
+    lost = sum(1 for s in states if s == "anchor_lost")
+    unchecked = sum(1 for s in states if s is None)
+    return {"name": "anchor_lost", "ok": True, "severity": "warning", "count": lost, "anchors": len(states),
+            "unchecked": unchecked,
+            "detail": (f"{lost} of {len(states)} anchor(s) were lost the last time they were checked, "
+                       f"{unchecked} never checked")}
+
+
 _CHECKS = [
     _check_node_types_nonempty,
     _check_no_dangling_edges,
@@ -636,6 +710,8 @@ _CHECKS = [
     _check_sessions_without_plan,
     _check_significance_disagreements,
     _check_unanchored_closes,
+    _check_manual_figures,
+    _check_anchor_lost,
 ]
 
 

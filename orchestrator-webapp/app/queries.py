@@ -777,9 +777,20 @@ def get_expectations_with_latest_outcome(conn: sqlite3.Connection, project: str 
         rows = conn.execute(sql, params).fetchall()
     except sqlite3.Error:
         return []
+    # DP phase 4 (§9): which of these targets is a figure nobody can trace. One
+    # query for the page, read-only; an older DB simply has no such node.
+    try:
+        manual = {q for (q,) in conn.execute(
+            "SELECT DISTINCT qualified_name FROM declared_node WHERE node_type = 'manual_figure' "
+            "AND state = 'active' AND superseded_by IS NULL")}
+    except sqlite3.Error:
+        manual = set()
+    counts = occurrence_counts(conn, project)
     out = []
     for r in rows:
         d = dict(r)
+        d["no_source"] = d["target"] in manual
+        d["occurrences"] = counts.get(d["target"], 0)
         try:
             value = json.loads(d["value_json"]) if d["value_json"] else {}
         except ValueError:
@@ -970,6 +981,12 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str,
     `qualified_name` may also be a node_key (nk_…)."""
     base = {"project": project, "qualified_name": qualified_name, "node_key": None, "available": False, "found": False,
             "reason": None, "runs": [], "events": 0, "card": {}, "reasons": [], "constraints": [], "approx_tokens": 0}
+    # DP phase 4 (§9): the places this number turned up. Computed FIRST and kept
+    # on every return path, including the ones that say the graph has never
+    # heard of this node — a figure's identity is its data source, and a section
+    # that only appeared for symbols in the graph would quietly claim that every
+    # metric in the project does not exist.
+    base["occurrences"] = occurrences_of(conn, project, qualified_name)
     if _psg is None:
         base["reason"] = "state graph unavailable: provledger.psg_bridge cannot be imported in this environment"
         return base
@@ -1055,6 +1072,65 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str,
     base["downstream"] = list(base["card"].get("output_consumers") or [])
     base["approx_tokens"] = len(json.dumps(base, default=str)) // 4
     return base
+
+
+# ── DP phase 4: where a number turned up ─────────────────────────────────────
+
+try:
+    from provledger.artifacts import anchor as _anchor          # the place names, from one source
+except Exception:                                               # pragma: no cover — the page still renders
+    _anchor = None
+
+
+def occurrences_of(conn: sqlite3.Connection, project: str, node_key: str) -> list[dict]:
+    """Every file this node's number was seen in, oldest first, each with the
+    place inside it, the value, when it was seen, and what the last check found.
+
+    Read-only, and keyed on the node's DATA SOURCE — `metric:<name>`,
+    `<dataset>.<column>`, `declared:<slug>`. It does not ask the state graph
+    anything: a figure in a deck is a reading of a metric the moment somebody
+    records that metric, and no analysis run has to bless it first. An older DB
+    with no occurrence table simply returns nothing.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT o.id, o.node_key, o.locator_json, o.value_text, o.value_num, o.seen_at, o.tier, o.by, "
+            "       f.path AS file_path, f.kind AS file_kind, f.sha256, "
+            "       s.state, s.reason, s.checked_at "
+            "FROM occurrence o JOIN artifact_file f ON f.id = o.file_id "
+            "LEFT JOIN anchor_state s ON s.id = (SELECT MAX(x.id) FROM anchor_state x WHERE x.occurrence_id = o.id) "
+            "WHERE o.project = ? AND o.node_key = ? ORDER BY o.id", (project, node_key)).fetchall()
+    except sqlite3.Error:
+        return []
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            locator = json.loads(d["locator_json"] or "{}")
+        except ValueError:
+            locator = {}
+        d["locator"] = locator
+        # the place the person typed, then the place it resolved to — one source
+        # for both spellings, so the page and the CLI never drift apart
+        d["at"] = locator.get("at") or ""
+        d["where"] = _anchor.describe(locator) if _anchor else d["at"]
+        d["state"] = d["state"] or "unchecked"
+        out.append(d)
+    return out
+
+
+def occurrence_counts(conn: sqlite3.Connection, project: str | None = None) -> dict[str, int]:
+    """How many occurrences each node has — one query for a whole page."""
+    sql = "SELECT node_key, COUNT(*) FROM occurrence"
+    params: tuple = ()
+    if project:
+        sql += " WHERE project = ?"
+        params = (project,)
+    sql += " GROUP BY node_key"
+    try:
+        return {k: int(n) for k, n in conn.execute(sql, params)}
+    except sqlite3.Error:
+        return {}
 
 
 # ── DP phase 2 (Task 7): headline, shown / adopted, hit counts, overhead ──────

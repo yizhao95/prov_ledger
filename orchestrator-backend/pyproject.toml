@@ -32,8 +32,8 @@ build-backend = "setuptools.build_meta"
 # site-packages). Repo-internal code, skills, and tests keep importing
 # `orchestrator` via pythonpath; only the built artifact uses `provledger`.
 # tests/ stays excluded from discovery (SQL data + test code, not packages).
-packages = ["provledger", "provledger.ask", "provledger.providers", "provledger.testing"]
-package-dir = { "provledger" = "orchestrator", "provledger.ask" = "orchestrator/ask", "provledger.providers" = "orchestrator/providers", "provledger.testing" = "orchestrator/testing" }
+packages = ["provledger", "provledger.artifacts", "provledger.ask", "provledger.providers", "provledger.testing"]
+package-dir = { "provledger" = "orchestrator", "provledger.artifacts" = "orchestrator/artifacts", "provledger.ask" = "orchestrator/ask", "provledger.providers" = "orchestrator/providers", "provledger.testing" = "orchestrator/testing" }
 
 [tool.setuptools.package-data]
 # Migrations live inside the package so run_migrations works from a wheel;
