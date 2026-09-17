@@ -100,11 +100,16 @@ def test_an_absence_is_marked_as_an_absence(client, with_model):
     assert "[scope]" in t
 
 
-def test_the_scope_line_is_on_the_page_and_says_what_was_searched(client, with_model):
+def test_the_scope_line_is_on_the_page_and_says_what_was_searched_and_what_it_cost(client, with_model):
     t = client.get(f"/ledger?q={QUESTION}&project=demo").text
     scope = re.search(r'data-scope="[^"]*"[^>]*>(.*?)</', t, re.S)
     assert scope and scope.group(1).strip().startswith("Scope:")
     assert "candidate" in scope.group(1) and "chosen" in scope.group(1)
+    # the page never gets slower in silence: the cost is on the line, and the
+    # machine-readable number is beside it
+    assert "Computed in" in scope.group(1) and scope.group(1).rstrip().endswith("s.")
+    ms = re.search(r'data-elapsed-ms="(\d+)"', t)
+    assert ms and int(ms.group(1)) >= 0
 
 
 def test_open_records_expands_the_fact_table_and_export_card_is_a_get_link(client, with_model):

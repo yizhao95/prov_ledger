@@ -21,20 +21,24 @@ import os
 
 DASHBOARD_URL_ENV = "PROVLEDGER_DASHBOARD_URL"
 DEFAULT_DASHBOARD_URL = "http://127.0.0.1:8765"
+# The budget a person waits through. The first real page load took 185 s, all of
+# it in one query, and nothing on the page said so — so the budget is a test and
+# the measurement is printed with the answer (`scope._cost`).
+BUDGET_S = 3.0
 
 
 def record_ask(conn, *, project: str, question: str, candidates=None, chosen=None, facts_sha: str | None = None,
                answer: str | None = None, cites=None, scope=None, dropped=None, model: str | None = None,
-               runner: str | None = None, commit: bool = True) -> int:
+               runner: str | None = None, elapsed_ms: int | None = None, commit: bool = True) -> int:
     """One row per question, written once. Returns ask_log.id."""
     def js(x):
         return None if x is None else json.dumps(x, ensure_ascii=False, default=str)
 
     cur = conn.execute(
         "INSERT INTO ask_log (project, question, candidates_json, chosen_json, facts_sha, answer, cites_json, "
-        "scope_json, dropped_json, model, runner) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "scope_json, dropped_json, model, runner, elapsed_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (project, question, js(candidates), js(chosen), facts_sha, answer, js(cites), js(scope), js(dropped),
-         model, runner))
+         model, runner, elapsed_ms))
     if commit:
         conn.commit()
     return int(cur.lastrowid)
@@ -114,9 +118,12 @@ def run(conn, *, project: str, question: str, psg_db_path: str | None = None, ru
         model: str | None = None, runner_name: str | None = None, lang: str = "en", record: bool = True) -> dict:
     """One question end to end. `runner` picks the nodes, `summary_runner` writes
     the paragraph (defaults to `runner`); `runner=None` is the degraded mode."""
+    import time
+
     from . import absence as absence_mod, facts as facts_mod, locate, scope as scope_mod, summarize as summarize_mod
     from .. import psg_bridge
 
+    started = time.perf_counter()
     psg = psg_db_path if psg_db_path is not None else psg_bridge.db_path_for(project)
     pool = locate.candidates(conn, psg, question, project=project, limit=10 ** 9)
     cands = pool[:locate.MAX_CANDIDATES]
@@ -129,7 +136,10 @@ def run(conn, *, project: str, question: str, psg_db_path: str | None = None, ru
     summary = summarize_mod.summarize(question, ft, absences=absences, scope_line=sc_line,
                                       runner=summary_runner if summary_runner is not None else runner, model=model)
     facts_sha = facts_mod.sha(ft)
+    # the cost of the answer rides with it: a tool must not get slower in silence
+    sc["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
     doc = {"project": project, "question": question, "candidates": cands, "chosen": chosen,
+           "elapsed_ms": sc["elapsed_ms"], "scope_line_timed": scope_mod.line(sc, lang),
            "facts": ft, "facts_text": summary["facts_text"], "facts_sha": facts_sha,
            "absences": absences, "scope": sc, "scope_line": sc_line,
            "answer": summary["answer"], "sentences": summary["sentences"], "cites": summary["cites"],
@@ -139,7 +149,8 @@ def run(conn, *, project: str, question: str, psg_db_path: str | None = None, ru
     doc["records"] = records(ft, summary["cites"])
     doc["ask_id"] = record_ask(conn, project=project, question=question, candidates=cands, chosen=chosen,
                                facts_sha=facts_sha, answer=summary["answer"], cites=summary["cites"], scope=sc,
-                               dropped=summary["dropped"], model=model, runner=doc["runner"]) if record else None
+                               dropped=summary["dropped"], model=model, runner=doc["runner"],
+                               elapsed_ms=sc["elapsed_ms"]) if record else None
     return doc
 
 
@@ -154,7 +165,7 @@ def render_text(doc: dict) -> str:
             out.append(f"({doc['note']})")
     if doc["absences"]:
         out += ["", "Absences"] + [f"  {a['text']}" for a in doc["absences"]]
-    out += ["", doc["scope_line"]]
+    out += ["", doc.get("scope_line_timed") or doc["scope_line"]]
     if doc["degraded"] or not doc["answer"]:
         out += ["", doc["facts_text"]]
     if doc["records"]:
@@ -206,7 +217,10 @@ def rebuild(conn, ask_id: int, *, psg_db_path: str | None = None, lang: str = "e
     chosen = (row.get("chosen") or {}).get("chosen") or []
     ft = facts_mod.facts(conn, psg_db_path, chosen, project=row["project"])
     absences = absence_mod.absences(conn, ft)
-    sc = row.get("scope") or scope_mod.scope(ft)
+    # the stored scope carries the ASK's wall time; reprinting it on a later
+    # answer would attribute one read's cost to another, so it is dropped here
+    # and whoever renders next measures its own.
+    sc = {k: v for k, v in (row.get("scope") or scope_mod.scope(ft)).items() if k != "elapsed_ms"}
     return {"row": row, "facts": ft, "facts_text": facts_mod.render(ft), "facts_sha": facts_mod.sha(ft),
             "absences": absences, "scope": sc, "scope_line": scope_mod.line(sc, lang)}
 
@@ -229,8 +243,11 @@ def latest_answer(conn, ask_id: int) -> dict | None:
 def submit(conn, ask_id: int, draft: str, *, psg_db_path: str | None = None, model: str = "session",
            lang: str = "en", commit: bool = True) -> dict:
     """Check a session model's draft and append it as the next version."""
-    from . import summarize as summarize_mod
+    import time
 
+    from . import scope as scope_mod, summarize as summarize_mod
+
+    started = time.perf_counter()
     base = rebuild(conn, ask_id, psg_db_path=psg_db_path, lang=lang)
     checked = summarize_mod.review(draft, base["facts"], absences=base["absences"],
                                    scope_line=base["scope_line"])
@@ -244,12 +261,15 @@ def submit(conn, ask_id: int, draft: str, *, psg_db_path: str | None = None, mod
     if commit:
         conn.commit()
     logged_sha = base["row"].get("facts_sha")
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    timed = dict(base["scope"], elapsed_ms=elapsed_ms)
     doc = {"ask_id": ask_id, "version": version, "model": model, "runner": "session",
            "facts_changed": bool(logged_sha and logged_sha != base["facts_sha"]),
            "facts_sha_asked": logged_sha,
            "project": base["row"]["project"], "question": base["row"]["question"],
            "facts": base["facts"], "facts_text": base["facts_text"], "facts_sha": base["facts_sha"],
            "absences": base["absences"], "scope": base["scope"], "scope_line": base["scope_line"],
+           "scope_line_timed": scope_mod.line(timed, lang), "elapsed_ms": elapsed_ms,
            "degraded": False, "lang": lang, "draft": draft, **checked}
     doc["records"] = records(base["facts"], checked["cites"])
     return doc

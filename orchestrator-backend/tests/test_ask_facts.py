@@ -191,3 +191,77 @@ def test_a_node_key_shows_its_qualified_name_and_says_when_the_graph_cannot_tell
     rendered = F.render(down)
     assert "## nk_p (graph unavailable)" in rendered, "the key is not printed twice, and 'existing' is not claimed"
     assert "nk_p (nk_p" not in rendered
+
+
+# ── DP phase 2e (Task 7): the budget ─────────────────────────────────────────
+
+def _big_graph(tmp_path, n_nodes=200, n_runs=8):
+    """A graph the size of a real project: 200 nodes seen across 8 analysis runs.
+    The first live page load spent 183 s of 185 s in ONE query over exactly this
+    shape, so the shape is the fixture."""
+    path = tmp_path / "big-state-graph.db"
+    c = ps.build(path)
+    for run in range(1, n_runs + 1):
+        ps.add_run(c, run, plan_id=f"P{run}")
+        for i in range(n_nodes):
+            ps.add_snapshot(c, run, f"nk_{i}", f"pkg.mod{i % 12}.fn_{i}")
+        ps.add_event(c, run, 1, "node_added", f"nk_{run}", created_at=f"2026-09-0{(run % 9) + 1}T09:00:00+00:00")
+    c.commit(); c.close()
+    return str(path)
+
+
+def test_the_no_model_path_stays_inside_its_budget(conn, tmp_path):
+    """H-budget: an answer a person waits for, on a project-sized graph."""
+    import time
+    from orchestrator import ask as ask_mod
+    graph = _big_graph(tmp_path)
+    for i in range(40):
+        pv.insert_reason(conn, project="proj", plan_id=f"P{i}", node_key=f"nk_{i}", kind="technical",
+                         interpretation=f"fn_{i} keeps the close-time rows because finance asked", recorded_by="agent")
+    conn.commit()
+    t0 = time.perf_counter()
+    doc = ask_mod.run(conn, project="proj", question="why does fn_7 keep close-time rows?",
+                      psg_db_path=graph, runner=None)
+    elapsed = time.perf_counter() - t0
+    assert elapsed < ask_mod.BUDGET_S, f"the no-model path took {elapsed:.2f}s (budget {ask_mod.BUDGET_S}s)"
+    assert doc["elapsed_ms"] is not None and doc["elapsed_ms"] >= 0
+    assert "pkg.mod7.fn_7" in [n["qn"] for n in doc["facts"]["nodes"]]
+
+
+def test_the_scope_line_says_what_the_answer_cost(conn, graph, seeded):
+    sc = S.scope(ft_of(conn, graph), candidates=7, chosen=1)
+    assert "computed in" not in S.line(sc)
+    sc["elapsed_ms"] = 812
+    line = S.line(sc)
+    assert line.rstrip().endswith("Computed in 0.8 s."), line
+    assert "计算耗时 0.8 秒" in S.line(sc, "zh")
+
+
+def ft_of(conn, graph):
+    return F.facts(conn, graph, ["pkg.pipe.build_features"], project="proj")
+
+
+@pytest.mark.live
+def test_live_the_no_model_path_stays_inside_its_budget_on_the_real_ledger():
+    """MANUAL, never CI: the same budget against ~/skill-workspace/orchestrator.db
+    and this project's own state graph — the fixture cannot reproduce a 200 MB
+    graph with a hundred analysis runs, and that is where the 185 s lived."""
+    import os
+    import time
+    from orchestrator import ask as ask_mod, db, psg_bridge
+    live = os.environ.get("ORCH_DB") or db.DEFAULT_DB_PATH
+    if not os.path.exists(live):
+        pytest.skip(f"no live ledger at {live}")
+    psg = psg_bridge.db_path_for("prov_ledger")
+    if not psg or not os.path.exists(psg):
+        pytest.skip("prov_ledger has no built state graph here")
+    c = db.open_db(live)
+    try:
+        t0 = time.perf_counter()
+        doc = ask_mod.run(c, project="prov_ledger", question="why does compute_etag hash close-time rows?",
+                          psg_db_path=psg, runner=None, record=False)
+        elapsed = time.perf_counter() - t0
+    finally:
+        c.close()
+    assert elapsed < ask_mod.BUDGET_S, f"the live no-model path took {elapsed:.2f}s (budget {ask_mod.BUDGET_S}s)"
+    assert doc["facts"]["nodes"], "the live ledger answered nothing"

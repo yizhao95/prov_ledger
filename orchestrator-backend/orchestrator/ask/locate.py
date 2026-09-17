@@ -120,13 +120,71 @@ def _reference_hits(conn, project: str, tokens: list[str], limit: int) -> list[t
         f"WHERE r.project = ? AND r.node_key IS NOT NULL AND ({where}) ORDER BY r.id DESC LIMIT ?", params)]
 
 
-def _graph_nodes(psg_db_path: str | None) -> list[tuple[str, str, str]]:
-    """(node_key, qualified_name, file_path) at each node's latest run."""
+# `node_snapshot` holds one row per node PER RUN — on this repo, ~2,900 nodes over
+# ~100 runs. The first version of this matcher asked for every node's latest row
+# with a correlated subquery (`run_id = (SELECT MAX(run_id) … WHERE x.node_key =
+# node_snapshot.node_key)`) and then compared names in Python. There is no index
+# on `node_key` alone, so the subquery re-scanned the table once per row: the
+# first real page load spent **183 of its 185 seconds inside that one query**.
+#
+# Two changes, both "ask the database the question you actually have":
+#   · the name / file predicates go INTO the query, so only candidate rows come
+#     back instead of the whole graph;
+#   · the latest run is a GROUP BY with a bare MAX (SQLite takes the other
+#     columns from the max row), so the table is scanned once, not once per row.
+
+def _name_predicates(tokens: list[str], literals: list[str], files: list[str]) -> tuple[str, list]:
+    """SQL that matches a node by its own name, its dotted path, or its file."""
+    where: list[str] = []
+    params: list = []
+    for t in {*tokens, *(x.lower() for x in literals)}:
+        if not t:
+            continue
+        where.append("lower(qualified_name) = ?")
+        params.append(t)
+        where.append("lower(qualified_name) LIKE ?")
+        params.append(f"%.{t}")
+    for lit in literals:                       # a dotted or underscored literal may sit mid-path
+        low = lit.lower()
+        if len(low) > 3:
+            where.append("lower(qualified_name) LIKE ?")
+            params.append(f"%{low}%")
+    for f in files:
+        base = f.rsplit("/", 1)[-1].lower()
+        if base:
+            where.append("lower(file_path) LIKE ?")
+            params.append(f"%/{base}")
+            where.append("lower(file_path) = ?")
+            params.append(base)
+    return (" OR ".join(where), params)
+
+
+def _graph_matches(psg_db_path: str | None, tokens: list[str], literals: list[str],
+                   files: list[str], limit: int) -> list[tuple[str, str, str]]:
+    """(node_key, qualified_name, file_path) for nodes the question NAMES, each
+    at its latest run. Never the whole graph."""
+    where, params = _name_predicates(tokens, literals, files)
+    if not where:
+        return []
     rows = why_mod.psg_bridge._query(
         psg_db_path,
-        "SELECT node_key, qualified_name, file_path FROM node_snapshot WHERE node_key <> '' "
-        "AND run_id = (SELECT MAX(run_id) FROM node_snapshot x WHERE x.node_key = node_snapshot.node_key)")
+        f"SELECT node_key, qualified_name, file_path, MAX(run_id) FROM node_snapshot "
+        f"WHERE node_key <> '' AND ({where}) GROUP BY node_key LIMIT ?", (*params, limit))
     return [(r[0], r[1], r[2]) for r in rows]
+
+
+def _names_of(psg_db_path: str | None, node_keys: list[str]) -> dict[str, str]:
+    """The latest qualified name of the keys the TEXT matchers found — one query
+    for all of them, not one per key."""
+    keys = [k for k in dict.fromkeys(node_keys) if k]
+    if not keys:
+        return {}
+    ph = ",".join("?" * len(keys))
+    rows = why_mod.psg_bridge._query(
+        psg_db_path,
+        f"SELECT node_key, qualified_name, MAX(run_id) FROM node_snapshot "
+        f"WHERE node_key IN ({ph}) GROUP BY node_key", tuple(keys))
+    return {r[0]: r[1] for r in rows}
 
 
 def _literal_text_hits(conn, project: str, literals: list[str], limit: int) -> list[tuple[str, int, str]]:
@@ -192,7 +250,7 @@ def candidates(conn, psg_db_path: str | None, question: str, *, project: str, li
         add(node_key, None, f"text match: source #{ref_id} ({label[:60]}) linked from #{reason_id}", SCORE_TEXT, reason_id)
 
     # 2 · the names the graph knows — the node's own name, its dotted path, its file
-    graph_nodes = _graph_nodes(psg_db_path)
+    graph_nodes = _graph_matches(psg_db_path, tokens, literals, files, max(limit, MAX_CANDIDATES) * 4)
     by_key = {k: qn for k, qn, _ in graph_nodes}
     for node_key, qn, file_path in graph_nodes:
         low = (qn or "").lower()
@@ -213,6 +271,9 @@ def candidates(conn, psg_db_path: str | None, question: str, *, project: str, li
     for lit, reason_id, node_key in _literal_text_hits(conn, project, literals, TEXT_LIMIT):
         add(node_key, None, f"literal match: {lit} in reason #{reason_id}", SCORE_LITERAL, reason_id)
 
+    unnamed = [e["node_key"] for e in pool.values()
+               if e["node_key"] and (not e["qn"] or e["qn"] == e["node_key"]) and e["node_key"] not in by_key]
+    by_key.update(_names_of(psg_db_path, unnamed))
     for e in pool.values():
         if not e["qn"] or e["qn"] == e["node_key"]:
             e["qn"] = by_key.get(e["node_key"]) or e["node_key"]

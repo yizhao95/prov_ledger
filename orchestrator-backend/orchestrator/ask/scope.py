@@ -38,6 +38,16 @@ def scope(ft: dict, *, candidates: int = 0, chosen: int | None = None, truncated
             "truncated": cut}
 
 
+def _cost(sc: dict, lang: str) -> str:
+    """What the answer cost. A tool that gets slower in silence is the thing this
+    project exists to prevent, so the number rides with the scope, not in a log."""
+    ms = sc.get("elapsed_ms")
+    if ms is None:
+        return ""
+    secs = f"{ms / 1000:.1f}"
+    return f" 计算耗时 {secs} 秒。" if lang == "zh" else f" Computed in {secs} s."
+
+
 def _n(count: int, noun: str) -> str:
     return f"{count} {noun}" + ("" if count == 1 else "s")
 
@@ -49,9 +59,9 @@ def line(sc: dict, lang: str = "en") -> str:
         rng = f"{span[0]} 至 {span[1]}" if span[0] else "没有带日期的记录"
         cut = ("裁剪：" + " · ".join(f"{k} {v}" for k, v in sorted(sc["truncated"].items()))) if sc.get("truncated") else "无裁剪"
         return (f"检索范围：节点 {sc['nodes']} · 约束 {sc['constraints']} · 有影响记录 {sc['influencing']} · "
-                f"变更 {sc['changes']} · {rng}；候选 {sc['candidates']}，选中 {sc['chosen']}；{cut}。")
+                f"变更 {sc['changes']} · {rng}；候选 {sc['candidates']}，选中 {sc['chosen']}；{cut}。" + _cost(sc, lang))
     rng = f"{span[0]} to {span[1]}" if span[0] else "no dated record"
     cut = (", ".join(f"{v} {k} truncated" for k, v in sorted(sc["truncated"].items()))) if sc.get("truncated") else "nothing truncated"
     return (f"Scope: {_n(sc['nodes'], 'node')}, {_n(sc['constraints'], 'constraint')}, "
             f"{_n(sc['influencing'], 'influencing record')}, {_n(sc['changes'], 'change')}, {rng}; "
-            f"{_n(sc['candidates'], 'candidate')}, {sc['chosen']} chosen; {cut}.")
+            f"{_n(sc['candidates'], 'candidate')}, {sc['chosen']} chosen; {cut}." + _cost(sc, lang))

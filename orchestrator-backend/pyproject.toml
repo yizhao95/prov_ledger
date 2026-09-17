@@ -47,8 +47,9 @@ dev = ["pytest>=7"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-v"
+addopts = "-v -m 'not live'"
 markers = [
     "veto: an acceptance item whose failure fails the whole suite (decision provenance §12); never skipped",
     "degraded: the hooks-only mode — asserts what is lost without the skills, explicitly (DP phase 2, Task 7b)",
+    "live: MANUAL — runs against the real ~/skill-workspace ledger and state graph; never CI (DP phase 2e, Task 7)",
 ]

@@ -55,7 +55,11 @@
 
   {# ── how far we looked ──────────────────────────────────────────────────── #}
   <div class="mt-4 text-[11px] uppercase tracking-wide text-brand-muted">{{ ui('ask_scope', lang) }}</div>
-  <div class="text-xs text-gray-700 mt-1" data-scope="{{ d.scope.nodes }}/{{ d.scope.constraints }}/{{ d.scope.influencing }}/{{ d.scope.changes }}">{{ d.scope_line }}</div>
+  {# the scope line carries what the answer COST: a page that gets slower in
+     silence is the failure this project exists to prevent (the first live load
+     of this route took 185 s and said nothing). #}
+  <div class="text-xs text-gray-700 mt-1" data-elapsed-ms="{{ d.elapsed_ms }}"
+       data-scope="{{ d.scope.nodes }}/{{ d.scope.constraints }}/{{ d.scope.influencing }}/{{ d.scope.changes }}">{{ d.scope_line_timed or d.scope_line }}</div>
   {% if d.dropped.values()|sum %}
   <div class="text-xs text-brand-red mt-1" data-drops="1">
     {{ ui('ask_dropped', lang).replace('{n}', d.dropped.values()|sum|string) }} —
