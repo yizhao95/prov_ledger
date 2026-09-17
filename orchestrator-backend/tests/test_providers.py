@@ -52,8 +52,8 @@ def _ids(plist):
 
 def test_builtins_by_default():
     plist, records = providers.load_providers(ext.EMPTY)
-    assert _ids(plist) == ["provledger.symbol", "provledger.owned"]
-    assert [r["id"] for r in records] == ["provledger.symbol", "provledger.owned"]
+    assert _ids(plist) == ["provledger.symbol", "provledger.owned", "provledger.declared"]   # DP 2c added the third
+    assert [r["id"] for r in records] == ["provledger.symbol", "provledger.owned", "provledger.declared"]
     assert all(r["degraded"] is None and r["enabled"] is True and r["priority"] == 0 for r in records)
     assert providers.load_providers(ext.EMPTY, builtin=False)[0] == []
 
@@ -61,7 +61,7 @@ def test_builtins_by_default():
 def test_third_party_loaded_by_module_path_in_priority_order(acme):
     e = _ext(acme, [{"id": "acme.example", "module": "acme_mod:Example", "priority": 5}])
     plist, records = providers.load_providers(e)
-    assert _ids(plist) == ["acme.example", "provledger.symbol", "provledger.owned"]      # priority 5 first
+    assert _ids(plist) == ["acme.example", "provledger.symbol", "provledger.owned", "provledger.declared"]      # priority 5 first
     rec = next(r for r in records if r["id"] == "acme.example")
     assert rec["module"] == "acme_mod:Example" and rec["schema_version"] == 2 and rec["degraded"] is None
     assert e.fingerprint()["providers"] == ["acme.example"]
@@ -101,7 +101,7 @@ def test_unavailable_capability_degrades(acme):
 def test_builtin_disabled_by_id(tmp_path):
     e = _ext(tmp_path, [{"id": "provledger.owned", "enabled": False}])
     plist, records = providers.load_providers(e)
-    assert _ids(plist) == ["provledger.symbol"]
+    assert _ids(plist) == ["provledger.symbol", "provledger.declared"]
     rec = next(r for r in records if r["id"] == "provledger.owned")
     assert rec["enabled"] is False and rec["degraded"] is None
 

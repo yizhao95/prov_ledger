@@ -72,7 +72,7 @@ def test_third_party_provider_snapshots_and_matches_by_qualname(conn, tmp_path, 
     (repo / "provledger-extensions.json").write_text(json.dumps(
         {"version": 1, "providers": [{"id": "acme.example", "module": "acme_provider:DatasetComments", "priority": 3}]}))
     plist, records = providers.load_providers(_host.extensions.current(str(repo)))
-    assert [p.type_id for p in plist] == ["acme.example", "provledger.symbol", "provledger.owned"]
+    assert [p.type_id for p in plist] == ["acme.example", "provledger.symbol", "provledger.owned", "provledger.declared"]
     r1, rep1 = _run(conn, repo, plist)
     rows = conn.execute("SELECT qualified_name, attrs_json FROM node_snapshot WHERE run_id=? AND node_type='dataset'", (r1,)).fetchall()
     assert {q for q, _ in rows} == {"pkg.m:orders", "pkg.m:customers"}
@@ -100,7 +100,7 @@ def test_cli_records_the_provider_set_and_selfcheck_warns_on_degradation(tmp_pat
     fp = json.loads(c.execute("SELECT extensions_json FROM analysis_run ORDER BY id DESC LIMIT 1").fetchone()[0])
     c.close()
     by_id = {p["id"]: p for p in fp["providers"]}
-    assert set(by_id) == {"acme.example", "acme.missing", "provledger.symbol", "provledger.owned"}
+    assert set(by_id) == {"acme.example", "acme.missing", "provledger.symbol", "provledger.owned", "provledger.declared"}
     assert by_id["acme.example"]["observations"] == 2 and by_id["acme.example"]["degraded"] is None
     assert by_id["acme.missing"]["degraded"] and by_id["acme.missing"]["observations"] == 0
     assert set(by_id["provledger.symbol"]) >= {"id", "module", "schema_version", "enabled", "priority", "degraded", "observations", "elapsed_s"}

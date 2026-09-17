@@ -143,6 +143,44 @@ def _node_key(psg, qn: str) -> str | None:
     return rows[0][0] if len(rows) == 1 else None
 
 
+def _retired_declarations(conn, psg, project: str, qn: str | None) -> list[dict]:
+    """Declared nodes that pointed AT `qn` and have since been retired.
+
+    FL-083: `removed_upstream` walks the target's consistency card, and a node
+    that is gone has already left that card — so "your upstream was removed",
+    the one thing most worth saying, could never be said. For declarations the
+    link outlives the node: `declared_node` is append-only, so the retired row
+    still names what it constrained. That is the half of FL-083 this phase can
+    close honestly; the code half (who called a deleted function) still needs
+    the previous run's card.
+    """
+    if not qn:
+        return []
+    try:
+        rows = conn.execute("SELECT id, slug, qualified_name, links_json, description FROM declared_node "
+                            "WHERE project = ? AND state = 'retired' AND superseded_by IS NULL ORDER BY id",
+                            (project,)).fetchall()
+    except sqlite3.Error:
+        return []                       # an orchestrator DB from before migration 023
+    out: list[dict] = []
+    for row in rows:
+        try:
+            links = json.loads(row["links_json"] or "[]")
+        except ValueError:
+            continue
+        if not any(isinstance(d, dict) and d.get("to") == qn for d in links):
+            continue
+        key = _node_key(psg, row["qualified_name"])
+        last = _psg_rows(psg, "SELECT id, event_type, run_id FROM node_event WHERE node_key = ? "
+                              "ORDER BY run_id DESC, seq DESC LIMIT 1", (key,)) if key else []
+        if not (last and last[0][1] == "node_removed"):
+            continue                    # retired in the ledger but the graph has not been refreshed yet
+        out.append({"qualified_name": row["qualified_name"], "node_key": key,
+                    "event_id": last[0][0], "run_id": last[0][2], "declared": True,
+                    "declaration": row["description"]})
+    return out
+
+
 def _records(conn, project: str, anchors: list[str]) -> list[dict]:
     if not anchors:
         return []
@@ -240,6 +278,7 @@ def build(conn, *, project: str, targets: list[str], psg_db_path: str | None = N
                 last = _psg_rows(psg, "SELECT id, event_type, run_id FROM node_event WHERE node_key = ? ORDER BY run_id DESC, seq DESC LIMIT 1", (uk,))
                 if last and last[0][1] == "node_removed":
                     tp.removed_upstream.append({"qualified_name": up, "node_key": uk, "event_id": last[0][0], "run_id": last[0][2]})
+            tp.removed_upstream.extend(_retired_declarations(conn, psg, project, qn))
             for nb in tp.output_consumers:
                 if nb in pack.neighbors_counts:
                     continue
