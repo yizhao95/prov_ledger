@@ -116,3 +116,8 @@
 | FL-108 | dp-phase4 | DEFERRED | `anchor candidates` 只做"文件里的数值 ∩ metrics 表里的数值"的精确匹配：`3.2` 与 `3.20`、`3.2%` 与 `0.032`、千分位与货币符号都对不上，而一个真实的 deck 到处是这些写法。开启 auto_discover 前需要一份校准集（像阶段 8 的仲裁器那样先量 consistency/coverage/accuracy 再决定接不接入），否则"只出候选"会退化成"出一堆没用的候选" | DP 5 期 |
 | FL-109 | dp-phase4 | DEFERRED | xlsx 抽取读的是缓存值（`<v>`）：公式单元格给的是上次计算的结果，而一个从没被 Excel 打开过、或被工具生成的工作簿可能只有公式没有缓存值——那种单元格现在抽出来是空的，于是锚定时报"值不在那里"，而人在 Excel 里明明看得见 3.2。至少要把"有公式无缓存值"识别出来单独报，而不是与"这里没有数字"混为一谈 | DP 5 期 |
 | FL-110 | dp-phase4 | DEFERRED | `occurrence.node_key` 装的是数据来源身份（`metric:<name>` / `<dataset>.<column>` / `declared:<slug>`），而 `change_reason.node_key` 装的是分析器的 `nk_…` 内容哈希——同名不同义。现在靠列注释与文档 §13.1 说清，长期应改名（`source_key`）或加一层显式的身份类型，否则下一个读代码的人会把两者 join 起来 | DP 5 期 |
+| FL-111 | release-0.3.0 | DEFERRED | 无头模型调用会继承宿主环境：`~/.claude/settings.json` 的 `language` 决定答复语言（提示词无法覆盖），其他已装插件会把提醒文字注入 `result` 开头。0.3.0 用隔离设置文件 + 严格 JSON 输出规避；仍需一条"调用外部模型前自检环境"的 selfcheck 项，并在文档里作为集成约束写明 | 0.4 |
+| FL-112 | release-0.3.0 | DEFERRED | 测试计数散落在 README / INSTALL / CHANGELOG 三处手写，每次发布都过期。应由 `scripts/count_tests.sh` 生成并在发布前校验（本次靠人工核对） | 0.4 |
+| FL-113 | release-0.3.0 | DEFERRED | `init_project.sh` 尊重 `PSG_REGISTRY_PATH`，但索引仍写 `~/skill-workspace/project-graphs/PROJECT-STATE-GRAPHS.md`，因此无法完全隔离；隔离测试与演示都会污染宿主索引 | 0.4 |
+| FL-114 | release-0.3.0 | DEFERRED | `PreToolUse` 钩子在 `hook-errors.log` 里留下 `NameError: name '_retract_injected_once' is not defined`（selfcheck 的 hook_failures 能看到）；需定位并补测试 | 0.4 |
+| FL-115 | release-0.3.0 | DEFERRED | PSG scenarios 段并发跑时 `constraint_bypassed` golden 偶发不一致（单独与整段重跑均过），疑与关闭时写 git notes 的并发有关 | 0.4 |

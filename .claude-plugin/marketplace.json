@@ -1,12 +1,15 @@
 {
   "name": "provledger",
-  "owner": { "name": "yzhao", "email": "yzhao950213@gmail.com" },
+  "owner": {
+    "name": "yzhao",
+    "email": "yzhao950213@gmail.com"
+  },
   "plugins": [
     {
       "name": "provledger",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "source": "./",
-      "description": "Provenance + ledger discipline for data-science coding agents."
+      "description": "Keeps the reasons behind a project's changes — your words, the email, the agent's reading, kept apart — and puts them in front of whoever is about to change the thing again."
     }
   ]
 }
