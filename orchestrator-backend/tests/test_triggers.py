@@ -213,7 +213,11 @@ def test_evaluate_is_idempotent(conn, tmp_path):
     _plan(conn)
     first = _eval(conn, graph)
     second = _eval(conn, graph)
-    assert first["auto"] == 1 and second == {"auto": 0, "ask": 0, "silent": 0, "by_rule": {k: 0 for k in second["by_rule"]}, "nodes": []}
+    # DP phase 5: evaluate also reports what the external path did — nothing here,
+    # since this plan has no artifact words and no occurrence to judge
+    assert first["auto"] == 1 and second == {
+        "auto": 0, "ask": 0, "silent": 0, "by_rule": {k: 0 for k in second["by_rule"]}, "nodes": [],
+        "external": {"plan_id": PLAN, "mode": "off", "judged": 0, "auto": 0, "ask": 0, "silent": 0, "nodes": []}}
     assert len(_reasons(conn)) == 1 and len(_log_rows(conn)) == 2
 
 

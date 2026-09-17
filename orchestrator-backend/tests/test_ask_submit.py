@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from orchestrator import ask, cli, provenance as pv
+from orchestrator.ask import summarize as SU
 
 sys.path.insert(0, str(Path(__file__).parent))
 import _psg_schema as ps  # noqa: E402
@@ -55,7 +56,7 @@ def test_j1_j2_apply_to_a_session_draft_exactly_as_to_a_headless_one(conn, graph
     out = ask.submit(conn, asked["ask_id"], draft, psg_db_path=graph)
     assert out["sentences"] == [f"A constraint requires the null-label drop [#{cid}]."]
     assert "4127" not in out["answer"] and "I think" not in out["answer"]
-    assert out["dropped"] == {"uncited": 1, "unknown_id": 1, "number": 1, "over_limit": 0}
+    assert out["dropped"] == {**SU.no_drops(), "uncited": 1, "unknown_id": 1, "number": 1}
     assert out["cites"] == [f"#{cid}"] and out["version"] == 1 and out["model"] == "session"
 
 

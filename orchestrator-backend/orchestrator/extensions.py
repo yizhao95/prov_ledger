@@ -103,6 +103,7 @@ class Extensions:
     reasons_significance: str = "hint"     # DP phase 2b: hint (default, no model) | llm (a logged verdict per reason at close)
     integrity_anchor: str = "on"           # DP phase 3: on (default) | off — write the chain heads into git notes when a plan closes
     reasons_auto_discover: bool = False    # DP phase 4 (F5): off. On, it only proposes candidates — it never writes an occurrence
+    reasons_external_trigger: str = "off"  # DP phase 5: off (default) | on — the external-artifact judge may only ASK once a gate report says it is calibrated
 
     def fingerprint(self) -> dict | None:
         """The shape written to analysis_run.extensions_json; None without a file."""
@@ -342,6 +343,9 @@ def load(path: str | None) -> Extensions:
     auto_discover = reasons_cfg.get("auto_discover", False)
     if not isinstance(auto_discover, bool):
         raise ExtensionsError(f"{path}: reasons.auto_discover must be true or false, got {auto_discover!r}")
+    external_trigger = reasons_cfg.get("external_trigger", "off")
+    if external_trigger not in ("off", "on"):
+        raise ExtensionsError(f"{path}: reasons.external_trigger must be off or on, got {external_trigger!r}")
     integrity_cfg = data.get("integrity", {})
     if not isinstance(integrity_cfg, dict):
         raise ExtensionsError(f"{path}: integrity must be an object")
@@ -351,7 +355,8 @@ def load(path: str | None) -> Extensions:
     return Extensions(path=path, sha256=hashlib.sha256(raw).hexdigest(), drift_kinds=kinds, namesets=sets,
                       constraints=cons, providers=provs, outcome_channels=chans, reasons_close_mode=close_mode,
                       reasons_session_refresh=session_refresh, reasons_significance=significance,
-                      integrity_anchor=anchor, reasons_auto_discover=auto_discover)
+                      integrity_anchor=anchor, reasons_auto_discover=auto_discover,
+                      reasons_external_trigger=external_trigger)
 
 
 def current(repo_root: str | None = None) -> Extensions:
