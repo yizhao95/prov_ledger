@@ -136,6 +136,38 @@ def baseline(conn, *, since: str | None = None) -> dict:
     }
 
 
+# The three budgets spec §20 fixes. They live here, next to the numbers they
+# judge, so changing a budget is a diff in one place and a test failure in
+# another — never a quiet edit inside an assertion.
+BUDGETS = {"provenance_ratio": 0.10, "overhead_ratio": 0.35, "context_overhead_tokens": 3000}
+H1_FACTOR = 1.5
+
+
+def over_budget(row: dict, budgets: dict | None = None) -> list[str]:
+    """Which of the §20 budgets this overhead row breaks. A value that was never
+    measured is not a breach — it is a gap, and the caller says so separately."""
+    out = []
+    for name, limit in (budgets or BUDGETS).items():
+        value = row.get(name)
+        if value is not None and value > limit:
+            out.append(name)
+    return out
+
+
+def h1_exceedances(conn, baseline: dict, *, factor: float = H1_FACTOR, last: int = 5) -> list | None:
+    """[(plan_id, calls_per_step)] above `factor` x the baseline's p90, over the
+    most recent measured plans. None when the baseline carries no measured p90 —
+    "we cannot tell" is a third answer, and it is not "pass"."""
+    p90 = (baseline.get("calls_per_step") or {}).get("p90")
+    if p90 is None:
+        return None
+    rows = [calls_for_plan(conn, r[0]) for r in conn.execute(
+        "SELECT plan_id FROM Plans WHERE status='COMPLETED' ORDER BY created_at DESC LIMIT ?", (int(last),))]
+    measured = [m for m in rows if m["measured"] and m["calls_per_step"] is not None][:5]
+    limit = factor * p90
+    return [(m["plan_id"], m["calls_per_step"]) for m in measured if m["calls_per_step"] > limit]
+
+
 def write_baseline(path, data: dict) -> None:
     """Rewrite the baseline file, carrying forward the hand-measured
     `superpowers_only` section (it is not computed here — see docs)."""

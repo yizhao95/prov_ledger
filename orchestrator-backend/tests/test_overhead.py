@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from _live import require_live_ledger
 from orchestrator import db, hooks, plan_metrics
 
 REPO = Path(__file__).resolve().parents[2]
@@ -101,12 +102,14 @@ def _recent(conn, n=5):
     return [r[0] for r in conn.execute("SELECT plan_id FROM Plans WHERE status='COMPLETED' ORDER BY created_at DESC LIMIT ?", (n,))]
 
 
+@pytest.mark.live
 def test_h1_overhead_ratio(capsys):
-    """The last 5 completed plans of the real DB: provenance ≤ 10 %, overhead ≤ 35 %. No measured data → skip, out loud."""
-    real = Path.home() / "skill-workspace" / "orchestrator.db"
-    if not real.exists():
-        print("SKIP-NOTE: H1 — no ~/skill-workspace/orchestrator.db on this machine")
-        pytest.skip("no orchestrator.db")
+    """The last 5 completed plans of the real DB: provenance ≤ 10 %, overhead ≤ 35 %.
+
+    `live` since DP 2c: the budgets themselves (spec §20) are asserted on
+    fixtures in test_live_marker.py, because a budget is a property of the code
+    and this reading is a property of the machine."""
+    real = require_live_ledger("H1 overhead")
     conn = db.open_db(real)
     try:
         rows = [plan_metrics.overhead(conn, p) for p in _recent(conn)]
@@ -117,20 +120,17 @@ def test_h1_overhead_ratio(capsys):
         print("SKIP-NOTE: H1 — none of the last 5 completed plans has a tool_call_log row in its window (the hook loads at session start); nothing to assert yet")
         pytest.skip("no measured plans")
     for r in measured:
-        assert r["provenance_ratio"] <= 0.10, r
-        assert r["overhead_ratio"] <= 0.35, r
+        assert plan_metrics.over_budget(r) == [], r
 
 
+@pytest.mark.live
 def test_h4_context_overhead(capsys):
     """The last 5 completed plans: context_overhead_tokens ≤ 3000 each, with the pack
     REBUILT by the current builder over the plan's stored targets (what the software
     would put in front of the agent today); the stored number is printed next to it
-    as history. Plans without a pack → skip, out loud."""
+    as history. `live` since DP 2c — same reason as H1."""
     from orchestrator import context_pack
-    real = Path.home() / "skill-workspace" / "orchestrator.db"
-    if not real.exists():
-        print("SKIP-NOTE: H4 — no ~/skill-workspace/orchestrator.db on this machine")
-        pytest.skip("no orchestrator.db")
+    real = require_live_ledger("H4")
     conn = db.open_db(real)
     try:
         rows = []
@@ -151,7 +151,7 @@ def test_h4_context_overhead(capsys):
         pytest.skip("no context data")
     for r in rows:
         print(f"H4 {r['plan_id']}: stored {r['stored']} · rebuilt now {r['now']}")
-        assert r["now"] <= 3000, r
+        assert plan_metrics.over_budget({"context_overhead_tokens": r["now"]}) == [], r
 
 
 def test_baseline_file_has_the_overhead_section_and_the_superpowers_only_reference():

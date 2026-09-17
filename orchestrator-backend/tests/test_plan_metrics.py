@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from _live import require_live_ledger
 from orchestrator import db, plan_metrics
 
 REPO = Path(__file__).resolve().parents[2]
@@ -109,9 +110,16 @@ def test_cli_metrics_plan_prints_json(tmp_path, conn):
     assert r.returncode == 0 and json.loads((tmp_path / "b.json").read_text())["n_measured"] == 1
 
 
+@pytest.mark.live
 def test_h1_threshold():
     """H1: the tool must not silently get slower — the last 5 measured plans of
-    this repository stay within 1.5 × the baseline's p90 calls per step."""
+    this repository stay within 1.5 × the baseline's p90 calls per step.
+
+    DP phase 2c marked this `live`: it reads the dogfood ledger, so the same
+    commit passes or fails depending on what ran on this machine. The threshold
+    LOGIC is asserted on fixtures in test_live_marker.py; this one is the real
+    reading, and you ask for it by name."""
+    require_live_ledger("H1")
     base = plan_metrics.read_baseline(REPO / "docs" / "perf-baseline.json")
     if base is None:
         pytest.skip("perf baseline not measured yet — run `python -m orchestrator.cli metrics baseline --write docs/perf-baseline.json`")
