@@ -143,7 +143,7 @@ downstream constraints) — as findings with a severity and a **tier label**
   constraint declared `block: true` in `provledger-extensions.json` (exit 5 until
   someone answers it).
 - **Progressive loading.** The headline and the context pack are summaries with
-  counts; what the budget cut appears as `还有 n 条 … provledger why <qn> --all`.
+  counts; what the budget cut appears as `n more … — provledger why <qn> --all`.
   Expand (run `provledger why <qn>`) when `blocking > 0`, when a target carries
   constraints, or when a neighbour carries rejected paths. Do **not** expand when
   the only cuts are minor reasons.

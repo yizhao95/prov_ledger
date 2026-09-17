@@ -9,10 +9,10 @@ export interface SourceLevelBadgeProps {
 }
 
 const WORDS: Record<string, {label: string; hint: string; color: string}> = {
-  linked: {label: "有链接可查", hint: "a reference you can open", color: "brand-green"},
-  verbal: {label: "有原话", hint: "the words themselves", color: "brand-blue"},
-  task_context: {label: "只有任务脉络", hint: "inferred from the task around it", color: "brand-spark"},
-  unstated: {label: "未说明", hint: "nothing was recorded", color: "brand-red"},
+  linked: {label: "linked", hint: "a reference you can open", color: "brand-green"},
+  verbal: {label: "verbal", hint: "the words themselves", color: "brand-blue"},
+  task_context: {label: "task-context", hint: "inferred from the task around it", color: "brand-spark"},
+  unstated: {label: "unstated", hint: "nothing was recorded", color: "brand-red"},
 };
 
 /**

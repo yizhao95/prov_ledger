@@ -119,7 +119,7 @@ rather than the decoration:
 
 - **the five tiers reading as five different things** — greyscale-safe, label
   first, `unstated` shown as a real tier and not blended away;
-- **被看到 and 改变了计划 as two separate counts** — the system can record that
+- **shown and adopted as two separate counts** — the system can record that
   something was shown, never that anyone read it, and a design that merges the
   two numbers is asserting something the ledger refuses to assert.
 
@@ -143,7 +143,8 @@ Two rules the suite enforces:
   `asserted` in every language, so the wording can change without the ETag, the
   test suite or anyone reading the page as data noticing.
 
-An earlier draft of this table overcorrected into conversational Chinese
-("因历史而变的决定", "还管着它的规矩"). That is the failure mode to avoid in both
+An earlier draft of this table overcorrected into conversational Chinese —
+phrases that read as "the decisions that changed because of history" and "the
+rules still keeping an eye on it". That is the failure mode to avoid in both
 directions: a page that chats is as unusable for audit as a page that only
 prints column names.

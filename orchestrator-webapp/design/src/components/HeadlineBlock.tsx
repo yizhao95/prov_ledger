@@ -29,11 +29,11 @@ export interface HeadlineBlockProps {
 }
 
 const SEVERITY_WORDS: Record<string, string> = {
-  blocking: "必须回应", warning: "值得注意", info: "仅供参考",
+  blocking: "Blocking", warning: "Warning", info: "Info",
 };
 
 /**
- * 开工前的提醒 — what the two-layer check found before this plan touched
+ * Findings — what the two-layer check found before this plan touched
  * anything. It never blocks: an unanswered blocking finding is COUNTED and
  * shown in red, and an agent that proceeded past one is marked as such. The
  * page's one large number is the unanswered count (layout spec 4).
@@ -47,12 +47,12 @@ export function HeadlineBlock({summary, findings}: HeadlineBlockProps) {
                       color: open ? c["brand-red"] : c["brand-gray"]}} data-unanswered={summary.unanswered}>
           {summary.unanswered}
         </span>
-        <span style={{fontSize: tokens.type_scale.body}}>条必须回应还没回应</span>
-        <Meta>· 共 {findings.length} 条提醒{typeof summary.shown === "number" ? ` · 被看到 ${summary.shown} 次` : ""}
-          {typeof summary.adopted === "number" ? ` · 改变了 ${summary.adopted} 次计划` : ""}</Meta>
+        <span style={{fontSize: tokens.type_scale.body}}>blocking findings unanswered</span>
+        <Meta>· {findings.length} findings{typeof summary.shown === "number" ? ` · Surfaced ${summary.shown}` : ""}
+          {typeof summary.adopted === "number" ? ` · Adopted ${summary.adopted}` : ""}</Meta>
       </div>
       {findings.length === 0 && (
-        <Meta>两层都查过这些目标，账上没有任何相关记录。</Meta>
+        <Meta>Both layers checked these targets; the ledger holds no related record.</Meta>
       )}
       <div style={{marginTop: tokens.spacing.row, display: "grid", gap: tokens.spacing.row}}>
         {findings.map((f) => (
@@ -68,21 +68,22 @@ export function HeadlineBlock({summary, findings}: HeadlineBlockProps) {
               <span style={{color: c["brand-gray"]}}>{f.text}</span>
             </div>
             {f.response ? (
-              <Meta>→ {f.response.action === "revise" ? "改了计划" : "照做了"}（{f.response.by}）
+              <Meta>→ {f.response.action === "revise" ? "plan revised" : "proceeded"} ({f.response.by})
                 {f.response.rationale ? ` · ${f.response.rationale}` : ""}
-                {f.agent_proceeded ? " · agent 越过" : ""}</Meta>
+                {f.agent_proceeded ? " · agent proceeded" : ""}</Meta>
             ) : f.unanswered ? (
               <span data-unanswered-finding="1"
-                    style={{fontSize: tokens.type_scale.micro, color: c["brand-red"]}}>未回答</span>
+                    style={{fontSize: tokens.type_scale.micro, color: c["brand-red"]}}>unanswered</span>
             ) : null}
           </div>
         ))}
       </div>
       {findings.length > 3 && (
         <div style={{marginTop: tokens.spacing.row}}>
-          <Disclose summary="这些提醒是怎么算出来的" >
-            <Meta>两层：这个目标自己的历史（规矩、走不通的路、上次失败的声明、上游被删），
-              和它的波及范围（谁吃它的输出、哪些上游没核对过、下游有哪些规矩）。</Meta>
+          <Disclose summary="How these findings are computed" >
+            <Meta>Two layers: the target's own history (constraints, rejected alternatives, claims that
+              failed last time, upstreams that were removed), and its blast radius (what consumes its
+              output, which upstreams were never checked, which constraints apply downstream).</Meta>
           </Disclose>
         </div>
       )}

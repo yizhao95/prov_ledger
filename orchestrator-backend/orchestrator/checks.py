@@ -58,7 +58,8 @@ def _fid(kind: str, anchor_key: str | None, n: int) -> str:
 # it went, so it cannot adopt that record either. Every observation-shaped finding
 # now appends the reason recorded against that node for that run (or that plan),
 # the user's own words first, and carries its reason_id so a response can cite it.
-# Nothing recorded reads 当时未说明 — the gap is stated, never left blank.
+# Nothing recorded reads "nothing was stated at the time" — the gap is said
+# out loud, never left blank.
 REASON_SNIPPET_MAX = 160
 
 
@@ -72,9 +73,10 @@ def _reason_at(conn, node_key: str | None, *, run_id: int | None = None, plan_id
     # plan) beats a looser one, the user's own words beat an agent's reading, and
     # the newest beats the older. The fallback to "any live reason on this node"
     # matters because `provledger note` — how a PERSON records a sentence — writes
-    # no run_id, so a strict run/plan match would print 当时未说明 for exactly the
-    # case this feature exists for. The finding always names the plan the words
-    # were recorded in, so a reader can see how contemporaneous they are.
+    # no run_id, so a strict run/plan match would print "nothing was stated at the
+    # time" for exactly the case this feature exists for. The finding always names
+    # the plan the words were recorded in, so a reader can see how contemporaneous
+    # they are.
     params: list = [node_key]
     rank = "0"
     if run_id is not None and plan_id is not None:
@@ -98,7 +100,7 @@ def _reason_at(conn, node_key: str | None, *, run_id: int | None = None, plan_id
     if not row or not row["text"]:
         return None
     return {"reason_id": row["id"], "plan_id": row["plan_id"], "tier": row["tier"],
-            "label": "用户原话" if row["tier"] == "stated" else (row["rule_id"] or row["recorded_by"]),
+            "label": "the user's own words" if row["tier"] == "stated" else (row["rule_id"] or row["recorded_by"]),
             "text": row["text"][:REASON_SNIPPET_MAX]}
 
 
@@ -109,8 +111,8 @@ def _because(rec: dict | None, *, asked: bool) -> str:
     if not asked:
         return ""
     if not rec:
-        return " —— 当时未说明"
-    return f' —— 因为："{rec["text"]}"（{rec["label"]}，{rec["plan_id"]}）'
+        return " — nothing was stated at the time"
+    return f' — because: "{rec["text"]}" ({rec["label"]}, {rec["plan_id"]})'
 
 
 def layer_self(pack, *, hard_statements: frozenset = frozenset(), conn=None) -> list[Finding]:
@@ -296,15 +298,15 @@ def close_headline(conn, *, plan_id: str, commit: bool = False) -> dict:
         resp = f.get("response")
         if resp is None:
             unanswered += 1
-            how = "未回答"
+            how = "unanswered"
         elif resp["action"] == "proceed":
             proceeded += 1
-            how = "越过"
+            how = "proceeded past"
         else:
             continue
         if not project:
             continue
-        claim = f"{how} #{f['id']} 后本 plan 内无 step 失败"
+        claim = f"{how} #{f['id']} and no step of this plan failed afterwards"
         exists = conn.execute("SELECT 1 FROM expectations WHERE plan_id = ? AND claim = ?", (plan_id, claim)).fetchone()
         if exists:
             continue

@@ -22,7 +22,7 @@ export interface OutcomeRowProps {
 }
 
 const KIND_WORDS: Record<string, string> = {
-  observed: "量到了", survival: "还在不在", none_available: "没有可观测的后果", pending: "还没有结果",
+  observed: "observed", survival: "survival", none_available: "nothing to observe", pending: "pending",
 };
 
 /**
@@ -40,7 +40,7 @@ export function OutcomeRow({claim, target, targetKind, latest}: OutcomeRowProps)
       <div>
         <div style={{color: c["brand-gray"]}}>“{claim}”</div>
         <Hidden id={`${targetKind ?? "node"}:${target}`}>
-          <Meta>关于 {target.split(".").pop()}</Meta>
+          <Meta>on {target.split(".").pop()}</Meta>
         </Hidden>
       </div>
       <div style={{textAlign: "right", whiteSpace: "nowrap"}}>

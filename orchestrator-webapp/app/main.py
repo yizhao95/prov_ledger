@@ -471,7 +471,7 @@ def outcomes(request: Request, project: str | None = None):
 def session_card(request: Request, session_id: str):
     """DP phase 2b (Task 5, FL-062): one session — what was said, what it cost,
     what changed, its headline, the plans it published; a session without a
-    plan is marked 降级. Read-only; an older DB renders empty parts."""
+    plan is marked degraded. Read-only; an older DB renders empty parts."""
     ctx = {"request": request, "error": None, "session": None, "bar": queries.view_bar("session", queries.triple(None, None, None))}
     try:
         conn = queries.open_db_readonly()

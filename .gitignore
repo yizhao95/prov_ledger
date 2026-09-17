@@ -48,3 +48,6 @@ node_modules/
 
 # Internal working docs (plans/specs/flowcharts) stay local-only — never published.
 docs/superpowers/
+
+# Internal working log (full deferred-work ledger, includes done items) stays local-only.
+docs/internal/

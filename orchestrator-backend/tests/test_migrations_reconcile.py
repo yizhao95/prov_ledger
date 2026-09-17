@@ -49,7 +49,7 @@ def test_fl021_fresh_db_applies_everything(tmp_path):
     c.close()
 
 
-# ── 对账自愈 (phase 4 Task 0): a legacy DB that recorded one row too few ────────
+# ── reconcile and self-heal (phase 4 Task 0): a legacy DB that recorded one row too few ──
 
 def test_reconcile_self_heals_when_a_version_row_is_missing(tmp_path, capsys):
     """Every file was applied but the bookkeeping is one row short: reconcile can

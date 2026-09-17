@@ -145,7 +145,7 @@ FROM outcomes o JOIN expectations e ON e.id = o.expectation_id ORDER BY o.id;
 
 - No aggregation window for metrics: the channel compares two rows, the
   nearest on each side. A rolling mean or a tolerance band is a later
-  channel (FUTURE-LOG).
+  channel ([known issues](KNOWN-ISSUES.md)).
 - No verdict: an outcome records *what was measured*, never whether the
   claim "held". `delta_pct = 23.19` next to "within ±5%" speaks for itself;
   a pass/fail column would be an opinion.

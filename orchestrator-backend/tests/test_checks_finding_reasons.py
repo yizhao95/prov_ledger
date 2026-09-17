@@ -5,7 +5,8 @@ run 2" — true, and useless: the agent reading the headline cannot see WHY it w
 removed, so it cannot adopt that record either. Every such finding now appends
 the reason recorded against that node for that run (verbatim first), names the
 plan it was recorded in, and carries its reason_id so answering the finding can
-cite it. A node with no reason reads 当时未说明 — never silence.
+cite it. A node with no reason reads "nothing was stated at the time" — never
+silence.
 """
 import sys
 from pathlib import Path
@@ -17,7 +18,7 @@ from orchestrator import checks, context_pack as cp, provenance as pv
 sys.path.insert(0, str(Path(__file__).parent))
 import _psg_schema as ps  # noqa: E402
 
-VERBATIM = "上游 parse 收到通知要下线，先别再依赖它"
+VERBATIM = "we were told upstream parse is being retired, so stop depending on it"
 
 
 @pytest.fixture
@@ -65,7 +66,7 @@ def test_removed_upstream_quotes_the_users_words_and_names_the_plan(conn, graph)
     rid = pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_u", kind="technical", run_id=2,
                            verbatim=(u, 0, len(VERBATIM)), recorded_by="agent")
     f = _finding(checks.layer_self(_pack(conn, graph), conn=conn), "removed_upstream")
-    assert VERBATIM in f.text and "因为" in f.text and "用户原话" in f.text and "P0" in f.text
+    assert VERBATIM in f.text and "because:" in f.text and "the user's own words" in f.text and "P0" in f.text
     assert f.evidence["reason_id"] == rid and f.evidence["plan_id"] == "P0"
     assert f.evidence["event_id"]                                  # the observation is still there
 
@@ -73,15 +74,15 @@ def test_removed_upstream_quotes_the_users_words_and_names_the_plan(conn, graph)
 def test_a_removal_with_nothing_recorded_says_so_instead_of_staying_quiet(conn, graph):
     _plans(conn)
     f = _finding(checks.layer_self(_pack(conn, graph), conn=conn), "removed_upstream")
-    assert "当时未说明" in f.text and "reason_id" not in f.evidence
+    assert "nothing was stated at the time" in f.text and "reason_id" not in f.evidence
 
 
 def test_an_agents_reading_is_not_labelled_as_the_users_words(conn, graph):
     _plans(conn)
     rid = pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_u", kind="technical", run_id=2,
-                           interpretation="parse 的调用点全部迁到 read_orders 了", recorded_by="agent")
+                           interpretation="every call site of parse now goes through read_orders", recorded_by="agent")
     f = _finding(checks.layer_self(_pack(conn, graph), conn=conn), "removed_upstream")
-    assert "parse 的调用点全部迁到 read_orders 了" in f.text and "用户原话" not in f.text and "agent" in f.text
+    assert "every call site of parse now goes through read_orders" in f.text and "the user's own words" not in f.text and "agent" in f.text
     assert f.evidence["reason_id"] == rid
 
 
@@ -98,7 +99,7 @@ def test_prior_outcome_failed_carries_the_reason_recorded_on_the_target(conn, gr
                            verbatim=(u, 0, len(VERBATIM)), recorded_by="agent")
     conn.commit()
     f = _finding(checks.layer_self(_pack(conn, graph), conn=conn), "prior_outcome_failed")
-    assert VERBATIM in f.text and "用户原话" in f.text
+    assert VERBATIM in f.text and "the user's own words" in f.text
     assert f.evidence["reason_id"] == rid and f.evidence["expectation_id"] == eid
 
 
@@ -107,14 +108,15 @@ def test_layer_self_without_a_connection_still_works_and_says_nothing_it_cannot_
     and not an invented reason."""
     _plans(conn)
     f = _finding(checks.layer_self(_pack(conn, graph)), "removed_upstream")
-    assert "was removed in run 2" in f.text and "因为" not in f.text and "当时未说明" not in f.text
+    assert "was removed in run 2" in f.text and "because:" not in f.text and "nothing was stated at the time" not in f.text
 
 
 # ── the human path: `provledger note` records no run_id (DP 2d, Task 5) ──────
 # The scenario this whole feature exists for is a PERSON explaining a removal in
 # their own words. `provledger note --node <qn>` is the documented way to record
 # that, and it writes no run_id — so a lookup keyed only on run/plan would print
-# 当时未说明 for exactly the case that matters. The fallback is the node itself.
+# "nothing was stated at the time" for exactly the case that matters. The
+# fallback is the node itself.
 
 def test_a_note_with_no_run_id_is_still_the_reason_for_the_removal(conn, graph):
     _plans(conn)
@@ -123,23 +125,23 @@ def test_a_note_with_no_run_id_is_still_the_reason_for_the_removal(conn, graph):
     rid = pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_u", kind="technical",
                            verbatim=(u, 0, len(VERBATIM)), recorded_by="human")   # no run_id, as note does
     f = _finding(checks.layer_self(_pack(conn, graph), conn=conn), "removed_upstream")
-    assert VERBATIM in f.text and "用户原话" in f.text and "P0" in f.text
+    assert VERBATIM in f.text and "the user's own words" in f.text and "P0" in f.text
     assert f.evidence["reason_id"] == rid
 
 
 def test_a_reason_tied_to_the_run_still_wins_over_a_loose_one(conn, graph):
     _plans(conn)
     pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_u", kind="technical",
-                     interpretation="一条没有 run 的旧记录", recorded_by="human")
+                     interpretation="an older record with no run attached", recorded_by="human")
     tied = pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_u", kind="technical", run_id=2,
-                            interpretation="就是这次 run 记的", recorded_by="agent")
+                            interpretation="recorded during this very run", recorded_by="agent")
     f = _finding(checks.layer_self(_pack(conn, graph), conn=conn), "removed_upstream")
-    assert "就是这次 run 记的" in f.text and f.evidence["reason_id"] == tied
+    assert "recorded during this very run" in f.text and f.evidence["reason_id"] == tied
 
 
 def test_a_reason_on_a_different_node_is_never_borrowed(conn, graph):
     _plans(conn)
     pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_x", kind="technical",
-                     interpretation="这是别的节点的理由", recorded_by="agent")
+                     interpretation="this is another node's reason", recorded_by="agent")
     f = _finding(checks.layer_self(_pack(conn, graph), conn=conn), "removed_upstream")
-    assert "这是别的节点的理由" not in f.text and "当时未说明" in f.text
+    assert "this is another node's reason" not in f.text and "nothing was stated at the time" in f.text

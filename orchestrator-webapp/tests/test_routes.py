@@ -519,7 +519,7 @@ def test_node_page_says_unavailable_when_the_graph_is_missing(client, tmp_path, 
     assert r.status_code == 200 and "not in the state graph" in r.text
 
 
-# ── DP phase 1 Task 7: the Reasons panels show the source level (来源等级) ────
+# ── DP phase 1 Task 7: the Reasons panels show the source level ─────────────
 def test_reasons_panel_shows_source_level_for_migrated_and_new_rows(client):
     pid = client._seeded["plan_id"]
     conn = odb.open_db(client._db)
@@ -536,9 +536,11 @@ def test_reasons_panel_shows_source_level_for_migrated_and_new_rows(client):
     conn.close()
     r = client.get("/api/dashboard")
     assert r.status_code == 200 and vocab_ui("reasons_panel") in r.text
-    # DP 2d (Task 3d): the node page says the level in plain words ("有链接可查"),
-    # the plan panels still print the 来源等级 prefix; both are the same column.
-    assert ("linked" in r.text or "verbal" in r.text or "task-context" in r.text) and "证据等级" not in r.text
+    # DP 2d (Task 3d): the node page says the level in plain words ("linked"),
+    # the plan panels still print the "source level" prefix; both are the same column.
+    import re as _re
+    assert "linked" in r.text or "verbal" in r.text or "task-context" in r.text
+    assert not _re.search(r"[\u4e00-\u9fff]", r.text), "the English page prints a Chinese phrase"
     assert 'data-tier="asserted"' in r.text and "legacy sentence written as stated" in r.text      # migrated: asserted, not stated
     assert 'data-tier="stated"' in r.text and 'data-source-level="verbal"' in r.text
     assert 'data-tier="unstated"' in r.text and 'data-source-level="unstated"' in r.text
@@ -548,7 +550,7 @@ def test_reasons_panel_shows_source_level_for_migrated_and_new_rows(client):
     rows = {x["node_key"]: x for x in queries.get_node_reasons(conn, pid)}
     conn.close()
     assert rows["nk_old"]["tier"] == "asserted" and rows["nk_old"]["evidence_level"] == "task_context"
-    assert rows["nk_new"]["tier"] == "stated" and rows["nk_new"]["source_level"].startswith("来源等级 verbal")
+    assert rows["nk_new"]["tier"] == "stated" and rows["nk_new"]["source_level"].startswith("source level verbal")
     assert queries.get_unstated(conn if False else odb.open_db(client._db), pid)["unstated"] == 1
 
 
@@ -591,7 +593,7 @@ def _seed_headline(db, pid, step_id):
          "text": "1 consumer(s) eat its output: pkg.m.clean", "anchor": "pkg.m.load_orders", "evidence": {"consumers": ["pkg.m.clean"]}, "hard": False},
         {"id": "active_constraint:nk_a:2", "layer": "self", "kind": "active_constraint", "tier": "stated", "severity": "blocking",
          "text": "never read the raw orders table in prod", "anchor": "pkg.m.load_orders", "evidence": {"reason_id": cid}, "hard": False}],
-        "summary": {"targets": 1, "layers": 2, "findings": 3, "blocking": 2, "warning": 1, "info": 0, "unanswered": 2, "shown": 2, "adopted": 0}, "hints": ["还有 1 条理由未展开，`provledger why pkg.m.load_orders --all`"]}
+        "summary": {"targets": 1, "layers": 2, "findings": 3, "blocking": 2, "warning": 1, "info": 0, "unanswered": 2, "shown": 2, "adopted": 0}, "hints": ["1 more reason is not expanded; run `provledger why pkg.m.load_orders --all`"]}
     conn.execute("INSERT INTO headline (project, plan_id, findings_json) VALUES ('demo', ?, ?)", (pid, json.dumps(doc, ensure_ascii=False)))
     hid = conn.execute("SELECT MAX(id) FROM headline").fetchone()[0]
     conn.execute("INSERT INTO headline_response (headline_id, finding_id, action, rationale, by, cites_json) VALUES (?, 'active_constraint:nk_a:1', 'proceed', 'the filter moves downstream', 'agent', '[]')", (hid,))
@@ -634,7 +636,7 @@ def test_node_page_hit_counts_per_moment_and_the_adopting_plan_backlink(client, 
     # machine-readable in data-* so the ETag, this suite and any scraper are unaffected
     assert f'data-stats="{ids["cid"]}"' in html and 'data-shown-plan="1"' in html and 'data-adopted="1"' in html
     # DP 2d: the link carries the TYPED triple (a record id, not a run); Task 3d
-    # replaced "被 <plan> 采用" with the sentence a person would say, and moved the
+    # replaced "adopted by <plan>" with the sentence a person would say, and moved the
     # plan id into title= (layout spec 8).
     assert f'href="/plan/{pid}?node=pkg.m.load_orders&at=reason:{ids["cid"]}" title="{pid}"' in html
     assert "Adopted by plan" in html
@@ -751,7 +753,7 @@ def test_degraded_session_is_marked_and_shows_its_refresh_and_headline(client, t
     conn.execute("UPDATE analysis_run SET plan_id='session:sess-D' WHERE id=2") if False else None
     conn.close()
     html = client.get("/session/sess-D").text
-    assert 'data-degraded="1"' in html and "降级（无 plan）" in html and "refresh done" in html and "run 2" in html
+    assert 'data-degraded="1"' in html and "degraded (no plan)" in html and "refresh done" in html and "run 2" in html
     assert "data-session-headline" in html and "never printed" in html and "data-no-plan" in html
     assert client.get("/session/nope").status_code == 200 and 'data-state="not-found"' in client.get("/session/nope").text
 
@@ -761,7 +763,7 @@ def test_home_lists_recent_sessions_with_and_without_a_plan(client, tmp_path, mo
     pid = client._seeded["plan_id"]; _seed_session(client._db, pid)
     html = client.get("/").text
     assert 'data-panel="recent-sessions"' in html and 'data-session-card="sess-A"' in html and 'data-session-card="sess-D" data-degraded="1"' in html
-    assert "1 plan" in html and "降级（无 plan）" in html
+    assert "1 plan" in html and "degraded (no plan)" in html
 
 
 def test_plan_header_names_its_session_and_the_sessions_other_plans(client):

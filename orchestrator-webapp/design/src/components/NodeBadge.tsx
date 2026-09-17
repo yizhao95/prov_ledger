@@ -30,7 +30,7 @@ export function NodeBadge({count, tier, minor = 0, name}: NodeBadgeProps) {
                     background: has ? tokens.colors["spark-wash"] : "transparent",
                     border: `2px solid ${dot}`}} />
       {has ? <b>{count}</b> : <span style={{color: c["brand-muted"]}}>0</span>}
-      <span style={{color: c["brand-muted"]}}>条记录{minor > 0 ? ` · 另有 ${minor} 条次要` : ""}</span>
+      <span style={{color: c["brand-muted"]}}>records{minor > 0 ? ` · ${minor} minor` : ""}</span>
     </span>
   );
 }

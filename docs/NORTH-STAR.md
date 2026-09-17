@@ -1,46 +1,106 @@
 # provLedger · North Star
 
-一句话：**每一个改动、每一个数字，都能追溯到让它存在的那个决定；人能在 30 秒内看到并否决。**
+In one sentence: **every change and every number can be traced back to the
+decision that put it there, and a person can see that decision — and overrule
+it — in thirty seconds.**
 
-## 三件核心（产品就是这三样，缺一件都不完整）
+## The three cores (the product is these three; any one missing and it is incomplete)
 
-1. **一个有全图视野和全历史视野的项目数据库。**
-   代码、数据、指标、外部对象在同一张图里。每个节点有系统算出来的履历、带来源等级的理由、锚定的约束、哈希链保证的时间线。
-2. **一个可供人类审计的 dashboard。**
-   Graph / Node / Task 三个视野，同一个上下文三元组（project, node, at）丝滑切换。回答三个问题：这个东西为什么变、谁看过、谁据此决定了什么。
-3. **一个声明真实世界的入口。**
-   用户用一句话，经 LLM 把会议决定、外部系统、业务规则、手算数字放进图里，之后它们与代码节点享受完全相同的溯源能力。
+1. **A project database that sees the whole graph and the whole history.**
+   Code, data, metrics and external objects live in one graph. Every node
+   carries a history the system computed, reasons labelled with their source
+   level, anchored constraints, and a timeline a hash chain vouches for.
+2. **A dashboard a human can audit.**
+   Three views — Graph, Node, Task — over one context triple (project, node,
+   at), switching between them without losing your place. They answer three
+   questions: why did this thing change, who was shown it, and who decided
+   something because of it.
+3. **A door for declaring the real world.**
+   The user says one sentence; an LLM puts the meeting decision, the external
+   system, the business rule or the hand-computed number into the graph. From
+   then on it has exactly the same provenance as a code node.
 
-## 不可动摇的原则
+## Principles that do not move
 
-- **图的结构和改动是算出来的。** 节点上的数据有多种类型：系统观测的、系统推导的、LLM 断言的、用户声明的。全部记录，靠 tier 区分，不混在一起，但也不排斥任何一种。
-- **观测与推断永远可区分。** tier 由系统按来源判定（observed / derived / asserted / stated / unstated），LLM 不能自封 tier，不能产出结果数字。
-- **加载是渐进的。** 不把全部记录扔给 LLM；先给摘要与计数，由 LLM 决定展开哪些，展开规则写在 skill 里。裁掉的永远以计数出现。
-- **永不静默。** 没有信息就说没有，裁剪就显示计数，LLM 判定就留痕可校准。一个消灭静默失败的工具自己不能有静默失败。
-- **历史只追加。** 修改 = 追加 supersede。
-- **系统能记录"展示过"和"采用过"，不能记录"读过"。** 不把展示次数当阅读证据。
-- **中性措辞。** 决策溯源、来源、脉络；不用证据、追责、甩锅。
-- **personal / shareable 边界由代码保证。**
-- **不让工具静默变慢。** 每次往返都要回答"用掉哪一次 tool call"，阈值是测试。
-- **不过度干涉。** 我们的 skill 是插件完整性的一部分，可以是必须的；但它只管 plan 怎么写、怎么关，不改用户 agent 的其他 skill、工具和设定。钩子只增不否：默认只记录、只展示、不阻断，阻断是人开的选项。一定程度的干预不可避免，所以用测试卡住：与只装 superpowers 的 Claude Code 做同样任务相比，多出的工具轮次和 context 有上限（H 组）。
-- **价值在三处。** 把决策存下来；把工作内容与历史留成可审计的账；当某条历史决策被触发时，用 hit count 与"本次改动的理由"把"plan 因它而变"显式地画出来。
+- **The graph's structure and its changes are computed.** A node's data comes
+  in several kinds: observed by the system, derived by the system, asserted by
+  an LLM, stated by the user. All of them are recorded and kept apart by tier.
+  Nothing is blended, and nothing is excluded.
+- **Observation and inference stay distinguishable, always.** The system
+  decides the tier from the source (observed / derived / asserted / stated /
+  unstated). An LLM may not award itself a tier and may not produce a result
+  number.
+- **Loading is progressive.** We do not hand the LLM every record. It gets
+  summaries and counts first and decides what to expand; the expansion rules
+  live in the skill. Whatever is cut always reappears as a count.
+- **Never silent.** No information means saying so. Trimming means showing the
+  count. An LLM judgement means leaving a trace that can be calibrated. A tool
+  built to kill silent failures cannot have silent failures of its own.
+- **History is append-only.** Changing something means appending a supersede.
+- **The system can record "was shown" and "was adopted" — never "was read".**
+  A display count is not evidence that anyone read anything.
+- **Neutral wording.** Decision provenance, source, context. Not evidence, not
+  accountability, not blame.
+- **The personal / shareable boundary is enforced by code.**
+- **The tool may not get slower in silence.** Every round trip has to answer
+  "which tool call did this cost?", and the threshold is a test.
+- **Do not overreach.** Our skills are part of the plugin's integrity and may
+  be mandatory, but they govern only how a plan is written and how it is
+  closed; they do not touch the user agent's other skills, tools or settings.
+  Hooks only add, never veto: by default they record and display, they do not
+  block, and blocking is an option a person turns on. Some interference is
+  unavoidable, so a test pins it down: against a Claude Code running
+  superpowers alone on the same task, the extra tool rounds and extra context
+  have a ceiling (the H group).
+- **The value is in three places.** Store the decision; turn the work and its
+  history into an auditable account; and when a past decision is triggered,
+  use the hit count and this change's reason to draw the line "the plan changed
+  because of it" explicitly.
 
-## 用法：每次改动、每篇文档、每条宣传前过一遍
+## How to use this: run every change, every document and every pitch past it
 
-- 这个改动让三件核心里的哪一件更完整？说不出来就不做。
-- 它有没有违反上面任何一条原则？
-- README、演示、宣传按 1 → 2 → 3 的顺序讲，不讲"编排器 / 契约门"这种实现层。
+- Which of the three cores does this change make more complete? If you cannot
+  say, do not do it.
+- Does it break any principle above?
+- The README, the demo and the pitch tell the story in the order 1 → 2 → 3,
+  never in implementation terms like "orchestrator" or "contract gate".
 
-## 来源
+## Where this came from
 
-2026-09-14 与用户 brainstorm 定案；详见 `docs/superpowers/specs/2026-09-14-decision-provenance-design.md` §14 与 §19。
+Settled in a brainstorm with the user on 2026-09-14; see §14 and §19 of
+`docs/superpowers/specs/2026-09-14-decision-provenance-design.md` (a local
+working document, not published with the repository).
 
-## 说人话（README、演示与宣传的起笔）
+## In plain words (the opening for the README, the demo and the pitch)
 
-它是装在 Claude Code 里的"项目记忆 + 审计员"。你和 agent 一起改代码、改数据、改报表里的数字，它在旁边记账：改了什么（自己前后对比算出来的，不是听 agent 说的）、为什么改（你的原话、agent 的解释、或规则推出来的）、依据是什么（邮件、会议、工单的链接，或就是那天那句话）、后来结果怎样。
+It is a project memory and an auditor that lives inside Claude Code. You and an
+agent change code, change data, change the numbers in a report, and it keeps
+the books alongside you: what changed (computed by comparing before and after
+itself, not taken on the agent's word), why it changed (your own words, the
+agent's explanation, or something a rule derived), what it rested on (the link
+to the email, the meeting, the ticket — or just the thing said that day), and
+how it turned out later.
 
-它在两个时刻把账翻出来：**改之前**，agent 要动某个东西，它先翻这个东西的账，把"你说过不许这么改""上次这么改弄坏了下游""下游有两处靠它"摆成一段 headline 放在 plan 最前面，agent 可以照做也可以带理由绕过，绕过会留痕、结果会记回来；**想查的时候**，dashboard 三个视角切换：整张图上哪个节点背后有故事，点进节点看它一路怎么变、每次为什么、谁看过、谁据此改了计划，点进任务看它读了什么、决定了什么。还有一个入口让你用一句话把代码以外的东西放进图里。
+It opens the books at two moments. **Before the change**: when the agent is
+about to touch something, it looks that thing up first and puts a headline at
+the top of the plan — "you said not to change this that way", "last time this
+change broke something downstream", "two things downstream depend on it". The
+agent can comply or go around it with a reason; going around leaves a trace,
+and the outcome comes back into the record. **When you want to look**: the
+dashboard switches between three points of view — which node in the whole graph
+has a story behind it; open a node to see how it changed over time, why each
+time, who was shown it, and who changed their plan because of it; open a task
+to see what it read and what it decided. And there is a door for putting things
+that are not code into the graph with one sentence.
 
-一句话：`git blame` 告诉你谁写的，这个告诉你为什么，而且下次有人要推翻那个"为什么"的时候，它会先开口。
+In one line: `git blame` tells you who wrote it. This tells you why — and the
+next time someone moves to overturn that why, it speaks up first.
 
-技术只有四样：Python 自带的代码解析器算出节点与改动；两个只追加、带哈希链的 SQLite 文件记一切；Claude Code 的钩子旁听原话、数开销、编辑前插一句嘴；两份 skill 告诉 agent 写计划前看账、关计划时填"为什么"。大模型只做两件事：把话和改动对应起来、信息不够时下判断，每条判断都标成"推断"并留痕，永远不产出结果数字，永远不能把自己的话标成你说的。
+There are only four pieces of technology. Python's own parser computes the
+nodes and the changes. Two append-only, hash-chained SQLite files record
+everything. Claude Code's hooks listen for what was actually said, count the
+cost, and put in a word before an edit. Two skills tell the agent to read the
+books before writing a plan and to fill in the why when closing one. The model
+does exactly two things: match words to changes, and judge when information is
+missing. Every judgement is marked as inference and leaves a trace. It never
+produces a result number, and it can never label its own words as yours.

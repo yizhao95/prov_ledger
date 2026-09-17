@@ -1,6 +1,6 @@
 <!-- @dsCard group="Provenance" -->
 <!doctype html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -19,22 +19,22 @@
 <main>
   <header>
     <h1>ShownAdopted</h1>
-    <p>被看到 ≠ 改变了计划。两个计数永不互相推导。</p>
+    <p>Surfaced ≠ adopted. Neither count is ever derived from the other.</p>
   </header>
-  <section data-variant="看到过，也被采用了">
-    <h2 class="variant-label">看到过，也被采用了</h2>
+  <section data-variant="surfaced and adopted">
+    <h2 class="variant-label">surfaced and adopted</h2>
     <div data-host="0"></div>
   </section>
-  <section data-variant="看到了，但没被采用">
-    <h2 class="variant-label">看到了，但没被采用</h2>
+  <section data-variant="surfaced but not adopted">
+    <h2 class="variant-label">surfaced but not adopted</h2>
     <div data-host="1"></div>
   </section>
 </main>
 <script src="../dist/_ds_bundle.js"></script>
 <script>
   var D = window.ProvLedgerDS, React = D.__React;
-  D.__render(React.createElement(D.ShownAdopted,{shown:[{reason_id:1414,text:'load_orders 只保留已付款的订单',moment:'plan'},{reason_id:1414,text:'load_orders 只保留已付款的订单',moment:'edit'}],adopted:[{reason_id:1414,text:'load_orders 只保留已付款的订单',via:'headline_response',by:'agent'}]}), document.querySelector('[data-host="0"]'));
-  D.__render(React.createElement(D.ShownAdopted,{shown:[{reason_id:99,text:'按自然周切分上次试过，财务对不上',moment:'plan'}],adopted:[]}), document.querySelector('[data-host="1"]'));
+  D.__render(React.createElement(D.ShownAdopted,{shown:[{reason_id:1414,text:'load_orders keeps paid orders only',moment:'plan'},{reason_id:1414,text:'load_orders keeps paid orders only',moment:'edit'}],adopted:[{reason_id:1414,text:'load_orders keeps paid orders only',via:'headline_response',by:'agent'}]}), document.querySelector('[data-host="0"]'));
+  D.__render(React.createElement(D.ShownAdopted,{shown:[{reason_id:99,text:'splitting by calendar week was tried before and finance could not reconcile it',moment:'plan'}],adopted:[]}), document.querySelector('[data-host="1"]'));
 </script>
 </body>
 </html>

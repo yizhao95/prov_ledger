@@ -10,7 +10,7 @@ provLedger helps you remember what was decided, who said it, and why — and rem
 
 A Claude Code plugin that keeps the reasons behind a project's changes — your words, the email, the agent's reading, kept apart — and puts them in front of whoever is about to change the thing again.
 
-![tests](https://img.shields.io/badge/tests-1826-brightgreen)
+![tests](https://img.shields.io/badge/tests-1829-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -31,11 +31,17 @@ This is its own kind of failure, and the usual tools each miss it by one step. `
 
 ### A project database with a full map and a full history
 
-![A data-flow graph of a real repository: 2,892 nodes folded into 11 modules, with the nodes that carry records marked](docs/media/graph-data.png)
+![A data-flow picture of a real repository: 2,892 nodes folded into 11 modules and laid out in three bands — what is read, what processes it, what is produced — with the nodes that carry records marked](docs/media/graph-data.png)
 
-*2,892 nodes, folded into 11 modules. Only what has a story is drawn — and the page says so.*
+*Data flow, not a call graph: 2,892 nodes folded into 11 modules and laid out in three bands — what gets read on one side, what processes it in the middle, what comes out on the other. Only what has a story is drawn, and the page says how much it left out.*
 
-Functions, data columns, SQL tables, metrics and the things you declare in a sentence live in one map. It is rebuilt from the source on every run and compared with the run before it, so what changed is measured, not reported by the agent. Around each thing the map holds its history: what it was, what it became, the reason recorded at the time, the rule that still constrains it, and how far that reason can be checked — a link, a recorded sentence, or nothing at all. Every record is appended, never edited; a correction is a new row pointing at the old one, and the whole timeline is hash-chained and anchored in git.
+Functions are the least of it. A column in a dataset is a thing in this map. So is a SQL table, a feed arriving from someone else's system, a metric you track, and anything you put there by describing it in a sentence. They are all first-class: each one has its own page, its own history and its own rules.
+
+Nothing in it is registered by hand, and nothing in it is taken on the agent's word. The map is rebuilt from the source on every run and compared against the run before, so what changed is **measured**: this column is gone; that function returns a different shape; this one only moved to another file. It keeps hold of the same thing across renames and moves — matching on the name, on the shape of the code, on what flows through it, and on what owns it — so a tidy-up does not reset a thing's history, and when two candidates are genuinely indistinguishable it says so instead of guessing.
+
+The arrows are computed the same way: what reads this table, what consumes this function's output, what a column ends up feeding. That is the part you cannot get from `git diff`, and it is what lets the tool answer *what might this break* before anything is edited. In the bundled demo an upstream supplier quietly stops sending the `discount` column. Nothing in the repository announces it — but the next run finds the column gone, and because the map already knows what reads that column and where those things lead, it can name the rollup three steps downstream and the revenue number on the end of it. That same computed blast radius is what the warning before an edit is reading, and what the second half of a plan's opening summary is made of.
+
+That is *what changed*. The rest of the record is *why*: around each thing the map holds its history — what it was, what it became, the reason recorded at the time, the rule that still constrains it, and how far that reason can be checked, whether that is a link, a recorded sentence, or nothing at all. Every record is appended, never edited; a correction is a new row pointing at the old one, and the whole timeline is hash-chained and anchored in git.
 
 ### A dashboard a person can audit
 
@@ -389,7 +395,7 @@ Seven suites, each with its own pyproject and pythonpath — run them separately
 | `skills/update-project-state-graph/scripts/tests` | 90 |
 | `skills/project-state-graph/scripts/tests` | 425 |
 
-Total **1826 collected** across the eight suites (`scripts/count_tests.sh`), plus a few deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
+Total **1829 collected** across the eight suites (`scripts/count_tests.sh`), plus a few deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
 
 ### Origin
 
@@ -410,7 +416,7 @@ Issues and pull requests are welcome. Good first contributions: run `make demo` 
 | [`docs/design.md`](docs/design.md) | the dashboard's design system: one `tokens.json`, the component library, the wording table (English default, `?lang=zh`) |
 | [`docs/benchmark-silent-class-drop.md`](docs/benchmark-silent-class-drop.md) | the mini-benchmark for the failure class: a silently dropped column, segment purity 0.31 against 0.91 on the same green pipeline |
 | [`examples/phantom-uplift/`](examples/phantom-uplift/) | `make demo` — a revenue number that goes up for the wrong reason, caught offline and deterministically; plus the provenance demo used in section 3 and the anchor walkthrough |
-| [`docs/FUTURE-LOG.md`](docs/FUTURE-LOG.md) | the deferred-work ledger: every PR appends what it postponed, nothing is deleted |
+| [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md) | the confirmed defects and the standing limits, grouped by where you will hit them, with the workaround when there is one |
 | [`CHANGELOG.md`](CHANGELOG.md) | what each phase and release added, 0.1.0 → 0.2.0 |
 | [`LICENSE`](LICENSE) | MIT |
 

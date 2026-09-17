@@ -1,7 +1,7 @@
 """DP phase 2d (Task 0): the context triple's `at` says WHAT it points at.
 
 2b shipped a bare `at`: Node used it for a run id AND for a reason id, Graph
-assumed a run. A "被 <plan> 采用" link carries a reason id, so Graph silently
+assumed a run. An "adopted by <plan>" link carries a reason id, so Graph silently
 looked for run 1414. From 2d on, `at` is `run:<id>` or `reason:<id>`; a bare
 number still means a run for one version (compatibility), and a non-numeric
 `at` is still a plan id (the Task view's anchor).
@@ -124,7 +124,7 @@ def test_graph_page_resolves_a_reason_id_to_its_run_and_says_so(client):
     assert r.status_code == 200
     t = r.text
     assert f'data-at-reason="{rid}"' in t and 'data-at-run="2"' in t
-    assert "记录" in t or "record" in t                                   # the title explains the hop, never silently
+    assert "record" in t                                                  # the title explains the hop, never silently
 
 
 def test_the_switch_bar_keeps_the_typed_at_across_the_three_views(client):

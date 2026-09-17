@@ -46,14 +46,15 @@ from . import provenance, triggers
 RULE_ID = "X1"
 PATH = "external"
 PROMPT_PATH = Path(__file__).resolve().parent / "testing" / "prompts" / "external_trigger.md"
-META_RULE = "不确定时，不问。"
+META_RULE = "When you cannot tell, do not ask."
 _JSON_RE = re.compile(r"\{.*\}", re.S)
 BASIS_MAX = 400
 NO_ANSWER = "no answer"          # the prefix of the basis when the runner returned nothing at all
 
 # The words that say a person is talking about something outside the code. Two
 # lists because the person is: an English deck and a Chinese one are the same
-# artifact, and a judge that only knows one of them is silently half-blind.
+# artifact, and a judge that only knows one of them is silently half-blind. The
+# Chinese list below is deliberate vocabulary, not stray text — leave it alone.
 ARTIFACT_WORDS_EN = ("deck", "slide", "slides", "presentation", "sheet", "spreadsheet", "workbook",
                      "report", "chart", "appendix", "pptx", "xlsx", "docx", "csv")
 ARTIFACT_WORDS_ZH = ("幻灯", "演示", "报表", "报告", "表格", "图表", "工作表", "附录", "这页", "那页")
@@ -173,9 +174,10 @@ def payload(ctx, node: dict) -> dict:
     sentences — each with the id and the exact text a span is measured in.
 
     Every sentence of the plan, not only the ones naming the deck: the fifth
-    example ("转化率改成 2.8%，Sam 说 EMEA 不算在 Q3 里") carries its reason in a
-    sentence that never says "slide". Filtering the material the way the path
-    is decided would hide exactly the sentences this judge exists to find."""
+    example ("change the conversion rate to 2.8%, Sam says EMEA does not count
+    in Q3") carries its reason in a sentence that never says "slide". Filtering
+    the material the way the path is decided would hide exactly the sentences
+    this judge exists to find."""
     said = triggers.candidate_utterances(ctx)
     return {"node": {"node_key": node.get("node_key"), "name": node.get("qualified_name"),
                      "node_type": node.get("node_type"), "file": node.get("file_path")},

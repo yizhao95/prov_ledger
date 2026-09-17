@@ -233,7 +233,7 @@ def test_the_doc_states_the_port_back_rule():
     """The rule that stops the library becoming a second source of truth."""
     text = DESIGN_DOC.read_text(encoding="utf-8")
     assert "prop" in text.lower()
-    assert "tokens.json" in text and ("port" in text.lower() or "搬回" in text)
+    assert "tokens.json" in text and "port" in text.lower()
 
 
 def test_the_readme_points_at_it():

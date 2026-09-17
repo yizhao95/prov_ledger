@@ -63,7 +63,7 @@ class Pack:
     targets: list[TargetPack] = field(default_factory=list)
     neighbors_counts: dict = field(default_factory=dict)      # qualified_name -> {constraints, rejected_paths, statements?}
     truncated: dict = field(default_factory=dict)              # kind -> records trimmed by the budget
-    hints: list[str] = field(default_factory=list)             # "还有 n 条 …，provledger why <qn> --all"
+    hints: list[str] = field(default_factory=list)             # "n more … — provledger why <qn> --all"
     approx_tokens: int = 0
     generated_at: str = ""
     shown: int = 0                                             # change_reason rows put in the pack (read_hits when recorded)
@@ -393,10 +393,10 @@ def _hints(pack: Pack) -> list[str]:
     structure = {k: pack.truncated.get(k, 0) for k in ("callers", "lineage_downstream", "dtype_map") if pack.truncated.get(k)}
     for kind, n in pack.truncated.items():
         if n and kind not in structure:
-            out.append(f"还有 {n} 条 {labels.get(kind, kind)} 未展开，`provledger why {cut_target(kind)} --all`")
+            out.append(f"{n} more {labels.get(kind, kind)} not expanded — `provledger why {cut_target(kind)} --all`")
     if structure:
         first = pack.targets[0].qualified_name if pack.targets else "<node>"
-        out.append("结构已折叠为计数：" + " · ".join(f"{k} {n}" for k, n in structure.items()) + f"（`provledger why {first} --impact` 展开）")
+        out.append("structure folded into counts: " + " · ".join(f"{k} {n}" for k, n in structure.items()) + f" (`provledger why {first} --impact` expands)")
     return out
 
 

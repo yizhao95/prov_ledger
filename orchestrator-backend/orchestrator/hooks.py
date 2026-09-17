@@ -282,10 +282,10 @@ def anchor_context(conn, data: dict) -> dict | None:
         if (qn, statement) in seen:                       # one constraint, several anchors / a rule's echo: say it once
             continue
         seen.add((qn, statement))
-        where = "下游 " if nk in downstream else ""
+        where = "downstream " if nk in downstream else ""
         lines.append(f"- {where}{qn}: {statement} ({by}, {(at or '')[:10]})")
     first = next(iter(nodes.values()))
-    text = "provledger · 这里有约束（来源等级见 why）：\n" + "\n".join(lines)
+    text = "provledger · there are constraints here (source levels are in `why`):\n" + "\n".join(lines)
     if len(text) > ANCHOR_CONTEXT_MAX_CHARS:
         text = text[:ANCHOR_CONTEXT_MAX_CHARS - 1].rstrip() + "…"
     text += f"\n`provledger why {first}`"

@@ -3,7 +3,9 @@
 All notable changes to provLedger — the `provledger` package, the four
 skills (`writing-plans`, `executing-plans`, `project-state-graph`,
 `update-project-state-graph`) and the read-only dashboard. Dates are the
-merge dates of the phase PRs; FL-nnn refers to `docs/FUTURE-LOG.md`.
+merge dates of the phase PRs. FL-nnn is an entry in the project's internal
+deferred-work ledger, which is not published; the part of it that affects
+users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
 ## 0.3.0 — 2026-09-17
 

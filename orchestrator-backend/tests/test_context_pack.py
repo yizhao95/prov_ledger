@@ -67,7 +67,7 @@ def test_layers_caps_identity_chain_and_neighbor_counts(conn, graph):
     assert ids["old_name"] in [r["id"] for r in t.reasons] or ids["old_name"] in [r["id"] for r in cp._records(conn, "proj", ["pkg.m.load"])]
     assert all(r.get("significance") != "minor" for r in t.reasons)
     assert pack.truncated == {"rejected_paths": 2, "reasons": 3, "reasons_minor": 1}
-    assert any("还有 2 条 rejected paths" in h and "provledger why pkg.m.load_orders --all" in h for h in pack.hints)
+    assert any("2 more rejected paths" in h and "provledger why pkg.m.load_orders --all" in h for h in pack.hints)
     assert t.callers == ["pkg.m.main"] and t.output_consumers == ["pkg.m.clean"] and t.dtype_map == {"return": "DataFrame"}
     assert t.upstream_assumptions == [{"table": "orders"}]
     assert pack.neighbors_counts == {"pkg.m.clean": {"constraints": 3, "rejected_paths": 1}}     # counts only by default
@@ -155,7 +155,7 @@ def test_structure_folds_into_counts_when_records_alone_cannot_reach_the_budget(
     t = pack.targets[0]
     assert len(t.callers) == cp.FOLD_CALLERS and t.counts["callers"] == 120 and pack.truncated["callers"] == 120 - len(t.callers)
     assert t.dtype_map == {} and t.counts["dtype_map"] == 30 and t.lineage_downstream == [] and t.counts["lineage_downstream"] == 20
-    assert any("结构" in h or "callers" in h for h in pack.hints)
+    assert any("structure folded into counts" in h or "callers" in h for h in pack.hints)
     assert pack.approx_tokens < 1800                                   # not necessarily under 900: the floor keeps one record per kind
     big = cp.build(conn, project="proj", targets=["pkg.m.load_orders"], psg_db_path=graph, budget_tokens=100000, record=False)
     assert len(big.targets[0].callers) == cp.CAP_CALLERS and big.targets[0].counts["callers"] == 120        # callers are always capped

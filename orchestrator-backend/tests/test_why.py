@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import _psg_schema as ps  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
-BANNED = ("追责", "甩锅", "防老板", "呈堂")
+BANNED = ("blame", "scapegoat", "pass the buck", "for the boss")
 
 
 def _snap(c, run, key, qn, lo, hi, ntype="function"):
@@ -74,19 +74,19 @@ def test_three_target_forms_resolve_to_the_same_node_and_file_line_is_innermost(
 def test_summary_line_is_fixed_and_counts_everything_even_what_is_not_shown(conn, graph):
     ids = _seed(conn)
     out = why.why(conn, project="proj", target="pkg.m.load_orders", psg_db_path=graph, record=False)
-    assert out["text"].splitlines()[0] == "pkg.m.load_orders · 下游 1 · 履历 3 次 · 约束 2（生效 1）· 否决 1 · 待补 1"
+    assert out["text"].splitlines()[0] == "pkg.m.load_orders · downstream 1 · history 3 · constraints 2 (1 active) · rejected 1 · pending 1"
     s = out["doc"]["summary"]
     assert s["identity_chain"] == ["pkg.m.load_orders", "pkg.m.load"] and s["constraints_active"] == 1 and s["pending"] == 1
-    # every record line: #id · tier · 来源等级 · when · 展示 n 次 · adopted-by
+    # every record line: #id · tier · source level · when · shown n · adopted-by
     conn.execute("INSERT INTO read_hit (reason_id, project, plan_id, moment) VALUES (?, 'proj', 'P1', 'plan')", (ids["c1"],))
     conn.execute("INSERT INTO influence (reason_id, project, plan_id, via, by) VALUES (?, 'proj', 'P9', 'headline_response', 'agent')", (ids["c1"],))
     conn.commit()
     text = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, record=False)["text"]
-    assert f"#{ids['c1']} · asserted · 任务上下文 · " in text and "展示 1 次 · 被 P9 采用" in text
-    assert f"#{ids['r2']} · stated · 口头 · " in text and text.count("展示 0 次 · 未被采用") >= 3
+    assert f"#{ids['c1']} · asserted · task context · " in text and "shown 1 · adopted by P9" in text
+    assert f"#{ids['r2']} · stated · verbal · " in text and text.count("shown 0 · not adopted") >= 3
     assert "rename load to load_orders" in text                                 # the stated span, verbatim
-    assert "── 影响面：调用方 1 · 下游消费 1（`--impact` 展开）" in text
-    assert "pkg.m.clean · 约束 0" in why.why(conn, project="proj", target="nk_a", psg_db_path=graph, impact=True, record=False)["text"]
+    assert "── blast radius: callers 1 · output consumers 1 (`--impact` expands)" in text
+    assert "pkg.m.clean · constraints 0" in why.why(conn, project="proj", target="nk_a", psg_db_path=graph, impact=True, record=False)["text"]
 
 
 def test_budget_trims_in_order_with_counts_and_all_lifts_the_caps(conn, graph):
@@ -96,11 +96,11 @@ def test_budget_trims_in_order_with_counts_and_all_lifts_the_caps(conn, graph):
         pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="technical", role="rejected_path", interpretation=f"rejected {i} " + "y" * 80, rule_id="R6", recorded_by="system")
     tight = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, budget=250, record=False)
     assert tight["doc"]["truncated"].get("reasons", 0) > 0                       # reasons go first
-    assert any("还有" in h and "provledger why" in h for h in tight["doc"]["hints"])
-    assert any("还有" in ln for ln in tight["text"].splitlines())
+    assert any("not expanded" in h and "provledger why" in h for h in tight["doc"]["hints"])
+    assert any("not expanded" in ln for ln in tight["text"].splitlines())
     everything = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, all_records=True, record=False)
-    assert len([r for r in everything["doc"]["records"] if r["layer"] == "理由"]) == 8            # 2 seeded + 6, no cap
-    assert len([r for r in everything["doc"]["records"] if r["layer"] == "否决"]) == 7
+    assert len([r for r in everything["doc"]["records"] if r["layer"] == "reasons"]) == 8         # 2 seeded + 6, no cap
+    assert len([r for r in everything["doc"]["records"] if r["layer"] == "rejected"]) == 7
 
 
 def test_pending_and_never_read_lists(conn, graph):
@@ -111,7 +111,7 @@ def test_pending_and_never_read_lists(conn, graph):
     assert allp["doc"]["mode"] == "pending" and [r["id"] for r in allp["doc"]["records"]] == [ids["un"]]
     nr = why.why(conn, project="proj", never_read_only=True, psg_db_path=graph, record=True)
     assert nr["doc"]["mode"] == "never-read" and [r["id"] for r in nr["doc"]["records"]] == [ids["c1"]]   # superseded c2 is not active
-    assert "从未展示过的生效约束 · 1 条" in nr["text"]
+    assert "active constraints never shown to anyone · 1" in nr["text"]
     # showing it in --never-read IS showing it: now it has a read_hit(why)
     assert why.why(conn, project="proj", never_read_only=True, psg_db_path=graph, record=False)["doc"]["records"] == []
     assert conn.execute("SELECT moment FROM read_hit WHERE reason_id=?", (ids["c1"],)).fetchone()[0] == "why"
@@ -123,7 +123,7 @@ def test_search_hits_with_fts_and_degrades_to_like_when_the_module_is_missing(co
     assert [r["id"] for r in hit["doc"]["records"]] == [ids["c1"]]
     if not hit["doc"]["degraded"]:
         assert conn.execute("SELECT 1 FROM sqlite_master WHERE name='change_reason_fts'").fetchone()
-        assert not hit["text"].startswith("（全文索引不可用")
+        assert not hit["text"].startswith("(no full-text index")
         later = pv.insert_reason(conn, project="proj", plan_id="P2", node_key="nk_a", kind="technical", interpretation="paid twice", recorded_by="agent")
         assert later in [r["id"] for r in why.why(conn, project="proj", search_query="paid", record=False)["doc"]["records"]]   # trigger keeps it in sync
     else:
@@ -134,7 +134,7 @@ def test_search_hits_with_fts_and_degrades_to_like_when_the_module_is_missing(co
     monkeypatch.setattr(why, "_fts_query", boom)
     monkeypatch.setattr(why, "ensure_fts", lambda c: True)
     deg = why.why(conn, project="proj", search_query="paid", record=False)
-    assert deg["doc"]["degraded"] is True and deg["text"].splitlines()[0] == "（全文索引不可用，本次用 LIKE 匹配）"
+    assert deg["doc"]["degraded"] is True and deg["text"].splitlines()[0] == "(no full-text index here — this search fell back to LIKE)"
     assert ids["c1"] in [r["id"] for r in deg["doc"]["records"]]
 
 
@@ -166,7 +166,7 @@ def test_cli_why_prints_the_read_and_help_has_no_banned_words(conn, graph, tmp_p
     env = {"PSG_REGISTRY_PATH": str(reg)}
     r = _cli(conn, "why", "pkg.m.load_orders", "--project", "proj", env_extra=env)
     assert r.returncode == 0, r.stderr
-    assert r.stdout.splitlines()[0] == "pkg.m.load_orders · 下游 1 · 履历 3 次 · 约束 2（生效 1）· 否决 1 · 待补 1"
+    assert r.stdout.splitlines()[0] == "pkg.m.load_orders · downstream 1 · history 3 · constraints 2 (1 active) · rejected 1 · pending 1"
     assert conn.execute("SELECT COUNT(*) FROM read_hit WHERE moment='why'").fetchone()[0] == 4
     j = _cli(conn, "why", "nk_a", "--project", "proj", "--json", env_extra=env)
     assert j.returncode == 0 and '"summary"' in j.stdout
@@ -175,4 +175,6 @@ def test_cli_why_prints_the_read_and_help_has_no_banned_words(conn, graph, tmp_p
     for argv in (["why", "--help"], ["export", "--help"], ["init", "--help"], ["headline", "--help"]):
         h = _cli(conn, *argv)
         assert h.returncode == 0 and not any(w in h.stdout for w in BANNED), argv
-    assert "证据等级" not in _cli(conn, "why", "--help").stdout
+    assert "evidence level" not in _cli(conn, "why", "--help").stdout
+    top = " ".join(_cli(conn, "--help").stdout.split())        # argparse wraps; the wording is what matters
+    assert "source level" in top and "evidence level" not in top

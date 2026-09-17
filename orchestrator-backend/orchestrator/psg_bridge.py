@@ -280,9 +280,9 @@ def runs_of(psg_db_path: str | None) -> list[dict]:
 
 
 # DP phase 2d (Task 0, FL-076): a whole project is too much graph for one page.
-# User feedback on the 2b screenshots (2026-09-16): 记全是对的，画全是错的 — recording
-# every node is right, DRAWING every node is wrong. So the reader has four modes
-# and the biggest one is never what a page asks for by default:
+# User feedback on the 2b screenshots (2026-09-16): recording everything is
+# right, drawing everything is wrong. So the reader has four modes, and the
+# biggest one is never what a page asks for by default:
 #
 #   focus — the focus node's ±hops neighbourhood
 #   story — the nodes that have a story (the caller passes their keys, since the

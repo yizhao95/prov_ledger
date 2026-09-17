@@ -63,16 +63,16 @@ def examples() -> tuple[Example, ...]:
     """The five paired examples, verbatim from design doc §5.2. Odd is not the
     same as ask: three of the five are odd, but only two become questions."""
     return (
-        Example("correction", "slide 4 转化率写成了 3.02%，应该是 3.2%",
+        Example("correction", "slide 4 has the conversion rate as 3.02%, it should be 3.2%",
                 "metric:q3_conv", "slide 4", "3.2", False, None, "silent"),
-        Example("bare_change", "slide 4 转化率改成 2.8%",
+        Example("bare_change", "change the conversion rate on slide 4 to 2.8%",
                 "metric:q3_conv", "slide 4", "3.2", True, None, "ask"),
-        Example("sync", "把 slide 4 按最新一轮结果更新",
+        Example("sync", "update slide 4 with the latest round of results",
                 "metric:q3_conv", "slide 4", "3.2", False, None, "silent"),
-        Example("deleted_conclusion", "把 slide 7 关于 EMEA 增长那段去掉",
+        Example("deleted_conclusion", "drop the paragraph about EMEA growth on slide 7",
                 "declared:emea-growth", "slide 7", "EMEA growth", True, None, "ask"),
-        Example("reason_in_the_sentence", "转化率改成 2.8%，Sam 说 EMEA 不算在 Q3 里",
-                "metric:q3_conv", "slide 4", "3.2", True, "Sam 说 EMEA 不算在 Q3 里", "auto"),
+        Example("reason_in_the_sentence", "change the conversion rate to 2.8%, Sam says EMEA does not count in Q3",
+                "metric:q3_conv", "slide 4", "3.2", True, "Sam says EMEA does not count in Q3", "auto"),
     )
 
 

@@ -75,11 +75,11 @@ def test_slots_and_checklist_are_closed_form(conn, psg_with_plan):
     slots = reasons.slots_for_plan(conn, "proj", "P1", psg_with_plan)
     assert [s["node_key"] for s in slots] == ["nk_a", "nk_b", "nk_c"]
     text = reasons.checklist_text(slots)
-    assert "3 个数据点" in text and "unstated" in text
+    assert "3 data point(s)" in text and "unstated" in text
     for i, s in enumerate(slots, 1):
         assert f"{i}. {s['qualified_name']}" in text and s["node_key"] in text
     assert "column" in text and "node_changed" in text
-    assert "不需要说明原因" in reasons.checklist_text([])
+    assert "nothing to explain" in reasons.checklist_text([])
     # a filled slot disappears from the checklist
     reasons.fill(conn, project="proj", plan_id="P1", run_id=2, reasons=[{"node_key": "nk_b", "interpretation": "dedupe"}], psg_db_path=psg_with_plan)
     assert [s["node_key"] for s in reasons.slots_for_plan(conn, "proj", "P1", psg_with_plan)] == ["nk_a", "nk_c"]

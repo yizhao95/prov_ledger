@@ -45,7 +45,8 @@
       {% if graph.clusters %}<span class="text-brand-muted ml-2 tnum" data-clusters="{{ graph.clusters|length }}">{{ ui('clusters', lang, clusters=graph.clusters|length, nodes=graph.mode_total) }}</span>{% endif %}
       <span class="text-brand-muted ml-2 tnum" data-counts>{{ graph.nodes|length }} / {{ graph.total_nodes }} {{ ui('records', lang) if lang == 'zh' else 'nodes' }} · {{ graph.badged }} {{ 'with records' if lang != 'zh' else '有记录' }} </span>
     </form>
-    {# 渐进加载：裁掉的永远以计数出现，展开是一个链接（用户 2026-09-16：记全是对的，画全是错的）#}
+    {# Progressive loading: what was trimmed always appears as a count, and expanding it is a link
+       (user, 2026-09-16: recording everything is right, drawing everything is wrong). #}
     <div class="mt-2 flex items-center gap-1 text-xs" data-mode-chips>
       {% for m, label in [('focus', ui('mode_focus', lang)), ('story', ui('mode_story', lang)), ('data', ui('mode_data', lang)), ('full', ui('mode_full', lang))] %}
         {% set href = '/graph/' ~ project ~ '?mode=' ~ m ~ ('&focus=' ~ focus if focus else '') ~ ('&at=run:' ~ graph.run.run_id if graph.run and graph.run.run_id != graph.latest_run_id else '') ~ ('&level=' ~ graph.level if graph.level != 'functions' else '') %}
@@ -93,7 +94,7 @@
   </div>
   {% else %}
   <div id="graph-canvas" class="bg-surface rounded-xl shadow-sm border border-hairline mb-4" style="height: {{ 720 if graph.layout == 'hierarchical' else 520 }}px" data-canvas>
-    <div id="graph-fallback" class="p-4 text-xs text-brand-muted">图渲染库加载中… 若此提示不消失，说明 vis-network 不可用（离线或被拦截）——下方节点表仍完整。</div>
+    <div id="graph-fallback" class="p-4 text-xs text-brand-muted">{{ 'Loading the graph library… If this message stays, vis-network is unavailable (offline or blocked) — the node table below is still complete.' if lang != 'zh' else '图渲染库加载中… 若此提示不消失，说明 vis-network 不可用（离线或被拦截）——下方节点表仍完整。' }}</div>
   </div>
   <script>
     (function () {

@@ -10,7 +10,7 @@ import pytest
 from orchestrator import cli, provenance as pv
 
 REPO = Path(__file__).resolve().parents[2]
-BANNED = ("追责", "甩锅", "防老板", "呈堂")
+BANNED = ("blame", "scapegoat", "pass the buck", "for the boss")
 
 
 def _run(conn, *argv, env_extra=None):

@@ -1,6 +1,6 @@
 <!-- @dsCard group="Provenance" -->
 <!doctype html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -19,21 +19,21 @@
 <main>
   <header>
     <h1>TimelineEntry</h1>
-    <p>一行一个时刻，线穿过去；显著改动就地展开成前 → 后。</p>
+    <p>One row per moment with the line running through it; a significant change expands in place to before → after.</p>
   </header>
-  <section data-variant="有起点终点的一条时间轴">
-    <h2 class="variant-label">有起点终点的一条时间轴</h2>
+  <section data-variant="a timeline with a start and an end">
+    <h2 class="variant-label">a timeline with a start and an end</h2>
     <div data-host="0"></div>
   </section>
-  <section data-variant="当时没人说明">
-    <h2 class="variant-label">当时没人说明</h2>
+  <section data-variant="nothing was recorded at the time">
+    <h2 class="variant-label">nothing was recorded at the time</h2>
     <div data-host="1"></div>
   </section>
 </main>
 <script src="../dist/_ds_bundle.js"></script>
 <script>
   var D = window.ProvLedgerDS, React = D.__React;
-  D.__render(React.createElement('div',null,React.createElement(D.RailEnd,{label:'这个东西出现',kind:'start'}),React.createElement(D.TimelineEntry,{emphasis:true,run:{id:93,at:'2026-09-14',planId:'task-a',planTitle:'下线 discount 列'},event:'column_dropped',tier:'observed',diff:{before:'order_id, amount, discount',after:'order_id, amount',label:'orders 的列集合'},because:{text:'收到上游通知，v2 以后不再有 discount 列',verbatim:true,level:'linked'},shown:{plan:2,edit:1,why:1},adoptedBy:[{planId:'task-b',title:'重算折扣率'}]}),React.createElement(D.TimelineEntry,{run:{id:70,at:'2026-08-30',planId:'p-70',planTitle:'补一条边界测试'},event:'node_changed',tier:'asserted',because:{text:'调用点全部迁到 read_orders 了',verbatim:false,by:'agent',level:'task_context'},shown:{plan:1},last:true}),React.createElement(D.RailEnd,{label:'现在',kind:'end'})), document.querySelector('[data-host="0"]'));
+  D.__render(React.createElement('div',null,React.createElement(D.RailEnd,{label:'this node appears',kind:'start'}),React.createElement(D.TimelineEntry,{emphasis:true,run:{id:93,at:'2026-09-14',planId:'task-a',planTitle:'Drop the discount column'},event:'column_dropped',tier:'observed',diff:{before:'order_id, amount, discount',after:'order_id, amount',label:'the column set of orders'},because:{text:'the upstream told us there is no discount column after v2',verbatim:true,level:'linked'},shown:{plan:2,edit:1,why:1},adoptedBy:[{planId:'task-b',title:'Recompute the discount rate'}]}),React.createElement(D.TimelineEntry,{run:{id:70,at:'2026-08-30',planId:'p-70',planTitle:'Add an edge-case test'},event:'node_changed',tier:'asserted',because:{text:'every call site moved to read_orders',verbatim:false,by:'agent',level:'task_context'},shown:{plan:1},last:true}),React.createElement(D.RailEnd,{label:'now',kind:'end'})), document.querySelector('[data-host="0"]'));
   D.__render(React.createElement(D.TimelineEntry,{run:{id:12,at:'2026-07-02'},event:'node_renamed',tier:'derived',because:null,shown:{},last:true}), document.querySelector('[data-host="1"]'));
 </script>
 </body>

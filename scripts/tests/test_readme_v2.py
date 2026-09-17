@@ -129,5 +129,5 @@ def test_the_five_minute_section_shows_both_install_paths(readme: str) -> None:
 
 
 def test_the_reference_section_links_the_standing_documents(readme: str) -> None:
-    for target in ("docs/FUTURE-LOG.md", "CHANGELOG.md", "LICENSE"):
+    for target in ("docs/KNOWN-ISSUES.md", "CHANGELOG.md", "LICENSE"):
         assert f"({target})" in readme, f"README does not link {target}"

@@ -99,7 +99,7 @@
   {% if ledger %}
   <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5 mb-4" data-panel="occurrences">
     <h2 class="text-sm font-semibold text-gray-900 mb-1" title="{{ ui('occurrences_help', lang) }}">
-      {{ ui('occurrences', lang) }}（{{ ledger.occurrences|length }}）</h2>
+      {{ ui('occurrences', lang) }}{{ '(' if lang != 'zh' else '（' }}{{ ledger.occurrences|length }}{{ ')' if lang != 'zh' else '）' }}</h2>
     {% if not ledger.occurrences %}
     <div class="text-xs text-brand-muted">{{ ui('no_occurrences', lang) }}</div>
     {% else %}
@@ -163,7 +163,7 @@
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
     {# ── the one timeline (layout spec 2): a line, a dot per row, a start and an end ── #}
     <section class="lg:col-span-2 bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="time" data-timeline>
-      <h2 class="text-sm font-semibold text-gray-900 mb-3">{{ ui('change_history', lang) }}（{{ ledger.timeline|length }}）</h2>
+      <h2 class="text-sm font-semibold text-gray-900 mb-3">{{ ui('change_history', lang) }}{{ '(' if lang != 'zh' else '（' }}{{ ledger.timeline|length }}{{ ')' if lang != 'zh' else '）' }}</h2>
 
       {% if not ledger.timeline %}
       <div class="text-xs text-brand-muted" data-empty="1">{{ ui('no_match', lang) }} 
@@ -239,7 +239,7 @@
 
     {# ── the aside: the rules that still apply to this node ── #}
     <aside class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="constraints">
-      <h2 class="text-sm font-semibold text-gray-900 mb-2">{{ ui('active_constraints', lang) }}（{{ ledger.constraints|length }}）</h2>
+      <h2 class="text-sm font-semibold text-gray-900 mb-2">{{ ui('active_constraints', lang) }}{{ '(' if lang != 'zh' else '（' }}{{ ledger.constraints|length }}{{ ')' if lang != 'zh' else '）' }}</h2>
       {% if not ledger.constraints %}<div class="text-xs text-brand-muted">{{ ui('no_active_constraints', lang) }}</div>{% endif %}
       {% for c in ledger.constraints %}
       <div class="text-xs mb-2 {{ 'bg-[#eef4fc] rounded px-1' if at_kind == 'reason' and at_id == c.id else '' }}"

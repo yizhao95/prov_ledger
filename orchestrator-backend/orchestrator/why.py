@@ -6,11 +6,11 @@ plan time and on-demand never disagree. Everything printed is a record that
 was put in front of someone: each line writes `read_hit(moment='why')`.
 The summary line is fixed so a person can read it at a glance:
 
-    <node> · 下游 n · 履历 m 次 · 约束 k（生效 j）· 否决 r · 待补 p
+    <node> · downstream n · history m · constraints k (j active) · rejected r · pending p
 
-and every record carries `#id · tier · 来源等级 · occurred_at · 展示 n 次 ·
-被 <plan> 采用` — how often it was shown before, and which plan adopted it.
-Trimmed records appear as counts ("还有 n 条 …"), never vanish.
+and every record carries `#id · tier · source level · occurred_at · shown n ·
+adopted by <plan>` — how often it was shown before, and which plan adopted it.
+Trimmed records appear as counts ("n more …"), never vanish.
 
 `--search` uses an FTS5 index built lazily here (`ensure_fts`); when the
 sqlite build has no FTS5 module it falls back to LIKE and says so on the
@@ -28,8 +28,8 @@ import sqlite3
 
 from . import context_pack, psg_bridge
 
-LEVEL_CN = {"linked": "有链接", "verbal": "口头", "task_context": "任务上下文", "unstated": "未说明"}
-ROLE_CN = {"constraint": "约束", "rejected_path": "否决", "reason": "理由"}
+LEVEL_LABELS = {"linked": "linked", "verbal": "verbal", "task_context": "task context", "unstated": "unstated"}
+ROLE_LABELS = {"constraint": "constraint", "rejected_path": "rejected path", "reason": "reason"}
 _FILE_LINE = re.compile(r"^(?P<file>[^\s:]+\.[A-Za-z0-9]+):(?P<line>\d+)$")
 FTS_TABLE = "change_reason_fts"
 
@@ -73,10 +73,10 @@ def stats_for(conn, reason_ids) -> dict[int, dict]:
 
 
 def _line(rec: dict, st: dict) -> str:
-    adopted = ("被 " + ", ".join(st["adopted_by"]) + " 采用") if st.get("adopted_by") else "未被采用"
+    adopted = ("adopted by " + ", ".join(st["adopted_by"])) if st.get("adopted_by") else "not adopted"
     text = (rec.get("text") or "").replace("\n", " ")
-    return (f"#{rec['id']} · {rec['tier']} · {LEVEL_CN.get(rec.get('evidence_level'), rec.get('evidence_level') or '?')} · "
-            f"{(rec.get('occurred_at') or '')[:16]} · 展示 {st.get('shown', 0)} 次 · {adopted}\n    {text}")
+    return (f"#{rec['id']} · {rec['tier']} · {LEVEL_LABELS.get(rec.get('evidence_level'), rec.get('evidence_level') or '?')} · "
+            f"{(rec.get('occurred_at') or '')[:16]} · shown {st.get('shown', 0)} · {adopted}\n    {text}")
 
 
 # ── FTS (lazy) ───────────────────────────────────────────────────────────────
@@ -172,16 +172,16 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
         rows, degraded = search(conn, project=project, query=search_query, limit=20)
         doc.update({"mode": "search", "query": search_query, "degraded": degraded, "records": rows})
         if degraded:
-            lines.append("（全文索引不可用，本次用 LIKE 匹配）")
-        lines.append(f"search {search_query!r} · {len(rows)} 条")
+            lines.append("(no full-text index here — this search fell back to LIKE)")
+        lines.append(f"search {search_query!r} · {len(rows)} records")
         st = stats_for(conn, [r["id"] for r in rows])
         for r in rows:
-            lines.append(f" {ROLE_CN.get(r['role'], r['role'])} {r['node_key'] or '-'} · " + _line(r, st.get(r["id"], {})))
+            lines.append(f" {ROLE_LABELS.get(r['role'], r['role'])} {r['node_key'] or '-'} · " + _line(r, st.get(r["id"], {})))
         shown = [r["id"] for r in rows]
     elif never_read_only:
         rows = never_read(conn, project=project)
         doc.update({"mode": "never-read", "records": rows})
-        lines.append(f"从未展示过的生效约束 · {len(rows)} 条")
+        lines.append(f"active constraints never shown to anyone · {len(rows)}")
         st = stats_for(conn, [r["id"] for r in rows])
         for r in rows:
             lines.append(f" {r['node_key'] or '-'} · " + _line(r, st.get(r["id"], {})))
@@ -189,7 +189,7 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
     elif pending_only and not target:
         rows = pending(conn, project=project)
         doc.update({"mode": "pending", "records": rows})
-        lines.append(f"待补的理由（unstated）· {len(rows)} 条")
+        lines.append(f"pending reasons (unstated) · {len(rows)}")
         for r in rows:
             lines.append(f" #{r['id']} · {r['node_key'] or '-'} · {r['plan_id']} · {(r['occurred_at'] or '')[:16]}")
         shown = []                                   # an unstated row has nothing to show
@@ -203,7 +203,7 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
                                   moment="why", session_id=session_id, plan_id=plan_id, record=False)
         tp = pack.targets[0] if pack.targets else None
         if tp is None:
-            lines.append(f"{target}: 图里没有这个节点，账本里也没有记录")
+            lines.append(f"{target}: no such node in the graph, and nothing on record in the ledger")
             doc["records"] = []
         else:
             anchors = ([tp.node_key] if tp.node_key else []) + [n for n in tp.identity_chain if n]
@@ -216,20 +216,20 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
             if tp.node_key:
                 h = psg_bridge._query(psg, "SELECT COUNT(*) FROM node_event WHERE node_key = ?", (tp.node_key,))
                 history = int(h[0][0]) if h else 0
-            summary = (f"{tp.qualified_name} · 下游 {len(tp.output_consumers) + len(tp.lineage_downstream)} · 履历 {history} 次 · "
-                       f"约束 {len(cons_all)}（生效 {len(cons_active)}）· 否决 {len(rej_all)} · 待补 {len(unst)}")
+            summary = (f"{tp.qualified_name} · downstream {len(tp.output_consumers) + len(tp.lineage_downstream)} · history {history} · "
+                       f"constraints {len(cons_all)} ({len(cons_active)} active) · rejected {len(rej_all)} · pending {len(unst)}")
             lines.append(summary)
             doc["summary"] = {"qualified_name": tp.qualified_name, "node_key": tp.node_key, "downstream": len(tp.output_consumers) + len(tp.lineage_downstream),
                               "history": history, "constraints": len(cons_all), "constraints_active": len(cons_active),
                               "rejected_paths": len(rej_all), "pending": len(unst), "identity_chain": tp.identity_chain}
             if pending_only:
-                recs = {"待补": [dict(r, text=None) for r in unst]}
+                recs = {"pending": [dict(r, text=None) for r in unst]}
             elif all_records:
-                recs = {"约束": [context_pack._slim(r) for r in cons_active],
-                        "否决": [context_pack._slim(r) for r in rej_all],
-                        "理由": [context_pack._slim(r) for r in allrecs if r["role"] == "reason" and r["tier"] != "unstated"]}
+                recs = {"constraints": [context_pack._slim(r) for r in cons_active],
+                        "rejected": [context_pack._slim(r) for r in rej_all],
+                        "reasons": [context_pack._slim(r) for r in allrecs if r["role"] == "reason" and r["tier"] != "unstated"]}
             else:
-                recs = {"约束": tp.constraints, "否决": tp.rejected_paths, "理由": tp.reasons}
+                recs = {"constraints": tp.constraints, "rejected": tp.rejected_paths, "reasons": tp.reasons}
             for label, items in recs.items():
                 if not items:
                     continue
@@ -243,21 +243,21 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
                     shown.append(r["id"])
                     doc["records"].append({**r, **st.get(r["id"], {}), "layer": label})
             if tp.prior_outcomes and not pending_only:
-                lines.append(f"── 过往承诺 · {len(tp.prior_outcomes)}")
+                lines.append(f"── prior claims · {len(tp.prior_outcomes)}")
                 for o in tp.prior_outcomes:
                     lines.append(f" {o['plan_id']} · \"{o['claim']}\" · {o['kind']} {o.get('signal') or o.get('delta_pct') or ''}")
             if impact or neighbors:
-                lines.append(f"── 影响面 · 调用方 {len(tp.callers)} · 下游消费 {len(tp.output_consumers)} · 血缘下游 {len(tp.lineage_downstream)}")
+                lines.append(f"── blast radius · callers {len(tp.callers)} · output consumers {len(tp.output_consumers)} · lineage downstream {len(tp.lineage_downstream)}")
                 for nb in tp.output_consumers[:8]:
                     entry = pack.neighbors_counts.get(nb) or {}
-                    lines.append(f"   {nb} · 约束 {entry.get('constraints', 0)} · 否决 {entry.get('rejected_paths', 0)}")
+                    lines.append(f"   {nb} · constraints {entry.get('constraints', 0)} · rejected {entry.get('rejected_paths', 0)}")
                     for s in entry.get("statements") or []:
                         st = stats_for(conn, [s["id"]])
                         lines.append("     " + _line(s, st.get(s["id"], {})))
                         shown.append(s["id"])
                         doc["records"].append({**s, **st.get(s["id"], {}), "layer": f"downstream:{nb}"})
             else:
-                lines.append(f"── 影响面：调用方 {len(tp.callers)} · 下游消费 {len(tp.output_consumers)}（`--impact` 展开）")
+                lines.append(f"── blast radius: callers {len(tp.callers)} · output consumers {len(tp.output_consumers)} (`--impact` expands)")
             for h in pack.hints:
                 lines.append(" " + h)
             doc["hints"] = list(pack.hints)
@@ -305,25 +305,25 @@ def export_md(conn, *, project: str, out_dir: str, psg_db_path: str | None = Non
         qn = psg_bridge.latest_qualified_name(psg, key) or key
         events = psg_bridge._query(psg, "SELECT COUNT(*) FROM node_event WHERE node_key = ?", (key,)) if psg else []
         n_events = int(events[0][0]) if events else 0
-        out = [f"# {qn}", "", f"- node_key: `{key}`", f"- 履历：{n_events} 次事件", f"- 记录：{len(recs)} 条（只含可共享的）", ""]
-        for label, role in (("约束", "constraint"), ("理由", "reason"), ("否决", "rejected_path")):
+        out = [f"# {qn}", "", f"- node_key: `{key}`", f"- history: {n_events} event(s)", f"- records: {len(recs)} (shareable only)", ""]
+        for label, role in (("Constraints", "constraint"), ("Reasons", "reason"), ("Rejected paths", "rejected_path")):
             items = [r for r in recs if r[3] == role]
             if not items:
                 continue
             out.append(f"## {label}")
             for r in items:
                 rid, _, plan_id, _, tier, level, by, at, state, rationale, rvis, text, withheld = r
-                out.append(f"- #{rid} · {tier} · 来源等级 {LEVEL_CN.get(level, level)} · {(at or '')[:10]} · {by} · {plan_id}" + (f" · {state}" if state != "active" else ""))
+                out.append(f"- #{rid} · {tier} · source level {LEVEL_LABELS.get(level, level)} · {(at or '')[:10]} · {by} · {plan_id}" + (f" · {state}" if state != "active" else ""))
                 if text:
                     out.append(f"  - {text}")
                 elif withheld is not None:
-                    out.append(f"  - （引自 utterance #{withheld}，标为 personal —— 原话不外发）")
+                    out.append(f"  - (quoted from utterance #{withheld}, which is marked personal — the words themselves do not travel)")
                 if rationale and rvis == "shareable":
-                    out.append(f"  - 为什么：{rationale}")
+                    out.append(f"  - why: {rationale}")
                 for kind, label_, uri in conn.execute(
                         "SELECT f.kind, f.label, f.uri FROM reference_link l JOIN reference f ON f.id = l.reference_id "
                         "WHERE l.reason_id = ? AND f.visibility = 'shareable' ORDER BY f.id", (rid,)):
-                    out.append(f"  - 来源：{kind} · {label_}" + (f" · {uri}" if uri else ""))
+                    out.append(f"  - source: {kind} · {label_}" + (f" · {uri}" if uri else ""))
             out.append("")
         path = os.path.join(out_dir, _safe_name(qn) + ".md")
         with open(path, "w", encoding="utf-8") as f:
@@ -337,18 +337,18 @@ def export_md(conn, *, project: str, out_dir: str, psg_db_path: str | None = Non
 AGENTS_BEGIN = "<!-- provledger:begin -->"
 AGENTS_END = "<!-- provledger:end -->"
 AGENTS_SNIPPET = f"""{AGENTS_BEGIN}
-## provledger（决策溯源）
+## provledger (decision provenance)
 
-两个动词就够：
+Two verbs are enough:
 
-- `provledger why <node|nk_…|file:line>` — 改一个东西之前先问一句：它的约束、被否决过的路子、过去的理由，一次拿完、有上界；`--impact` 看影响面，`--all` 展开裁掉的，`--search "<词>"` 全文找。
-- `provledger note "<原话>" --at "<时间>" [--node <qn>]` — 有人当面/邮件里定了什么，事后记进来，原话原样存。
+- `provledger why <node|nk_…|file:line>` — before you change a thing, ask once: its constraints, the paths already rejected, the reasons on record — all of it in one bounded read. `--impact` for the blast radius, `--all` to expand what was trimmed, `--search "<word>"` to search the text.
+- `provledger note "<what was said>" --at "<when>" [--node <qn>]` — someone settled something in a meeting or an email; record it afterwards, their words kept verbatim.
 
-什么时候调：plan 发布时 headline 里出现 `⚠ blocking` 的发现；PreToolUse 提示"该处有约束"；关闭 plan 填理由时想引用旧记录（写 `because: [id]`）。
+When to reach for them: a `⚠ blocking` finding in the headline when a plan is published; a PreToolUse hint saying there is a constraint here; citing an older record while closing a plan (write `because: [id]`).
 
-怎么回答 headline：每条 blocking 发现用 `headline-respond`（`action: revise | proceed` + 一句 rationale + 引用的记录 id）；不回答也不会被拦，但会被记成"未回答"并在关闭时留下一条承诺。
+How to answer a headline: every blocking finding takes a `headline-respond` (`action: revise | proceed`, one sentence of rationale, the record ids you cite). Leaving one unanswered never blocks you, but it is recorded as unanswered and leaves a claim behind at close.
 
-措辞：来源等级 / 展示过 / 采用过。
+Wording: source level / shown / adopted.
 {AGENTS_END}
 """
 

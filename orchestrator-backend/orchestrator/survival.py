@@ -10,7 +10,8 @@ graph (psg_bridge); pure derivation, tier `derived`.
   untouched           no change since and no consumers
 
 Survival is NOT correctness: an untouched node may be untouched because nobody
-looked. Dashboards and docs must say so ("存活 ≠ 正确，弱证据").
+looked. Dashboards and docs must say so ("surviving is not the same as being
+right — it is weak evidence").
 """
 from __future__ import annotations
 

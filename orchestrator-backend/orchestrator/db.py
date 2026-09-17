@@ -137,10 +137,11 @@ def run_migrations(conn: sqlite3.Connection) -> int:
         except sqlite3.OperationalError:
             pass  # Table doesn't exist yet — will be created by 001
         sql = sql_file.read_text()
-        # Phase 4 / 对账自愈: each file runs inside its own SAVEPOINT. A file the
-        # bookkeeping lost (one row too few) re-runs and dies on "duplicate
-        # column name" / "already exists" — roll it back, record it as applied
-        # and carry on. Anything else rolls back and re-raises unchanged.
+        # Phase 4 / reconcile and self-heal: each file runs inside its own
+        # SAVEPOINT. A file the bookkeeping lost (one row too few) re-runs and
+        # dies on "duplicate column name" / "already exists" — roll it back,
+        # record it as applied and carry on. Anything else rolls back and
+        # re-raises unchanged.
         try:
             _apply_in_savepoint(conn, sql)
         except sqlite3.OperationalError as e:

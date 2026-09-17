@@ -3,7 +3,8 @@
 The scenario is the product's claim in miniature:
 
   Task A (a person) removes orders.discount. The reason is their own sentence —
-  "收到上游通知，v2 以后不再有 discount 列" — with the email that carried it.
+  "Drop orders.discount from the rollup — upstream said the v2 feed no longer carries it" —
+  with the email that carried it.
   Task B (an agent) plans to compute a discount rate from that column. At
   publish, the heads-up finds the removal AND the words behind it, the agent
   revises and cites the record, and that citation becomes one influence row.
