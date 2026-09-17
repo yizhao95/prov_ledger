@@ -107,3 +107,20 @@ def test_every_absence_sentence_is_english_and_ends_with_its_cite(conn, graph):
         assert a["text"].endswith(f" {a['cite']}")
         assert a["text"][0].isupper() or a["text"].startswith("`")
         assert a["text"].isascii()
+
+
+def test_an_unreachable_graph_is_said_out_loud_not_reported_as_a_missing_node(conn, graph):
+    """A graph that cannot answer (missing file, mid-refresh journal lock) is not
+    the same fact as a node that is not in the graph, and the second sentence
+    would be a lie. The ledger-only absences still hold; the one that needs the
+    change history does not."""
+    _expectation(conn, "recall stays at 0.90")
+    conn.commit()
+    ft = F.facts(conn, "/nonexistent/state-graph.db", ["nk_p"], project="proj")
+    got = {a["code"]: a for a in A.absences(conn, ft)}
+    assert "not_in_graph" not in got
+    assert "graph_unavailable" in got
+    assert "could not be read" in got["graph_unavailable"]["text"]
+    assert got["graph_unavailable"]["text"].endswith("[scope]")
+    assert "never_verified" in got, "outcomes live in the ledger, not in the graph"
+    assert "unchanged_since" not in got, "there is no change history to speak for"

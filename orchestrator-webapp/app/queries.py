@@ -1629,6 +1629,16 @@ def recent_sessions(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
 
 
 # ── DP phase 2e (Task 4): /ledger — ask the ledger ───────────────────────────
+# FL-067, webapp side: in production the package is installed under the name
+# `provledger`; `orchestrator` exists only on the pytest pythonpath. A
+# importing the repo-internal name inside a route is green in 237 tests and a
+# 500 on the running server, so the import happens ONCE, here, under the
+# installed name, guarded the way `_psg` and `_pm` already are. The static
+# check in tests/test_ledger_production_import.py keeps it that way.
+try:
+    from provledger import ask as _ask
+except Exception:  # pragma: no cover — the page says "ask unavailable" rather than 500
+    _ask = None
 # The dashboard reads with mode=ro and mutates no business table. `ask_log` is
 # not a business table: it is the trace of the read itself, append-only
 # (migration 023), and spec §21 requires one row per question so a wrong answer
@@ -1638,14 +1648,15 @@ def recent_sessions(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
 
 def log_ask(doc: dict, path: Path | str = DEFAULT_DB_PATH) -> int | None:
     """Append one ask_log row. None when the ledger is not writable here."""
-    from orchestrator import ask as ask_mod
+    if _ask is None:
+        return None
     try:
         conn = sqlite3.connect(str(path), isolation_level=None)
     except sqlite3.Error:
         return None
     try:
         conn.execute("PRAGMA busy_timeout = 2000")
-        return ask_mod.record_ask(conn, project=doc["project"], question=doc["question"],
+        return _ask.record_ask(conn, project=doc["project"], question=doc["question"],
                                   candidates=doc["candidates"], chosen=doc["chosen"],
                                   facts_sha=doc["facts_sha"], answer=doc["answer"], cites=doc["cites"],
                                   scope=doc["scope"], dropped=doc["dropped"], model=doc.get("model"),
@@ -1658,9 +1669,10 @@ def log_ask(doc: dict, path: Path | str = DEFAULT_DB_PATH) -> int | None:
 
 def get_ask_row(conn: sqlite3.Connection, ask_id: int) -> dict | None:
     """One logged question, for the evidence-card download. Read-only."""
-    from orchestrator import ask as ask_mod
+    if _ask is None:
+        return None
     try:
-        return ask_mod.get_ask(conn, ask_id)
+        return _ask.get_ask(conn, ask_id)
     except sqlite3.Error:
         return None
 
@@ -1670,10 +1682,11 @@ def cite_links(doc: dict) -> dict:
 
     The URL comes from the same builder the CLI prints, minus the host: a page
     link and a terminal link must not disagree about where a record lives."""
-    from orchestrator import ask as ask_mod
-    base = ask_mod.dashboard_url()
+    if _ask is None:
+        return {}
+    base = _ask.dashboard_url()
     out: dict = {}
-    for r in ask_mod.records(doc["facts"], None):
+    for r in _ask.records(doc["facts"], None):
         url = r["url"]
         out[r["cite"]] = {"url": url[len(base):] if url.startswith(base) else url,
                           "kind": r["kind"], "node": r["node"], "text": r["text"]}

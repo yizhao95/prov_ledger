@@ -34,6 +34,18 @@ _CITE = re.compile(r"\[#([A-Za-z]{0,2}\d+)\]")
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
 
+def _graph_ok(pcon) -> bool:
+    """Whether the state graph can answer at all. A missing file, a mid-refresh
+    journal lock or a pre-history-layer build all mean the same thing to a
+    reader: the graph cannot say, and the fact table must say that."""
+    if pcon is None:
+        return False
+    try:
+        return pcon.execute("SELECT 1 FROM node_snapshot LIMIT 1").fetchone() is not None
+    except sqlite3.Error:
+        return False
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -69,13 +81,49 @@ def _shown_and_adopted(conn, reason_ids: list[int]) -> dict[int, dict]:
     return out
 
 
+def _merge(rows: list[dict]) -> list[dict]:
+    """Same (role, tier, text) is ONE decision; every later write of it is an
+    ACTIVATION, not another fact — the rule the node page already applies
+    (webapp queries.merge_decisions). On this repo's own `compute_etag` the
+    derived rule wrote the same sentence on eight consecutive plans, and eight
+    identical lines in a fact table teach a reader nothing and cost a model its
+    budget. `rows` come in oldest first, so the representative is the decision
+    and the rest are its activations; the fold is reported, never hidden."""
+    out: list[dict] = []
+    seen: dict[tuple, dict] = {}
+    for r in rows:
+        text = (r.get("text") or "").strip()
+        if not text:
+            out.append({**r, "merged_ids": [], "plans": [r.get("plan_id")] if r.get("plan_id") else []})
+            continue
+        sig = (r.get("role"), r.get("tier"), text)
+        g = seen.get(sig)
+        if g is not None:
+            g["merged_ids"].append(r["id"])
+            if r.get("plan_id") and r["plan_id"] not in g["plans"]:
+                g["plans"].append(r["plan_id"])
+            continue
+        g = {**r, "merged_ids": [], "plans": [r["plan_id"]] if r.get("plan_id") else []}
+        seen[sig] = g
+        out.append(g)
+    return out
+
+
 def _record(conn, r: dict, stats: dict) -> dict:
+    merged = r.get("merged_ids") or []
     st = stats.get(r["id"], {})
+    shown = st.get("shown", 0) + sum(stats.get(i, {}).get("shown", 0) for i in merged)
+    adopted: list[str] = list(st.get("adopted_by", []))
+    for i in merged:
+        for plan in stats.get(i, {}).get("adopted_by", []):
+            if plan not in adopted:
+                adopted.append(plan)
     return {"cite": f"#{r['id']}", "id": r["id"], "role": r["role"], "tier": r["tier"],
             "evidence_level": r.get("evidence_level"), "state": r.get("state"), "plan_id": r.get("plan_id"),
             "recorded_by": r.get("recorded_by"), "occurred_at": r.get("occurred_at"),
             "text": (r.get("text") or "").replace("\n", " ").strip(),
-            "shown": st.get("shown", 0), "adopted_by": st.get("adopted_by", []),
+            "shown": shown, "adopted_by": sorted(adopted), "merged": len(merged), "merged_ids": merged,
+            "plans": sorted(r.get("plans") or ([r["plan_id"]] if r.get("plan_id") else [])),
             "references": _references(conn, r["id"])}
 
 
@@ -169,16 +217,24 @@ def facts(conn, psg_db_path: str | None, chosen: list[str], *, project: str) -> 
         except sqlite3.Error:
             pcon = None
     ft: dict = {"project": project, "generated_at": _now(), "nodes": [], "ids": {}, "numbers": set(),
-                "counts": {}, "truncated": {}}
+                "counts": {}, "truncated": {}, "merged": {}}
+    graph_ok = _graph_ok(pcon)
     try:
         for target in chosen:
             if not target:
                 continue
             if str(target).startswith("nk_"):
+                # the title is the NAME; the key belongs in the brackets. When the
+                # graph cannot say (missing, mid-refresh, built before the history
+                # layer), the row says so instead of printing the key twice and
+                # claiming the node exists — "state graph unavailable" is a
+                # visible outcome, never a silent one (psg_bridge).
                 key = target
                 qn = psg_bridge.latest_qualified_name(psg, key) or target
+                status = "existing" if qn != target else ("not in graph" if graph_ok else "graph unavailable")
             else:
                 qn, key = target, context_pack._node_key(pcon, target)
+                status = "existing" if key else ("new" if graph_ok else "graph unavailable")
             chain = context_pack._identity_chain(pcon, key, qn)
             anchors = ([key] if key else []) + chain
             recs = context_pack._records(conn, project, anchors)
@@ -186,12 +242,15 @@ def facts(conn, psg_db_path: str | None, chosen: list[str], *, project: str) -> 
             cons = [r for r in recs if r["role"] == "constraint" and r["state"] == "active" and r["superseded_by"] is None]
             rej = [r for r in recs if r["role"] == "rejected_path"]
             rea = [r for r in recs if r["role"] == "reason" and r["tier"] != "unstated"]
-            node: dict = {"qn": qn, "node_key": key, "status": "existing" if key else "new", "identity_chain": chain}
+            node: dict = {"qn": qn, "node_key": key, "status": status, "identity_chain": chain}
             for name, rows in (("constraints", cons), ("reasons", rea), ("rejected_paths", rej)):
-                kept = list(reversed(rows))[-CAP[name]:] if len(rows) > CAP[name] else list(reversed(rows))
-                if len(rows) > CAP[name]:
-                    ft["truncated"][name] = ft["truncated"].get(name, 0) + len(rows) - CAP[name]
-                node[name] = [_record(conn, r, stats) for r in kept]
+                decisions = _merge(list(reversed(rows)))          # oldest first: the first write is the decision
+                folded = len(rows) - len(decisions)
+                if folded:
+                    ft["merged"][name] = ft["merged"].get(name, 0) + folded
+                if len(decisions) > CAP[name]:                      # the cap counts DECISIONS, not repeated writes
+                    ft["truncated"][name] = ft["truncated"].get(name, 0) + len(decisions) - CAP[name]
+                node[name] = [_record(conn, r, stats) for r in decisions[-CAP[name]:]]
             node["influence"] = _influence(conn, project, anchors, [r["id"] for r in recs], CAP["influence"])
             node["changes"], node["first_seen"], node["last_changed"] = _changes(psg, key, CAP["changes"])
             node["expectations"] = _expectations(conn, project, chain or [qn], CAP["expectations"])
@@ -206,6 +265,8 @@ def facts(conn, psg_db_path: str | None, chosen: list[str], *, project: str) -> 
         for name in ("constraints", "reasons", "rejected_paths"):
             for r in node[name]:
                 index[r["cite"]] = {"kind": name, "node": node["qn"], **r}
+                for folded_id in r.get("merged_ids") or ():
+                    index[f"#{folded_id}"] = index[r["cite"]]      # an activation points at its decision
                 for ref in r["references"]:
                     # the cite namespace wins: a source's own kind (doc, meeting, …) is `source_kind`
                     index[ref["cite"]] = {**ref, "kind": "reference", "source_kind": ref["kind"],
@@ -232,8 +293,11 @@ def facts(conn, psg_db_path: str | None, chosen: list[str], *, project: str) -> 
 
 def _fmt_record(r: dict, indent: str = "  ") -> list[str]:
     head = f"{indent}[{r['cite']}] {r['tier']} · {r.get('evidence_level') or '?'} · {(r.get('occurred_at') or '')[:10]}"
-    if r.get("plan_id"):
-        head += f" · plan {r['plan_id']}"
+    plans = r.get("plans") or ([r["plan_id"]] if r.get("plan_id") else [])
+    if plans:
+        head += f" · plan{'s' if len(plans) > 1 else ''} {', '.join(plans)}"
+    if r.get("merged"):
+        head += f" · merged {r['merged']}"
     head += f" · shown {r.get('shown', 0)}"
     head += (" · adopted by " + ", ".join(r["adopted_by"])) if r.get("adopted_by") else " · not adopted"
     out = [head]
@@ -249,7 +313,9 @@ def render(ft: dict) -> str:
     lines = [f"Fact table · project {ft['project']} · {len(ft['nodes'])} node(s)"]
     for n in ft["nodes"]:
         lines.append("")
-        lines.append(f"## {n['qn']} ({n['node_key'] or 'not in graph'}, {n['status']})")
+        title = n["qn"]
+        bracket = n["status"] if title == (n["node_key"] or title) else f"{n['node_key'] or 'not in graph'}, {n['status']}"
+        lines.append(f"## {title} ({bracket})")
         seen = f"first seen {n['first_seen']}" if n.get("first_seen") else "first seen: no record"
         changed = f"last changed {n['last_changed']}" if n.get("last_changed") else "last changed: no record"
         lines.append(f"{seen} · {changed}")
@@ -272,6 +338,10 @@ def render(ft: dict) -> str:
         lines.append(f"values ({len(n['values'])})")
         for r in n["values"]:
             lines.append(f"  [{r['cite']}] {r['name']} = {r['value']}{(' ' + r['unit']) if r['unit'] else ''} · {(r['observed_at'] or '')[:10]}")
+    if ft.get("merged"):
+        lines.append("")
+        lines.append("merged (identical writes folded into their decision): "
+                     + " · ".join(f"{k} {v}" for k, v in sorted(ft["merged"].items())))
     if ft.get("truncated"):
         lines.append("")
         lines.append("truncated: " + " · ".join(f"{k} {v}" for k, v in sorted(ft["truncated"].items())))

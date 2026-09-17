@@ -135,3 +135,59 @@ def test_span_is_empty_when_nothing_is_dated(conn, graph):
     ft = F.facts(conn, graph, ["pkg.pipe.nothing"], project="proj")
     sc = S.scope(ft, candidates=0, chosen=0)
     assert sc["span"] == [None, None] and "no dated record" in S.line(sc)
+
+
+# ── DP phase 2e follow-up: what the live ledger showed ───────────────────────
+
+def test_identical_records_are_one_decision_with_its_activations(conn, graph, seeded):
+    """A rule that writes the same sentence on every plan is ONE decision that was
+    activated N times — the node page's merge (queries.merge_decisions), applied
+    to the fact table. On this repo's own compute_etag it folded 8 rows into 1."""
+    ids = []
+    for plan in ("P3", "P4", "P5"):
+        ids.append(pv.insert_reason(conn, project="proj", plan_id=plan, node_key="nk_p", kind="technical",
+                                    rule_id="R6", recorded_by="system",
+                                    interpretation="covered by active constraint #1: the null-label drop",
+                                    occurred_at=f"2026-09-1{len(ids) + 1} 09:00:00"))
+    conn.execute("INSERT INTO read_hit (reason_id, project, plan_id, moment) VALUES (?, 'proj', 'P4', 'plan')", (ids[1],))
+    conn.commit()
+    ft = F.facts(conn, graph, ["pkg.pipe.build_features"], project="proj")
+    n = ft["nodes"][0]
+    covered = [r for r in n["reasons"] if "covered by active constraint" in r["text"]]
+    assert len(covered) == 1, "three identical writes are one decision"
+    row = covered[0]
+    assert row["cite"] == f"#{ids[0]}", "the representative is the first one written, not the last"
+    assert row["merged"] == 2 and sorted(row["plans"]) == ["P3", "P4", "P5"]
+    assert row["shown"] == 1, "an activation's hits count toward the one decision"
+    assert ft["merged"]["reasons"] == 2, "the fold is reported, never silent"
+    text = F.render(ft)
+    assert text.count("covered by active constraint") == 1
+    assert "merged 2" in text and "P3, P4, P5" in text
+    for merged_id in ids[1:]:
+        assert ft["ids"][f"#{merged_id}"]["cite"] == row["cite"], "a cite of a folded row resolves to its decision"
+
+
+def test_truncation_counts_distinct_decisions_not_repeated_writes(conn, graph, seeded, monkeypatch):
+    monkeypatch.setitem(F.CAP, "reasons", 2)
+    for plan in ("P3", "P4", "P5", "P6"):
+        pv.insert_reason(conn, project="proj", plan_id=plan, node_key="nk_p", kind="technical", rule_id="R6",
+                         recorded_by="system", interpretation="the same derived sentence every time")
+    conn.commit()
+    ft = F.facts(conn, graph, ["pkg.pipe.build_features"], project="proj")
+    # two distinct decisions (the seeded reason + the repeated one) fit in the cap of 2
+    assert ft["truncated"].get("reasons") is None
+    assert len(ft["nodes"][0]["reasons"]) == 2 and ft["merged"]["reasons"] == 3
+
+
+def test_a_node_key_shows_its_qualified_name_and_says_when_the_graph_cannot_tell(conn, graph, seeded):
+    ft = F.facts(conn, graph, ["nk_p"], project="proj")
+    n = ft["nodes"][0]
+    assert n["qn"] == "pkg.pipe.build_features" and n["node_key"] == "nk_p" and n["status"] == "existing"
+    assert "## pkg.pipe.build_features (nk_p, existing)" in F.render(ft)
+
+    down = F.facts(conn, "/nonexistent/state-graph.db", ["nk_p"], project="proj")
+    d = down["nodes"][0]
+    assert d["status"] == "graph unavailable" and d["qn"] == "nk_p"
+    rendered = F.render(down)
+    assert "## nk_p (graph unavailable)" in rendered, "the key is not printed twice, and 'existing' is not claimed"
+    assert "nk_p (nk_p" not in rendered

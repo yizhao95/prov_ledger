@@ -312,13 +312,27 @@ def search(request: Request, q: str | None = None, project: str | None = None):
 # PROVLEDGER_ASK_RUNNER=claude to turn it on.
 
 ASK_RUNNER_ENV = "PROVLEDGER_ASK_RUNNER"
+ASK_UNAVAILABLE = "ask unavailable: provledger not importable"
+
+# FL-067, webapp side: the installed package is named `provledger`. Importing
+# `orchestrator` inside a route passed every test (pytest puts
+# orchestrator-backend on the path) and returned 500 from the real server, so
+# every ask import is made once, here, under the installed name.
+try:
+    from provledger import ask as ask_mod
+    from provledger.ask import absence as ask_absence, card as ask_card, facts as ask_facts, scope as ask_scope
+except Exception:  # pragma: no cover — the page says so instead of failing
+    ask_mod = ask_absence = ask_card = ask_facts = ask_scope = None
 
 
 def _ask_runner(request: Request):
     """(runner, name) for this request. None means: no summary, and say why."""
     choice = (os.environ.get(ASK_RUNNER_ENV) or "").strip().lower()
     if choice == "claude":
-        from orchestrator.testing.claude_arbiter import default_runner
+        try:
+            from provledger.testing.claude_arbiter import default_runner
+        except Exception:
+            return None, "none"
         return default_runner, "claude"
     return None, "none"
 
@@ -330,6 +344,9 @@ def _ledger_context(request: Request, q: str | None, project: str | None) -> dic
            "bar": queries.view_bar("ledger", queries.triple(project, request.query_params.get("node"), None))}
     if not ctx["q"]:
         return ctx
+    if ask_mod is None:
+        ctx["error"] = ASK_UNAVAILABLE
+        return ctx
     if not project:
         ctx["error"] = "no project: /ledger?q=…&project=<name>"
         return ctx
@@ -340,7 +357,6 @@ def _ledger_context(request: Request, q: str | None, project: str | None) -> dic
         return ctx
     runner, runner_name = _ask_runner(request)
     try:
-        from orchestrator import ask as ask_mod
         doc = ask_mod.run(conn, project=project, question=ctx["q"], runner=runner,
                           runner_name=runner_name, lang=lang, record=False)
     except sqlite3.Error as e:
@@ -372,6 +388,8 @@ def ledger_results(request: Request, q: str | None = None, project: str | None =
 def ledger_card(request: Request, ask_id: int):
     """The evidence card of one logged question: timeline, per-record hash,
     the three chains walked at export time, the scope and the export time."""
+    if ask_mod is None:
+        return Response(ASK_UNAVAILABLE, status_code=503, media_type="text/plain")
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:
@@ -380,7 +398,7 @@ def ledger_card(request: Request, ask_id: int):
         row = queries.get_ask_row(conn, ask_id)
         if row is None:
             return Response(f"no logged question with ask id {ask_id}", status_code=404, media_type="text/plain")
-        from orchestrator.ask import card as card_mod, facts as facts_mod
+        card_mod, facts_mod = ask_card, ask_facts
         chosen = (row.get("chosen") or {}).get("chosen") or []
         # psg_db_path=None means "resolve from the registry", which is what the
         # CLI does too — the card must not depend on the page's import luck
@@ -390,7 +408,7 @@ def ledger_card(request: Request, ask_id: int):
                "answer": row.get("answer") or "", "cites": row.get("cites") or [],
                "absences": [], "scope_line": "", "degraded": not (row.get("answer") or ""),
                "note": None, "model": row.get("model"), "runner": row.get("runner")}
-        from orchestrator.ask import absence as absence_mod, scope as scope_mod
+        absence_mod, scope_mod = ask_absence, ask_scope
         doc["absences"] = absence_mod.absences(conn, ft)
         sc = row.get("scope") or scope_mod.scope(ft)
         doc["scope_line"] = scope_mod.line(sc, _lang(request))
