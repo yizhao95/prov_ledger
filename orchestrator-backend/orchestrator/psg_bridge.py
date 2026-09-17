@@ -304,6 +304,16 @@ CLUSTER_ABOVE = 600
 CROWDED_LEVEL = 12
 # level 0 of the data-flow layout: where data comes from
 SOURCE_TYPES = ("sql_table", "bq_dataset", "api_source", "dataset", "file")
+# DP phase 2c (spec §18): the world outside the code, drawn in the same picture.
+DECLARED_TYPES = ("external_system", "business_rule", "stakeholder_decision", "external_dataset", "manual_figure")
+# an external system, an external dataset or a hand-computed figure is where
+# something comes FROM: level 0, like a table or an api source.
+DECLARED_SOURCE_TYPES = ("external_system", "external_dataset", "manual_figure")
+# a rule or a stakeholder decision is not a step in the flow. It sits BESIDE the
+# node it constrains, in its own lane, so declaring a rule never pushes the code
+# it is about down a level — the picture would then say the rule produces it.
+DECLARED_CONSTRAINT_TYPES = ("business_rule", "stakeholder_decision")
+DECLARED_EDGES = ("declared_feeds", "declared_constrains", "declared_depends_on")
 # story / data pick their nodes from the whole project rather than from one
 # neighbourhood, so they need their own, tighter cap: on prov_ledger 1163 nodes
 # carry a story and an uncapped story page is 2 MB. The cut is reported as
@@ -389,8 +399,10 @@ def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "f
     rows = _query(psg_db_path, "SELECT node_key, qualified_name, node_type, file_path FROM node_snapshot "
                                "WHERE run_id = ? AND node_key <> '' ORDER BY qualified_name", (run,))
     every = [{"node_key": r["node_key"], "qualified_name": r["qualified_name"], "node_type": r["node_type"],
-              "file_path": r["file_path"]} for r in rows]
-    at_level = [n for n in every if level != "functions" or n["node_type"] in APP_FUNC_TYPES]
+              "file_path": r["file_path"], "declared": r["node_type"] in DECLARED_TYPES} for r in rows]
+    # a declared node has no file and is not a function, but it is exactly the
+    # kind of thing a reader came to see: it stays in the functions view.
+    at_level = [n for n in every if level != "functions" or n["node_type"] in APP_FUNC_TYPES + DECLARED_TYPES]
     total_nodes = len(at_level)
     erows = _query(psg_db_path,
                    "SELECT s.node_key AS src_key, d.node_key AS dst_key, t.name AS edge_type FROM edge e "
@@ -436,7 +448,7 @@ def graph_at(psg_db_path: str | None, run_id: int | None = None, level: str = "f
         nodes = at_level
         mode_total = len(nodes)
         keep = {n["node_key"] for n in nodes}
-        edge_types = FLOW_EDGES if level == "functions" else None
+        edge_types = (FLOW_EDGES + DECLARED_EDGES) if level == "functions" else None
         edges = [e for e in all_edges if e["src_key"] in keep and e["dst_key"] in keep
                  and (edge_types is None or e["edge_type"] in edge_types)]
         if mode == "focus" and focus:
@@ -506,11 +518,14 @@ def _assign_levels(nodes: list[dict], edges: list[dict], focus_key: str | None =
         a, b = e["src_key"], e["dst_key"]
         if a not in by_key or b not in by_key or a == b:
             continue
+        if by_key[a].get("node_type") in DECLARED_CONSTRAINT_TYPES:
+            continue        # a rule constrains a node; it is not upstream of it
         # A read edge points AT the table (`f3 --reads_sql--> orders`) but the
         # data flows the other way. For layering, reverse it: a source a function
         # reads is upstream of that function, which is the whole point of the
         # data-flow picture.
-        if by_key[b].get("node_type") in SOURCE_TYPES and by_key[a].get("node_type") not in SOURCE_TYPES:
+        upstream = SOURCE_TYPES + DECLARED_SOURCE_TYPES
+        if by_key[b].get("node_type") in upstream and by_key[a].get("node_type") not in upstream:
             a, b = b, a
         out.setdefault(a, set()).add(b)
         inc.setdefault(b, set()).add(a)
@@ -527,6 +542,7 @@ def _assign_levels(nodes: list[dict], edges: list[dict], focus_key: str | None =
                 frontier = nxt
         for k, n in by_key.items():
             n["level"] = level.get(k, 0)
+        _place_declared(nodes, edges)
         return
 
     # Kahn's algorithm, with the remainder (the cycles) placed at the depth they
@@ -549,6 +565,27 @@ def _assign_levels(nodes: list[dict], edges: list[dict], focus_key: str | None =
             level[k] = (min(preds) + 1) if preds else 0
     for k, n in by_key.items():
         n["level"] = int(level.get(k, 0))
+    _place_declared(nodes, edges)
+
+
+def _place_declared(nodes: list[dict], edges: list[dict]) -> None:
+    """Give the declared nodes their place: external sources at level 0, rules
+    and decisions in a `constraint` lane at the depth of what they constrain.
+
+    The lane exists so the reader can see a rule next to the function it governs
+    without the layout claiming the rule feeds it. Every other node keeps the
+    `graph` lane, so a template can ask for one lane and get a complete answer."""
+    by_key = {n["node_key"]: n for n in nodes}
+    for n in nodes:
+        node_type = n.get("node_type")
+        if node_type in DECLARED_SOURCE_TYPES:
+            n["level"], n["lane"] = 0, "source"
+        elif node_type in DECLARED_CONSTRAINT_TYPES:
+            targets = [by_key[e["dst_key"]]["level"] for e in edges
+                       if e["src_key"] == n["node_key"] and e["dst_key"] in by_key]
+            n["level"], n["lane"] = (max(targets) if targets else 0), "constraint"
+        else:
+            n.setdefault("lane", "graph")
 
 
 def _split_crowded_levels(nodes: list[dict], crowd: int = CROWDED_LEVEL) -> None:
@@ -572,6 +609,32 @@ def _split_crowded_levels(nodes: list[dict], crowd: int = CROWDED_LEVEL) -> None
         for row, mod in enumerate(sorted(by_mod, key=lambda m: (-len(by_mod[m]), m))):
             for n in by_mod[mod]:
                 n["level"] = level * 10 + min(row, 9)
+
+
+def declaration_of(psg_db_path: str | None, node_key: str | None) -> dict | None:
+    """The declaration behind a node, or None for ordinary code (DP phase 2c).
+
+    {slug, node_type, tier, version, description, attrs, links} read from the
+    node row the analyzer's declared stage wrote. `tier` is the DECLARATION's
+    (stated | asserted): who put it there. It is not the node's event tier, and
+    the page prints both."""
+    if not (psg_db_path and node_key):
+        return None
+    rows = _query(psg_db_path, "SELECT n.metadata_json, t.name FROM node n JOIN node_type t ON t.id = n.node_type_id "
+                               "WHERE n.node_key = ? AND t.name IN ({}) ORDER BY n.id DESC LIMIT 1".format(
+                                   ",".join("?" * len(DECLARED_TYPES))), (node_key, *DECLARED_TYPES))
+    if not rows:
+        return None
+    try:
+        meta = json.loads(rows[0]["metadata_json"] or "{}")
+    except ValueError:
+        meta = {}
+    if not meta:
+        return None
+    return {"slug": meta.get("slug"), "node_type": rows[0]["name"], "tier": meta.get("tier"),
+            "state": meta.get("state"), "version": meta.get("version"), "description": meta.get("description"),
+            "attrs": meta.get("attrs") or {}, "links": meta.get("links") or [],
+            "links_checked": bool(meta.get("links_checked")), "field_tiers": meta.get("field_tiers") or {}}
 
 
 def latest_tier_of(psg_db_path: str | None, run_id: int | None = None) -> dict[str, str]:

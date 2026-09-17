@@ -27,7 +27,7 @@ def test_builtin_providers_are_the_default_and_carry_type_ids(conn, tmp_path):
     assert ("function", "provledger.symbol") in kinds and ("dataframe", "provledger.owned") in kinds
     assert all(json.loads(a).get("schema_version") == 1 for _, _, a in rows)
     ids = [p.type_id for p in providers.builtin_providers()]
-    assert ids == ["provledger.symbol", "provledger.owned"]
+    assert ids == ["provledger.symbol", "provledger.owned", "provledger.declared"]   # DP 2c added the third
     assert all(isinstance(p, graph_api.NodeTypeProvider) for p in providers.builtin_providers())
 
 

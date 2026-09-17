@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """demo-walkthrough.py — record the provenance scenario as a walkthrough.
 
-Follows the five screens `examples/phantom-uplift/demo-provenance.sh` builds,
+Follows the seven screens `examples/phantom-uplift/demo-provenance.sh` builds,
 in the order a person would actually read them:
 
   1. the agent's task, and the block that says what history changed about it
@@ -63,8 +63,16 @@ STEPS = [
      '[data-panel="trace-strip"]'),
     ("4", "Task A — the person's own words, and the email behind them.",
      '[data-panel="changed-by-history"]'),
-    ("5", "Graph — reduced view, clustered by module.", '[data-mode-chips]'),
+    # DP phase 2c — the third core: a sentence about the world outside the code,
+    # first as a node of its own, then as a lane in the picture beside the
+    # functions it governs.
+    ("5", "The declared decision — not code: somebody said it, and here it is with its tier.",
+     '[data-declared="1"]'),
+    ("6", "Graph — the declared constraint lane, beside what it governs.", '[data-panel="declared-lane"]'),
+    ("7", "Graph — reduced view, clustered by module.", '[data-mode-chips]'),
 ]
+# the declared node's own page, which demo-provenance.sh does not print a URL for
+DECLARED_PATH = "/node/{project}/declared:emea-excluded-from-q3-rollup"
 
 
 def urls_from(path: Path) -> list[str]:
@@ -72,8 +80,13 @@ def urls_from(path: Path) -> list[str]:
     found = re.findall(r"^\s+(/(?:plan|node|graph)/\S+)$", path.read_text(encoding="utf-8"), re.M)
     if len(found) < 4:
         sys.exit(f"demo-walkthrough: only {len(found)} URLs in {path} — run demo-provenance.sh first")
-    # screens 1 and 2 are the same page: the block, then the rule expanded
-    return [found[0], found[0], found[1], found[2], found[3]]
+    # screens 1 and 2 are the same page: the block, then the rule expanded.
+    # 5 is the declared node (derived from the graph URL's project, which is the
+    # only place the script names it), 6 and 7 are the graph twice: the lane,
+    # then the whole reduced picture.
+    project = found[3].split("/graph/", 1)[1].split("?", 1)[0]
+    return [found[0], found[0], found[1], found[2],
+            DECLARED_PATH.format(project=project), found[3] + "&level=full", found[3]]
 
 
 def main(argv=None) -> int:
@@ -100,7 +113,7 @@ def main(argv=None) -> int:
         page = ctx.new_page()
         for (n, caption, expand), path in zip(STEPS, paths):
             page.goto(a.base + path, wait_until="networkidle")
-            page.evaluate(STRIP % _js_string(f"{n}/5  {caption}"))
+            page.evaluate(STRIP % _js_string(f"{n}/{len(STEPS)}  {caption}"))
             if expand:
                 for sel in expand.split(", "):
                     el = page.query_selector(sel)

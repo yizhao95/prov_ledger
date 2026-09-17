@@ -354,7 +354,10 @@ def test_a_clustered_page_ships_cluster_summaries_not_every_node(client):
     assert payload["clusters"], "no clusters in the payload"
     assert sum(c["nodes"] for c in payload["clusters"]) == g["mode_total"]
     for n in payload["nodes"]:
-        assert set(n) <= {"node_key", "qualified_name", "node_type", "level", "badge", "tier"}, \
+        # DP 2c added `declared` and `lane`: two small flags the node table needs
+        # even when the picture is clustered. The point of this assertion is that
+        # the payload is a SUMMARY, so the set stays closed and named.
+        assert set(n) <= {"node_key", "qualified_name", "node_type", "level", "badge", "tier", "declared", "lane"}, \
             f"a clustered payload still carries {sorted(set(n))}"
 
 

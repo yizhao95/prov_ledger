@@ -107,8 +107,12 @@ def test_task_b_is_warned_by_the_rule_the_person_left(demo):
         findings = json.loads(row["findings_json"])["findings"]
         hit = [f for f in findings if f["kind"] == "active_constraint"]
         assert hit, f"nothing reached task B: {[f['kind'] for f in findings]}"
-        f = hit[0]
-        assert f["severity"] == "blocking" and "discount" in f["text"]
+        # pick the rule this test is about by its TEXT, not by position: DP 2c
+        # added a second constraint (the declared steering-group decision) and
+        # "the first finding" quietly became a different record.
+        f = next((x for x in hit if "discount" in x["text"]), None)
+        assert f is not None, f"the discount rule did not reach task B: {[x['text'][:60] for x in hit]}"
+        assert f["severity"] == "blocking"
         assert "reason_id" in f["evidence"]
     finally:
         conn.close()
@@ -168,3 +172,69 @@ def test_the_walkthrough_script_exists_and_is_not_wired_into_ci():
     assert "docs/media" in body
     # layout feedback: a pale top strip, never a banner over the content
     assert "strip" in body.lower() and "banner" not in body.lower().split("never a banner")[0][-200:]
+
+
+# ── DP phase 2c: the third core, in the same walkthrough ─────────────────────
+# The first two cores are about code the system can see. The third is the
+# sentence it cannot: a steering group decided something, and from the moment
+# somebody says so it is a node in the same graph, with the same identity and
+# the same reach into the next plan's heads-up.
+
+DECLARED_QN = "declared:emea-excluded-from-q3-rollup"
+DECLARED_WORDS = "EMEA is excluded from the Q3 rollup — the steering group decided that on 2026-03-14"
+
+
+def test_the_declared_rule_is_in_the_ledger_as_the_persons_own_words(demo):
+    conn = sqlite3.connect(str(demo["db"]))
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT * FROM declared_node WHERE state = 'active' AND superseded_by IS NULL").fetchone()
+        assert row is not None, "the walkthrough declared nothing"
+        assert row["qualified_name"] == DECLARED_QN
+        assert row["node_type"] == "stakeholder_decision"
+        assert row["tier"] == "stated", "a confirmed declaration is the user's own words"
+        u = conn.execute("SELECT text FROM utterance WHERE id = ?", (row["description_utterance_id"],)).fetchone()
+        assert u and DECLARED_WORDS in u["text"]
+    finally:
+        conn.close()
+
+
+def test_the_declared_rule_is_a_node_in_the_graph(demo):
+    """Not a note attached to the graph: a node IN it, with a key and an event,
+    computed by the same run that computes the functions."""
+    import glob
+    graphs = glob.glob(str(demo["ws"] / "graph" / "*" / "*state-graph.db")) + \
+        glob.glob(str(demo["ws"] / "graph" / "*state-graph.db"))
+    assert graphs, f"no state graph under {demo['ws'] / 'graph'}"
+    conn = sqlite3.connect(graphs[0])
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT node_key, node_type, attrs_json FROM node_snapshot "
+                           "WHERE qualified_name = ? ORDER BY run_id DESC LIMIT 1", (DECLARED_QN,)).fetchone()
+        assert row is not None, "the declaration never reached the graph"
+        assert row["node_type"] == "stakeholder_decision"
+        assert json.loads(row["attrs_json"])["type_id"] == "provledger.declared"
+        events = [r[0] for r in conn.execute("SELECT event_type FROM node_event WHERE node_key = ?", (row["node_key"],))]
+        assert "node_added" in events, f"no computed event for the declared node: {events}"
+        edge = conn.execute(
+            "SELECT t.name, d.qualified_name FROM edge e JOIN edge_type t ON t.id = e.edge_type_id "
+            "JOIN node s ON s.id = e.src_node_id JOIN node d ON d.id = e.dst_node_id "
+            "WHERE s.qualified_name = ?", (DECLARED_QN,)).fetchall()
+        assert ("declared_constrains", "pkg.rollup.weekly_report") in [tuple(r) for r in edge], edge
+    finally:
+        conn.close()
+
+
+def test_task_b_headline_names_the_declared_rule(demo):
+    """The acceptance the whole phase is for: one sentence, said once, turns up
+    in the heads-up of the next plan that touches what it governs."""
+    conn = sqlite3.connect(str(demo["db"]))
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT findings_json FROM headline ORDER BY id DESC LIMIT 1").fetchone()
+        findings = json.loads(row["findings_json"])["findings"]
+        hit = [f for f in findings if "EMEA" in f["text"]]
+        assert hit, f"the declared rule did not reach task B: {[f['text'][:60] for f in findings]}"
+        assert hit[0]["kind"] == "active_constraint" and hit[0]["tier"] == "stated"
+    finally:
+        conn.close()

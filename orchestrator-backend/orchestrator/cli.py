@@ -4,6 +4,8 @@ in the repo, `provledger ...` once installed.
   metrics plan <id>                       what one plan cost in tool calls
   metrics baseline [--since] [--write F]  median / p90 over completed plans
   note "<words>" --at <when> [...]        record something that was said, after the fact
+  node declare "<sentence>" [...]         put something outside the code into the graph (draft -> --confirm)
+  node list|show|retire                   the project's declared nodes
   reasons reclass-status                  the state of the legacy-reason migration
   why <node|nk_…|file:line> [...]         one bounded read: history, constraints, rejected paths, blast radius
   ask "<question>" [--project] [...]      ask the ledger: fact table, cited summary, scope, evidence card
@@ -25,6 +27,8 @@ import sqlite3
 import sys
 
 from . import db, plan_metrics
+
+_DECLARED_TYPES = ("external_system", "business_rule", "stakeholder_decision", "external_dataset", "manual_figure")
 
 
 def _db_path():
@@ -110,6 +114,150 @@ def _note(args) -> int:
         if reason_id is not None:
             out["evidence_level"] = provenance.get_reason(conn, reason_id)["evidence_level"]
         print(json.dumps(out, indent=1, sort_keys=True))
+        return 0
+    finally:
+        conn.close()
+
+
+# ── node: the entry point for the world outside the code (DP phase 2c, §18) ──
+
+def _known_names(project: str | None) -> set | None:
+    """The qualified names of the project's latest analysis run, or None when
+    there is no graph to check links against. None means "not checked", and the
+    row records that — it never means "checked and fine"."""
+    from . import psg_bridge
+    path = psg_bridge.db_path_for(project) if project else None
+    if not path or not os.path.exists(path):
+        return None
+    rows = psg_bridge._query(path, "SELECT DISTINCT qualified_name FROM node_snapshot "
+                                   "WHERE run_id = (SELECT MAX(run_id) FROM node_snapshot)")
+    return {r[0] for r in rows} or None
+
+
+def _declared_row(row: dict, extra: dict | None = None) -> dict:
+    out = {k: row[k] for k in ("id", "project", "slug", "qualified_name", "node_type", "description",
+                               "state", "tier", "version", "links_checked", "description_utterance_id",
+                               "recorded_by", "model", "occurred_at", "recorded_at")}
+    out["attrs"] = json.loads(row["attrs_json"] or "{}")
+    out["links"] = json.loads(row["links_json"] or "[]")
+    out["field_tiers"] = json.loads(row["field_tiers_json"] or "{}")
+    return {**out, **(extra or {})}
+
+
+def _print(payload: dict, as_json: bool, text: str | None = None) -> None:
+    if as_json or text is None:
+        print(json.dumps(payload, indent=1, sort_keys=True, ensure_ascii=False, default=str))
+    else:
+        print(text)
+
+
+def _node_declare(args) -> int:
+    from . import declared, provenance, psg_bridge
+    conn = _open()
+    try:
+        project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+        if not project:
+            print("provledger node: no --project and the cwd is not inside a registered project", file=sys.stderr)
+            return 2
+        if args.confirm:
+            row = declared.get(conn, int(args.confirm))
+            if row is None or row["project"] != project:
+                print(f"provledger node: no draft {args.confirm} in project {project}", file=sys.stderr)
+                return 1
+            if not args.words:
+                print("provledger node: --confirm needs --words: the sentence that puts this node in the graph "
+                      "is what makes the row stated", file=sys.stderr)
+                return 2
+            at = _check_at(args.at) if args.at else None
+            with db.transaction(conn):
+                uid = provenance.insert_utterance(conn, session_id=args.session or "node-declare", project=project,
+                                                  plan_id=args.plan, text=args.words,
+                                                  occurred_at=at or provenance._db_now(conn), commit=False)
+                active = declared.confirm(conn, row["id"], uid, commit=False)
+                anchored = declared.anchor_as_constraint(conn, active, uid, commit=False)
+            out = _declared_row(active, {"constraints_anchored": len(anchored), "constraint_ids": anchored,
+                                         "utterance_id": uid})
+            _print(out, args.json, f"{active['qualified_name']} is in the graph "
+                                   f"({active['node_type']}, tier {active['tier']}, version {active['version']})"
+                                   + (f"; {len(anchored)} constraint(s) anchored on what it constrains" if anchored else ""))
+            return 0
+        if not args.description:
+            print("provledger node declare: give the sentence, or --confirm <draft id> --words \"<sentence>\"", file=sys.stderr)
+            return 2
+        attrs = {}
+        for spec in args.attr or ():
+            k, sep, v = spec.partition("=")
+            if not sep:
+                print(f"provledger node: --attr needs key=value, got {spec!r}", file=sys.stderr)
+                return 2
+            attrs[k.strip()] = v.strip()
+        links = [(qn, args.link_kind) for qn in (args.links_to or ())]
+        runner = None
+        if not args.no_model and args.type is None:
+            runner = declared.default_runner
+        try:
+            row = declared.declare(conn, project, args.description, node_type=args.type, attrs=attrs, links=links,
+                                   runner=runner, model=args.model, known_names=_known_names(project))
+        except declared.ModelRejected as e:
+            print(f"provledger node: the model's tidy-up was discarded — {e}", file=sys.stderr)
+            return 2
+        except ValueError as e:
+            print(f"provledger node: {e}", file=sys.stderr)
+            return 2
+        confirm_with = (f"provledger node declare --confirm {row['id']} --words \"<the sentence you would say>\" "
+                        f"--at \"<when it was decided>\" --project {project}")
+        out = _declared_row(row, {"confirm_with": confirm_with})
+        _print(out, args.json,
+               f"draft {row['id']}: {row['qualified_name']} ({row['node_type']}, tier {row['tier']})\n"
+               f"  attrs {out['attrs']}\n"
+               + "  links " + ", ".join(f"{d['kind']} -> {d['to']} ({d['by']})" for d in out["links"]) + "\n"
+               + "  nothing is in the graph yet. Confirm it with your own words:\n  " + confirm_with)
+        return 0
+    finally:
+        conn.close()
+
+
+def _node_cmd(args) -> int:
+    from . import declared, provenance, psg_bridge
+    if args.sub == "declare":
+        return _node_declare(args)
+    conn = _open()
+    try:
+        project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+        if not project:
+            print("provledger node: no --project and the cwd is not inside a registered project", file=sys.stderr)
+            return 2
+        if args.sub == "list":
+            rows = [_declared_row(r) for r in declared.active(conn, project)]
+            _print({"project": project, "nodes": rows}, args.json,
+                   "\n".join(f"{r['qualified_name']}  {r['node_type']}  tier {r['tier']}  v{r['version']}  "
+                             f"{len(r['links'])} link(s)" for r in rows) or f"no declared nodes in {project}")
+            return 0
+        slug = args.slug[len(declared.QN_PREFIX):] if args.slug.startswith(declared.QN_PREFIX) else args.slug
+        versions = declared.history(conn, project, slug)
+        if not versions:
+            print(f"provledger node: {args.slug} is not a declared node of {project}", file=sys.stderr)
+            return 1
+        if args.sub == "show":
+            _print({"project": project, "slug": slug, "versions": [_declared_row(v) for v in versions]}, args.json,
+                   "\n".join(f"v{v['version']} {v['state']:8} tier {v['tier']:8} {v['recorded_at']}  {v['description']}"
+                             for v in versions))
+            return 0
+        latest = versions[-1]
+        if latest["superseded_by"] is not None or latest["state"] == "retired":
+            print(f"provledger node: {slug} is already retired", file=sys.stderr)
+            return 1
+        uid = None
+        with db.transaction(conn):
+            if args.words:
+                uid = provenance.insert_utterance(conn, session_id=args.session or "node-retire", project=project,
+                                                  plan_id=args.plan, text=args.words,
+                                                  occurred_at=_check_at(args.at) if args.at else provenance._db_now(conn),
+                                                  commit=False)
+            row = declared.retire(conn, latest["id"], utterance_id=uid, commit=False)
+        _print(_declared_row(row), args.json,
+               f"{row['qualified_name']} is retired (version {row['version']}); "
+               "the next analysis run computes its removal like any other node's")
         return 0
     finally:
         conn.close()
@@ -419,6 +567,33 @@ def build_parser() -> argparse.ArgumentParser:
     n.add_argument("--ref", action="append", default=[], metavar="kind=…,label=…[,uri=…]",
                    help="a source to register and link (email, meeting, chat, ticket, doc, commit, verbal, other); repeatable")
     n.add_argument("--session", default=None, help=argparse.SUPPRESS)
+    nd = sub.add_parser("node", help="declare the world outside the code: business rules, external systems, "
+                                     "stakeholder decisions, external datasets, hand-computed figures")
+    nds = nd.add_subparsers(dest="sub", required=True)
+    dec = nds.add_parser("declare", help="turn one sentence into a declared node (a draft, until you confirm it in your own words)")
+    dec.add_argument("description", nargs="?", default=None, help="the sentence, as you would say it")
+    dec.add_argument("--type", default=None, choices=list(_DECLARED_TYPES),
+                     help="say the type yourself; without it a model tidies the sentence (--no-model refuses instead of guessing)")
+    dec.add_argument("--attr", action="append", default=[], metavar="k=v", help="an attribute of the declaration; repeatable")
+    dec.add_argument("--links-to", action="append", default=[], metavar="QN",
+                     help="an existing node this one points at; repeatable (a name outside the graph is refused)")
+    dec.add_argument("--link-kind", default="declared_constrains",
+                     choices=["declared_feeds", "declared_constrains", "declared_depends_on"])
+    dec.add_argument("--confirm", default=None, metavar="DRAFT_ID", help="confirm a draft — needs --words")
+    dec.add_argument("--words", default=None, help="the sentence you are confirming it with, verbatim (it becomes the node's stated reason)")
+    dec.add_argument("--at", default=None, help="when it was decided (YYYY-MM-DD HH:MM[:SS])")
+    dec.add_argument("--no-model", action="store_true", help="never call a model: without --type the declaration is refused")
+    dec.add_argument("--model", default=None, help=argparse.SUPPRESS)
+    for q in (dec,):
+        q.add_argument("--project", default=None); q.add_argument("--plan", default=None, help=argparse.SUPPRESS)
+        q.add_argument("--session", default=None, help=argparse.SUPPRESS); q.add_argument("--json", action="store_true")
+    nl = nds.add_parser("list", help="the project's active declared nodes")
+    ns = nds.add_parser("show", help="every version of one declared node"); ns.add_argument("slug")
+    nr = nds.add_parser("retire", help="retire a declared node (append-only: a new version, state retired)")
+    nr.add_argument("slug"); nr.add_argument("--words", default=None); nr.add_argument("--at", default=None)
+    for q in (nl, ns, nr):
+        q.add_argument("--project", default=None); q.add_argument("--plan", default=None, help=argparse.SUPPRESS)
+        q.add_argument("--session", default=None, help=argparse.SUPPRESS); q.add_argument("--json", action="store_true")
     h = sub.add_parser("headline", help="the plan headline: what the two-layer check found, and how it was answered")
     hs = h.add_subparsers(dest="sub", required=True)
     hshow = hs.add_parser("show", help="print a plan's latest headline"); hshow.add_argument("plan_id")
@@ -490,6 +665,8 @@ def main(argv=None) -> int:
         return _metrics(args)
     if args.cmd == "note":
         return _note(args)
+    if args.cmd == "node":
+        return _node_cmd(args)
     if args.cmd == "reasons":
         return _reasons_cmd(args)
     if args.cmd == "why":

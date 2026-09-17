@@ -36,6 +36,7 @@ EP="$REPO_ROOT/skills/executing-plans/scripts"
 PSG="$REPO_ROOT/skills/project-state-graph/scripts"
 
 VERBATIM='Drop orders.discount from the rollup — upstream said the v2 feed no longer carries it'
+DECLARED_WORDS='EMEA is excluded from the Q3 rollup — the steering group decided that on 2026-03-14'
 EMAIL_LABEL='Re: orders feed v2 schema (demo)'
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
@@ -49,7 +50,7 @@ fi
 mkdir -p "$DEMO_HOME" "$SRC" "$OUT"
 
 # ── the repo the demo talks about ───────────────────────────────────────────
-say "1/6  a small repo: the rollup reads orders.discount; another team's tile leans on it"
+say "1/8  a small repo: the rollup reads orders.discount; another team's tile leans on it"
 mkdir -p "$SRC/pkg"
 cat > "$SRC/pkg/__init__.py" <<'PYEOF'
 PYEOF
@@ -85,12 +86,12 @@ def dashboard_tile(rows):
 PYEOF
 ( cd "$SRC" && git init -q . && git add -A && git -c user.email=demo@example.com -c user.name=demo commit -qm "v1: the rollup reads discount" )
 
-say "2/6  build the state graph (the plugin's own initializer)"
+say "2/8  build the state graph (the plugin's own initializer)"
 bash "$PSG/init_project.sh" --name "$PROJECT" --repo "$SRC" --out-dir "$OUT" >"$DEMO_HOME/init1.log" 2>&1 \
   || { tail -20 "$DEMO_HOME/init1.log"; exit 1; }
 
 # ── Task A: a person removes the column, and says why ───────────────────────
-say "3/6  task A — a person removes orders.discount and records WHY, with the email"
+say "3/8  task A — a person removes orders.discount and records WHY, with the email"
 cat > "$DEMO_HOME/plan-a.json" <<JSONEOF
 {
   "goal": "Drop orders.discount: the v2 upstream feed no longer provides it",
@@ -147,7 +148,7 @@ PYX
 # other team's caller, and nothing at the time told them.
 ( cd "$SRC" && git add -A && git -c user.email=demo@example.com -c user.name=demo commit -qm "v2: discount is gone upstream" )
 
-say "4/6  refresh the graph — the removal becomes an observation"
+say "4/8  refresh the graph — the removal becomes an observation"
 bash "$PSG/init_project.sh" --name "$PROJECT" --repo "$SRC" --out-dir "$OUT" >"$DEMO_HOME/init2.log" 2>&1 \
   || { tail -20 "$DEMO_HOME/init2.log"; exit 1; }
 STEP_A="$("$PY" - "$ORCH_DB" "$PLAN_A" <<'PYEOF'
@@ -162,15 +163,32 @@ cat > "$DEMO_HOME/done-a.json" <<JSONEOF
 JSONEOF
 bash "$EP/complete-step.sh" "$DEMO_HOME/done-a.json" >/dev/null 2>&1 || true
 
+# ── the third core: a sentence that is not in the code at all ───────────────
+say "5/8  declare the world outside the code — a steering-group decision, in one sentence"
+DECLARE_OUT="$(PYTHONPATH="$REPO_ROOT/orchestrator-backend" "$PY" -m orchestrator.cli node declare \
+  "EMEA excluded from Q3 rollup" --type stakeholder_decision \
+  --links-to "pkg.rollup.weekly_report" --link-kind declared_constrains \
+  --attr "decided_on=2026-03-14" --attr "scope=Q3" --project "$PROJECT" --json)"
+DRAFT_ID="$(printf '%s' "$DECLARE_OUT" | "$PY" -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+echo "    draft $DRAFT_ID — nothing is in the graph yet"
+PYTHONPATH="$REPO_ROOT/orchestrator-backend" "$PY" -m orchestrator.cli node declare \
+  --confirm "$DRAFT_ID" --words "$DECLARED_WORDS" --at "2026-03-14 09:00" \
+  --project "$PROJECT" --json >"$DEMO_HOME/declare.json"
+echo "    confirmed in the user's own words — the row is stated, and the rule is anchored on what it constrains"
+
+say "6/8  refresh again — the declaration becomes a node like any other"
+bash "$PSG/init_project.sh" --name "$PROJECT" --repo "$SRC" --out-dir "$OUT" >"$DEMO_HOME/init3.log" 2>&1 \
+  || { tail -20 "$DEMO_HOME/init3.log"; exit 1; }
+
 # ── Task B: an agent plans to use the column that is gone ───────────────────
-say "5/6  task B — an agent plans to use it again; the heads-up carries the rule and the words"
+say "7/8  task B — an agent plans to use it again; the heads-up carries the rule, the words and the decision"
 cat > "$DEMO_HOME/plan-b.json" <<JSONEOF
 {
   "goal": "Add a discount-rate metric to the weekly report",
   "prefix": "demo-task-b",
   "project": "$PROJECT",
   "user_query": "Add a discount rate to the weekly report: orders.discount over amount",
-  "declared_targets": ["pkg.tiles.dashboard_tile"],
+  "declared_targets": ["pkg.tiles.dashboard_tile", "pkg.rollup.weekly_report"],
   "skills": [{"name": "writing-plans", "source": "iron-law"}],
   "steps": [{"description": "CODE: add discount_rate back onto the weekly rollup", "type": "CODE"}]
 }
@@ -197,7 +215,7 @@ else:
 PYEOF
 )"
 if [[ -n "$FINDING" ]]; then
-  say "6/6  the agent revises, citing the record — that citation is the influence row"
+  say "8/8  the agent revises, citing the record — that citation is the influence row"
   "$PY" - "$FINDING" "$PLAN_B" "$DEMO_HOME/respond.json" <<'PYEOF'
 import json, sys
 f = json.loads(sys.argv[1])

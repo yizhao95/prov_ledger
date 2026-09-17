@@ -146,10 +146,14 @@ def _extract_in_subprocess(provider, ctx, timeout_s: float):
 
 
 def builtin_providers() -> list:
-    """The two reference providers, in the host's emission order."""
+    """The three built-in providers, in the host's emission order. `declared`
+    is last because it names code nodes and reads the graph they are already
+    in; on a project nobody has declared anything for it observes nothing, so
+    adding it changed no existing golden."""
     from .builtin_owned import BuiltinOwnedProvider
     from .builtin_symbols import BuiltinSymbolProvider
-    return [BuiltinSymbolProvider(), BuiltinOwnedProvider()]
+    from .declared_provider import DeclaredProvider
+    return [BuiltinSymbolProvider(), BuiltinOwnedProvider(), DeclaredProvider()]
 
 
 def make_context(db_path: str, repo_root: str, run_id: int, file_map=None):

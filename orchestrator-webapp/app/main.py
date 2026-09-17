@@ -493,7 +493,7 @@ def session_card(request: Request, session_id: str):
 # Removing the node cap must not move the cost from the picture to the payload:
 # a clustered page carries the cluster summaries and the minimum each node needs
 # to be drawn and expanded, not 1601 full records.
-COMPACT_NODE_FIELDS = ("node_key", "qualified_name", "node_type", "level", "badge", "tier")
+COMPACT_NODE_FIELDS = ("node_key", "qualified_name", "node_type", "level", "badge", "tier", "declared", "lane")
 
 
 def graph_payload(graph: dict) -> dict:

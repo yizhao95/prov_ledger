@@ -194,6 +194,27 @@
   </script>
   <script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js" async onload="(function(){var e=new Event('load');window.dispatchEvent(e)})()"></script>
 
+  {# ── DP phase 2c: the rules and decisions, beside the picture rather than in it ── #}
+  {% if graph.declared_lane %}
+  <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5 mb-4" data-panel="declared-lane">
+    <h2 class="text-sm font-semibold text-gray-900 mb-2">{{ ui('declared_lane', lang) }} ({{ graph.declared_lane|length }})</h2>
+    <ul class="text-xs space-y-2">
+      {% for n in graph.declared_lane %}
+      <li data-declared-node="{{ n.node_key }}" data-declared-tier="{{ n.declared_tier }}" data-declared-type="{{ n.node_type }}">
+        <a class="text-brand-blue font-mono" href="/node/{{ project }}/{{ n.qualified_name }}">{{ n.qualified_name }}</a>
+        <span class="ml-1 text-brand-muted">{{ n.node_type|say('declared_type', lang) }} · {{ n.declared_tier|say('tier', lang) }}</span>
+        {% if n.description %}<div class="text-brand-gray">{{ n.description }}</div>{% endif %}
+        {% if n.targets %}
+        <div>{{ ui('constrains', lang) }}:
+          {% for t in n.targets %}<a class="text-brand-blue font-mono" href="/node/{{ project }}/{{ t }}">{{ t }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+        </div>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
   <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5" data-panel="graph-table">
     <h2 class="text-sm font-semibold text-gray-900 mb-2">{{ 'node'|say('term', lang) }} ({{ graph.nodes|length }} / {{ graph.total_nodes }})</h2>
     <div class="overflow-x-auto">
@@ -213,7 +234,7 @@
         {% endfor %}
         {% else %}
         {% for n in graph.nodes %}
-          <tr class="{{ 'bg-[#fff3d6]' if focus and (focus == n.qualified_name or focus == n.node_key) else '' }}" data-node="{{ n.node_key }}" data-tier="{{ n.tier }}" data-badge="{{ n.badge }}"{% if focus and (focus == n.qualified_name or focus == n.node_key) %} data-focus="1"{% endif %}>
+          <tr class="{{ 'bg-[#fff3d6]' if focus and (focus == n.qualified_name or focus == n.node_key) else '' }}" data-node="{{ n.node_key }}" data-tier="{{ n.tier }}" data-badge="{{ n.badge }}"{% if n.declared %} data-declared="1" data-lane="{{ n.lane }}"{% endif %}{% if focus and (focus == n.qualified_name or focus == n.node_key) %} data-focus="1"{% endif %}>
             <td class="pr-3 font-mono"><a class="text-brand-blue" href="/node/{{ project }}/{{ n.qualified_name }}{% if graph.run and graph.run.run_id != graph.latest_run_id %}?at=run:{{ graph.run.run_id }}{% endif %}">{{ n.qualified_name }}</a></td>
             <td class="pr-3">{{ n.node_type }}</td>
             <td class="pr-3"><span class="type-dot" style="background: {{ {'observed': '#2a78d6', 'derived': '#1baf7a', 'asserted': '#eda100', 'stated': '#4a3aa7'}.get(n.tier, '#898781') }}"></span> <span title="{{ vocab.define(n.tier, kind='tier', lang=lang) }}">{{ n.tier|say('tier', lang) }}</span></td>

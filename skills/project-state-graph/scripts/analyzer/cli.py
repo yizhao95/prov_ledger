@@ -24,6 +24,7 @@ from . import (
     dataflow,
     dataflow_types,
     de_overlay,
+    declared_nodes,
     history,
     namesets,
     leakage,
@@ -116,6 +117,10 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
         de_overlay.analyze(conn, repo_path, file_map)
         leakage.analyze(conn, repo_path, file_map)  # Phase 4.1 silent-failure gate
         profiles.analyze(conn, repo_path, file_map)
+        # DP phase 2c (spec §18): what the user declared is part of this project
+        # too. It enters the graph here, before the snapshot, so the declared
+        # provider sees it and its changes are computed like everybody else's.
+        declared_report = declared_nodes.analyze(conn, repo_path, project)
         if build_cards:
             cards.build_symbol_cards(conn)  # also builds consistency cards
         # History layer (spec §2.5): snapshot this rebuild's rows (selected by
@@ -131,6 +136,12 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
             reason = r.get("degraded") or prov_report.get(r["id"], {}).get("degraded")
             if reason:
                 print(f"WARNING: provider {r['id']} degraded: {reason}", file=sys.stderr)
+        # DP phase 2c: how much of this run came from declarations, on the run row
+        # itself — a reader must never have to guess whether the graph they are
+        # looking at contains declared nodes.
+        if declared_report.get("declarations"):
+            ext_fp = dict(ext_fp or {})
+            ext_fp["declared"] = declared_report
         if ext_fp is not None:
             ext_fp["providers"] = [{**r, **{k: v for k, v in prov_report.get(r["id"], {}).items() if k != "schema_version"},
                                     "observations": prov_report.get(r["id"], {}).get("observations", 0)}

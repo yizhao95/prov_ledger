@@ -999,6 +999,10 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str,
     base["events"] = len(events)
     # space
     base["card"] = _psg.card_of(db_path, qn)
+    # DP phase 2c: a declared node says so, and says who put it there. The
+    # DECLARATION's tier (stated | asserted) sits next to the event tier the
+    # graph computed — never instead of it: they answer different questions.
+    base["declared"] = _psg.declaration_of(db_path, node_key)
     # intent: reasons (all plans) + constraints anchored by node_key or qualified name
     try:
         rows = conn.execute("SELECT r.id, r.node_key, r.run_id, r.plan_id, r.step_id, r.role AS kind, "
@@ -1214,7 +1218,7 @@ def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = Non
             "edges_from": "none", "level": level, "badged": 0, "focus": focus or None, "mode": mode,
             "total_nodes": 0, "mode_total": 0, "truncated": False, "focus_found": False, "hops": NEIGHBOURHOOD_HOPS,
             "at_kind": None, "at_reason": None, "at_id": None, "story_keys": 0,
-            "clusters": [], "layout": "physics"}
+            "clusters": [], "layout": "physics", "declared_lane": []}
     a = parse_at(at)
     base.update(at_kind=a["kind"], at_id=a["id"])
     if _psg is None:
@@ -1243,7 +1247,18 @@ def get_graph(conn: sqlite3.Connection, project: str, at: int | str | None = Non
         # a record may be anchored by node_key or by qualified name (a constraint declared by name): both count
         b1 = badges.get(n["node_key"]) or {}; b2 = badges.get(n["qualified_name"]) or {}
         nodes.append({**n, "badge": int(b1.get("badge") or 0) + int(b2.get("badge") or 0), "minor": int(b1.get("minor") or 0) + int(b2.get("minor") or 0),
-                      "tier": tiers.get(n["node_key"], "observed"), "last_at": max([x for x in (b1.get("last_at"), b2.get("last_at")) if x], default=None)})
+                      "tier": tiers.get(n["node_key"], "observed"), "last_at": max([x for x in (b1.get("last_at"), b2.get("last_at")) if x], default=None),
+                      "declared": bool(n.get("declared")), "lane": n.get("lane") or "graph"})
+    # DP phase 2c: the rules and decisions, with what each one constrains — drawn
+    # as a lane beside the graph rather than as another node in the flow.
+    lane = []
+    for n in nodes:
+        if n.get("lane") != "constraint":
+            continue
+        decl = _psg.declaration_of(db_path, n["node_key"]) or {}
+        lane.append({**n, "description": decl.get("description"), "declared_tier": decl.get("tier"),
+                     "targets": [d.get("to") for d in (decl.get("links") or []) if d.get("kind") == "declared_constrains"]})
+    base["declared_lane"] = lane
     runs = _psg.runs_of(db_path)
     run = next((r for r in runs if r["run_id"] == g["run_id"]), None)
     base.update(available=True, nodes=nodes, edges=g["edges"], runs=runs[:50], run=run, edges_from=g["edges_from"],
@@ -1492,26 +1507,6 @@ def _read_hit_counts(conn: sqlite3.Connection, base: dict) -> dict[int, int]:
             f"SELECT reason_id, COUNT(*) FROM read_hit WHERE reason_id IN ({ph}) GROUP BY reason_id", ids)}
     except sqlite3.Error:
         return {}
-
-
-TRACE_STRIP_MAX = 8
-
-
-def trace_strip(ledger: dict, limit: int = TRACE_STRIP_MAX) -> list[dict]:
-    """The latest moment of each KIND, newest first — at most one structural
-    change, one stated reason, one asserted reason, one constraint, one outcome.
-
-    Taking the latest N rows instead put the same repeated sentence in every
-    line, which told the reader nothing. Everything past the cut is still in the
-    timeline below: this crops a summary, not the record."""
-    rows = [r for r in (ledger.get("timeline") or []) if r.get("significant", True)]
-    rows.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
-    seen: dict[str, dict] = {}
-    for r in rows:
-        seen.setdefault(_recent_kind(r), r)
-    out = [seen[k] for k in RECENT_KINDS if k in seen]
-    out.sort(key=lambda r: str(r.get("at") or ""), reverse=True)
-    return out[:max(0, min(int(limit), 5))]
 
 
 def mark_span(text: str | None, start: int | None, end: int | None) -> str:

@@ -51,5 +51,5 @@ addopts = "-v -m 'not live'"
 markers = [
     "veto: an acceptance item whose failure fails the whole suite (decision provenance §12); never skipped",
     "degraded: the hooks-only mode — asserts what is lost without the skills, explicitly (DP phase 2, Task 7b)",
-    "live: MANUAL — runs against the real ~/skill-workspace ledger and state graph; never CI (DP phase 2e, Task 7)",
+    "live: MANUAL — runs against the real ~/skill-workspace ledger and state graph, so its verdict depends on who ran plans on this machine; deselected by default, never CI. Run it with PROVLEDGER_LIVE=1 (DP phases 2e and 2c)",
 ]

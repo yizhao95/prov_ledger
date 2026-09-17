@@ -28,6 +28,30 @@
   <div class="bg-surface rounded-xl shadow-sm border border-hairline px-5 py-4 mb-4" data-panel="node-head">
     <div class="text-[11px] uppercase tracking-wide text-brand-muted">{{ project }}</div>
     <h1 class="text-lg font-semibold font-mono text-gray-900 break-all">{{ ledger.qualified_name if ledger else qualified_name }}</h1>
+    {# ── DP phase 2c: this node is not code — somebody put it here in one sentence ── #}
+    {% if ledger and ledger.declared %}
+    <div class="mt-2 text-xs bg-brand-bg border border-hairline rounded-lg px-3 py-2" data-declared="1"
+         data-declared-type="{{ ledger.declared.node_type }}" data-declared-tier="{{ ledger.declared.tier }}"
+         data-declared-version="{{ ledger.declared.version }}">
+      <span class="px-1.5 py-0.5 rounded bg-brand-blue text-white text-[10px] uppercase tracking-wide"
+            title="{{ ui('declared_help', lang) }}">{{ ui('declared', lang) }}</span>
+      <span class="ml-1">{{ ledger.declared.node_type|say('declared_type', lang) }}</span>
+      <span class="ml-1 text-brand-muted" title="{{ vocab.define(ledger.declared.tier, kind='tier', lang=lang) }}">·
+        {{ ledger.declared.tier|say('tier', lang) }}</span>
+      <div class="mt-1 text-brand-gray">{{ ledger.declared.description }}</div>
+      {% if ledger.declared.attrs %}
+      <div class="mt-1 font-mono text-[11px] text-brand-muted">{% for k, v in ledger.declared.attrs.items() %}{{ k }}={{ v }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+      {% endif %}
+      {% if ledger.declared.links %}
+      <div class="mt-1">{% for l in ledger.declared.links %}<span class="mr-2">{{ l.kind }} →
+        <a class="text-brand-blue font-mono" href="/node/{{ project }}/{{ l.to }}">{{ l.to }}</a>
+        <span class="text-brand-muted">({{ 'stated' if l.by == 'user' else 'asserted' }})</span></span>{% endfor %}</div>
+      {% endif %}
+      {% if not ledger.declared.links_checked %}
+      <div class="mt-1 text-brand-serious">{{ 'links were not checked against a graph when this was declared' if lang != 'zh' else '声明时没有可校验的图，链接未核对' }}</div>
+      {% endif %}
+    </div>
+    {% endif %}
     {% if ledger and ledger.found %}
     <div class="text-xs text-brand-muted mt-1 flex flex-wrap items-center gap-x-3">
       <span title="{{ ledger.node_key }}" data-node-key="{{ ledger.node_key }}">{{ ledger.card.get('file_path') or '' }}</span>
