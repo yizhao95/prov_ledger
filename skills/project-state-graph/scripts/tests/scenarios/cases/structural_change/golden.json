@@ -214,6 +214,12 @@
   {
    "plan": "t1",
    "step": "REVIEW",
+   "tag": "[ANCHOR]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t1",
+   "step": "REVIEW",
    "tag": "[REVIEW LOCK]",
    "type": "review_log"
   },

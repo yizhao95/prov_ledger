@@ -279,13 +279,22 @@ def export_md(conn, *, project: str, out_dir: str, psg_db_path: str | None = Non
     """One markdown per node: shareable reasons / constraints / rejected paths,
     their linked references (label + uri), and a history line. Rows whose
     statement is personal never leave the database; a personal rationale is
-    omitted from a shareable row (E1, first half)."""
+    omitted from a shareable row (E1, first half).
+
+    DP phase 3: a shareable record may quote words that are not shareable. The
+    record travels, the quotation does not, and the file says which utterance
+    was withheld instead of leaving a blank where a sentence used to be."""
     psg = psg_db_path if psg_db_path is not None else psg_bridge.db_path_for(project)
     os.makedirs(out_dir, exist_ok=True)
     rows = conn.execute(
         "SELECT r.id, r.node_key, r.plan_id, r.role, r.tier, r.evidence_level, r.recorded_by, r.occurred_at, r.state, "
         "       r.rationale, r.rationale_visibility, "
-        "       COALESCE(r.interpretation, r.statement, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS text "
+        "       COALESCE(r.interpretation, r.statement, "
+        "               CASE WHEN u.visibility = 'shareable' "
+        "                    THEN substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start) END) AS text, "
+        "       CASE WHEN r.verbatim_utterance_id IS NOT NULL AND r.interpretation IS NULL AND r.statement IS NULL "
+        "                 AND COALESCE(u.visibility, 'personal') <> 'shareable' "
+        "            THEN r.verbatim_utterance_id END AS withheld_utterance "
         "FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
         "WHERE r.project = ? AND r.node_key IS NOT NULL AND r.statement_visibility = 'shareable' ORDER BY r.node_key, r.id", (project,)).fetchall()
     by_node: dict[str, list] = {}
@@ -303,10 +312,12 @@ def export_md(conn, *, project: str, out_dir: str, psg_db_path: str | None = Non
                 continue
             out.append(f"## {label}")
             for r in items:
-                rid, _, plan_id, _, tier, level, by, at, state, rationale, rvis, text = r
+                rid, _, plan_id, _, tier, level, by, at, state, rationale, rvis, text, withheld = r
                 out.append(f"- #{rid} · {tier} · 来源等级 {LEVEL_CN.get(level, level)} · {(at or '')[:10]} · {by} · {plan_id}" + (f" · {state}" if state != "active" else ""))
                 if text:
                     out.append(f"  - {text}")
+                elif withheld is not None:
+                    out.append(f"  - （引自 utterance #{withheld}，标为 personal —— 原话不外发）")
                 if rationale and rvis == "shareable":
                     out.append(f"  - 为什么：{rationale}")
                 for kind, label_, uri in conn.execute(

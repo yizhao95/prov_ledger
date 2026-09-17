@@ -53,6 +53,28 @@ def test_export_md_one_file_per_node_shareable_rows_only(conn, graph, tmp_path):
     assert grep.stdout.strip().endswith("pkg.m.load_orders.md")
 
 
+def test_e1_export_md_does_not_quote_a_personal_utterance(conn, graph, tmp_path):
+    """DP phase 3: the older `--md` path quoted a verbatim span straight out of
+    `utterance` without asking whether those words were personal. A shareable
+    record may be built on words that are not shareable — the record travels,
+    the quotation does not."""
+    secret = "he only agreed because his bonus depends on the Q3 number"
+    private = pv.insert_utterance(conn, session_id="s", project="proj", plan_id="P0", text=secret,
+                                  occurred_at="2026-09-01 10:00:00", visibility="personal")
+    public = pv.insert_utterance(conn, session_id="s", project="proj", plan_id="P0",
+                                 text="weekly grain, to match how finance reports",
+                                 occurred_at="2026-09-01 10:05:00", visibility="shareable")
+    pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="organizational",
+                     verbatim=(private, 0, len(secret)), recorded_by="human")
+    pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="technical",
+                     verbatim=(public, 0, 12), recorded_by="human")
+    out = why.export_md(conn, project="proj", out_dir=str(tmp_path / "md"), psg_db_path=graph)
+    text = "\n".join(Path(f).read_text(encoding="utf-8") for f in out["files"])
+    assert secret not in text
+    assert "weekly grain" in text                      # the shareable quotation still travels
+    assert f"utterance #{private}" in text             # and the withholding is stated, not silent
+
+
 def test_init_agents_md_is_idempotent(tmp_path):
     r1 = why.init_agents_md(str(tmp_path))
     text = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")

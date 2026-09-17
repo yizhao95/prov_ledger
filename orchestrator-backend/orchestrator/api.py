@@ -557,6 +557,12 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         except Exception as exc:  # pragma: no cover - defensive
             telemetry.append_step_log(conn, review_step_id, f"[OUTCOMES] backfill failed: {exc}")
             backfilled = {"error": str(exc)}
+    # DP phase 3 (Task 1, spec §7): the ledger's chain heads leave the database
+    # and become a git note on HEAD, so the record of "these rows existed here"
+    # is no longer kept by the thing being checked. Its own try/except: a repo
+    # without git, without a commit, or with a refusing notes ref is a logged
+    # warning, never a plan that will not close.
+    anchor = _anchor_close(conn, project, plan_id, review_step_id, registry_path)
     return {
         "ready": True,
         "plan_status": "COMPLETED",
@@ -576,7 +582,74 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
         "rejected_paths": n_rejected,
         "constraints_bypassed": n_bypassed,
         "outcomes_backfilled": backfilled,
+        "anchor": anchor,
     }
+
+
+def _anchor_mode(project: str | None, registry_path) -> str:
+    """provledger-extensions.json → integrity.anchor (on | off) of the project's
+    repo. `on` whenever in doubt: anchoring is the default, turning it off is a
+    choice somebody has to write down."""
+    if not project:
+        return "on"
+    try:
+        from . import extensions
+        repo = psg_bridge.repo_for(project, _resolve_registry_path(registry_path))
+        path = extensions.discover(repo) if repo else None
+        return extensions.load(path).integrity_anchor if path else "on"
+    except Exception:
+        return "on"
+
+
+def _anchor_close(conn: sqlite3.Connection, project: str | None, plan_id: str,
+                  review_step_id: str, registry_path) -> dict:
+    """Append the three chain heads to `git notes --ref provledger` on the repo's
+    HEAD. Every outcome — written, switched off, or failed — leaves one
+    `[ANCHOR]` line on the review step, because an anchor that quietly did not
+    happen is exactly the kind of silence this product exists to remove."""
+    from . import integrity
+    if not project:
+        return {"anchored": False, "mode": "on", "reason": "the plan belongs to no registered project"}
+    mode = _anchor_mode(project, registry_path)
+    if mode == "off":
+        telemetry.append_step_log(
+            conn, review_step_id,
+            f"[ANCHOR] off: provledger-extensions.json says integrity.anchor=off, so the chain heads of {plan_id} "
+            f"were NOT written to refs/notes/{integrity.NOTES_REF}")
+        return {"anchored": False, "mode": "off", "reason": "integrity.anchor=off"}
+    repo = psg_bridge.repo_for(project, _resolve_registry_path(registry_path))
+    try:
+        if not repo:
+            raise integrity.AnchorError(f"no repo registered for project {project!r}")
+        payload = integrity.anchor_payload(conn, plan_id=plan_id)
+        note = integrity.anchor_heads(repo, payload)
+        commit = integrity.head_commit(repo)
+        heads = ", ".join(f"{t} #{payload[t]['id']} {(payload[t]['hash'] or '')[:12]}" for t in integrity.CHAINS)
+        telemetry.append_step_log(
+            conn, review_step_id,
+            f"[ANCHOR] chain heads anchored in refs/notes/{integrity.NOTES_REF}: note {note[:12]} @ {commit[:12]} "
+            f"· {heads} · push it with `git push origin refs/notes/{integrity.NOTES_REF}`")
+        return {"anchored": True, "mode": "on", "note_sha": note, "commit": commit,
+                "at": payload["at"], "ref": integrity.NOTES_REF,
+                "heads": {t: payload[t] for t in integrity.CHAINS}}
+    except integrity.AnchorError as exc:
+        if "nothing to anchor" in str(exc):
+            telemetry.append_step_log(
+                conn, review_step_id,
+                f"[ANCHOR] nothing to anchor: {exc} — {plan_id} closed with no note, because a note full of "
+                "nulls witnesses nothing.")
+            return {"anchored": False, "mode": mode, "reason": str(exc), "empty": True}
+        telemetry.append_step_log(
+            conn, review_step_id,
+            f"[ANCHOR] not anchored: {exc} — {plan_id} closed anyway (spec §7: a notes failure is a warning, "
+            "never a block). The ledger still verifies; it just has no outside witness for this close.")
+        return {"anchored": False, "mode": mode, "reason": str(exc)}
+    except Exception as exc:  # pragma: no cover - defensive
+        telemetry.append_step_log(
+            conn, review_step_id,
+            f"[ANCHOR] not anchored: {exc} — {plan_id} closed anyway (spec §7: a notes failure is a warning, "
+            "never a block). The ledger still verifies; it just has no outside witness for this close.")
+        return {"anchored": False, "mode": mode, "reason": str(exc)}
 
 
 def _significance_mode(project: str | None, registry_path) -> str:

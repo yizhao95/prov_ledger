@@ -14,6 +14,7 @@ import warnings
 from ..graph_api import KNOWN_LAYERS, TYPE_ID_RE, NodeObservation, validate_attrs
 
 DEFAULT_TIMEOUT_S = 30.0
+RO_BUSY_TIMEOUT_MS = 30000     # a provider waits out a host write rather than degrading on it
 ISOLATE_MODES = ("thread", "subprocess")
 
 
@@ -164,6 +165,11 @@ def make_context(db_path: str, repo_root: str, run_id: int, file_map=None):
 
     from ..graph_api import ExtractionContext
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, check_same_thread=False)
+    # Wait for a host write instead of degrading on it. sqlite3's default is 5 s,
+    # which a large graph's write transaction can outlive; a provider that gives
+    # up then is not "degraded", it is silently wrong — its nodes come out
+    # without an identity. The wait is bounded by run_provider's own timeout.
+    conn.execute(f"PRAGMA busy_timeout = {RO_BUSY_TIMEOUT_MS}")
 
     def node_rows(kinds: tuple[str, ...]) -> list:
         ph = ",".join("?" for _ in kinds) or "''"

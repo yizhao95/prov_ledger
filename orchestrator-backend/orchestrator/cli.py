@@ -12,6 +12,8 @@ in the repo, `provledger ...` once installed.
   ask submit <ask_id> --answer-file F     check a draft written by the session's model and record it
   ask card <ask_id> --out FILE            the evidence card of a logged question
   ask feedback <ask_id> wrong|partial|right   a person's word on one answer
+  verify [--against-notes] [--project]    walk the three hash chains, and the git anchors they must agree with
+  export <project> --out DIR [--zip]      a whitelisted bundle; personal rows are refused by code
   export <project> --md DIR               one markdown per node (shareable rows only)
   init --agents-md                        drop the two verbs into ./AGENTS.md
   reason mark <id> major|minor            a person's word on a reason's significance
@@ -526,7 +528,45 @@ def _ask_cmd(args) -> int:
         conn.close()
 
 
+def _verify_repo(args) -> str | None:
+    """--repo, else the repo of --project / the cwd's registered project, else the
+    cwd when it is itself a git work tree. None means "there is nothing to ask"."""
+    if getattr(args, "repo", None):
+        return args.repo
+    from . import psg_bridge
+    project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+    if project:
+        repo = psg_bridge.repo_for(project, None)
+        if repo:
+            return repo
+    cwd = os.getcwd()
+    return cwd if os.path.isdir(os.path.join(cwd, ".git")) else None
+
+
+def _verify_cmd(args) -> int:
+    """Exit 0 when every chain walks and every anchor still describes this
+    ledger, 3 when one does not (spec §7, G1). A missing anchor is printed, not
+    punished: it lowers what the ledger can claim, it does not break it."""
+    from . import integrity
+    repo = _verify_repo(args) if args.against_notes else None
+    conn = _open()
+    try:
+        report = integrity.verify(conn, against_notes=args.against_notes, repo=repo)
+    finally:
+        conn.close()
+    if args.json:
+        print(json.dumps(report, indent=1, sort_keys=True, ensure_ascii=False, default=str))
+    else:
+        print(integrity.render(report))
+    return 0 if report["ok"] else 3
+
+
 def _export_cmd(args) -> int:
+    if not args.out and not args.md:
+        print("provledger export: pass --out DIR (the bundle) or --md DIR (one markdown per node)", file=sys.stderr)
+        return 2
+    if args.out:
+        return _export_bundle(args)
     from . import why
     conn = _open()
     try:
@@ -535,6 +575,35 @@ def _export_cmd(args) -> int:
         return 0
     finally:
         conn.close()
+
+
+def _export_bundle(args) -> int:
+    """The whitelisted bundle (spec §8). An ExportViolation is an error with a
+    message and exit 4 — never a bundle that shipped anyway."""
+    from . import export, psg_bridge
+    ids: list[int] = []
+    for chunk in (args.include_rationale or []):
+        for part in str(chunk).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if not part.isdigit():
+                print(f"provledger export: --include-rationale takes reason ids, got {part!r}", file=sys.stderr)
+                return 2
+            ids.append(int(part))
+    repo = args.repo or psg_bridge.repo_for(args.project, None)
+    conn = _open()
+    try:
+        manifest = export.bundle(conn, args.project, args.out, include_rationale=ids,
+                                 fmt=("zip" if args.zip else "md"), repo=repo,
+                                 exported_by=args.by)
+    except export.ExportViolation as e:
+        print(f"provledger export: {e}", file=sys.stderr)
+        return 4
+    finally:
+        conn.close()
+    print(json.dumps(manifest, indent=1, sort_keys=True, ensure_ascii=False, default=str))
+    return 0
 
 
 def _init_cmd(args) -> int:
@@ -631,9 +700,20 @@ def build_parser() -> argparse.ArgumentParser:
                    help="`ask submit <ask_id> --answer-file F`: a draft written by the session's own model; the same "
                         "checks apply — every sentence cites, no number outside the fact table, drops are counted")
     a.add_argument("--out", default=None, metavar="FILE", help="`ask card <ask_id> --out F`: write the evidence card here")
-    e = sub.add_parser("export", help="export a project's shareable records as markdown, one file per node")
+    v = sub.add_parser("verify", help="walk the three hash chains and, with --against-notes, the git anchors they must agree with (exit 3 on a broken chain)")
+    v.add_argument("--against-notes", action="store_true", help="also compare the chain heads with the anchors in refs/notes/provledger")
+    v.add_argument("--project", default=None, help="registered project whose repo holds the notes (default: the one containing the cwd)")
+    v.add_argument("--repo", default=None, metavar="DIR", help="the git work tree to read the notes from")
+    v.add_argument("--json", action="store_true", help="machine-readable report")
+    e = sub.add_parser("export", help="hand a project's shareable records to someone who was not there: a whitelisted bundle (--out) or one markdown per node (--md)")
     e.add_argument("project")
-    e.add_argument("--md", required=True, metavar="DIR", help="output directory")
+    e.add_argument("--out", default=None, metavar="DIR", help="write the bundle here: README.md, records.jsonl, nodes/*.md, manifest.json")
+    e.add_argument("--zip", action="store_true", help="also write <DIR>/<project>.zip")
+    e.add_argument("--include-rationale", action="append", default=[], metavar="IDS",
+                   help="reason ids whose rationale may travel, listed one by one; every release is written to export_log")
+    e.add_argument("--repo", default=None, metavar="DIR", help="the git work tree whose notes hold the anchor (default: the project's repo)")
+    e.add_argument("--by", default="agent", choices=["human", "agent", "system"], help="who is exporting")
+    e.add_argument("--md", default=None, metavar="DIR", help="the older per-node markdown output")
     i = sub.add_parser("init", help="set a repo up: --agents-md writes the provledger block into ./AGENTS.md")
     i.add_argument("--agents-md", action="store_true", help="write or refresh the provledger section of ./AGENTS.md")
     rm = sub.add_parser("reason", help="one reason record")
@@ -677,6 +757,8 @@ def main(argv=None) -> int:
         return _significance_cmd(args)
     if args.cmd == "ask":
         return _ask_cmd(args)
+    if args.cmd == "verify":
+        return _verify_cmd(args)
     if args.cmd == "export":
         return _export_cmd(args)
     if args.cmd == "init":

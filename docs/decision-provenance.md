@@ -401,3 +401,135 @@ No extraction of nodes from documents. No judging whether two descriptions mean
 the same object: changing a description is an attribute change on the same node,
 a new `declare` is a new node. The model never produces a result number and
 never labels its own output as the user's words.
+
+## 12 · Phase 3 — integrity and export: the anchor, and what it does not prove
+
+### 12.1 The two words that are not the same word
+
+`provenance.verify_chain` walks a table and recomputes every row's hash from the
+row before it. It answers one question: *has any row moved since it was
+written?* That answer is self-referential. Somebody who can edit a row can
+recompute the chain from that row onward, and the ledger will report `ok`
+forever.
+
+So `provledger verify` reports two things and never merges them:
+
+| word | what it means |
+|---|---|
+| `ok` | every chain walks, and every anchor still describes this ledger |
+| `anchored` | something **outside the database** vouches for these chain heads |
+
+A ledger with no anchor is still `ok`. It is simply unwitnessed, and
+`anchors.reason` says why there is no witness — no git, no HEAD, no notes ref —
+instead of reporting a silent zero.
+
+```
+provledger verify --against-notes
+  chain utterance: ok · 57 row(s) walked · head #57 4b2e1c9a0f31
+  chain reference: ok · 4 row(s) walked · head #4 90a7c11de2b8
+  chain change_reason: ok · 2308 row(s) walked · head #2308 7f1c05ab93d4
+  anchors: 2 anchor(s), 2 matched · latest note a91c4e7f0b22 @ 6744c800af13
+```
+
+Exit codes: `0` ok, `3` a broken chain (G1). A missing anchor never changes the
+exit code — it lowers what the ledger can *claim*, it does not break it.
+
+### 12.2 The anchor
+
+When a plan closes, `api._anchor_close` appends one line to
+`git notes --ref provledger` on the repository's HEAD:
+
+```json
+{"at":"2026-09-17T07:11:02Z","change_reason":{"hash":"7f1c…","id":2308},"plan_id":"dp3-t123-…","reference":{"hash":"90a7…","id":4},"utterance":{"hash":"4b2e…","id":57},"v":1}
+```
+
+- **One compact line.** `git notes append` joins messages with a blank line, so
+  a payload that wrapped would come back unparseable.
+- **Append-only.** Only `git notes append` is ever called; a second close on the
+  same commit adds a second line and leaves the first alone.
+- **A witness, not a copy.** Three head hashes and nothing else. Row N's hash
+  folds in every predecessor, so one comparison per table checks the whole
+  prefix before that anchor.
+- **Never blocking.** No git, no commit, no repo, a refusing ref: all of them
+  leave one `[ANCHOR] not anchored: …` line on the review step and the plan
+  closes anyway. `selfcheck` counts those closes (`unanchored_closes`), because
+  a failure that never blocks needs somewhere to be seen.
+- **Pushing is the user's decision.** The note stays local until somebody runs
+  `git push origin refs/notes/provledger`; the log line says so.
+- `provledger-extensions.json` → `{"integrity": {"anchor": "off"}}` switches it
+  off. The default is `on`: turning it off is a choice somebody writes down.
+- **An anchor must pin something.** A payload whose three heads are all `null`
+  vouches for nothing, so it is refused (`[ANCHOR] nothing to anchor`) rather
+  than written. Lines like that already on a ref are counted as
+  `anchors.empty` — visible, never deleted, never passed off as a witness.
+- **An anchor must land in the repository somebody registered.** A registered
+  path *inside* a work tree is not that work tree: `git notes` run there writes
+  to the enclosing repository. The refusal names the root the note would
+  otherwise have landed on. This is not hypothetical — the phantom-uplift e2e
+  suite registers `examples/phantom-uplift`, and before this check it appended
+  ten empty notes to the developer's own checkout while the tests ran.
+
+### 12.3 What none of this proves
+
+> These records existed at the anchored commit and have not been altered since.
+> That is not a claim that what they say happened.
+
+The sentence lives in the code (`integrity.CLAIM`) and is quoted by the evidence
+card, the bundle README and this section, so the three cannot drift apart. In
+particular: an anchor is only as good as the repository it lives in. Anyone who
+can rewrite the ledger *and* force-push the notes ref can rewrite both. A remote
+that rejects non-fast-forward notes, or a third-party timestamp, would close
+that gap; neither is built (FUTURE-LOG).
+
+### 12.4 The export bundle
+
+`provledger export <project> --out DIR [--zip] [--include-rationale <ids>]`
+writes `DIR/<project>/` with `README.md`, `records.jsonl`, `nodes/*.md` and
+`manifest.json`. An export is the one operation with no undo, so the boundary is
+code, not convention:
+
+| table | what travels |
+|---|---|
+| `utterance` | **nothing, ever.** Verbatim words are always somebody's own |
+| `change_reason` | rows whose `statement_visibility` is `shareable`; the quotation of a personal utterance is withheld and the withholding is printed |
+| `change_reason.rationale` | only the ids named in `--include-rationale`, one by one |
+| `reference` | rows whose `visibility` is `shareable`, linked to an exported record |
+| `declared_node` | active declarations |
+| `expectations` / `outcomes` | the claim, the channel, the observed outcome |
+| `headline` | findings whose evidence is exportable; **never** a response's rationale |
+| the graph | per node: qualified name, event count, record count |
+
+Four rules make that checkable rather than aspirational:
+
+1. **It is a whitelist, per column.** A column added to `change_reason`
+   tomorrow does not silently widen the export. `manifest.whitelist` prints it.
+2. **The manifest says what was refused**, per reason: personal statements,
+   personal references, withheld quotations, rationales nobody asked for,
+   findings built on personal records.
+3. **Naming a personal rationale is an error**, not a quiet skip — an
+   `ExportViolation` quoting the reason id, and nothing is written. Someone who
+   asked deserves to know their request was refused.
+4. **The bundle is read back and swept.** Every personal string the project
+   holds is searched for across every written file; a hit deletes the bundle and
+   raises. Strings shorter than 12 characters are counted in the manifest as
+   unscanned rather than matched, because containment on a short string is not
+   evidence of a leak.
+
+Every bundle writes one append-only `export_log` row (migration 027): the
+counts, what was refused, the released rationale ids, the chain heads and the
+anchor. An export that happened cannot be un-happened.
+
+### 12.5 The evidence card
+
+`provledger ask card <id> --out card.md` and `GET /ledger/card?ask_id=` render
+the same card from the same function. Its Integrity section prints one line per
+chain — state, rows walked, head id and head hash — then one anchor line:
+
+```
+- git anchor: git note a91c4e7f0b22 @ 6744c800af13 (2026-09-17T07:11:02Z, plan dp3-t123-…)
+- git anchor: not anchored (no note on refs/notes/provledger: nothing has been anchored in this repository yet)
+- git anchor: anchor mismatch: change_reason #1414 was anchored as 7f1c05ab93d4 but this ledger holds 3ac9b177e802 (note a91c4e7f0b22 @ 6744c800af13)
+```
+
+The third line is the state that matters most and is easiest to lose: the chains
+walk **and** the witness disagrees. The card does not round it down to `ok`.

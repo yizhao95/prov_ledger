@@ -583,6 +583,33 @@ def _check_significance_disagreements(conn) -> Dict[str, Any]:
             "detail": f"{n} reason(s) hinted major but judged minor (of {total} significance_log rows)"}
 
 
+def _check_unanchored_closes(conn) -> Dict[str, Any]:
+    """DP phase 3 (§7): plans that closed without writing their chain heads into
+    `git notes --ref provledger`. A notes failure never blocks a close, so the
+    only way it stays visible is here — informational, never flips ok."""
+    import os
+    path = os.environ.get("ORCH_DB") or os.path.expanduser("~/skill-workspace/orchestrator.db")
+    if not os.path.exists(path):
+        return {"name": "unanchored_closes", "ok": True, "severity": "warning", "detail": "no orchestrator.db (0 closes)"}
+    try:
+        oc = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            anchored = oc.execute("SELECT COUNT(*) FROM Steps WHERE is_review = '1' AND status = 'COMPLETED' "
+                                  "AND log_context LIKE '%[ANCHOR] chain heads anchored%'").fetchone()[0]
+            unanchored = oc.execute("SELECT COUNT(*) FROM Steps WHERE is_review = '1' AND status = 'COMPLETED' "
+                                    "AND log_context LIKE '%[ANCHOR] not anchored%'").fetchone()[0]
+            switched_off = oc.execute("SELECT COUNT(*) FROM Steps WHERE is_review = '1' AND status = 'COMPLETED' "
+                                      "AND log_context LIKE '%[ANCHOR] off%'").fetchone()[0]
+        finally:
+            oc.close()
+    except sqlite3.Error as e:
+        return {"name": "unanchored_closes", "ok": True, "severity": "warning", "detail": f"orchestrator.db unreadable ({e})"}
+    return {"name": "unanchored_closes", "ok": True, "severity": "warning", "count": int(unanchored),
+            "anchored": int(anchored), "switched_off": int(switched_off),
+            "detail": (f"{unanchored} close(s) could not write a git-note anchor, {anchored} did, "
+                       f"{switched_off} had anchoring switched off")}
+
+
 _CHECKS = [
     _check_node_types_nonempty,
     _check_no_dangling_edges,
@@ -608,6 +635,7 @@ _CHECKS = [
     _check_hook_failures,
     _check_sessions_without_plan,
     _check_significance_disagreements,
+    _check_unanchored_closes,
 ]
 
 
