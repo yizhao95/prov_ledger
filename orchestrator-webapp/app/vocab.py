@@ -207,7 +207,7 @@ UI: dict[str, dict[str, str]] = {
     "ask_scope": {"en": "Scope of the search", "zh": "检索范围"},
     "ask_records": {"en": "Open records", "zh": "展开记录"},
     "ask_export": {"en": "Export card", "zh": "导出证据卡"},
-    "ask_no_model": {"en": "summary unavailable: no model", "zh": "无法生成总结：没有可用模型"},
+    "ask_no_model": {"en": "summary unavailable: no model configured", "zh": "无法生成总结：没有配置模型"},
     "ask_no_model_help": {"en": "The fact table below is the answer. Set PROVLEDGER_ASK_RUNNER=claude to let the "
                                 "dashboard call a model, or run `provledger ask` in a terminal.",
                           "zh": "下面的事实表就是答案。要让面板调用模型，设置 PROVLEDGER_ASK_RUNNER=claude；或在终端运行 `provledger ask`。"},

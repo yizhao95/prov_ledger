@@ -296,6 +296,100 @@ version, answer, cites, dropped, model)` (migration 024) keeps every version,
 including the ones that were rewritten. `model='session'` distinguishes them
 from the headless runner's.
 
+### 10.7 · The headless model path, and saying why there is no summary
+
+`provledger ask --runner claude` makes two calls: `locate.choose` picks nodes
+from the candidate list the code computed, `summarize` restates the fact table.
+Both go through `ask.runner.call`, which is the only place that decides what
+happened — `ok`, `empty`, `failed` or `timeout` — and the reader is told which:
+
+| cause | what the answer says |
+| --- | --- |
+| no runner | `summary unavailable: no model configured` |
+| the code found nothing to ask about | `summary unavailable: no candidate nodes matched the question` |
+| the model was reached and said nothing | `summary unavailable: model returned nothing (rc 3; stderr: …)` |
+| the model answered about itself | `summary unavailable: model call refused [fable]: You've reached your Fable limit… — try --model sonnet` |
+| the answer was not the JSON shape | `summary unavailable: the model did not answer in the JSON shape the prompt requires (it said: …)` |
+| the call raised | `summary unavailable: model call failed: <exception>` |
+| the budget ran out (`--timeout`, default 180 s) | `summary unavailable: model call timed out after 180 s` |
+
+All five used to be one sentence, "summary unavailable: no model". The reason
+that matters: `summarize.prompt_text` asked `importlib.resources` for the
+literal module `orchestrator.testing`, the wheel installs the backend as
+`provledger`, and the `ModuleNotFoundError` was raised **inside** the `try`
+that wrapped the model call — so a packaging bug (FL-067, the same one that hit
+the webapp routes) was reported to the person at the terminal as a missing
+model. Building the prompt is now outside that `try`, the package name is
+derived from `__package__`, and `scripts/pkg_smoke_test.py` loads the prompt
+from the installed wheel, where the repo suite cannot see it.
+
+The refusal row is the one that cost the most. When the account's budget for
+one model ran out, `claude -p` exited 1 and printed a perfectly good JSON object
+carrying `is_error` and the one sentence in the whole run worth reading. The
+runner judged the exit code first, so that sentence was discarded and the note
+said `model returned nothing (rc 1; non-zero exit)`. The JSON is read before the
+exit code now.
+
+`PROVLEDGER_ASK_MODEL` names the model and `--model` beats it; `ask.run`
+resolves it once so both calls, the note and `ask_log.model` agree on which
+model answered. When one declines, the run stops and names another to try — it
+does **not** retry with it. An answer whose model was substituted behind the
+reader's back is an answer whose provenance is a guess, which is the one thing
+this page may not produce.
+
+What each call actually reported — the command, rc, the head of stderr, the
+wall time, the prompt and answer sizes, the head of the raw answer — is
+appended to `ask_log.runner_detail` (migration 029). A tool that fails without
+saying why is the thing this project exists to prevent, and that applies to the
+tool itself.
+
+### 10.8 · Calling a model on someone else's machine
+
+Two rules, both learned the hard way, both applying to every headless call this
+project makes (`ask`, `ClaudeArbiter`, `significance`, the external trigger):
+
+**Isolate the host's settings.** `claude -p` reads the user's own
+`~/.claude/settings.json`. On the machine this was found on it says
+`"language": "Chinese"`, so every headless call answered in Chinese against
+prompts written in English — and *asking for English in the prompt does not
+override it*, which was measured, not assumed. `claude_command()` therefore
+passes `--settings` pointing at a file of ours (`{"language": "en"}`, one temp
+file per process, removed at exit; `$PROVLEDGER_CLAUDE_SETTINGS` overrides it).
+A headless call is a tool call, not a conversation: it must not inherit the
+preferences of whoever happens to be logged in.
+
+**Assume the answer is noisy.** The host's plugins still run, and they write
+into the answer. claude-mem prepends its own paragraph — "Memory capture is
+currently paused due to a quota cooldown…" — to `result` on every call, and
+putting `enabledPlugins: {}` in our settings file does not stop it. Read as
+prose, that paragraph became *a sentence the model had invented with no
+citation*: it was counted as a drop and the reader was told the model had
+guessed. It never was the model.
+
+So nothing here parses `result` as prose. The summarize prompt demands one JSON
+object, `{"sentences": [...]}`, and `summarize.parse_sentences` takes that
+object out of the reply (`ClaudeArbiter.parse_answer` has always done the same
+with `{"pairs": …}`). Anything a plugin wrote in front of it falls off by
+construction, and the J1 / J2 checks then run per sentence exactly as before.
+
+### 10.9 · Language is not correctness
+
+The answer is also in the language that was asked for: `--lang` / `?lang=`
+switched the scope line only, so a model that answered in Chinese against an
+English prompt went through unremarked. `prompts/ask.md` now asks for English
+right after the answer shape, with an English example.
+
+It is **reported, never deleted**. The first version of this check deleted a
+CJK sentence the way it deletes an uncited one, and the result was
+`(nothing survived the checks)` printed over a paragraph whose every citation
+was correct — the whole answer destroyed by a setting on the machine. A machine
+cannot tell a wrong answer from a right one in the wrong language; it can tell
+an uncited sentence, and it can tell an invented number. Those are correctness
+and they still delete. Language is a preference, so `language_mismatch`
+(`None` | `some` | `all`) travels with the answer, the note names the fix
+(`--lang zh`, or the `language` key in `~/.claude/settings.json`), and the
+sentences stay.
+
 `skills/ledger/SKILL.md` states the two commands the skill may run and nothing
 else — no edits, no other tools, no answering from memory or from the source
 tree. A read that can edit is not a read, and the rule only holds if it is
@@ -653,3 +747,158 @@ figure went. File identity across versions — "is this the same deck?" — is
 phase 6 (`file_identity_claim`); until then a revised deck is a new
 `artifact_file` row and the anchors on the old one are checked against the path
 they were given.
+
+## 14 · Phase 5 — the external judge, its log and its gate
+
+Phase 4 put the numbers that live in decks and reports into the ledger. It did
+not answer the question those numbers raise. `R0`–`R6` are functions of the
+ledger and the graph, and a figure on slide 4 changing from 3.2 to 2.8 leaves
+no trace in either: no commit, no test, no drift, no constraint. The rules stay
+quiet, and the ledger records nothing — which is the silent failure this whole
+project exists to remove.
+
+### 14.1 Two questions, in this order
+
+The judge is a headless model given the five paired examples of the design
+document verbatim, and it answers two questions that must not be collapsed
+into one:
+
+1. **Is the change odd?** A number moved or a conclusion was removed, and
+   nothing in the data accounts for it.
+2. **Is the reason already in what the person said?**
+
+```
+不触发 · 纠错      "slide 4 转化率写成了 3.02%，应该是 3.2%"   修笔误，原因自明
+触发 · 违和        "slide 4 转化率改成 2.8%"                   数字变了，没说为什么
+不触发 · 同步      "把 slide 4 按最新一轮结果更新"             理由自明：上游变了
+触发 · 违和        "把 slide 7 关于 EMEA 增长那段去掉"         删结论
+触发但自动解决      "转化率改成 2.8%，Sam 说 EMEA 不算在 Q3 里"  理由已在这句话里
+```
+
+Three of the five are odd; only two become questions. **Odd is not ask**, and
+keeping the two apart is what removes most of the questions. The fifth is the
+point of the whole design: odd, and answered, so the reason is recorded as a
+`stated` reason (rule `X1`) pointing at the span the person actually said — and
+nobody is asked anything.
+
+### 14.2 The disposition, in the prompt, with its argument
+
+> **不确定时，不问。**
+>
+> 漏掉一次 → 少一条记录，损失有限，**可逆**。
+> 多问一次 → 用户被打扰，几次后学会一律跳过，**功能静默死亡，不可逆**。
+
+The two errors do not cost the same, and the model is told why, not merely told
+to be careful (D8). Everything ambiguous therefore ends in `silent`:
+
+| what came back | verdict |
+|---|---|
+| strict JSON, `trigger: false` | `silent` |
+| strict JSON, `trigger: true`, no reason | `ask` |
+| strict JSON, `trigger: true`, a span that is really in that utterance | `auto` — a `stated` reason, rule `X1` |
+| prose, a fence with no object, a missing key, a wrong type | `silent`, basis `unparseable` |
+| a span the utterance does not contain | `silent`, and the basis says the span is not there |
+| nothing at all | `silent` |
+
+No path leads from doubt to a question. A span that is not in the sentence
+records nothing — writing it would be forging the person's words — and asks
+nothing, because we are not sure it was odd either.
+
+### 14.3 Which changes this path is for
+
+Both halves are required: an **external node** (identity `metric:<name>` /
+`declared:<slug>`, node type `metric` / `manual_figure` / `declared`, a node
+with an `occurrence`, or a node the plan changed inside a known
+`artifact_file`) **and** a plan whose words are about the artifact (`deck`,
+`slide`, `sheet`, `report`, `幻灯`, `报表`, `图表` …). A metric named in a
+sentence about `compute_conversion` is a code change; a sentence about a deck
+that happens to name a function is not licence to judge the function.
+
+Which external node is narrowed by the person's own words too: a candidate is
+one whose anchored place (`slide 4`), file, or name appears in one of those
+sentences. Nothing is judged because it merely exists.
+
+The **material** the judge reads is every sentence of the plan, not only the
+ones naming the deck — the fifth example carries its reason in a sentence that
+never says "slide", and filtering the material the way the path is decided
+would hide exactly what the judge is for.
+
+### 14.4 Every verdict is a row (C4), and off is still a row
+
+```sql
+SELECT node_key, verdict, basis FROM trigger_log WHERE path = 'external';
+```
+
+An LLM verdict's problem is not that it is sometimes wrong. It is that when it
+is wrong nobody finds out. So `triggers.evaluate` writes one `trigger_log` row
+per judgement on `path='external'` — **including the ones taken while the
+switch is off**, basis `external trigger off`. A switch that also switches off
+the record could never be shown to be worth turning on.
+
+### 14.5 The two rates (C5)
+
+```json
+{"name": "external_trigger_rates", "severity": "warning",
+ "asks": 12, "asks_answered": 8, "false_asks": 1, "external_false_ask_rate": 0.125,
+ "silences": 40, "misses": 2, "external_miss_rate": 0.05,
+ "detail": "false ask: 1 of 8 answered ask(s) (12.5%) · miss: 2 of 40 silence(s) (5.0%)"}
+```
+
+Both are computed from what happened afterwards, never from a self-report. A
+**false ask** is an ask the person answered `unstated`: they had nothing to
+say, so the question spent trust and bought nothing. A **miss** is a silence
+the person came back to on their own and recorded a reason for. Both print
+their denominator, and with nothing answered yet a rate is `null`, not `0.0` —
+never asked is not the same statement as never wrong.
+
+### 14.6 The gate, and the switch it does not open by itself
+
+```
+provledger trigger eval --runner claude --n-runs 3
+provledger trigger label <trigger_log_id> right|wrong --note "…"
+```
+
+The bar is phase 7's, imported rather than restated: **consistency exactly
+1.0**, **accuracy ≥ 0.9**, **at least 10 labelled items**. The five paired
+examples are seeds — they are the only items whose right answer is known
+without anybody labelling anything — so five can never clear the bar on their
+own. The rest must be real verdicts a real person has marked.
+
+A mark is an **appended** `trigger_log` row naming the row it marks
+(`rule_id = 'X1-label'`, `user_action = right|wrong`). `trigger_log` refuses
+`UPDATE` in SQL, and a calibration set that can rewrite its own history
+calibrates nothing.
+
+Passing the gate does not switch anything on. `reasons.external_trigger` in
+`provledger-extensions.json` is `off` by default and a person turns it on:
+
+```json
+{"version": 1, "reasons": {"external_trigger": "on"}}
+```
+
+### 14.7 What this does not prove
+
+A verdict is a judgement about a sentence, not about a deck. The judge never
+reads the file, never checks whether 2.8 is right, and never produces a number.
+`auto` means the person's own words explained the change and the span was
+really in them; it does not mean the explanation is true. `silent` means
+nothing could be told from the answer — it is not a statement that the change
+was fine. And the rates measure the judge only where a person came back: a
+miss nobody ever noticed is, by construction, not in the numerator.
+
+### 14.8 Where phase 5 left the gate
+
+The one real run of this phase — the five paired examples, `--n-runs 3`,
+headless claude — came back **consistency 0.600, accuracy 0.600, 0
+unanswered**, and the gate refused:
+
+```
+refused: consistency 0.600 < 1.0 — a judge that wavers may not ask anybody anything
+```
+
+Three of the five were answered identically three times and correctly. Two
+wavered across runs — including the fifth, whose majority answer was the right
+one. A judge that gives the right answer twice out of three times is not
+calibrated; under D8 it is a judge that will eventually ask a question it
+should not have asked. So nothing was wired: `reasons.external_trigger`
+remains `off`, and that is the phase's honest outcome rather than its failure.

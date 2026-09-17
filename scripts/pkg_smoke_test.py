@@ -63,7 +63,23 @@ with tempfile.TemporaryDirectory() as td:
     n_dec = conn.execute("SELECT COUNT(*) FROM llm_decisions").fetchone()[0]
     n_led = conn.execute("SELECT COUNT(*) FROM LedgerEntries").fetchone()[0]
     assert n_dec == len(results) and n_led >= len(results), (n_dec, n_led)
+
+    # `ask`'s model path, from the wheel. The prompt used to be looked up under
+    # the literal module name `orchestrator.testing`, which the wheel does not
+    # install: every installed copy raised ModuleNotFoundError inside the try
+    # around the model call and printed "summary unavailable: no model" at a
+    # model that was right there. The repo suite could not see it (pytest puts
+    # orchestrator-backend on the path); this line can.
+    from provledger.ask import summarize as _su
+    _prompt = _su.prompt_text()
+    assert "{question}" in _prompt and "{facts}" in _prompt, "the ask prompt did not ship in the wheel"
+    assert _su.TESTING_PACKAGE == "provledger.testing", _su.TESTING_PACKAGE
+    _ft = {"project": "p", "nodes": [], "ids": {}, "numbers": set()}
+    _degraded = _su.summarize("q", _ft, runner=lambda pr, *, model=None, timeout_s=None: ("", {"rc": 7}))
+    assert _degraded["degraded_reason"] == "empty", _degraded
+    assert "rc 7" in _degraded["note"], _degraded["note"]
+    assert "runner_detail" in [r[1] for r in conn.execute("PRAGMA table_info(ask_log)")]
     conn.close()
 
 print("PACKAGE SMOKE TEST OK — plan/steps, migrations-from-wheel, "
-      "profile→drift→decision→ledger all work from `pip install provledger`")
+      "profile→drift→decision→ledger and the ask prompt all work from `pip install provledger`")

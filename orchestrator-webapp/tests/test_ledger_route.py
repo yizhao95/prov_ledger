@@ -23,6 +23,15 @@ from test_routes import _seed_db, _seed_reasons_and_constraints, _seed_state_gra
 QUESTION = "why must load_orders keep paid orders only?"
 
 
+def _a_cite_from_the_fact_table(prompt: str) -> str:
+    """A real id, taken from the fact table half of the prompt. The RULES half
+    carries `[#3]` as an example, and a stub that grabs that one is testing the
+    example, not the ledger."""
+    table = prompt.split("## Fact table", 1)[-1]
+    m = re.search(r"\[#(\d+)\] asserted", table) or re.search(r"\[#(\d+)\]", table)
+    return m.group(1) if m else "1"
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     dbp = tmp_path / "orch.db"
@@ -46,11 +55,13 @@ def with_model(monkeypatch):
     def runner(prompt, *, model=None, timeout_s=None):
         if '"chosen"' in prompt:
             return json.dumps({"chosen": ["pkg.m.load_orders"], "basis": "the question names it"})
-        rid = re.search(r"\[#(\d+)\] asserted", prompt) or re.search(r"\[#(\d+)\]", prompt)
-        cite = rid.group(1) if rid else "1"
-        return (f"Finance reconciles on paid orders, so load_orders keeps only those [#{cite}]. "
-                f"This sentence has no id and must not survive. "
-                f"It removed 4127 rows last week [#{cite}].")
+        cite = _a_cite_from_the_fact_table(prompt)
+        # the JSON shape the prompt demands, behind the paragraph a host plugin
+        # prepends to `result` on this machine — it must fall off, not be judged
+        return "Memory capture is paused due to a quota cooldown.\n\n" + json.dumps({"sentences": [
+            f"Finance reconciles on paid orders, so load_orders keeps only those [#{cite}].",
+            "This sentence has no id and must not survive.",
+            f"It removed 4127 rows last week [#{cite}]."]})
     monkeypatch.setattr(main, "_ask_runner", lambda request: (runner, "stub"))
     return runner
 
@@ -127,13 +138,92 @@ def test_the_page_states_the_command_for_saying_the_answer_is_wrong(client, with
     assert re.search(r"provledger ask feedback \d+ wrong", t), "the page must show the command, not a button"
 
 
-# ── J7: no model ─────────────────────────────────────────────────────────────
+# ── J7: no model, and the four other reasons there may be no summary ─────────
 
 def test_j7_without_a_model_the_page_shows_the_fact_table_and_says_why(client):
     t = client.get(f"/ledger?q={QUESTION}&project=demo").text
-    assert "summary unavailable: no model" in t
+    assert "summary unavailable: no model configured" in t
     assert "Fact table" in t and "Scope:" in t
-    assert 'data-degraded="1"' in t
+    assert 'data-degraded="1"' in t and 'data-degraded-reason="no_model"' in t
+    assert "PROVLEDGER_ASK_RUNNER=claude" in t, "the help line belongs on THIS reason"
+
+
+@pytest.mark.parametrize("runner,reason,says", [
+    (lambda p, *, model=None, timeout_s=None: ("", {"rc": 3, "stderr_head": "Invalid API key"}),
+     "empty", "model returned nothing (rc 3; stderr: Invalid API key)"),
+    (lambda p, *, model=None, timeout_s=None: (_ for _ in ()).throw(RuntimeError("claude not on PATH")),
+     "failed", "model call failed: RuntimeError: claude not on PATH"),
+    # the real one: the account's budget for that model ran out, `claude -p`
+    # exited 1 and said so in good JSON. The sentence is the answer here.
+    (lambda p, *, model=None, timeout_s=None: ("", {"rc": 1, "refused": True, "is_error": True, "model": "fable",
+                                                    "result": "Your Fable limit is reached. Switch to another model."}),
+     "refused", "model call refused [fable]: Your Fable limit is reached. Switch to another model. — "
+                "try --model sonnet"),
+])
+def test_the_page_names_which_failure_it_was_not_just_no_model(client, monkeypatch, runner, reason, says):
+    """Four different failures printed one sentence, and a packaging bug went out
+    as "you have no model" for weeks. The page says which one happened."""
+    from app import main
+    monkeypatch.setattr(main, "_ask_runner", lambda request: (runner, "claude"))
+    t = client.get(f"/ledger?q={QUESTION}&project=demo").text
+    assert f'data-degraded-reason="{reason}"' in t
+    assert says in t
+    assert "PROVLEDGER_ASK_RUNNER=claude" not in t, "a model WAS configured; do not tell them to configure one"
+
+
+def test_a_question_nothing_matches_says_there_were_no_candidates(client, with_model):
+    t = client.get("/ledger?q=what+did+the+zzzqqq+widget+decide&project=demo").text
+    assert 'data-degraded-reason="no_candidates"' in t
+    assert "no candidate nodes matched the question" in t
+
+
+def test_a_chinese_sentence_is_kept_and_flagged_not_deleted(client, monkeypatch):
+    """The host's `~/.claude/settings.json` says `"language": "Chinese"`, so the
+    headless model answered in Chinese. Deleting for that emptied a correct
+    answer; language is a preference, citations are correctness."""
+    from app import main
+
+    def runner(prompt, *, model=None, timeout_s=None):
+        if '"chosen"' in prompt:
+            return json.dumps({"chosen": ["pkg.m.load_orders"], "basis": "the question names it"})
+        cite = _a_cite_from_the_fact_table(prompt)
+        return json.dumps({"sentences": [f"Finance reconciles on paid orders [#{cite}].",
+                                         f"财务只核对已付款订单 [#{cite}]."]})
+
+    monkeypatch.setattr(main, "_ask_runner", lambda request: (runner, "stub"))
+    en = client.get(f"/ledger?q={QUESTION}&project=demo").text
+    assert "财务只核对已付款订单" in en, "a correct sentence is not deleted for its language"
+    assert 'data-language-mismatch="some"' in en and "--lang zh" in en
+    assert 'data-drop=' not in en
+    zh = client.get(f"/ledger?q={QUESTION}&project=demo&lang=zh").text
+    assert "财务只核对已付款订单" in zh and "Finance reconciles on paid orders" in zh
+    assert "--lang en" in zh, "asked in Chinese, the English half is the odd one — and it is still kept"
+
+
+def test_a_plugin_preamble_never_becomes_a_sentence_the_model_is_blamed_for(client, with_model):
+    """claude-mem prepends its own paragraph to every `result`. Read as prose it
+    counted as an uncited sentence the model had invented. It never was."""
+    t = client.get(f"/ledger?q={QUESTION}&project=demo").text
+    assert "Memory capture is paused" not in t
+    assert re.search(r'data-dropped="(\d+)"', t).group(1) == "2", "the two bad sentences, not the plugin's"
+
+
+def test_the_page_logs_why_the_model_said_nothing(client, monkeypatch):
+    from app import main
+    from provledger import ask as ask_mod, db as odb
+    monkeypatch.setattr(main, "_ask_runner",
+                        lambda request: ((lambda p, *, model=None, timeout_s=None: ("", {"rc": 3, "stderr_head": "boom"})),
+                                         "claude"))
+    t = client.get(f"/ledger?q={QUESTION}&project=demo").text
+    ask_id = int(re.search(r'data-ask-id="(\d+)"', t).group(1))
+    conn = odb.open_db(client._db)
+    try:
+        row = ask_mod.get_ask(conn, ask_id)
+    finally:
+        conn.close()
+    assert row["runner_detail"]["summarize"]["outcome"] == "empty"
+    assert row["runner_detail"]["summarize"]["detail"]["rc"] == 3
+    assert row["elapsed_ms"] is not None
 
 
 # ── the chrome: an entry in the switch bar, and the words ────────────────────

@@ -20,6 +20,7 @@ from __future__ import annotations
 import html as html_mod
 from datetime import datetime, timezone
 
+from . import summarize
 from .. import integrity as integrity_mod, psg_bridge
 
 CHAINS = ("change_reason", "utterance", "reference")
@@ -122,7 +123,7 @@ def card_md(conn, doc: dict, *, now: str | None = None, repo=None) -> str:
     out = [f"# Evidence card · ask {ask_id}", "",
            f"**Question** {doc['question']}", "", "## Answer", ""]
     if doc["degraded"] or not doc["answer"]:
-        out += [f"_{doc.get('note') or 'summary unavailable: no model'}_", "",
+        out += [f"_{doc.get('note') or summarize.NO_MODEL_NOTE}_", "",
                 "The fact table below is the answer.", ""]
     else:
         out += [doc["answer"], ""]
@@ -169,7 +170,7 @@ def card_html(conn, doc: dict, *, now: str | None = None, repo=None) -> str:
         ("ok" if b["integrity"][t]["ok"] else f"<strong>chain broken at #{e(str(b['integrity'][t]['first_bad_id']))}</strong>") +
         f" &middot; {b['integrity'][t]['rows']} row(s) walked &middot; head #{e(str(b['integrity'][t]['head_id'] or '-'))} "
         f"<code>{e((b['integrity'][t]['head_hash'] or '')[:12])}</code></li>" for t in CHAINS)
-    answer = (f"<p><em>{e(doc.get('note') or 'summary unavailable: no model')}</em></p>"
+    answer = (f"<p><em>{e(doc.get('note') or summarize.NO_MODEL_NOTE)}</em></p>"
               if (doc["degraded"] or not doc["answer"]) else f"<p>{e(doc['answer'])}</p>")
     absences = "".join(f"<li>{e(a['text'])}</li>" for a in doc.get("absences") or ())
     return f"""<!doctype html>

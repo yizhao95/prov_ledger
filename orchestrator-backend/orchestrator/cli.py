@@ -405,7 +405,7 @@ def _significance_cmd(args) -> int:
         sql += " ORDER BY r.id DESC LIMIT ?"; params.append(args.limit)
         rows = [dict(r) for r in conn.execute(sql, params)]
         if args.runner == "claude":
-            from .testing.claude_arbiter import default_runner as runner
+            from .testing.claude_arbiter import text_runner as runner
         elif args.runner == "stub-major":
             def runner(prompt, *, model=None, timeout_s=None): return '{"significance": "major", "basis": "stub"}'
         else:
@@ -416,6 +416,45 @@ def _significance_cmd(args) -> int:
         out = {"judged": len(results), "verdicts": sum(1 for x in results if x["verdict"]), "runner": args.runner,
                "confusion": significance.confusion(conn, args.project), "disagreements": len(significance.disagreements(conn, args.project)),
                "rows": results}
+        print(json.dumps(out, indent=1, ensure_ascii=False, default=str))
+        return 0
+    finally:
+        conn.close()
+
+
+def _trigger_cmd(args) -> int:
+    """MANUAL, never CI: the external judge's calibration and the mark a person
+    puts on a verdict. `eval` replays the five paired examples against a runner
+    and prints the gate's verdict; `label` marks one real verdict right or
+    wrong by APPENDING a row — trigger_log refuses UPDATE on purpose."""
+    from .testing import calibration_external as cx
+    conn = _open()
+    try:
+        if args.sub == "label":
+            rid = cx.label(conn, args.trigger_log_id, args.mark, note=args.note)
+            row = conn.execute("SELECT project, plan_id, node_key, verdict, basis FROM trigger_log WHERE id = ?",
+                               (rid,)).fetchone()
+            print(json.dumps({"label_id": rid, "marks": args.trigger_log_id, "user_action": args.mark,
+                              "project": row[0], "plan_id": row[1], "node_key": row[2], "verdict": row[3],
+                              "basis": row[4]}, indent=1, ensure_ascii=False))
+            return 0
+        if args.runner == "claude":
+            from .testing.claude_arbiter import default_runner as runner
+        elif args.runner == "stub-truthful":
+            runner = cx.truthful_runner()
+        elif args.runner == "stub-silent":
+            def runner(prompt, *, model=None, timeout_s=None):
+                return '{"trigger": false, "reason_in_utterance": null, "basis": "stub: never odd"}'
+        else:
+            def runner(prompt, *, model=None, timeout_s=None):
+                return "I could not tell."
+        rep = cx.run(runner, n_runs=args.n_runs, conn=conn, project=args.project,
+                     out_dir=args.out_dir, model=args.model)
+        ok, detail = cx.gate(out_dir=args.out_dir)
+        out = json.loads(rep.to_json())
+        out["runner"] = args.runner
+        out["report_path"] = str(cx.report_path(args.out_dir))
+        out["gate"] = {"ok": ok, "detail": detail}
         print(json.dumps(out, indent=1, ensure_ascii=False, default=str))
         return 0
     finally:
@@ -467,12 +506,27 @@ def _why_cmd(args) -> int:
 
 # ── ask: the read-only question entry (DP phase 2e, Task 2) ──────────────────
 
+ASK_RUNNER_ENV = "PROVLEDGER_ASK_RUNNER"
+ASK_MODEL_ENV = "PROVLEDGER_ASK_MODEL"
+ASK_RUNNERS = ("claude", "stub", "none")
+ASK_TIMEOUT_S = 180.0
+
+
+def _ask_runner_default() -> str:
+    """`--runner`'s default. The dashboard has read PROVLEDGER_ASK_RUNNER since
+    phase 2e and the CLI ignored it, so the same export turned the model on in
+    one place and not the other. An unknown value is not a crash: it falls back
+    to `claude` and the runner name in `ask_log` still says what ran."""
+    choice = (os.environ.get(ASK_RUNNER_ENV) or "").strip().lower()
+    return choice if choice in ASK_RUNNERS else "claude"
+
+
 def _ask_runner(args):
     """(runner, name): the headless-claude runner, a stub, or nothing at all."""
-    if args.no_model:
+    if getattr(args, "no_model", False) or args.runner == "none":
         return None, "none"
-    if args.runner == "stub":
-        return (lambda prompt, *, model=None, timeout_s=None: ""), "stub"
+    if args.runner == "stub":                                # a model that is reached and says nothing
+        return (lambda prompt, *, model=None, timeout_s=None: ("", {"rc": 0, "reason": "the stub runner"})), "stub"
     from .testing.claude_arbiter import default_runner
     return default_runner, "claude"
 
@@ -568,7 +622,7 @@ def _ask_cmd(args) -> int:
     conn = _open()
     try:
         doc = ask_mod.run(conn, project=project, question=args.question, runner=runner, model=args.model,
-                          runner_name=runner_name, lang=args.lang)
+                          runner_name=runner_name, lang=args.lang, timeout_s=args.timeout)
         if args.export:
             from .ask import card
             with open(args.export, "w", encoding="utf-8") as f:
@@ -904,9 +958,17 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--json", action="store_true", help="machine-readable answer, fact table included as text")
     a.add_argument("--export", default=None, metavar="FILE", help="also write the evidence card (markdown) here")
     a.add_argument("--no-model", action="store_true", help="no model at all: print the fact table, the absences and the scope")
-    a.add_argument("--model", default=None, help="model for the headless claude runner")
-    a.add_argument("--runner", default="claude", choices=["claude", "stub"], help="stub never calls a model (tests)")
-    a.add_argument("--lang", default="en", choices=["en", "zh"], help="language of the scope line")
+    a.add_argument("--model", default=os.environ.get(ASK_MODEL_ENV) or None, metavar="NAME",
+                   help=f"model for the headless claude runner (default: ${ASK_MODEL_ENV}, else the runner's own); "
+                        "when one model declines the answer says so and stops — no model is substituted for another")
+    a.add_argument("--runner", default=_ask_runner_default(), choices=list(ASK_RUNNERS),
+                   help=f"which model runs (default: ${ASK_RUNNER_ENV}, else claude); "
+                        "stub is reached and says nothing (tests), none is the no-model path")
+    a.add_argument("--timeout", type=float, default=ASK_TIMEOUT_S, metavar="S",
+                   help=f"seconds one model call may take before the answer says it timed out (default {ASK_TIMEOUT_S:g})")
+    a.add_argument("--lang", default="en", choices=["en", "zh"],
+                   help="the language of the answer and the scope line; an answer in another language is "
+                        "reported, never deleted — language is a preference, citations are correctness")
     a.add_argument("--note", default=None, help="feedback only: a sentence saying what was wrong")
     a.add_argument("--answer-file", default=None, metavar="FILE",
                    help="`ask submit <ask_id> --answer-file F`: a draft written by the session's own model; the same "
@@ -943,6 +1005,21 @@ def build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--model", default=None)
     dis = sgs.add_parser("disagreements", help="hint = major but the latest verdict says minor")
     dis.add_argument("--project", default=None)
+    tg = sub.add_parser("trigger", help="the external-artifact judge: its calibration, its gate, and a person's mark on one verdict")
+    tgs = tg.add_subparsers(dest="sub", required=True)
+    te = tgs.add_parser("eval", help="MANUAL: replay the five paired examples against a runner, add every marked verdict, "
+                                     "write the report and print whether it clears the gate — never run in CI")
+    te.add_argument("--runner", default="stub-truthful",
+                    choices=["claude", "stub-truthful", "stub-silent", "stub-prose"],
+                    help="claude = headless claude (the arbiter's runner); the stubs never call a model")
+    te.add_argument("--n-runs", type=int, default=3, dest="n_runs", help="replays per example; consistency is measured across them")
+    te.add_argument("--project", default=None, help="only this project's marked verdicts count as labels")
+    te.add_argument("--out-dir", default=None, dest="out_dir", help="where the report is written (default: the arbiter eval dir)")
+    te.add_argument("--model", default=None)
+    tl = tgs.add_parser("label", help="mark one verdict right or wrong — appended next to it, never written over it")
+    tl.add_argument("trigger_log_id", type=int)
+    tl.add_argument("mark", choices=["right", "wrong"])
+    tl.add_argument("--note", default=None, help="one sentence: what made it right or wrong")
     r = sub.add_parser("reasons", help="the reasons ledger")
     rs = r.add_subparsers(dest="sub", required=True)
     rs.add_parser("reclass-status", help="whether the legacy node_reason / ledger rows were migrated into change_reason, and the tier counts")
@@ -967,6 +1044,8 @@ def main(argv=None) -> int:
         return _reason_cmd(args)
     if args.cmd == "significance":
         return _significance_cmd(args)
+    if args.cmd == "trigger":
+        return _trigger_cmd(args)
     if args.cmd == "ask":
         return _ask_cmd(args)
     if args.cmd == "verify":
