@@ -154,7 +154,7 @@ python3 -m pytest skills/executing-plans                -q   #  73 passed
 python3 -m pytest skills/update-project-state-graph/scripts/tests -q   #  90 passed
 ```
 
-Total: **1048 passed, 1 skipped** (0.2.0). The project-state-graph suite is
+Total: **1719 collected** (0.3.0; run `scripts/count_tests.sh` to re-derive). The project-state-graph suite is
 the long one (~8 min); run it in three segments if you want to see progress —
 scenarios + runner, the corpus, and the rest (see the phase-8 PR for the
 exact commands). The `llm_consistency` marker is deselected by default and
