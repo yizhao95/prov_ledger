@@ -11,17 +11,13 @@ from __future__ import annotations
 import importlib
 import json
 import re
-import sys
-from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
-WEBAPP = REPO / "orchestrator-webapp"
-sys.path.insert(0, str(WEBAPP))
-sys.path.insert(0, str(REPO / "orchestrator-backend"))
-sys.path.insert(0, str(WEBAPP / "tests"))
-
+# FL-006: nothing outside analyzer/_host.py splices the bundled backend path into
+# sys.path, and the webapp reaches the backend only as `provledger`. Both are
+# conftest.py's job (orchestrator-webapp/conftest.py) — a test that wires its own
+# path is a test that proves something production does not do.
 from test_routes import _seed_db, _seed_reasons_and_constraints, _seed_state_graph  # noqa: E402
 
 QUESTION = "why must load_orders keep paid orders only?"
@@ -163,7 +159,7 @@ def test_the_partial_is_the_same_result_without_the_chrome(client, with_model):
 
 
 def test_an_empty_question_asks_for_one_and_writes_nothing(client):
-    from orchestrator import db as odb
+    from provledger import db as odb
     t = client.get("/ledger?project=demo").text
     assert "Scope:" not in t and "summary unavailable" not in t
     conn = odb.open_db(client._db)

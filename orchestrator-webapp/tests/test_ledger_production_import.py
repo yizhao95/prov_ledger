@@ -33,10 +33,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 WEBAPP = REPO / "orchestrator-webapp"
+# the one path this file legitimately knows, because building a production-shaped
+# import path is its subject; conftest.py does the sys.path wiring (FL-006)
 BACKEND = REPO / "orchestrator-backend"
-sys.path.insert(0, str(WEBAPP))
-sys.path.insert(0, str(BACKEND))
-sys.path.insert(0, str(WEBAPP / "tests"))
 
 from test_routes import _seed_db, _seed_reasons_and_constraints, _seed_state_graph  # noqa: E402
 
