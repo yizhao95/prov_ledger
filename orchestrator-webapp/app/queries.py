@@ -1311,6 +1311,14 @@ def url_for_view(view: str, t: dict, plan_id: str | None = None) -> str | None:
         if at:
             q["at"] = at
         return f"/node/{quote(project, safe='')}/{quote(node, safe='')}" + (f"?{urlencode(q)}" if q else "")
+    if view == "ledger":
+        # DP phase 2e: /ledger is a project-wide read; a node in the triple
+        # becomes the question's starting point rather than a filter.
+        if not project:
+            return None
+        if node:
+            q["node"] = node
+        return f"/ledger?project={quote(project, safe='')}" + (f"&{urlencode(q)}" if q else "")
     if view == "task":
         pid = plan_id or (at if at and kind is None else None)
         if not pid:
@@ -1326,7 +1334,7 @@ def url_for_view(view: str, t: dict, plan_id: str | None = None) -> str | None:
 def view_bar(view: str, t: dict, plan_id: str | None = None) -> dict:
     """What base.html renders: the three links (None when unreachable), the current view, the breadcrumb."""
     return {"current": view, "triple": t, "plan_id": plan_id,
-            "links": {v: url_for_view(v, t, plan_id) for v in ("graph", "node", "task")}}
+            "links": {v: url_for_view(v, t, plan_id) for v in ("graph", "node", "task", "ledger")}}
 
 
 # ── DP phase 2d (Task 3c): the decisions history changed, first ──────────────
@@ -1617,4 +1625,92 @@ def recent_sessions(conn: sqlite3.Connection, limit: int = 10) -> list[dict]:
         d["project"] = sr["project"] if sr else None
         d["degraded"] = not d["plans"]
         out.append(d)
+    return out
+
+
+# ── DP phase 2e (Task 4): /ledger — ask the ledger ───────────────────────────
+# FL-067, webapp side: in production the package is installed under the name
+# `provledger`; `orchestrator` exists only on the pytest pythonpath. A
+# importing the repo-internal name inside a route is green in 237 tests and a
+# 500 on the running server, so the import happens ONCE, here, under the
+# installed name, guarded the way `_psg` and `_pm` already are. The static
+# check in tests/test_ledger_production_import.py keeps it that way.
+try:
+    from provledger import ask as _ask
+except Exception:  # pragma: no cover — the page says "ask unavailable" rather than 500
+    _ask = None
+# The dashboard reads with mode=ro and mutates no business table. `ask_log` is
+# not a business table: it is the trace of the read itself, append-only
+# (migration 023), and spec §21 requires one row per question so a wrong answer
+# can be replayed and fed back as a calibration case. It gets its own writable
+# connection for exactly one INSERT, and when the file cannot be opened for
+# writing the page SAYS the question was not recorded rather than pretending.
+
+def log_ask(doc: dict, path: Path | str = DEFAULT_DB_PATH) -> int | None:
+    """Append one ask_log row. None when the ledger is not writable here."""
+    if _ask is None:
+        return None
+    try:
+        conn = sqlite3.connect(str(path), isolation_level=None)
+    except sqlite3.Error:
+        return None
+    try:
+        conn.execute("PRAGMA busy_timeout = 2000")
+        return _ask.record_ask(conn, project=doc["project"], question=doc["question"],
+                                  candidates=doc["candidates"], chosen=doc["chosen"],
+                                  facts_sha=doc["facts_sha"], answer=doc["answer"], cites=doc["cites"],
+                                  scope=doc["scope"], dropped=doc["dropped"], model=doc.get("model"),
+                                  runner=doc.get("runner"))
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
+def get_ask_row(conn: sqlite3.Connection, ask_id: int) -> dict | None:
+    """One logged question, for the evidence-card download. Read-only."""
+    if _ask is None:
+        return None
+    try:
+        return _ask.get_ask(conn, ask_id)
+    except sqlite3.Error:
+        return None
+
+
+def cite_links(doc: dict) -> dict:
+    """cite token -> {url, kind, node, text} for the answer's `[#id]` markers.
+
+    The URL comes from the same builder the CLI prints, minus the host: a page
+    link and a terminal link must not disagree about where a record lives."""
+    if _ask is None:
+        return {}
+    base = _ask.dashboard_url()
+    out: dict = {}
+    for r in _ask.records(doc["facts"], None):
+        url = r["url"]
+        out[r["cite"]] = {"url": url[len(base):] if url.startswith(base) else url,
+                          "kind": r["kind"], "node": r["node"], "text": r["text"]}
+    return out
+
+
+_CITE_TOKEN = re.compile(r"\[(#[A-Za-z]{0,2}\d+|scope)\]")
+
+
+def cite_parts(sentence: str) -> list[dict]:
+    """A sentence split into prose and cite tokens, so the template can link the
+    tokens without ever building HTML by string concatenation:
+    `[{"text": "…"}, {"cite": "#12"}, …]`. `[scope]` keeps its own marker."""
+    out: list[dict] = []
+    pos = 0
+    for m in _CITE_TOKEN.finditer(sentence or ""):
+        if m.start() > pos:
+            out.append({"text": sentence[pos:m.start()], "cite": None})
+        token = m.group(1)
+        out.append({"text": None, "cite": token if token.startswith("#") else None,
+                    "scope": token == "scope"})
+        if token == "scope":
+            out[-1] = {"text": "[scope]", "cite": None}
+        pos = m.end()
+    if pos < len(sentence or ""):
+        out.append({"text": sentence[pos:], "cite": None})
     return out

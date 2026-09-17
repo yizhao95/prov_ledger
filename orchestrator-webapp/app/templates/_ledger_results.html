@@ -1,0 +1,106 @@
+{#
+  DP phase 2e (Task 4): one answer, and everything the reader needs to distrust it.
+
+  The order is the argument: what it says · what is NOT in the ledger · how far
+  we looked · the records themselves. An absence carries `data-absence` with its
+  code, so a machine can tell "we found nothing" apart from "we found nothing to
+  say" — and the scope line is right underneath, because an absence without a
+  range is not a fact. Every `[#id]` is a link back to the record; ids stay in
+  `data-cite` and `title` rather than in the sentence (layout spec 8).
+#}
+{% if error %}
+<div class="text-sm text-brand-red" data-error="1">{{ error }}</div>
+{% elif doc %}
+{% set d = doc %}
+<div data-ask="1" {% if ask_id %}data-ask-id="{{ ask_id }}"{% endif %}
+     data-dropped="{{ d.dropped.values()|sum }}" {% if d.degraded %}data-degraded="1"{% endif %}>
+
+  {# ── the answer ─────────────────────────────────────────────────────────── #}
+  <div class="text-[11px] uppercase tracking-wide text-brand-muted">{{ ui('ask_answer', lang) }}</div>
+  {% if d.degraded %}
+  <div class="text-sm text-gray-800 mt-1" data-no-model="1">{{ ui('ask_no_model', lang) }}</div>
+  <div class="text-xs text-brand-muted mt-1">{{ ui('ask_no_model_help', lang) }}</div>
+  {% elif not d.sentences %}
+  <div class="text-sm text-brand-muted mt-1">{{ ui('ask_nothing_kept', lang) }}</div>
+  {% else %}
+  <ul class="mt-1 space-y-1">
+    {% for s in d.sentences %}
+    <li class="text-sm text-gray-800 leading-relaxed" data-sentence="{{ loop.index0 }}">
+      {%- for part in s|cite_parts -%}
+        {%- if part.cite -%}
+          {%- set link = cites.get(part.cite) -%}
+          {%- if link -%}
+          <a class="text-brand-blue font-mono text-xs align-baseline" data-cite="{{ part.cite }}"
+             href="{{ link.url }}" title="{{ link.kind }} · {{ link.node }}">[{{ part.cite }}]</a>
+          {%- else -%}
+          <span class="font-mono text-xs text-brand-muted" data-cite="{{ part.cite }}">[{{ part.cite }}]</span>
+          {%- endif -%}
+        {%- else -%}{{ part.text }}{%- endif -%}
+      {%- endfor -%}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {# ── what the code could NOT find ───────────────────────────────────────── #}
+  {% if d.absences %}
+  <div class="mt-4 text-[11px] uppercase tracking-wide text-brand-muted">{{ ui('ask_absences', lang) }}</div>
+  <ul class="mt-1 space-y-1">
+    {% for a in d.absences %}
+    <li class="text-sm text-gray-800 leading-relaxed border-l-2 border-hairline pl-2"
+        data-absence="{{ a.code }}" data-node="{{ a.node }}">{{ a.text }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {# ── how far we looked ──────────────────────────────────────────────────── #}
+  <div class="mt-4 text-[11px] uppercase tracking-wide text-brand-muted">{{ ui('ask_scope', lang) }}</div>
+  {# the scope line carries what the answer COST: a page that gets slower in
+     silence is the failure this project exists to prevent (the first live load
+     of this route took 185 s and said nothing). #}
+  <div class="text-xs text-gray-700 mt-1" data-elapsed-ms="{{ d.elapsed_ms }}"
+       data-scope="{{ d.scope.nodes }}/{{ d.scope.constraints }}/{{ d.scope.influencing }}/{{ d.scope.changes }}">{{ d.scope_line_timed or d.scope_line }}</div>
+  {% if d.dropped.values()|sum %}
+  <div class="text-xs text-brand-red mt-1" data-drops="1">
+    {{ ui('ask_dropped', lang).replace('{n}', d.dropped.values()|sum|string) }} —
+    {% for label, n in [('uncited', d.dropped.uncited), ('unknown id', d.dropped.unknown_id),
+                        ('number not in the fact table', d.dropped.number), ('over the limit', d.dropped.over_limit)] %}
+      {%- if n %}<span data-drop="{{ label }}">{{ n }} {{ label }}</span>{% if not loop.last %} · {% endif %}{% endif -%}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# ── the records themselves ─────────────────────────────────────────────── #}
+  <div class="mt-4 flex items-center gap-3 text-xs">
+    {% if ask_id %}
+    <a class="text-brand-blue" href="/ledger/card?ask_id={{ ask_id }}">{{ ui('ask_export', lang) }} ↓</a>
+    {% else %}
+    <span class="text-brand-muted" data-not-logged="1">{{ ui('ask_not_logged', lang) }}</span>
+    {% endif %}
+    <span class="text-brand-muted">{{ ui('ask_basis', lang) }}: {{ d.chosen.chosen|join(', ') or '—' }}
+      <span class="text-brand-gray">({{ d.chosen.basis }})</span></span>
+  </div>
+
+  <details class="mt-3" id="ledger-records" data-records="{{ cites|length }}">
+    <summary class="text-xs text-brand-blue cursor-pointer">{{ ui('ask_records', lang) }} ({{ cites|length }})</summary>
+    <pre class="mt-2 text-[11px] bg-brand-bg border border-hairline rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">{{ d.facts_text }}</pre>
+    <ul class="mt-2 space-y-1">
+      {% for cite, link in cites.items() %}
+      <li class="text-xs" data-record="{{ cite }}">
+        <a class="text-brand-blue font-mono" data-cite="{{ cite }}" href="{{ link.url }}" title="{{ link.kind }} · {{ link.node }}">[{{ cite }}]</a>
+        <span class="text-brand-muted">{{ link.kind }}</span>
+        <span class="text-gray-800">{{ link.text[:160] }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+  </details>
+
+  {# read-only means read-only: a verdict is recorded from a terminal, never by a page #}
+  {% if ask_id %}
+  <div class="mt-3 text-[11px] text-brand-muted">
+    {{ ui('ask_wrong', lang) }}
+    <code class="bg-brand-bg border border-hairline rounded px-1">provledger ask feedback {{ ask_id }} wrong</code>
+  </div>
+  {% endif %}
+</div>
+{% endif %}

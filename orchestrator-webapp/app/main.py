@@ -8,11 +8,16 @@ Routes:
   GET /node/{project}/{qualified_name} — one node's space / time / intent ledger (phase 8, FL-009)
   GET /graph/{project}?focus=&at=&level=&mode= — the project, cropped to focus | story | data | full (DP phase 2b/2d)
   GET /session/{session_id} — what a session said, cost, changed, published (DP phase 2b)
+  GET /ledger?q=&project= — ask the ledger: located nodes, a computed fact table,
+                            a cited summary, the absences and the scope (DP phase 2e)
+  GET /ledger/results   — the same result as an HTMX partial
+  GET /ledger/card?ask_id= — the evidence card of one logged question, as markdown
 
 Read-only access to ~/skill-workspace/orchestrator.db. Never mutates.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -41,6 +46,9 @@ TEMPLATES.env.globals["tier_badge"] = queries.tier_badge
 # DP phase 2d (Task 3d): the reader's words. `|say` translates one of the ledger's
 # tokens for display; every data-* attribute keeps the token itself.
 TEMPLATES.env.filters["say"] = lambda token, kind="term", lang="zh": vocab.say(token, kind=kind, lang=lang)
+# DP phase 2e (Task 4): one answer sentence -> prose + cite tokens, so `[#12]`
+# becomes a link without the template ever concatenating HTML.
+TEMPLATES.env.filters["cite_parts"] = queries.cite_parts
 TEMPLATES.env.globals["vocab"] = vocab
 TEMPLATES.env.globals["ui"] = vocab.ui
 
@@ -291,6 +299,126 @@ def search(request: Request, q: str | None = None, project: str | None = None):
     finally:
         conn.close()
     return TEMPLATES.TemplateResponse(request, "search.html", ctx)
+
+
+
+# ── DP phase 2e (Task 4): /ledger — ask the ledger, read-only ────────────────
+# The page runs the same pipeline as `provledger ask`: code locates candidates,
+# a model may only pick among them and restate the computed fact table, and code
+# deletes any sentence that does not cite or that carries a number the table does
+# not state. GET only (J6). The model is OFF by default here — a dashboard route
+# that shells out to `claude` for two minutes per request would be a surprise —
+# so the page degrades to the fact table and says so (J7); set
+# PROVLEDGER_ASK_RUNNER=claude to turn it on.
+
+ASK_RUNNER_ENV = "PROVLEDGER_ASK_RUNNER"
+ASK_UNAVAILABLE = "ask unavailable: provledger not importable"
+
+# FL-067, webapp side: the installed package is named `provledger`. Importing
+# `orchestrator` inside a route passed every test (pytest puts
+# orchestrator-backend on the path) and returned 500 from the real server, so
+# every ask import is made once, here, under the installed name.
+try:
+    from provledger import ask as ask_mod
+    from provledger.ask import absence as ask_absence, card as ask_card, facts as ask_facts, scope as ask_scope
+except Exception:  # pragma: no cover — the page says so instead of failing
+    ask_mod = ask_absence = ask_card = ask_facts = ask_scope = None
+
+
+def _ask_runner(request: Request):
+    """(runner, name) for this request. None means: no summary, and say why."""
+    choice = (os.environ.get(ASK_RUNNER_ENV) or "").strip().lower()
+    if choice == "claude":
+        try:
+            from provledger.testing.claude_arbiter import default_runner
+        except Exception:
+            return None, "none"
+        return default_runner, "claude"
+    return None, "none"
+
+
+def _ledger_context(request: Request, q: str | None, project: str | None) -> dict:
+    lang = _lang(request)
+    ctx = {"request": request, "error": None, "q": (q or "").strip(), "project": project, "lang": lang,
+           "doc": None, "cites": {}, "ask_id": None, "logged": True,
+           "bar": queries.view_bar("ledger", queries.triple(project, request.query_params.get("node"), None))}
+    if not ctx["q"]:
+        return ctx
+    if ask_mod is None:
+        ctx["error"] = ASK_UNAVAILABLE
+        return ctx
+    if not project:
+        ctx["error"] = "no project: /ledger?q=…&project=<name>"
+        return ctx
+    try:
+        conn = queries.open_db_readonly()
+    except FileNotFoundError as e:
+        ctx["error"] = f"orchestrator.db not found: {e}"
+        return ctx
+    runner, runner_name = _ask_runner(request)
+    try:
+        doc = ask_mod.run(conn, project=project, question=ctx["q"], runner=runner,
+                          runner_name=runner_name, lang=lang, record=False)
+    except sqlite3.Error as e:
+        ctx["error"] = f"database error: {e}"
+        return ctx
+    finally:
+        conn.close()
+    ctx["doc"] = doc
+    ctx["cites"] = queries.cite_links(doc)
+    ctx["ask_id"] = queries.log_ask(doc)
+    ctx["logged"] = ctx["ask_id"] is not None
+    return ctx
+
+
+@app.get("/ledger", response_class=HTMLResponse)
+def ledger(request: Request, q: str | None = None, project: str | None = None):
+    """Ask the ledger. Read-only, GET only; the only row written is the
+    append-only `ask_log` trace of the question itself (spec §21)."""
+    return TEMPLATES.TemplateResponse(request, "ledger.html", _ledger_context(request, q, project))
+
+
+@app.get("/ledger/results", response_class=HTMLResponse)
+def ledger_results(request: Request, q: str | None = None, project: str | None = None):
+    """The result block alone — what the form swaps in (HTMX partial)."""
+    return TEMPLATES.TemplateResponse(request, "_ledger_results.html", _ledger_context(request, q, project))
+
+
+@app.get("/ledger/card")
+def ledger_card(request: Request, ask_id: int):
+    """The evidence card of one logged question: timeline, per-record hash,
+    the three chains walked at export time, the scope and the export time."""
+    if ask_mod is None:
+        return Response(ASK_UNAVAILABLE, status_code=503, media_type="text/plain")
+    try:
+        conn = queries.open_db_readonly()
+    except FileNotFoundError as e:
+        return Response(f"orchestrator.db not found: {e}", status_code=404, media_type="text/plain")
+    try:
+        row = queries.get_ask_row(conn, ask_id)
+        if row is None:
+            return Response(f"no logged question with ask id {ask_id}", status_code=404, media_type="text/plain")
+        card_mod, facts_mod = ask_card, ask_facts
+        chosen = (row.get("chosen") or {}).get("chosen") or []
+        # psg_db_path=None means "resolve from the registry", which is what the
+        # CLI does too — the card must not depend on the page's import luck
+        ft = facts_mod.facts(conn, None, chosen, project=row["project"])
+        doc = {"ask_id": ask_id, "project": row["project"], "question": row["question"],
+               "facts": ft, "facts_text": facts_mod.render(ft), "facts_sha": row.get("facts_sha") or "",
+               "answer": row.get("answer") or "", "cites": row.get("cites") or [],
+               "absences": [], "scope_line": "", "degraded": not (row.get("answer") or ""),
+               "note": None, "model": row.get("model"), "runner": row.get("runner")}
+        absence_mod, scope_mod = ask_absence, ask_scope
+        doc["absences"] = absence_mod.absences(conn, ft)
+        sc = row.get("scope") or scope_mod.scope(ft)
+        doc["scope_line"] = scope_mod.line(sc, _lang(request))
+        md = card_mod.card_md(conn, doc)
+    except sqlite3.Error as e:
+        return Response(f"database error: {e}", status_code=500, media_type="text/plain")
+    finally:
+        conn.close()
+    return Response(md, media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="evidence-card-{ask_id}.md"'})
 
 
 @app.get("/api/health")

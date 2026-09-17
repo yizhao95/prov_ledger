@@ -105,6 +105,7 @@ WORDS: dict[str, dict[str, dict[str, str]]] = {
         "run": {"en": "run", "zh": "分析批次"},
         "graph": {"en": "Graph", "zh": "依赖图"},
         "reduced": {"en": "Reduced view", "zh": "精简视图"},
+        "ledger": {"en": "Ledger", "zh": "账本问答"},
     },
 }
 
@@ -183,6 +184,30 @@ UI: dict[str, dict[str, str]] = {
     "plans": {"en": "plans", "zh": "个计划"},
     "downstream_consumers": {"en": "Downstream consumers", "zh": "下游消费者"},
     "upstream_sources": {"en": "Upstream", "zh": "上游"},
+    # DP phase 2e (Task 4): /ledger — ask the ledger, read-only.
+    "ask_title": {"en": "Ask the ledger", "zh": "问一句账本"},
+    "ask_placeholder": {"en": "Why was this done? Did we try the alternative?",
+                        "zh": "为什么这样做？我们试过别的吗？"},
+    "ask_button": {"en": "Ask", "zh": "提问"},
+    "ask_hint": {"en": "A question in words. The nodes and the facts are computed; a model may only restate them, "
+                       "and every sentence cites the record it rests on.",
+                 "zh": "用一句话提问。节点与事实由代码算出；模型只能转述，且每句都要引用它所依据的记录。"},
+    "ask_answer": {"en": "Answer", "zh": "答案"},
+    "ask_absences": {"en": "Not in the ledger", "zh": "账本里没有的"},
+    "ask_scope": {"en": "Scope of the search", "zh": "检索范围"},
+    "ask_records": {"en": "Open records", "zh": "展开记录"},
+    "ask_export": {"en": "Export card", "zh": "导出证据卡"},
+    "ask_no_model": {"en": "summary unavailable: no model", "zh": "无法生成总结：没有可用模型"},
+    "ask_no_model_help": {"en": "The fact table below is the answer. Set PROVLEDGER_ASK_RUNNER=claude to let the "
+                                "dashboard call a model, or run `provledger ask` in a terminal.",
+                          "zh": "下面的事实表就是答案。要让面板调用模型，设置 PROVLEDGER_ASK_RUNNER=claude；或在终端运行 `provledger ask`。"},
+    "ask_dropped": {"en": "{n} sentence(s) dropped", "zh": "剔除 {n} 句"},
+    "ask_nothing_kept": {"en": "No sentence survived the checks.", "zh": "没有一句通过校验。"},
+    "ask_not_logged": {"en": "This question was not recorded: the ledger is open read-only here.",
+                       "zh": "本次提问未被记录：此处的账本是只读打开的。"},
+    "ask_wrong": {"en": "Wrong? Record it:", "zh": "答得不对？记一笔："},
+    "ask_basis": {"en": "Nodes chosen", "zh": "选中的节点"},
+    "ask_candidates": {"en": "Candidates", "zh": "候选"},
     "tier_help": {"en": "how the system decided this row's provenance", "zh": "系统如何判定该行的来源"},
     "level_help": {"en": "how checkable the source is", "zh": "来源的可核对程度"},
 }

@@ -48,7 +48,10 @@ def client(tmp_path, monkeypatch):
 def _pages(client):
     pid = client._seeded["plan_id"]
     return ["/", f"/plan/{pid}", "/history", "/outcomes", "/graph/demo",
-            "/node/demo/pkg.m.load_orders", "/session/sess-A", "/search?q=orders&project=demo"]
+            "/node/demo/pkg.m.load_orders", "/session/sess-A", "/search?q=orders&project=demo",
+            # DP phase 2e: an answer whose cites do not resolve is the exact failure
+            # this crawl exists for — every `[#id]` is a link back to a record
+            "/ledger?project=demo", "/ledger?q=why+must+load_orders+keep+paid+orders+only&project=demo"]
 
 
 def _hrefs(html: str) -> list[str]:
