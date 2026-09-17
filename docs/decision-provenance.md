@@ -653,3 +653,158 @@ figure went. File identity across versions — "is this the same deck?" — is
 phase 6 (`file_identity_claim`); until then a revised deck is a new
 `artifact_file` row and the anchors on the old one are checked against the path
 they were given.
+
+## 14 · Phase 5 — the external judge, its log and its gate
+
+Phase 4 put the numbers that live in decks and reports into the ledger. It did
+not answer the question those numbers raise. `R0`–`R6` are functions of the
+ledger and the graph, and a figure on slide 4 changing from 3.2 to 2.8 leaves
+no trace in either: no commit, no test, no drift, no constraint. The rules stay
+quiet, and the ledger records nothing — which is the silent failure this whole
+project exists to remove.
+
+### 14.1 Two questions, in this order
+
+The judge is a headless model given the five paired examples of the design
+document verbatim, and it answers two questions that must not be collapsed
+into one:
+
+1. **Is the change odd?** A number moved or a conclusion was removed, and
+   nothing in the data accounts for it.
+2. **Is the reason already in what the person said?**
+
+```
+不触发 · 纠错      "slide 4 转化率写成了 3.02%，应该是 3.2%"   修笔误，原因自明
+触发 · 违和        "slide 4 转化率改成 2.8%"                   数字变了，没说为什么
+不触发 · 同步      "把 slide 4 按最新一轮结果更新"             理由自明：上游变了
+触发 · 违和        "把 slide 7 关于 EMEA 增长那段去掉"         删结论
+触发但自动解决      "转化率改成 2.8%，Sam 说 EMEA 不算在 Q3 里"  理由已在这句话里
+```
+
+Three of the five are odd; only two become questions. **Odd is not ask**, and
+keeping the two apart is what removes most of the questions. The fifth is the
+point of the whole design: odd, and answered, so the reason is recorded as a
+`stated` reason (rule `X1`) pointing at the span the person actually said — and
+nobody is asked anything.
+
+### 14.2 The disposition, in the prompt, with its argument
+
+> **不确定时，不问。**
+>
+> 漏掉一次 → 少一条记录，损失有限，**可逆**。
+> 多问一次 → 用户被打扰，几次后学会一律跳过，**功能静默死亡，不可逆**。
+
+The two errors do not cost the same, and the model is told why, not merely told
+to be careful (D8). Everything ambiguous therefore ends in `silent`:
+
+| what came back | verdict |
+|---|---|
+| strict JSON, `trigger: false` | `silent` |
+| strict JSON, `trigger: true`, no reason | `ask` |
+| strict JSON, `trigger: true`, a span that is really in that utterance | `auto` — a `stated` reason, rule `X1` |
+| prose, a fence with no object, a missing key, a wrong type | `silent`, basis `unparseable` |
+| a span the utterance does not contain | `silent`, and the basis says the span is not there |
+| nothing at all | `silent` |
+
+No path leads from doubt to a question. A span that is not in the sentence
+records nothing — writing it would be forging the person's words — and asks
+nothing, because we are not sure it was odd either.
+
+### 14.3 Which changes this path is for
+
+Both halves are required: an **external node** (identity `metric:<name>` /
+`declared:<slug>`, node type `metric` / `manual_figure` / `declared`, a node
+with an `occurrence`, or a node the plan changed inside a known
+`artifact_file`) **and** a plan whose words are about the artifact (`deck`,
+`slide`, `sheet`, `report`, `幻灯`, `报表`, `图表` …). A metric named in a
+sentence about `compute_conversion` is a code change; a sentence about a deck
+that happens to name a function is not licence to judge the function.
+
+Which external node is narrowed by the person's own words too: a candidate is
+one whose anchored place (`slide 4`), file, or name appears in one of those
+sentences. Nothing is judged because it merely exists.
+
+The **material** the judge reads is every sentence of the plan, not only the
+ones naming the deck — the fifth example carries its reason in a sentence that
+never says "slide", and filtering the material the way the path is decided
+would hide exactly what the judge is for.
+
+### 14.4 Every verdict is a row (C4), and off is still a row
+
+```sql
+SELECT node_key, verdict, basis FROM trigger_log WHERE path = 'external';
+```
+
+An LLM verdict's problem is not that it is sometimes wrong. It is that when it
+is wrong nobody finds out. So `triggers.evaluate` writes one `trigger_log` row
+per judgement on `path='external'` — **including the ones taken while the
+switch is off**, basis `external trigger off`. A switch that also switches off
+the record could never be shown to be worth turning on.
+
+### 14.5 The two rates (C5)
+
+```json
+{"name": "external_trigger_rates", "severity": "warning",
+ "asks": 12, "asks_answered": 8, "false_asks": 1, "external_false_ask_rate": 0.125,
+ "silences": 40, "misses": 2, "external_miss_rate": 0.05,
+ "detail": "false ask: 1 of 8 answered ask(s) (12.5%) · miss: 2 of 40 silence(s) (5.0%)"}
+```
+
+Both are computed from what happened afterwards, never from a self-report. A
+**false ask** is an ask the person answered `unstated`: they had nothing to
+say, so the question spent trust and bought nothing. A **miss** is a silence
+the person came back to on their own and recorded a reason for. Both print
+their denominator, and with nothing answered yet a rate is `null`, not `0.0` —
+never asked is not the same statement as never wrong.
+
+### 14.6 The gate, and the switch it does not open by itself
+
+```
+provledger trigger eval --runner claude --n-runs 3
+provledger trigger label <trigger_log_id> right|wrong --note "…"
+```
+
+The bar is phase 7's, imported rather than restated: **consistency exactly
+1.0**, **accuracy ≥ 0.9**, **at least 10 labelled items**. The five paired
+examples are seeds — they are the only items whose right answer is known
+without anybody labelling anything — so five can never clear the bar on their
+own. The rest must be real verdicts a real person has marked.
+
+A mark is an **appended** `trigger_log` row naming the row it marks
+(`rule_id = 'X1-label'`, `user_action = right|wrong`). `trigger_log` refuses
+`UPDATE` in SQL, and a calibration set that can rewrite its own history
+calibrates nothing.
+
+Passing the gate does not switch anything on. `reasons.external_trigger` in
+`provledger-extensions.json` is `off` by default and a person turns it on:
+
+```json
+{"version": 1, "reasons": {"external_trigger": "on"}}
+```
+
+### 14.7 What this does not prove
+
+A verdict is a judgement about a sentence, not about a deck. The judge never
+reads the file, never checks whether 2.8 is right, and never produces a number.
+`auto` means the person's own words explained the change and the span was
+really in them; it does not mean the explanation is true. `silent` means
+nothing could be told from the answer — it is not a statement that the change
+was fine. And the rates measure the judge only where a person came back: a
+miss nobody ever noticed is, by construction, not in the numerator.
+
+### 14.8 Where phase 5 left the gate
+
+The one real run of this phase — the five paired examples, `--n-runs 3`,
+headless claude — came back **consistency 0.600, accuracy 0.600, 0
+unanswered**, and the gate refused:
+
+```
+refused: consistency 0.600 < 1.0 — a judge that wavers may not ask anybody anything
+```
+
+Three of the five were answered identically three times and correctly. Two
+wavered across runs — including the fifth, whose majority answer was the right
+one. A judge that gives the right answer twice out of three times is not
+calibrated; under D8 it is a judge that will eventually ask a question it
+should not have asked. So nothing was wired: `reasons.external_trigger`
+remains `off`, and that is the phase's honest outcome rather than its failure.

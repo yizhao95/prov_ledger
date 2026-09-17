@@ -169,6 +169,7 @@ class ExternalReport:
     created_at: str
     items: list[dict] = field(default_factory=list)
     labels: int = 0
+    unanswered: int = 0
     version: int = VERSION
 
     @property
@@ -191,16 +192,21 @@ def run(runner, *, n_runs: int = 3, conn=None, project: str | None = None, out_d
     items: list[dict] = []
     consistent = correct = 0
     seeds = examples()
+    unanswered = 0
     for ex in seeds:
         with example_ledger(ex) as (ectx, enode):
-            verdicts = [external_trigger.judge(ectx, enode, runner=runner, model=model).verdict
-                        for _ in range(max(1, n_runs))]
+            judged = [external_trigger.judge(ectx, enode, runner=runner, model=model)
+                      for _ in range(max(1, n_runs))]
+        verdicts = [v.verdict for v in judged]
+        silent_for_want_of_an_answer = all(v.basis.startswith(external_trigger.NO_ANSWER) for v in judged)
+        unanswered += silent_for_want_of_an_answer
         is_consistent = all(v == verdicts[0] for v in verdicts)
         consistent += is_consistent
         is_correct = is_consistent and verdicts[0] == ex.verdict
         correct += is_correct
         items.append({"id": ex.id, "kind": "example", "answer": verdicts[0], "truth": ex.verdict,
-                      "answers_distinct": len(set(verdicts)), "correct": is_correct})
+                      "answers_distinct": len(set(verdicts)), "correct": is_correct,
+                      "answered": not silent_for_want_of_an_answer})
     marks = labelled(conn, project) if conn is not None else []
     for m in marks:
         right = m["user_action"] == "right"
@@ -213,7 +219,7 @@ def run(runner, *, n_runs: int = 3, conn=None, project: str | None = None, out_d
                          consistency=round(consistent / len(seeds), 4) if seeds else 1.0,
                          accuracy=round(correct / n_truth, 4) if n_truth else None,
                          created_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                         items=items, labels=len(marks))
+                         items=items, labels=len(marks), unanswered=unanswered)
     p = report_path(out_dir)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(rep.to_json() + "\n", encoding="utf-8")
@@ -235,6 +241,10 @@ def gate_reason(rep: ExternalReport | None, *, min_truth: int = MIN_TRUTH,
     say which number fell short and by how much."""
     if rep is None:
         return "no evaluation report"
+    if rep.unanswered:
+        return (f"the runner returned no answer for {rep.unanswered} of {rep.n_items} example(s) — "
+                "an unreachable, refused or timed-out model is not a consistent judge, however "
+                "consistently it says nothing")
     if rep.consistency < 1.0:
         return f"consistency {rep.consistency:.3f} < 1.0 — a judge that wavers may not ask anybody anything"
     if rep.n_truth < min_truth:

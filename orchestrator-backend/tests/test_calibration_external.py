@@ -56,6 +56,20 @@ def _wavering():
     return runner
 
 
+
+def _ctx_for(conn):
+    """A ledger holding one example, for judging a single answer directly."""
+    ex = cx.examples()[1]
+    cx._scaffold(conn, ex)
+    from orchestrator import triggers
+    return triggers._ctx(conn, cx.PROJECT, cx.PLAN, None)
+
+
+def _node_for():
+    return {"node_key": "metric:q3_conv", "qualified_name": "metric:q3_conv", "node_type": "metric",
+            "file_path": cx.DECK, "event_types": [], "payloads": [], "run_id": None}
+
+
 # ── the five seeds ───────────────────────────────────────────────────────────
 
 def test_the_calibration_set_is_the_five_paired_examples_of_the_design_document():
@@ -165,3 +179,32 @@ def test_trigger_label_records_the_mark_and_prints_the_row_it_marks(tmp_path, ca
     assert cli.main(["trigger", "label", str(judged), "wrong"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["marks"] == judged and out["user_action"] == "wrong"
+
+
+# ── an unreachable model is not a consistent judge ───────────────────────────
+
+def _unreachable(prompt, *, model=None, timeout_s=None):
+    """What `default_runner` returns when headless claude exits non-zero — a
+    rate limit, a missing binary, a timeout. All of them look like this."""
+    return ""
+
+
+def test_a_runner_that_answers_nothing_is_silent_and_says_no_answer_not_unparseable(conn):
+    from orchestrator import external_trigger as et2
+    v = et2.judge(_ctx_for(conn), _node_for(), runner=_unreachable)
+    assert v.verdict == "silent" and v.trigger is False
+    assert "no answer" in v.basis and "unparseable" not in v.basis
+
+
+def test_a_report_whose_runner_never_answered_is_refused_however_consistent_it_looks(tmp_path):
+    rep = cx.run(_unreachable, n_runs=3, out_dir=tmp_path)
+    assert rep.consistency == 1.0          # every run agreed — on nothing
+    assert rep.unanswered == 5
+    ok, detail = cx.gate(out_dir=tmp_path)
+    assert ok is False
+    assert "no answer" in detail and "5 of 5" in detail
+
+
+def test_a_report_whose_runner_answered_every_time_has_nothing_unanswered(tmp_path):
+    rep = cx.run(_truthful(), n_runs=2, out_dir=tmp_path)
+    assert rep.unanswered == 0

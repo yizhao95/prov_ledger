@@ -49,6 +49,7 @@ PROMPT_PATH = Path(__file__).resolve().parent / "testing" / "prompts" / "externa
 META_RULE = "不确定时，不问。"
 _JSON_RE = re.compile(r"\{.*\}", re.S)
 BASIS_MAX = 400
+NO_ANSWER = "no answer"          # the prefix of the basis when the runner returned nothing at all
 
 # The words that say a person is talking about something outside the code. Two
 # lists because the person is: an English deck and a Chinese one are the same
@@ -224,7 +225,13 @@ def judge(ctx, node: dict, *, runner=None, model: str | None = None) -> Verdict:
     raw = runner(prompt_for(ctx, node), model=model)
     doc = parse_answer(raw)
     if doc is None:
-        return Verdict(key, "silent", False, "unparseable answer — nothing was asked", None, raw)
+        # "the model said something unusable" and "the model was never reached"
+        # both end in silence, and both must end in silence — but they are not
+        # the same fact, and a calibration report that cannot tell them apart
+        # will call an unreachable model a perfectly consistent judge.
+        basis = ("no answer — the runner returned nothing (model unreachable, refused or timed out)"
+                 if not (raw or "").strip() else "unparseable answer — nothing was asked")
+        return Verdict(key, "silent", False, basis, None, raw)
     basis = doc["basis"] or "no basis given"
     if not doc["trigger"]:
         return Verdict(key, "silent", False, basis, None, raw)
