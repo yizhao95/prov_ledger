@@ -318,6 +318,12 @@
   {
    "plan": "t0",
    "step": "REVIEW",
+   "tag": "[ANCHOR]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t0",
+   "step": "REVIEW",
    "tag": "[REVIEW LOCK]",
    "type": "review_log"
   },
@@ -325,6 +331,12 @@
    "plan": "t0",
    "step": "REVIEW.1",
    "tag": "[REVIEW LOCK]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t1",
+   "step": "REVIEW",
+   "tag": "[ANCHOR]",
    "type": "review_log"
   },
   {
@@ -349,6 +361,12 @@
    "plan": "t1",
    "step": "REVIEW.1",
    "tag": "[REVIEW LOCK]",
+   "type": "review_log"
+  },
+  {
+   "plan": "t2",
+   "step": "REVIEW",
+   "tag": "[ANCHOR]",
    "type": "review_log"
   },
   {

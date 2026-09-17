@@ -124,6 +124,11 @@ def anchor_heads(repo, payload: dict, *, ref: str = NOTES_REF) -> str:
     return note_sha(repo, head, ref=ref) or ""
 
 
+def head_commit(repo) -> str:
+    """The commit an anchor written right now would hang on."""
+    return _head(repo)
+
+
 def note_sha(repo, commit: str, *, ref: str = NOTES_REF) -> str | None:
     """The sha of the note blob currently attached to `commit`, or None."""
     p = _git(repo, "notes", "--ref", ref, "list", commit, check=False)

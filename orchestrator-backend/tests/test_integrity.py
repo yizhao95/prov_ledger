@@ -223,3 +223,95 @@ def test_the_payload_is_one_line_so_append_stays_parseable(conn):
     line = integrity.payload_line(integrity.anchor_payload(conn, plan_id="P0"))
     assert "\n" not in line
     assert json.loads(line)["plan_id"] == "P0"
+
+
+# ── Task 1: a closed plan anchors the chain heads in git notes ────────────────
+
+def _registry(tmp_path, name, repo, db_path="/g/missing.db"):
+    p = tmp_path / "projects.json"
+    p.write_text(json.dumps({"projects": [
+        {"name": name, "repo": str(repo), "db_path": db_path,
+         "commit_sha": "abc", "updated_at": "2026-09-17T00:00:00+00:00"}]}))
+    return str(p)
+
+
+def _close(conn, plan_id, project, reg):
+    from orchestrator import api, db as dbm
+    dbm.insert_plan(conn, plan_id, f"Refactor the {project} pipeline")
+    dbm.insert_step(conn, f"{plan_id}-A", plan_id, "CODE: work", 0, status="COMPLETED")
+    review_id = dbm.insert_review_step(conn, plan_id)
+    api.review_and_complete(conn, plan_id, registry_path=reg)
+    api.start_step(conn, f"{review_id}.1")
+    api.complete_step(conn, f"{review_id}.1")
+    result = api.review_and_complete(conn, plan_id, registry_path=reg)
+    return review_id, result
+
+
+def test_a_closed_plan_anchors_the_three_chain_heads(conn, repo, tmp_path):
+    from orchestrator import db as dbm
+    ids = _seed(conn, n=2)
+    reg = _registry(tmp_path, "demo-app", repo)
+    review_id, result = _close(conn, "p-anchor", "demo-app", reg)
+    assert result["plan_status"] == "COMPLETED"
+    assert result["anchor"]["anchored"] is True
+    anchors = integrity.read_anchors(repo)
+    assert len(anchors) == 1
+    a = anchors[0]
+    assert a["plan_id"] == "p-anchor"
+    for table in integrity.CHAINS:
+        assert a[table]["id"] == ids[table][-1]
+        assert a[table]["hash"] == conn.execute(
+            f"SELECT hash FROM {table} WHERE id = ?", (ids[table][-1],)).fetchone()[0]
+    log = dbm.get_step(conn, review_id)["log_context"]
+    assert "[ANCHOR]" in log and a["note_sha"][:12] in log
+
+
+def test_a_close_without_git_warns_and_never_blocks(conn, tmp_path):
+    """spec §7: no git, no HEAD, or a notes failure is a logged warning — the
+    plan still closes, and the log says what was lost."""
+    from orchestrator import db as dbm
+    _seed(conn, n=1)
+    not_a_repo = tmp_path / "plain"
+    not_a_repo.mkdir()
+    reg = _registry(tmp_path, "demo-app", not_a_repo)
+    review_id, result = _close(conn, "p-nogit", "demo-app", reg)
+    assert result["plan_status"] == "COMPLETED"
+    assert dbm.get_plan(conn, "p-nogit")["status"] == "COMPLETED"
+    assert result["anchor"]["anchored"] is False and result["anchor"]["reason"]
+    log = dbm.get_step(conn, review_id)["log_context"]
+    assert "[ANCHOR] not anchored" in log
+
+
+def test_anchor_off_writes_nothing_and_says_so(conn, repo, tmp_path):
+    from orchestrator import db as dbm
+    _seed(conn, n=1)
+    (repo / "provledger-extensions.json").write_text(
+        json.dumps({"version": 1, "integrity": {"anchor": "off"}}))
+    reg = _registry(tmp_path, "demo-app", repo)
+    review_id, result = _close(conn, "p-off", "demo-app", reg)
+    assert result["plan_status"] == "COMPLETED"
+    assert result["anchor"]["anchored"] is False and result["anchor"]["mode"] == "off"
+    assert integrity.read_anchors(repo) == []
+    assert "[ANCHOR] off" in dbm.get_step(conn, review_id)["log_context"]
+
+
+def test_two_closes_leave_two_anchors_on_the_same_commit(conn, repo, tmp_path):
+    _seed(conn, n=1)
+    reg = _registry(tmp_path, "demo-app", repo)
+    _close(conn, "p-one", "demo-app", reg)
+    _seed(conn, n=1)
+    _close(conn, "p-two", "demo-app", reg)
+    anchors = integrity.read_anchors(repo)
+    assert [a["plan_id"] for a in anchors] == ["p-one", "p-two"]
+    assert anchors[0]["commit"] == anchors[1]["commit"]           # same HEAD, appended
+    assert anchors[0]["change_reason"]["id"] < anchors[1]["change_reason"]["id"]
+
+
+def test_the_anchor_a_close_wrote_is_what_verify_reads_back(conn, repo, tmp_path):
+    _seed(conn, n=1)
+    reg = _registry(tmp_path, "demo-app", repo)
+    _close(conn, "p-round", "demo-app", reg)
+    rep = integrity.verify(conn, against_notes=True, repo=repo)
+    assert rep["ok"] is True and rep["anchored"] is True
+    assert rep["anchors"]["found"] == 1 and rep["anchors"]["matched"] == 1
+    assert rep["anchors"]["latest"]["plan_id"] == "p-round"
