@@ -1731,7 +1731,8 @@ def log_ask(doc: dict, path: Path | str = DEFAULT_DB_PATH) -> int | None:
                                   candidates=doc["candidates"], chosen=doc["chosen"],
                                   facts_sha=doc["facts_sha"], answer=doc["answer"], cites=doc["cites"],
                                   scope=doc["scope"], dropped=doc["dropped"], model=doc.get("model"),
-                                  runner=doc.get("runner"))
+                                  runner=doc.get("runner"), elapsed_ms=doc.get("elapsed_ms"),
+                                  runner_detail=doc.get("runner_detail"))
     except sqlite3.Error:
         return None
     finally:

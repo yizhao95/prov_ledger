@@ -18,8 +18,15 @@
   {# ── the answer ─────────────────────────────────────────────────────────── #}
   <div class="text-[11px] uppercase tracking-wide text-brand-muted">{{ ui('ask_answer', lang) }}</div>
   {% if d.degraded %}
-  <div class="text-sm text-gray-800 mt-1" data-no-model="1">{{ ui('ask_no_model', lang) }}</div>
+  {# The note NAMES the cause: no runner, no candidate node, a runner that came
+     back empty (with its rc and the head of stderr), one that raised, one that
+     ran out of time. One sentence for all of them sent a real
+     packaging bug out as "you have no model" (see ask.runner). #}
+  <div class="text-sm text-gray-800 mt-1" data-no-model="1"
+       data-degraded-reason="{{ d.degraded_reason or 'no_model' }}">{{ d.note or ui('ask_no_model', lang) }}</div>
+  {% if (d.degraded_reason or 'no_model') == 'no_model' %}
   <div class="text-xs text-brand-muted mt-1">{{ ui('ask_no_model_help', lang) }}</div>
+  {% endif %}
   {% elif not d.sentences %}
   <div class="text-sm text-brand-muted mt-1">{{ ui('ask_nothing_kept', lang) }}</div>
   {% else %}
@@ -64,10 +71,16 @@
   <div class="text-xs text-brand-red mt-1" data-drops="1">
     {{ ui('ask_dropped', lang).replace('{n}', d.dropped.values()|sum|string) }} —
     {% for label, n in [('uncited', d.dropped.uncited), ('unknown id', d.dropped.unknown_id),
-                        ('number not in the fact table', d.dropped.number), ('over the limit', d.dropped.over_limit)] %}
+                        ('number not in the fact table', d.dropped.number),
+                        ('over the limit', d.dropped.over_limit)] %}
       {%- if n %}<span data-drop="{{ label }}">{{ n }} {{ label }}</span>{% if not loop.last %} · {% endif %}{% endif -%}
     {% endfor %}
   </div>
+  {% endif %}
+  {# Language is not correctness. Deleting a sentence for it deleted a CORRECT
+     answer, so a mismatch is said and the sentences stay. #}
+  {% if d.language_mismatch %}
+  <div class="text-xs text-brand-muted mt-1" data-language-mismatch="{{ d.language_mismatch }}">{{ d.note }}</div>
   {% endif %}
 
   {# ── the records themselves ─────────────────────────────────────────────── #}

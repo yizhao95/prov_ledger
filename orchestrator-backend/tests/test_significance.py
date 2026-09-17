@@ -108,7 +108,7 @@ def test_apply_for_plan_in_hint_mode_never_calls_a_runner_and_writes_exactly_one
     n = {"calls": 0}
     def boom(*a, **k):
         n["calls"] += 1; raise AssertionError("no runner in hint mode")
-    monkeypatch.setattr("orchestrator.testing.claude_arbiter.default_runner", boom)
+    monkeypatch.setattr("orchestrator.testing.claude_arbiter.text_runner", boom)
     out = significance.apply_for_plan(conn, project="proj", plan_id="P1", psg_db_path=graph, mode="hint", commit=True)
     assert out == {"plan_id": "P1", "mode": "hint", "judged": 2, "major": 1, "minor": 1, "verdicts": 0} and n["calls"] == 0
     rows = [tuple(r) for r in conn.execute("SELECT reason_id, COUNT(*) FROM significance_log GROUP BY 1 ORDER BY 1")]

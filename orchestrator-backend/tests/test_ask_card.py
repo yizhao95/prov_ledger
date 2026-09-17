@@ -43,7 +43,9 @@ def seeded(conn, graph):
 
 
 def _doc(conn, graph, answer=None):
-    runner = None if answer is None else (lambda p, *, model=None, timeout_s=None: answer)
+    # the summarize model answers in the JSON shape the prompt demands
+    runner = None if answer is None else (lambda p, *, model=None, timeout_s=None:
+                                          json.dumps({"sentences": [answer]}))
     chooser = (lambda p, *, model=None, timeout_s=None: json.dumps({"chosen": ["pkg.pipe.build_features"], "basis": "named"}))
     return ask.run(conn, project="proj", question=QUESTION, psg_db_path=graph,
                    runner=chooser if answer is not None else None, summary_runner=runner,

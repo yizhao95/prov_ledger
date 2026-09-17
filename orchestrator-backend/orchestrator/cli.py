@@ -405,7 +405,7 @@ def _significance_cmd(args) -> int:
         sql += " ORDER BY r.id DESC LIMIT ?"; params.append(args.limit)
         rows = [dict(r) for r in conn.execute(sql, params)]
         if args.runner == "claude":
-            from .testing.claude_arbiter import default_runner as runner
+            from .testing.claude_arbiter import text_runner as runner
         elif args.runner == "stub-major":
             def runner(prompt, *, model=None, timeout_s=None): return '{"significance": "major", "basis": "stub"}'
         else:
@@ -467,12 +467,27 @@ def _why_cmd(args) -> int:
 
 # ── ask: the read-only question entry (DP phase 2e, Task 2) ──────────────────
 
+ASK_RUNNER_ENV = "PROVLEDGER_ASK_RUNNER"
+ASK_MODEL_ENV = "PROVLEDGER_ASK_MODEL"
+ASK_RUNNERS = ("claude", "stub", "none")
+ASK_TIMEOUT_S = 180.0
+
+
+def _ask_runner_default() -> str:
+    """`--runner`'s default. The dashboard has read PROVLEDGER_ASK_RUNNER since
+    phase 2e and the CLI ignored it, so the same export turned the model on in
+    one place and not the other. An unknown value is not a crash: it falls back
+    to `claude` and the runner name in `ask_log` still says what ran."""
+    choice = (os.environ.get(ASK_RUNNER_ENV) or "").strip().lower()
+    return choice if choice in ASK_RUNNERS else "claude"
+
+
 def _ask_runner(args):
     """(runner, name): the headless-claude runner, a stub, or nothing at all."""
-    if args.no_model:
+    if getattr(args, "no_model", False) or args.runner == "none":
         return None, "none"
-    if args.runner == "stub":
-        return (lambda prompt, *, model=None, timeout_s=None: ""), "stub"
+    if args.runner == "stub":                                # a model that is reached and says nothing
+        return (lambda prompt, *, model=None, timeout_s=None: ("", {"rc": 0, "reason": "the stub runner"})), "stub"
     from .testing.claude_arbiter import default_runner
     return default_runner, "claude"
 
@@ -568,7 +583,7 @@ def _ask_cmd(args) -> int:
     conn = _open()
     try:
         doc = ask_mod.run(conn, project=project, question=args.question, runner=runner, model=args.model,
-                          runner_name=runner_name, lang=args.lang)
+                          runner_name=runner_name, lang=args.lang, timeout_s=args.timeout)
         if args.export:
             from .ask import card
             with open(args.export, "w", encoding="utf-8") as f:
@@ -904,9 +919,17 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--json", action="store_true", help="machine-readable answer, fact table included as text")
     a.add_argument("--export", default=None, metavar="FILE", help="also write the evidence card (markdown) here")
     a.add_argument("--no-model", action="store_true", help="no model at all: print the fact table, the absences and the scope")
-    a.add_argument("--model", default=None, help="model for the headless claude runner")
-    a.add_argument("--runner", default="claude", choices=["claude", "stub"], help="stub never calls a model (tests)")
-    a.add_argument("--lang", default="en", choices=["en", "zh"], help="language of the scope line")
+    a.add_argument("--model", default=os.environ.get(ASK_MODEL_ENV) or None, metavar="NAME",
+                   help=f"model for the headless claude runner (default: ${ASK_MODEL_ENV}, else the runner's own); "
+                        "when one model declines the answer says so and stops — no model is substituted for another")
+    a.add_argument("--runner", default=_ask_runner_default(), choices=list(ASK_RUNNERS),
+                   help=f"which model runs (default: ${ASK_RUNNER_ENV}, else claude); "
+                        "stub is reached and says nothing (tests), none is the no-model path")
+    a.add_argument("--timeout", type=float, default=ASK_TIMEOUT_S, metavar="S",
+                   help=f"seconds one model call may take before the answer says it timed out (default {ASK_TIMEOUT_S:g})")
+    a.add_argument("--lang", default="en", choices=["en", "zh"],
+                   help="the language of the answer and the scope line; an answer in another language is "
+                        "reported, never deleted — language is a preference, citations are correctness")
     a.add_argument("--note", default=None, help="feedback only: a sentence saying what was wrong")
     a.add_argument("--answer-file", default=None, metavar="FILE",
                    help="`ask submit <ask_id> --answer-file F`: a draft written by the session's own model; the same "
