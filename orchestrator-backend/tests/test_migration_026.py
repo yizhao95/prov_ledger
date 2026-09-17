@@ -1,4 +1,4 @@
-"""023 — declared_node: the table that holds the world outside the code.
+"""026 — declared_node: the table that holds the world outside the code.
 
 Append-only like every other provenance table: one INSERT per version, the
 only column an UPDATE may touch is `superseded_by`, DELETE is refused. `tier`

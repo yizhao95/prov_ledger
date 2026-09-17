@@ -1,4 +1,4 @@
--- 023_declared_nodes.sql — DP phase 2c: the world outside the code, in the same graph.
+-- 026_declared_nodes.sql — DP phase 2c: the world outside the code, in the same graph.
 --
 -- The third core of the product (NORTH-STAR): a user says one sentence and a
 -- business rule, an external system, a stakeholder decision, an external

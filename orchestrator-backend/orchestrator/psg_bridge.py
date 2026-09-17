@@ -611,6 +611,32 @@ def _split_crowded_levels(nodes: list[dict], crowd: int = CROWDED_LEVEL) -> None
                 n["level"] = level * 10 + min(row, 9)
 
 
+def declaration_of(psg_db_path: str | None, node_key: str | None) -> dict | None:
+    """The declaration behind a node, or None for ordinary code (DP phase 2c).
+
+    {slug, node_type, tier, version, description, attrs, links} read from the
+    node row the analyzer's declared stage wrote. `tier` is the DECLARATION's
+    (stated | asserted): who put it there. It is not the node's event tier, and
+    the page prints both."""
+    if not (psg_db_path and node_key):
+        return None
+    rows = _query(psg_db_path, "SELECT n.metadata_json, t.name FROM node n JOIN node_type t ON t.id = n.node_type_id "
+                               "WHERE n.node_key = ? AND t.name IN ({}) ORDER BY n.id DESC LIMIT 1".format(
+                                   ",".join("?" * len(DECLARED_TYPES))), (node_key, *DECLARED_TYPES))
+    if not rows:
+        return None
+    try:
+        meta = json.loads(rows[0]["metadata_json"] or "{}")
+    except ValueError:
+        meta = {}
+    if not meta:
+        return None
+    return {"slug": meta.get("slug"), "node_type": rows[0]["name"], "tier": meta.get("tier"),
+            "state": meta.get("state"), "version": meta.get("version"), "description": meta.get("description"),
+            "attrs": meta.get("attrs") or {}, "links": meta.get("links") or [],
+            "links_checked": bool(meta.get("links_checked")), "field_tiers": meta.get("field_tiers") or {}}
+
+
 def latest_tier_of(psg_db_path: str | None, run_id: int | None = None) -> dict[str, str]:
     """node_key → tier of its latest event (at or before run_id) — the colour rule of the views."""
     if not psg_db_path:

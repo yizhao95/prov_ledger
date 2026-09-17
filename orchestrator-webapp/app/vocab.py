@@ -45,6 +45,16 @@ WORDS: dict[str, dict[str, dict[str, str]]] = {
         "stated": {"en": "stated", "zh": "用户陈述"},
         "unstated": {"en": "unstated", "zh": "未陈述"},
     },
+    # DP phase 2c: the five kinds of object a person can declare. Five different
+    # things in both columns — "external system" and "external dataset" must not
+    # collapse into "external", or the reader loses the distinction the type carries.
+    "declared_type": {
+        "external_system": {"en": "external system", "zh": "外部系统"},
+        "business_rule": {"en": "business rule", "zh": "业务规则"},
+        "stakeholder_decision": {"en": "stakeholder decision", "zh": "相关方决定"},
+        "external_dataset": {"en": "external dataset", "zh": "外部数据集"},
+        "manual_figure": {"en": "hand-computed figure", "zh": "手算数字"},
+    },
     # a finding never blocks; the severity states what it asks of the reader
     "severity": {
         "blocking": {"en": "Blocking", "zh": "需响应"},
@@ -209,6 +219,11 @@ UI: dict[str, dict[str, str]] = {
     "ask_basis": {"en": "Nodes chosen", "zh": "选中的节点"},
     "ask_candidates": {"en": "Candidates", "zh": "候选"},
     "tier_help": {"en": "how the system decided this row's provenance", "zh": "系统如何判定该行的来源"},
+    "declared": {"en": "declared", "zh": "声明式"},
+    "declared_help": {"en": "not code — somebody put this in the graph in one sentence", "zh": "不是代码：有人用一句话把它放进图里"},
+    "declared_lane": {"en": "Declared constraints", "zh": "声明式约束"},
+    "declares": {"en": "declares", "zh": "声明"},
+    "constrains": {"en": "constrains", "zh": "约束"},
     "level_help": {"en": "how checkable the source is", "zh": "来源的可核对程度"},
 }
 

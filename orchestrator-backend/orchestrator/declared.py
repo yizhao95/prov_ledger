@@ -265,6 +265,42 @@ def _next_version(conn, previous: dict, changes: dict, commit: bool) -> dict:
     return get(conn, new["id"])
 
 
+CONSTRAINT_TYPES = ("business_rule", "stakeholder_decision")
+
+
+def anchor_as_constraint(conn, row: dict, utterance_id: int, *, commit: bool = True) -> list[int]:
+    """Spec §18: a business rule is "the node form of a constraint" — it is a
+    node in the graph AND a record the next plan's headline can find. So a
+    confirmed rule or stakeholder decision writes one active constraint per node
+    it says it constrains, anchored by qualified name, carrying the user's own
+    words as its span (tier stated, because they said it).
+
+    Other kinds declare nothing about what may be done, so they anchor nothing:
+    an external system is a fact, not a rule.
+    """
+    if row.get("node_type") not in CONSTRAINT_TYPES:
+        return []
+    try:
+        links = json.loads(row.get("links_json") or "[]")
+    except ValueError:
+        return []
+    targets = [d["to"] for d in links if isinstance(d, dict) and d.get("kind") == "declared_constrains" and d.get("to")]
+    if not targets:
+        return []
+    text = provenance.get_utterance(conn, int(utterance_id))["text"]
+    out = []
+    for target in sorted(set(targets)):
+        out.append(provenance.insert_reason(
+            conn, project=row["project"], plan_id="declare", node_key=target, kind="organizational",
+            role="constraint", statement=row["description"],
+            rationale=f"declared as {row['qualified_name']} ({row['node_type']})",
+            rationale_visibility="shareable", verbatim=(int(utterance_id), 0, len(text)),
+            recorded_by="human", occurred_at=row["occurred_at"], commit=False))
+    if commit:
+        conn.commit()
+    return out
+
+
 def confirm(conn, draft_id: int, utterance_id: int, *, commit: bool = True) -> dict:
     """The user says the words that put this node in the graph. The row becomes
     `stated` and active; the fields the model wrote keep saying so."""
