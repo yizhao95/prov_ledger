@@ -20,6 +20,7 @@ import subprocess
 from importlib import resources
 from pathlib import Path
 
+from ..ask import runner as R
 from ..graph_api import Ambiguity, Assertion, Row
 
 ARBITER_ID = "anthropic.claude_headless"
@@ -39,21 +40,56 @@ def claude_command(model: str | None = None) -> list[str]:
     return cmd
 
 
-def default_runner(prompt: str, *, model: str | None = None, timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
-    """Run headless claude with `prompt` on stdin from a neutral cwd; return
-    the `result` text, or '' on timeout / non-zero exit / non-JSON output."""
+def default_runner(prompt: str, *, model: str | None = None,
+                   timeout_s: float = DEFAULT_TIMEOUT_S) -> tuple[str, dict]:
+    """Run headless claude with `prompt` on stdin from a neutral cwd and return
+    `(result text, detail)`.
+
+    It used to return `''` for a timeout, a non-zero exit and unparseable output
+    alike, and the caller printed "no model" for all three. Now the reason
+    travels: `detail` carries the return code, the head of stderr, the wall time
+    and the command, a timeout raises `RunnerTimeout`, and a `claude` that is
+    not on PATH raises `RunnerError`. Whoever called decides what to say —
+    `text_runner` is the thin wrapper for callers that only want the text."""
+    import time
+
+    cmd = claude_command(model)
+    detail = {"cmd": " ".join(cmd), "model": model, "timeout_s": timeout_s, "prompt_chars": len(prompt or "")}
+    started = time.perf_counter()
+
+    def timed() -> dict:
+        return {**detail, "elapsed_ms": int((time.perf_counter() - started) * 1000)}
+
     try:
-        p = subprocess.run(claude_command(model), input=prompt, capture_output=True, text=True,
+        p = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
                            timeout=timeout_s, cwd=os.environ.get("TMPDIR") or "/tmp")
-    except (subprocess.TimeoutExpired, OSError):
-        return ""
+    except subprocess.TimeoutExpired as e:
+        raise R.RunnerTimeout(f"claude did not answer within {timeout_s} s",
+                              {**timed(), "stderr_head": R.head(getattr(e, "stderr", None))}) from e
+    except OSError as e:
+        raise R.RunnerError(f"could not run claude: {e}", {**timed(), "error": f"{type(e).__name__}: {e}"}) from e
+    d = {**timed(), "rc": p.returncode, "stderr_head": R.head(p.stderr), "stdout_chars": len(p.stdout or "")}
     if p.returncode != 0:
-        return ""
+        return "", {**d, "reason": "non-zero exit"}
     try:
         doc = json.loads(p.stdout)
     except ValueError:
+        return "", {**d, "reason": "output was not JSON", "stdout_head": R.head(p.stdout)}
+    if not isinstance(doc, dict):
+        return "", {**d, "reason": "output was not a JSON object"}
+    text = doc.get("result") or ""
+    if not text:
+        d["reason"] = "the JSON answer had no `result`"
+    return text, d
+
+
+def text_runner(prompt: str, *, model: str | None = None, timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
+    """`default_runner` for callers that want the text and nothing else — the
+    arbiter, which treats every silence the same way (no assertion)."""
+    try:
+        return default_runner(prompt, model=model, timeout_s=timeout_s)[0]
+    except R.RunnerError:
         return ""
-    return doc.get("result") or "" if isinstance(doc, dict) else ""
 
 
 def parse_answer(text: str | None) -> tuple[list[tuple[str, str]], str] | None:
@@ -96,7 +132,7 @@ class ClaudeArbiter:
     def __init__(self, *, model: str | None = None, timeout_s: float = DEFAULT_TIMEOUT_S, runner=None, repo: str | None = None):
         self.model = model or os.environ.get("PROVLEDGER_ARBITER_MODEL") or None
         self.timeout_s = timeout_s
-        self.runner = runner or default_runner
+        self.runner = runner or text_runner
         self.repo = repo or os.environ.get("PROVLEDGER_ARBITER_REPO") or None
         self.exchanges: list[dict] = []      # (prompt, raw answer, verdict) per call — for the dogfood log
 

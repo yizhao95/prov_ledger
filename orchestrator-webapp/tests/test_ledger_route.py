@@ -127,13 +127,74 @@ def test_the_page_states_the_command_for_saying_the_answer_is_wrong(client, with
     assert re.search(r"provledger ask feedback \d+ wrong", t), "the page must show the command, not a button"
 
 
-# ── J7: no model ─────────────────────────────────────────────────────────────
+# ── J7: no model, and the four other reasons there may be no summary ─────────
 
 def test_j7_without_a_model_the_page_shows_the_fact_table_and_says_why(client):
     t = client.get(f"/ledger?q={QUESTION}&project=demo").text
-    assert "summary unavailable: no model" in t
+    assert "summary unavailable: no model configured" in t
     assert "Fact table" in t and "Scope:" in t
-    assert 'data-degraded="1"' in t
+    assert 'data-degraded="1"' in t and 'data-degraded-reason="no_model"' in t
+    assert "PROVLEDGER_ASK_RUNNER=claude" in t, "the help line belongs on THIS reason"
+
+
+@pytest.mark.parametrize("runner,reason,says", [
+    (lambda p, *, model=None, timeout_s=None: ("", {"rc": 3, "stderr_head": "Invalid API key"}),
+     "empty", "model returned nothing (rc 3; stderr: Invalid API key)"),
+    (lambda p, *, model=None, timeout_s=None: (_ for _ in ()).throw(RuntimeError("claude not on PATH")),
+     "failed", "model call failed: RuntimeError: claude not on PATH"),
+])
+def test_the_page_names_which_failure_it_was_not_just_no_model(client, monkeypatch, runner, reason, says):
+    """Four different failures printed one sentence, and a packaging bug went out
+    as "you have no model" for weeks. The page says which one happened."""
+    from app import main
+    monkeypatch.setattr(main, "_ask_runner", lambda request: (runner, "claude"))
+    t = client.get(f"/ledger?q={QUESTION}&project=demo").text
+    assert f'data-degraded-reason="{reason}"' in t
+    assert says in t
+    assert "PROVLEDGER_ASK_RUNNER=claude" not in t, "a model WAS configured; do not tell them to configure one"
+
+
+def test_a_question_nothing_matches_says_there_were_no_candidates(client, with_model):
+    t = client.get("/ledger?q=what+did+the+zzzqqq+widget+decide&project=demo").text
+    assert 'data-degraded-reason="no_candidates"' in t
+    assert "no candidate nodes matched the question" in t
+
+
+def test_a_chinese_sentence_is_dropped_from_an_english_answer(client, monkeypatch):
+    """`?lang=` used to switch the scope line only; a model answering in Chinese
+    against an English prompt went straight through."""
+    from app import main
+
+    def runner(prompt, *, model=None, timeout_s=None):
+        if '"chosen"' in prompt:
+            return json.dumps({"chosen": ["pkg.m.load_orders"], "basis": "the question names it"})
+        cite = (re.search(r"\[#(\d+)\]", prompt) or re.match("1", "1")).group(1)
+        return f"Finance reconciles on paid orders [#{cite}]. 财务只核对已付款订单 [#{cite}]."
+
+    monkeypatch.setattr(main, "_ask_runner", lambda request: (runner, "stub"))
+    en = client.get(f"/ledger?q={QUESTION}&project=demo").text
+    assert "财务只核对已付款订单" not in en
+    assert "not in the language asked for" in en and 'data-drop="not in the language asked for"' in en
+    zh = client.get(f"/ledger?q={QUESTION}&project=demo&lang=zh").text
+    assert "财务只核对已付款订单" in zh
+
+
+def test_the_page_logs_why_the_model_said_nothing(client, monkeypatch):
+    from app import main
+    from provledger import ask as ask_mod, db as odb
+    monkeypatch.setattr(main, "_ask_runner",
+                        lambda request: ((lambda p, *, model=None, timeout_s=None: ("", {"rc": 3, "stderr_head": "boom"})),
+                                         "claude"))
+    t = client.get(f"/ledger?q={QUESTION}&project=demo").text
+    ask_id = int(re.search(r'data-ask-id="(\d+)"', t).group(1))
+    conn = odb.open_db(client._db)
+    try:
+        row = ask_mod.get_ask(conn, ask_id)
+    finally:
+        conn.close()
+    assert row["runner_detail"]["summarize"]["outcome"] == "empty"
+    assert row["runner_detail"]["summarize"]["detail"]["rc"] == 3
+    assert row["elapsed_ms"] is not None
 
 
 # ── the chrome: an entry in the switch bar, and the words ────────────────────

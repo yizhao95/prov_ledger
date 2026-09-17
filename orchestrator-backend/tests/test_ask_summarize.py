@@ -89,7 +89,7 @@ def test_scope_cites_and_table_numbers_are_allowed(conn, ft, seeded):
                                                 "text": "`pkg.pipe.build_features` has never been verified: no outcome is recorded for it in scope. [scope]"}],
                        scope_line="Scope: 1 node, 1 constraint, 0 influencing records, 1 change, 2026-09-01 to 2026-09-01; 3 candidates, 1 chosen; nothing truncated.",
                        runner=_runner(answer))
-    assert len(got["sentences"]) == 2 and got["dropped"] == {"uncited": 0, "unknown_id": 0, "number": 0, "over_limit": 0}
+    assert len(got["sentences"]) == 2 and got["dropped"] == SU.no_drops()
     assert "[scope]" in got["answer"] and "2026-09-01" in got["answer"]
 
 
@@ -103,7 +103,8 @@ def test_more_than_eight_sentences_are_cut_and_counted(conn, ft, seeded):
 def test_j7_without_a_model_the_fact_table_is_the_answer(conn, graph, seeded):
     doc = ask.run(conn, project="proj", question=QUESTION, psg_db_path=graph, runner=None)
     assert doc["degraded"] is True and doc["answer"] == ""
-    assert doc["note"] == SU.NO_MODEL_NOTE == "summary unavailable: no model"
+    assert doc["note"] == SU.NO_MODEL_NOTE == "summary unavailable: no model configured"
+    assert doc["degraded_reason"] == "no_model"
     assert "Fact table" in doc["facts_text"] and doc["scope_line"].startswith("Scope:")
     assert doc["chosen"]["basis"] == "fallback: no model"
 

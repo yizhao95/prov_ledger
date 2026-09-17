@@ -1,0 +1,14 @@
+-- 029_ask_runner_detail.sql — why the model did not answer.
+--
+-- `summary unavailable: no model` was printed for four different things: no
+-- runner configured, no candidate node, a runner that came back empty, and a
+-- runner that raised or timed out. The worst case was a packaging bug — the
+-- summarize prompt was looked up under a module name the wheel does not
+-- install, the ModuleNotFoundError was caught by the `except` around the model
+-- call, and the terminal said "no model" about a model that was right there.
+--
+-- Every ask now keeps what the call actually reported: the outcome of each of
+-- the two model calls (choose, summarize), the note the reader was given, the
+-- return code, the head of stderr, the wall time, and the head of the raw
+-- answer. One JSON object per row, appended with the row, never updated.
+ALTER TABLE ask_log ADD COLUMN runner_detail TEXT;

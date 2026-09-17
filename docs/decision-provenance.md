@@ -296,6 +296,44 @@ version, answer, cites, dropped, model)` (migration 024) keeps every version,
 including the ones that were rewritten. `model='session'` distinguishes them
 from the headless runner's.
 
+### 10.7 · The headless model path, and saying why there is no summary
+
+`provledger ask --runner claude` makes two calls: `locate.choose` picks nodes
+from the candidate list the code computed, `summarize` restates the fact table.
+Both go through `ask.runner.call`, which is the only place that decides what
+happened — `ok`, `empty`, `failed` or `timeout` — and the reader is told which:
+
+| cause | what the answer says |
+| --- | --- |
+| no runner | `summary unavailable: no model configured` |
+| the code found nothing to ask about | `summary unavailable: no candidate nodes matched the question` |
+| the model was reached and said nothing | `summary unavailable: model returned nothing (rc 3; stderr: …)` |
+| the call raised | `summary unavailable: model call failed: <exception>` |
+| the budget ran out (`--timeout`, default 180 s) | `summary unavailable: model call timed out after 180 s` |
+
+All five used to be one sentence, "summary unavailable: no model". The reason
+that matters: `summarize.prompt_text` asked `importlib.resources` for the
+literal module `orchestrator.testing`, the wheel installs the backend as
+`provledger`, and the `ModuleNotFoundError` was raised **inside** the `try`
+that wrapped the model call — so a packaging bug (FL-067, the same one that hit
+the webapp routes) was reported to the person at the terminal as a missing
+model. Building the prompt is now outside that `try`, the package name is
+derived from `__package__`, and `scripts/pkg_smoke_test.py` loads the prompt
+from the installed wheel, where the repo suite cannot see it.
+
+What each call actually reported — the command, rc, the head of stderr, the
+wall time, the prompt and answer sizes, the head of the raw answer — is
+appended to `ask_log.runner_detail` (migration 029). A tool that fails without
+saying why is the thing this project exists to prevent, and that applies to the
+tool itself.
+
+The answer is also in the language that was asked for: `--lang` / `?lang=`
+switched the scope line only, so a model that answered in Chinese against an
+English prompt went through unremarked. The language rule is now the first rule
+in `prompts/ask.md`, with an English example sentence, and a sentence carrying
+CJK characters in an `en` answer is deleted and counted like every other drop
+(`dropped["language"]`).
+
 `skills/ledger/SKILL.md` states the two commands the skill may run and nothing
 else — no edits, no other tools, no answering from memory or from the source
 tree. A read that can edit is not a read, and the rule only holds if it is

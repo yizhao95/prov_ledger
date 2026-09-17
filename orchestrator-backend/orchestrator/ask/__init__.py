@@ -27,18 +27,31 @@ DEFAULT_DASHBOARD_URL = "http://127.0.0.1:8765"
 BUDGET_S = 3.0
 
 
+def _has_column(conn, table: str, column: str) -> bool:
+    """`runner_detail` arrived in migration 029; a page that logs into a ledger
+    opened by an older build must still log, minus the column it does not have."""
+    try:
+        return any(r[1] == column for r in conn.execute(f"PRAGMA table_info({table})"))
+    except Exception:
+        return False
+
+
 def record_ask(conn, *, project: str, question: str, candidates=None, chosen=None, facts_sha: str | None = None,
                answer: str | None = None, cites=None, scope=None, dropped=None, model: str | None = None,
-               runner: str | None = None, elapsed_ms: int | None = None, commit: bool = True) -> int:
+               runner: str | None = None, elapsed_ms: int | None = None, runner_detail=None,
+               commit: bool = True) -> int:
     """One row per question, written once. Returns ask_log.id."""
     def js(x):
         return None if x is None else json.dumps(x, ensure_ascii=False, default=str)
 
-    cur = conn.execute(
-        "INSERT INTO ask_log (project, question, candidates_json, chosen_json, facts_sha, answer, cites_json, "
-        "scope_json, dropped_json, model, runner, elapsed_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (project, question, js(candidates), js(chosen), facts_sha, answer, js(cites), js(scope), js(dropped),
-         model, runner, elapsed_ms))
+    cols = ["project", "question", "candidates_json", "chosen_json", "facts_sha", "answer", "cites_json",
+            "scope_json", "dropped_json", "model", "runner", "elapsed_ms"]
+    vals = [project, question, js(candidates), js(chosen), facts_sha, answer, js(cites), js(scope), js(dropped),
+            model, runner, elapsed_ms]
+    if _has_column(conn, "ask_log", "runner_detail"):
+        cols.append("runner_detail")
+        vals.append(js(runner_detail))
+    cur = conn.execute(f"INSERT INTO ask_log ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", vals)
     if commit:
         conn.commit()
     return int(cur.lastrowid)
@@ -61,13 +74,15 @@ def get_ask(conn, ask_id: int) -> dict | None:
     if row is None:
         return None
     d = dict(row)
-    for k in ("candidates_json", "chosen_json", "cites_json", "scope_json", "dropped_json"):
-        d[k[:-5]] = None
-        if d.get(k):
+    for k in ("candidates_json", "chosen_json", "cites_json", "scope_json", "dropped_json", "runner_detail"):
+        name = k[:-5] if k.endswith("_json") else k   # runner_detail is its own name, not a _json alias
+        raw = d.get(k)
+        d[name] = None
+        if raw:
             try:
-                d[k[:-5]] = json.loads(d[k])
+                d[name] = json.loads(raw)
             except ValueError:
-                d[k[:-5]] = None
+                d[name] = None
     return d
 
 
@@ -114,10 +129,36 @@ def records(ft: dict, cites=None) -> list[dict]:
     return out
 
 
+RAW_HEAD = 2000                 # how much of a model answer ask_log keeps verbatim
+
+
+def _raw_head(raw) -> str | None:
+    return None if not raw else str(raw)[:RAW_HEAD]
+
+
+def runner_trace(chosen: dict, summary: dict, candidates: int) -> dict:
+    """What actually happened at each of the two model calls — the outcome, the
+    note the reader was given, the rc / stderr head / wall time the runner
+    reported, and the head of the raw answer. Written to `ask_log.runner_detail`
+    (migration 029), append-only, because "summary unavailable" without a reason
+    is the bug this exists to prevent."""
+    return {"candidates": candidates,
+            "choose": {"outcome": chosen.get("outcome") or "ok", "fallback": bool(chosen.get("fallback")),
+                       "rejected": chosen.get("rejected"), "basis": chosen.get("basis"),
+                       "detail": chosen.get("runner_detail") or {}, "raw": _raw_head(chosen.get("raw"))},
+            "summarize": {"outcome": summary.get("degraded_reason") or "ok", "note": summary.get("note"),
+                          "detail": summary.get("runner_detail") or {}, "raw": _raw_head(summary.get("raw"))}}
+
+
 def run(conn, *, project: str, question: str, psg_db_path: str | None = None, runner=None, summary_runner=None,
-        model: str | None = None, runner_name: str | None = None, lang: str = "en", record: bool = True) -> dict:
+        model: str | None = None, runner_name: str | None = None, lang: str = "en", record: bool = True,
+        timeout_s: float | None = None) -> dict:
     """One question end to end. `runner` picks the nodes, `summary_runner` writes
-    the paragraph (defaults to `runner`); `runner=None` is the degraded mode."""
+    the paragraph (defaults to `runner`); `runner=None` is the degraded mode.
+
+    A runner may return the text or `(text, detail)` — see `ask.runner`. When it
+    does not answer, the note says WHICH of the five things happened and the
+    detail is logged; it never says "no model" about a model that was there."""
     import time
 
     from . import absence as absence_mod, facts as facts_mod, locate, scope as scope_mod, summarize as summarize_mod
@@ -128,14 +169,16 @@ def run(conn, *, project: str, question: str, psg_db_path: str | None = None, ru
     pool = locate.candidates(conn, psg, question, project=project, limit=10 ** 9)
     cands = pool[:locate.MAX_CANDIDATES]
     truncated = {"candidates": len(pool) - len(cands)} if len(pool) > len(cands) else {}
-    chosen = locate.choose(question, cands, runner=runner, model=model)
+    chosen = locate.choose(question, cands, runner=runner, model=model, timeout_s=timeout_s)
     ft = facts_mod.facts(conn, psg, chosen["chosen"], project=project)
     absences = absence_mod.absences(conn, ft)
     sc = scope_mod.scope(ft, candidates=len(pool), chosen=len(chosen["chosen"]), truncated=truncated)
     sc_line = scope_mod.line(sc, lang)
     summary = summarize_mod.summarize(question, ft, absences=absences, scope_line=sc_line,
-                                      runner=summary_runner if summary_runner is not None else runner, model=model)
+                                      runner=summary_runner if summary_runner is not None else runner, model=model,
+                                      timeout_s=timeout_s, candidates=len(cands), lang=lang)
     facts_sha = facts_mod.sha(ft)
+    trace = runner_trace(chosen, summary, len(cands))
     # the cost of the answer rides with it: a tool must not get slower in silence
     sc["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
     doc = {"project": project, "question": question, "candidates": cands, "chosen": chosen,
@@ -144,13 +187,14 @@ def run(conn, *, project: str, question: str, psg_db_path: str | None = None, ru
            "absences": absences, "scope": sc, "scope_line": sc_line,
            "answer": summary["answer"], "sentences": summary["sentences"], "cites": summary["cites"],
            "dropped": summary["dropped"], "dropped_detail": summary["dropped_detail"],
-           "degraded": summary["degraded"], "note": summary["note"], "model": model,
+           "degraded": summary["degraded"], "degraded_reason": summary.get("degraded_reason"),
+           "note": summary["note"], "runner_detail": trace, "model": model,
            "runner": runner_name or ("none" if runner is None else "stub"), "lang": lang}
     doc["records"] = records(ft, summary["cites"])
     doc["ask_id"] = record_ask(conn, project=project, question=question, candidates=cands, chosen=chosen,
                                facts_sha=facts_sha, answer=summary["answer"], cites=summary["cites"], scope=sc,
                                dropped=summary["dropped"], model=model, runner=doc["runner"],
-                               elapsed_ms=sc["elapsed_ms"]) if record else None
+                               elapsed_ms=sc["elapsed_ms"], runner_detail=trace) if record else None
     return doc
 
 
@@ -158,7 +202,8 @@ def render_text(doc: dict) -> str:
     """The terminal rendering of one answer: what it says, what is missing, how far we looked."""
     out = [f"Q: {doc['question']}", ""]
     if doc["degraded"]:
-        out.append(doc["note"] or "summary unavailable: no model")
+        from .summarize import NO_MODEL_NOTE
+        out.append(doc["note"] or NO_MODEL_NOTE)
     else:
         out += doc["sentences"] or ["(nothing survived the checks)"]
         if doc.get("note"):
@@ -189,8 +234,8 @@ def render_text(doc: dict) -> str:
 def as_json(doc: dict) -> dict:
     """The machine-readable answer — the fact table as text, not as a nested blob."""
     keep = ("ask_id", "project", "question", "answer", "sentences", "cites", "scope", "scope_line",
-            "facts_text", "facts_sha", "dropped", "dropped_detail", "degraded", "note", "model", "runner",
-            "records", "lang")
+            "facts_text", "facts_sha", "dropped", "dropped_detail", "degraded", "degraded_reason", "note",
+            "runner_detail", "model", "runner", "records", "lang")
     out = {k: doc.get(k) for k in keep}
     out["absences"] = doc.get("absences")
     out["candidates"] = [{k: c[k] for k in ("qn", "node_key", "why", "score")} for c in doc.get("candidates", [])]
@@ -250,7 +295,7 @@ def submit(conn, ask_id: int, draft: str, *, psg_db_path: str | None = None, mod
     started = time.perf_counter()
     base = rebuild(conn, ask_id, psg_db_path=psg_db_path, lang=lang)
     checked = summarize_mod.review(draft, base["facts"], absences=base["absences"],
-                                   scope_line=base["scope_line"])
+                                   scope_line=base["scope_line"], lang=lang)
     version = int(conn.execute("SELECT COALESCE(MAX(version), 0) + 1 FROM ask_answer WHERE ask_id = ?",
                                (ask_id,)).fetchone()[0])
     conn.execute("INSERT INTO ask_answer (ask_id, version, answer, cites_json, dropped_json, model) "
@@ -270,7 +315,7 @@ def submit(conn, ask_id: int, draft: str, *, psg_db_path: str | None = None, mod
            "facts": base["facts"], "facts_text": base["facts_text"], "facts_sha": base["facts_sha"],
            "absences": base["absences"], "scope": base["scope"], "scope_line": base["scope_line"],
            "scope_line_timed": scope_mod.line(timed, lang), "elapsed_ms": elapsed_ms,
-           "degraded": False, "lang": lang, "draft": draft, **checked}
+           "degraded": False, "degraded_reason": None, "lang": lang, "draft": draft, **checked}
     doc["records"] = records(base["facts"], checked["cites"])
     return doc
 

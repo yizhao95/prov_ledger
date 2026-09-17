@@ -21,17 +21,32 @@ from __future__ import annotations
 import re
 from importlib import resources
 
-from . import facts as F
+from . import facts as F, runner as R
 
 MAX_SENTENCES = 8
-NO_MODEL_NOTE = "summary unavailable: no model"
-DEFAULT_TIMEOUT_S = 120.0
+# One note per cause. They used to be one sentence, "summary unavailable: no
+# model", printed for four different things — including a packaging bug (see
+# TESTING_PACKAGE below), which read as "you have no model".
+NO_MODEL_NOTE = "summary unavailable: no model configured"
+NO_CANDIDATES_NOTE = "summary unavailable: no candidate nodes matched the question"
+DEFAULT_TIMEOUT_S = R.DEFAULT_TIMEOUT_S
+# FL-067: the wheel installs this backend as `provledger`, the repo imports it
+# as `orchestrator`. The prompt lives one package up from this one, whatever
+# that package is called — a literal name here is a ModuleNotFoundError in
+# every installed copy, and that is exactly what happened.
+TESTING_PACKAGE = __package__.rsplit(".", 1)[0] + ".testing"
+# The answer is in the language the reader asked in. `--lang` / `?lang=` used to
+# switch the scope line only, so a model that felt like answering in Chinese
+# did, and nothing noticed. CJK in an English answer is a dropped sentence, the
+# same way an uncited one is — the count is printed, so it is never silent.
+DROP_KINDS = ("uncited", "unknown_id", "number", "language", "over_limit")
+_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]")
 _SPLIT = re.compile(r"(?<=[.!?\]])\s+(?!\[)")
 _CITE_TOKEN = re.compile(r"\[#[A-Za-z]{0,2}\d+\]|\[scope\]")
 
 
 def prompt_text() -> str:
-    return resources.files("orchestrator.testing").joinpath("prompts/ask.md").read_text(encoding="utf-8")
+    return resources.files(TESTING_PACKAGE).joinpath("prompts/ask.md").read_text(encoding="utf-8")
 
 
 def prompt_for(question: str, facts_text: str, absences=(), scope_line: str = "") -> str:
@@ -54,7 +69,11 @@ def split_sentences(text: str) -> list[str]:
     return out
 
 
-def check(sentence: str, *, ids, numbers) -> tuple[bool, str | None, list[str]]:
+def no_drops() -> dict:
+    return dict.fromkeys(DROP_KINDS, 0)
+
+
+def check(sentence: str, *, ids, numbers, lang: str = "en") -> tuple[bool, str | None, list[str]]:
     """(keep, reason, offending numbers) for one sentence."""
     cites = F.cites_in(sentence)
     has_scope = "[scope]" in sentence
@@ -67,6 +86,8 @@ def check(sentence: str, *, ids, numbers) -> tuple[bool, str | None, list[str]]:
     bad = sorted(F.numbers_in(bare) - set(numbers))
     if bad:
         return False, "number", bad
+    if lang == "en" and _CJK.search(sentence):
+        return False, "language", []
     return True, None, []
 
 
@@ -81,21 +102,21 @@ def allowed_numbers(ft: dict, absences=(), scope_line: str = "") -> set[str]:
 
 
 def review(draft: str, ft: dict, *, absences=(), scope_line: str = "",
-           max_sentences: int = MAX_SENTENCES) -> dict:
+           max_sentences: int = MAX_SENTENCES, lang: str = "en") -> dict:
     """The checks, and the ONLY implementation of them: whoever wrote the draft —
     a headless model, or the session's own model through `provledger ask submit`
     — it is read back the same way. Returns {answer, sentences, cites, dropped,
     dropped_detail, note}."""
     numbers = allowed_numbers(ft, absences, scope_line)
     kept: list[str] = []
-    dropped = {"uncited": 0, "unknown_id": 0, "number": 0, "over_limit": 0}
+    dropped = no_drops()
     detail: list[dict] = []
     for s in split_sentences(draft):
         if len(kept) >= max_sentences:
             dropped["over_limit"] += 1
             detail.append({"text": s, "reason": "over_limit", "numbers": []})
             continue
-        ok, reason, bad = check(s, ids=ft["ids"], numbers=numbers)
+        ok, reason, bad = check(s, ids=ft["ids"], numbers=numbers, lang=lang)
         if ok:
             kept.append(s)
         else:
@@ -110,34 +131,56 @@ def review(draft: str, ft: dict, *, absences=(), scope_line: str = "",
     if sum(dropped.values()):
         note = ", ".join(f"{n} {label}" for label, n in
                          (("uncited", dropped["uncited"]), ("unknown id", dropped["unknown_id"]),
-                          ("number not in the fact table", dropped["number"]), ("over the limit", dropped["over_limit"]))
+                          ("number not in the fact table", dropped["number"]),
+                          ("not in the language asked for", dropped["language"]),
+                          ("over the limit", dropped["over_limit"]))
                          if n)
         note = f"{sum(dropped.values())} sentence(s) dropped: {note}"
     return {"answer": " ".join(kept), "sentences": kept, "cites": cites, "dropped": dropped,
             "dropped_detail": detail, "note": note}
 
 
+def note_for(outcome: str, detail: dict) -> str:
+    """The one sentence the reader gets, and it names the cause."""
+    if outcome == "timeout":
+        return f"summary unavailable: model call timed out after {detail.get('timeout_s')} s"
+    if outcome == "failed":
+        return f"summary unavailable: model call failed: {detail.get('error') or 'unknown'}"
+    why = R.why_empty(detail)
+    return "summary unavailable: model returned nothing" + (f" ({why})" if why else "")
+
+
 def summarize(question: str, ft: dict, *, absences=(), scope_line: str = "", runner=None, model: str | None = None,
-              timeout_s: float | None = None, max_sentences: int = MAX_SENTENCES) -> dict:
-    """The checked answer. Without a runner: degraded, and the fact table stands."""
+              timeout_s: float | None = None, max_sentences: int = MAX_SENTENCES,
+              candidates: int | None = None, lang: str = "en") -> dict:
+    """The checked answer — or the reason there is none, which is never "no model"
+    unless there is genuinely no model. `candidates=0` means the code found
+    nothing to ask about, and the model is not called at all."""
     facts_text = F.render(ft)
     absences = list(absences or ())
     base = {"facts_text": facts_text, "scope_line": scope_line, "model": model,
-            "dropped": {"uncited": 0, "unknown_id": 0, "number": 0, "over_limit": 0}, "dropped_detail": []}
+            "dropped": no_drops(), "dropped_detail": []}
+
+    def degraded(reason: str, note: str, detail: dict | None = None, raw: str | None = None) -> dict:
+        return {**base, "answer": "", "sentences": [], "cites": [], "degraded": True, "degraded_reason": reason,
+                "note": note, "raw": raw, "runner_detail": dict(detail or {})}
+
+    if candidates == 0:
+        return degraded("no_candidates", NO_CANDIDATES_NOTE)
     if runner is None:
-        return {**base, "answer": "", "sentences": [], "cites": [], "degraded": True, "note": NO_MODEL_NOTE, "raw": None}
+        return degraded("no_model", NO_MODEL_NOTE)
 
-    kwargs = {"model": model}
-    if timeout_s is not None:
-        kwargs["timeout_s"] = timeout_s
+    # building the prompt is NOT part of the model call: a prompt that cannot be
+    # read is a bug here, and saying "no model" about it wasted a day.
     try:
-        raw = runner(prompt_for(question, facts_text, absences, scope_line), **kwargs)
-    except Exception:
-        return {**base, "answer": "", "sentences": [], "cites": [], "degraded": True,
-                "note": NO_MODEL_NOTE, "raw": None}
-    if not (raw or "").strip():
-        return {**base, "answer": "", "sentences": [], "cites": [], "degraded": True,
-                "note": NO_MODEL_NOTE, "raw": raw}
+        prompt = prompt_for(question, facts_text, absences, scope_line)
+    except Exception as e:
+        return degraded("failed", note_for("failed", {"error": f"{type(e).__name__}: {e}"}),
+                        {"error": f"{type(e).__name__}: {e}", "stage": "prompt"})
 
-    checked = review(raw, ft, absences=absences, scope_line=scope_line, max_sentences=max_sentences)
-    return {**base, **checked, "degraded": False, "raw": raw}
+    raw, detail, outcome = R.call(runner, prompt, model=model, timeout_s=timeout_s)
+    if outcome != "ok":
+        return degraded(outcome, note_for(outcome, detail), detail, raw or None)
+
+    checked = review(raw, ft, absences=absences, scope_line=scope_line, max_sentences=max_sentences, lang=lang)
+    return {**base, **checked, "degraded": False, "degraded_reason": None, "raw": raw, "runner_detail": detail}

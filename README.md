@@ -374,18 +374,26 @@ identifiers and numbers written in the question), computes the fact table, and
 computes the absences — because "there is no record of that" is the one answer
 a model is worst at giving unprompted. **A model** may only restate that table.
 Then **code** reads the answer back and deletes any sentence that cites nothing,
-cites an id the table does not hold, or carries a number the table does not
-state — counting every deletion, so a trimmed answer never reads like a complete
-one. Nothing is written except the question's own append-only trace.
+cites an id the table does not hold, carries a number the table does not state,
+or is not in the language you asked in — counting every deletion, so a trimmed
+answer never reads like a complete one. Nothing is written except the question's
+own append-only trace.
 
 The same thing is a command (`provledger ask "<question>"`, with `--json`,
+`--runner claude|stub|none` — default `$PROVLEDGER_ASK_RUNNER` — `--timeout`,
 `--no-model`, `--export card.md`) and a page: **`GET /ledger?q=`** on the
 dashboard, where each `[#id]` is a link back to the record, absence sentences
 carry `data-absence`, and `[Export card]` hands you a markdown evidence card —
 the timeline, each record's hash, the three hash chains walked at export time
 (a tampered row reads `chain broken at #1414`), the scope and the export time.
-The page has no non-GET route; with no model it shows the fact table and says
-why.
+The page has no non-GET route.
+
+When there is no summary, the line says **which** of the five things happened —
+no model configured, no candidate node matched, the model returned nothing (with
+its exit code and the head of stderr), the call failed, or it timed out — and
+the numbers behind it go into `ask_log.runner_detail`, append-only. One sentence
+for every failure is how a packaging bug read as "you have no model" for a whole
+release.
 
 See [`docs/decision-provenance.md`](docs/decision-provenance.md) §10.
 ### The world outside the code, in the same graph (decision provenance, phase 2c)

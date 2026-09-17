@@ -10,6 +10,7 @@ import pytest
 
 from orchestrator import graph_api as g
 from orchestrator.testing import calibration as cal
+from orchestrator.ask import runner as R
 from orchestrator.testing import claude_arbiter as ca
 
 ClaudeArbiter = lambda **kw: ca.ClaudeArbiter(**kw)   # resolved at call time (RED: the module is a stub)
@@ -98,18 +99,42 @@ def test_default_runner_runs_headless_claude_with_the_prompt_on_stdin(tmp_path, 
     fake.write_text('#!/usr/bin/env bash\nprompt=$(cat)\nprintf \'{"type":"result","result":"{\\\\"pairs\\\\": [], \\\\"evidence\\\\": \\\\"seen: %s args: %s\\\\"}"}\' "$(echo "$prompt" | head -c 20 | tr -d \'\\n\')" "$*"\n')
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
-    text = ca.default_runner("You are an identity arbiter…", model="claude-haiku-4-5", timeout_s=10)
+    text, detail = ca.default_runner("You are an identity arbiter…", model="claude-haiku-4-5", timeout_s=10)
     parsed = ca.parse_answer(text)
     assert parsed is not None and parsed[0] == []
     assert "seen: You are an identity" in parsed[1]
     assert "-p --output-format json --max-turns 1 --tools  --no-session-persistence --model claude-haiku-4-5" in parsed[1]
-    slow = tmp_path / "claude"
-    slow.write_text("#!/usr/bin/env bash\nsleep 5\n")
-    assert ca.default_runner("x", timeout_s=0.3) == ""
-    fake.write_text("#!/usr/bin/env bash\nexit 3\n")
-    assert ca.default_runner("x", timeout_s=5) == ""
+    assert detail["rc"] == 0 and isinstance(detail["elapsed_ms"], int) and detail["model"] == "claude-haiku-4-5"
+
+
+def test_default_runner_says_why_it_came_back_empty(tmp_path, monkeypatch):
+    """It used to return '' for a timeout, a crash and garbage alike, and the
+    caller printed "no model" for all three. The reason travels now."""
+    fake = tmp_path / "claude"
+    fake.chmod(0o755) if fake.exists() else fake.write_text("#!/usr/bin/env bash\nexit 3\n")
+    fake.write_text("#!/usr/bin/env bash\necho 'boom: bad credentials' >&2\nexit 3\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+
+    text, detail = ca.default_runner("x", timeout_s=5)
+    assert text == "" and detail["rc"] == 3 and "boom: bad credentials" in detail["stderr_head"]
+    assert detail["reason"] == "non-zero exit"
+    assert ca.text_runner("x", timeout_s=5) == "", "the arbiter still sees a plain empty string"
+
     fake.write_text("#!/usr/bin/env bash\necho not json\n")
-    assert ca.default_runner("x", timeout_s=5) == ""
+    text, detail = ca.default_runner("x", timeout_s=5)
+    assert text == "" and detail["rc"] == 0 and detail["reason"] == "output was not JSON"
+
+    fake.write_text("#!/usr/bin/env bash\nsleep 5\n")
+    with pytest.raises(R.RunnerTimeout) as e:
+        ca.default_runner("x", timeout_s=0.3)
+    assert e.value.detail["timeout_s"] == 0.3
+    assert ca.text_runner("x", timeout_s=0.3) == ""
+
+    monkeypatch.setenv("PATH", str(tmp_path / "nothing-here"))
+    with pytest.raises(R.RunnerError):
+        ca.default_runner("x", timeout_s=5)
+    assert ca.text_runner("x", timeout_s=5) == ""
 
 
 def _stub_by_suffix(prompt):

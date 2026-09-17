@@ -22,6 +22,7 @@ import json
 import re
 import sqlite3
 
+from . import runner as R
 from .. import why as why_mod
 
 MAX_CANDIDATES = 40
@@ -313,40 +314,44 @@ def prompt_for(question: str, cands: list[dict], max_chosen: int = MAX_CHOSEN) -
     return PROMPT.format(max_chosen=max_chosen, question=question.strip(), candidates="\n".join(lines) or "(none)")
 
 
-def _fallback(cands: list[dict], basis: str, rejected: str | None = None) -> dict:
+def _fallback(cands: list[dict], basis: str, rejected: str | None = None, raw: str | None = None,
+              detail: dict | None = None, outcome: str = "ok") -> dict:
     return {"chosen": [c["qn"] for c in cands[:FALLBACK_TOP]], "basis": basis, "fallback": True,
-            "rejected": rejected, "raw": None}
+            "rejected": rejected, "raw": raw, "runner_detail": dict(detail or {}), "outcome": outcome}
 
 
 def choose(question: str, cands: list[dict], *, runner=None, model: str | None = None, timeout_s: float | None = None,
            max_chosen: int = MAX_CHOSEN) -> dict:
     """The model picks among `cands`; anything off the list degrades to the top matches.
 
-    Returns `{chosen: [qualified name], basis, fallback, rejected, raw}`."""
+    Returns `{chosen: [qualified name], basis, fallback, rejected, raw, outcome,
+    runner_detail}` — `outcome` and `runner_detail` say what the model call
+    itself did (`ask.runner`), so a fallback is never mistaken for a choice."""
+    if not cands:                                            # nothing to pick FROM: the model is not asked
+        return _fallback(cands, "fallback: no candidates", outcome="no_candidates")
     if runner is None:
-        return _fallback(cands, "fallback: no model")
-    kwargs = {"model": model}
-    if timeout_s is not None:
-        kwargs["timeout_s"] = timeout_s
-    try:
-        raw = runner(prompt_for(question, cands, max_chosen), **kwargs)
-    except Exception:                                        # a runner that dies is a missing model, not a crash
-        return _fallback(cands, "fallback: runner failed")
+        return _fallback(cands, "fallback: no model", outcome="no_model")
+    raw, detail, outcome = R.call(runner, prompt_for(question, cands, max_chosen), model=model, timeout_s=timeout_s)
+    if outcome != "ok":                                      # a runner that dies is a missing model, not a crash —
+        # but WHICH death it died now travels with the answer and into ask_log.
+        return _fallback(cands, "fallback: runner failed", detail.get("error") or R.why_empty(detail) or outcome,
+                         raw or None, detail, outcome)
     m = _JSON_RE.search(raw or "")
     if not m:
-        return _fallback(cands, "fallback: top by match", "not the JSON answer shape")
+        return _fallback(cands, "fallback: top by match", "not the JSON answer shape", raw, detail)
     try:
         doc = json.loads(m.group(0))
     except ValueError:
-        return _fallback(cands, "fallback: top by match", "not the JSON answer shape")
+        return _fallback(cands, "fallback: top by match", "not the JSON answer shape", raw, detail)
     if not isinstance(doc, dict) or not isinstance(doc.get("chosen"), list) or not isinstance(doc.get("basis"), str):
-        return _fallback(cands, "fallback: top by match", "not the JSON answer shape")
+        return _fallback(cands, "fallback: top by match", "not the JSON answer shape", raw, detail)
     picked = [x for x in doc["chosen"] if isinstance(x, str) and x]
     if len(picked) != len(doc["chosen"]):
-        return _fallback(cands, "fallback: top by match", "not the JSON answer shape")
+        return _fallback(cands, "fallback: top by match", "not the JSON answer shape", raw, detail)
     if len(picked) > max_chosen:
-        return _fallback(cands, "fallback: top by match", f"more than {max_chosen} nodes")
+        return _fallback(cands, "fallback: top by match", f"more than {max_chosen} nodes", raw, detail)
     allowed = {c["qn"] for c in cands} | {c["node_key"] for c in cands if c.get("node_key")}
     if any(x not in allowed for x in picked):
-        return _fallback(cands, "fallback: top by match", "a name outside the candidates")
-    return {"chosen": picked, "basis": doc["basis"], "fallback": False, "rejected": None, "raw": raw}
+        return _fallback(cands, "fallback: top by match", "a name outside the candidates", raw, detail)
+    return {"chosen": picked, "basis": doc["basis"], "fallback": False, "rejected": None, "raw": raw,
+            "runner_detail": detail, "outcome": outcome}

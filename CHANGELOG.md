@@ -5,6 +5,16 @@ skills (`writing-plans`, `executing-plans`, `project-state-graph`,
 `update-project-state-graph`) and the read-only dashboard. Dates are the
 merge dates of the phase PRs; FL-nnn refers to `docs/FUTURE-LOG.md`.
 
+## Unreleased
+
+### fix(ask): the model path
+- **The summarize prompt is found under the installed package name** (FL-067, again). `ask/summarize.py` asked `importlib.resources` for `orchestrator.testing`; the wheel installs the backend as `provledger`, so every installed copy raised `ModuleNotFoundError` **inside** the `try` around the model call, and `provledger ask --runner claude` printed `summary unavailable: no model` at a model that was right there. The repo suite could not see it (pytest puts `orchestrator-backend` on the path) — `scripts/pkg_smoke_test.py` now asserts the prompt loads from the wheel.
+- **One note per cause.** `summary unavailable: no model` was printed for four different things. Now: `no model configured` · `no candidate nodes matched the question` · `model returned nothing (rc 3; stderr: …)` · `model call failed: <exception>` · `model call timed out after N s`, with `degraded_reason` on the doc and on the page (`data-degraded-reason`).
+- **`ask_log.runner_detail`** (migration 029, append-only): per model call — outcome, the note the reader got, the command, rc, the head of stderr, wall time, prompt/answer sizes and the head of the raw answer.
+- **`ask.runner`**: a runner may return `text` or `(text, detail)`; `claude_arbiter.default_runner` returns `(text, detail)` and raises `RunnerTimeout` / `RunnerError` instead of swallowing every failure into `''`; `text_runner` is the thin shim the arbiter keeps using.
+- **The answer is in the language you asked in.** `--lang` / `?lang=` switched the scope line only, so a model that answered in Chinese against an English prompt went straight through. The language rule is now the first rule in `prompts/ask.md` (with an English example) and a CJK sentence in an `en` answer is dropped and counted as `dropped["language"]`.
+- **CLI**: `--runner` defaults to `$PROVLEDGER_ASK_RUNNER` (the dashboard has read it since phase 2e and the CLI ignored it), accepts `none`, and `--timeout S` (default 180) bounds each model call.
+
 ## 0.2.0 — 2026-09-15
 
 The dual-layer node model, end to end: a project's code is observed as

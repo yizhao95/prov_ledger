@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 
 from . import psg_bridge
+from .ask import runner as ask_runner
 
 LEVELS = ("major", "minor")
 PROMPT_PATH = Path(__file__).resolve().parent / "testing" / "prompts" / "significance.md"
@@ -143,9 +144,11 @@ def judge(conn, reason: dict, *, runner=None, model: str | None = None, psg_db_p
     psg = psg_db_path if psg_db_path is not None else psg_bridge.db_path_for(reason["project"])
     qn = psg_bridge.latest_qualified_name(psg, reason.get("node_key")) if (psg and reason.get("node_key")) else None
     if runner is None:
-        from .testing.claude_arbiter import default_runner
-        runner = default_runner
-    raw = runner(prompt_for(reason, qn, level, basis), model=model)
+        # `default_runner` returns (text, detail) now; this judge wants the text
+        # and treats every silence as "the hint stands", so it takes the shim.
+        from .testing.claude_arbiter import text_runner
+        runner = text_runner
+    raw, _ = ask_runner.normalise(runner(prompt_for(reason, qn, level, basis), model=model))
     parsed = parse_verdict(raw)
     name = getattr(runner, "__name__", "runner")
     if parsed is None:
