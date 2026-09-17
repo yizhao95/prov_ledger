@@ -79,6 +79,16 @@ reference, a rule the system applied, or an admitted gap — never by the writer
 - A reproducible demo (`examples/phantom-uplift/demo-provenance.sh`) builds the
   whole scenario in seconds, and a walkthrough recording is generated from it.
 - `provledger` on PyPI now ships the console script the documentation uses.
+- The repository reads in English throughout: the interface wording, the CLI
+  output and the documents. The Chinese vocabulary file stays, because it is
+  what `?lang=zh` is made of. Four Chinese strings that were reaching the
+  English pages regardless of the setting now go through it instead.
+- The deferred-work ledger is split: [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md)
+  publishes the confirmed defects and standing limits with their workarounds,
+  and the working log stays out of the repository.
+- README section 2 shows the map as an animation and the dashboard as the three
+  views a person actually walks: a task turning red on a silent upstream change,
+  the node history behind it, and the graph the warning is computed from.
 
 ## 0.2.0 — 2026-09-15
 
