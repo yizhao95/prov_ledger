@@ -10,17 +10,15 @@ from __future__ import annotations
 import importlib
 import json
 import re
-import sys
 from pathlib import Path
 
 import pytest
 
+# FL-006 / FL-067 / FL-077: conftest.py owns the paths — it binds `provledger`
+# to THIS tree and makes `app` importable whatever the collection order. A test
+# file that splices a path itself is the bug that convention exists to prevent.
 REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / "orchestrator-backend"))
-sys.path.insert(0, str(REPO / "orchestrator-webapp"))          # FL-077: `app` must not depend on collection order
-sys.path.insert(0, str(REPO / "orchestrator-webapp" / "tests"))
 
-from orchestrator import db as odb  # noqa: E402
 from test_routes import _seed_db, _seed_state_graph  # noqa: E402
 
 RULE_QN = "declared:emea-excluded-from-the-q3-rollup"
