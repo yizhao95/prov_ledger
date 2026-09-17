@@ -450,6 +450,41 @@ bundle rather than shipping it. `manifest.json` carries the counts, everything
 that was refused and why, the three chain heads and the anchor. See
 [`docs/decision-provenance.md`](docs/decision-provenance.md) §12.
 
+### The numbers in your deck (decision provenance, phase 4)
+
+A figure on a slide is a reading of something — a metric, a column, or a number
+somebody worked out by hand. `provledger anchor` records that reading, and what
+it records is the **data source**, not the file: the deck is one place the
+number turned up, so renaming it or shipping a v2 changes nothing about the
+node's history.
+
+```bash
+provledger anchor decks/q3.pptx --at "slide 4" --node metric:q3_conv --value 3.2
+#   metric:q3_conv ← 3.2 at slide 4 shape 2 in decks/q3.pptx
+
+# somebody revises the deck and the figure moves to an appendix slide
+provledger anchor check
+#   anchor_lost  metric:q3_conv      3.2  slide 4   decks/q3.pptx
+#                3.2 is no longer at slide 4: moved or removed
+#                what is there now: Conversion / see appendix
+#   ok           metric:net_revenue  64.33  slide 2  decks/q3.pptx
+#   a lost anchor is never re-pointed: where the number went is not something this tool decides
+```
+
+That last line is the whole feature. The number is still in the file, two
+slides further on — and the anchor says lost anyway, because citing the wrong
+slide is worse than admitting the pointer broke. Auto-discovery is off by
+default, and switched on it only ever proposes candidates. Text extraction
+(pptx / xlsx / docx / csv / markdown) uses the standard library alone and
+stores nothing: it locates, and a deck's wording stays the deck's.
+
+A number that came from nobody's pipeline says so:
+`provledger node add --manual-figure q3_conv --value 3.2 --note "how you worked
+it out"` puts it in the same graph marked **no traceable data source**, and
+selfcheck prints what share of your figures are of that kind. See
+[`docs/decision-provenance.md`](docs/decision-provenance.md) §13, and
+`python examples/phantom-uplift/anchor_demo.py` for the arc in one command.
+
 ## 📚 Documentation
 
 This README is the high-level entry point. What's in the repo today:

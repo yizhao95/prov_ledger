@@ -58,6 +58,9 @@
           <td class="px-4 py-2 font-mono text-xs">{{ r.target }} <span class="text-brand-muted">({{ r.target_kind }})</span>
             {% if r.no_source %}<div class="text-[11px] text-brand-serious" data-no-source="1"
                  title="{{ ui('no_source_help', lang) }}">{{ ui('no_source', lang) }}</div>{% endif %}
+            {% if r.occurrences %}<div class="text-[11px]" data-occurrences="{{ r.occurrences }}">
+              <a class="text-brand-blue" href="/node/{{ r.project }}/{{ r.target }}"
+                 title="{{ ui('occurrences_help', lang) }}">{{ ui('occurrences', lang) }}: {{ r.occurrences }}</a></div>{% endif %}
           </td>
           <td class="px-4 py-2 font-mono text-xs">{{ r.channel }}</td>
           <td class="px-4 py-2">

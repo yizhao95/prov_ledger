@@ -89,6 +89,52 @@
     {% endif %}
   </div>
 
+  {# ── DP phase 4 (§9): where this number turned up ─────────────────────────
+     Outside the error / not-found branches on purpose. A figure's identity is
+     its data source, so `metric:q3_conv` has occurrences whether or not any
+     analysis run has ever seen a symbol by that name. The file path is TEXT,
+     not a link: this page is read-only and lives in a browser, and a link to
+     somebody's deck either does nothing or opens a file:// URL that promises
+     more than it can deliver. #}
+  {% if ledger %}
+  <section class="bg-surface rounded-xl shadow-sm border border-hairline p-5 mb-4" data-panel="occurrences">
+    <h2 class="text-sm font-semibold text-gray-900 mb-1" title="{{ ui('occurrences_help', lang) }}">
+      {{ ui('occurrences', lang) }}（{{ ledger.occurrences|length }}）</h2>
+    {% if not ledger.occurrences %}
+    <div class="text-xs text-brand-muted">{{ ui('no_occurrences', lang) }}</div>
+    {% else %}
+    <table class="min-w-full text-xs">
+      <thead class="text-[11px] uppercase tracking-wide text-brand-muted border-b border-hairline">
+        <tr><th class="text-left py-1 pr-4">file</th><th class="text-left py-1 pr-4">where</th>
+            <th class="text-left py-1 pr-4">value</th><th class="text-left py-1 pr-4">{{ ui('seen_at', lang) }}</th>
+            <th class="text-left py-1">anchor</th></tr>
+      </thead>
+      <tbody>
+        {% for o in ledger.occurrences %}
+        <tr class="border-b border-hairline align-top" data-occurrence="{{ o.id }}"
+            data-anchor-state="{{ o.state }}">
+          <td class="py-1 pr-4 font-mono break-all">{{ o.file_path }}
+            <span class="text-brand-muted">({{ o.file_kind }})</span></td>
+          <td class="py-1 pr-4 font-mono">{{ o.at or o.where }}
+            {% if o.at and o.where and o.at != o.where %}<span class="text-brand-muted">→ {{ o.where }}</span>{% endif %}</td>
+          <td class="py-1 pr-4 tnum">{{ o.value_text }}</td>
+          <td class="py-1 pr-4 tnum text-brand-muted">{{ o.seen_at }}</td>
+          <td class="py-1">
+            {% if o.state == 'ok' %}<span class="px-1.5 py-0.5 rounded bg-brand-blue/10 text-brand-blue">{{ ui('anchor_ok', lang) }}</span>
+            {% elif o.state == 'anchor_lost' %}<span class="px-1.5 py-0.5 rounded bg-brand-serious/10 text-brand-serious">{{ ui('anchor_lost', lang) }}</span>
+            {% else %}<span class="px-1.5 py-0.5 rounded bg-brand-gray/10 text-brand-gray">{{ ui('anchor_unchecked', lang) }}</span>{% endif %}
+            {% if o.reason %}<div class="text-[11px] text-brand-gray mt-0.5">{{ o.reason }}</div>{% endif %}
+            {% if o.checked_at %}<div class="text-[11px] text-brand-muted">{{ o.checked_at }}</div>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div class="text-[11px] text-brand-muted mt-2">{{ ui('anchor_never_moved', lang) }}</div>
+    {% endif %}
+  </section>
+  {% endif %}
+
   {% if error %}
   <div class="bg-surface rounded-xl border border-hairline p-5 text-sm text-brand-red">{{ error }}</div>
   {% elif not ledger.available %}
