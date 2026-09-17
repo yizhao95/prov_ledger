@@ -200,6 +200,7 @@ def test_verify_against_notes_without_a_repo_says_so(conn, tmp_path):
 
 
 def test_anchor_heads_on_a_repo_without_head_raises_anchor_error(conn, tmp_path):
+    _seed(conn, n=1)                      # something to anchor, so HEAD is the question being asked
     d = tmp_path / "empty"
     d.mkdir()
     _git(d, "init", "-q", "-b", "main")
@@ -315,3 +316,63 @@ def test_the_anchor_a_close_wrote_is_what_verify_reads_back(conn, repo, tmp_path
     assert rep["ok"] is True and rep["anchored"] is True
     assert rep["anchors"]["found"] == 1 and rep["anchors"]["matched"] == 1
     assert rep["anchors"]["latest"]["plan_id"] == "p-round"
+
+
+# ── Task 1 follow-up: an anchor must pin something, in the right repository ───
+
+def test_a_close_with_nothing_to_anchor_writes_no_note(conn, repo, tmp_path):
+    """An empty ledger has nothing for a witness to vouch for. A note full of
+    nulls is not an anchor, it is noise on the ref."""
+    from orchestrator import db as dbm
+    reg = _registry(tmp_path, "demo-app", repo)
+    review_id, result = _close(conn, "p-empty", "demo-app", reg)
+    assert result["plan_status"] == "COMPLETED"
+    assert result["anchor"]["anchored"] is False
+    assert integrity.read_anchors(repo) == []
+    assert _git(repo, "notes", "--ref", integrity.NOTES_REF, "list").strip() == ""
+    assert "[ANCHOR] nothing to anchor" in dbm.get_step(conn, review_id)["log_context"]
+
+
+def test_a_registered_path_inside_a_repo_is_refused(conn, repo, tmp_path):
+    """The defect this test exists for: the phantom-uplift e2e suite registers
+    `examples/phantom-uplift` — a directory INSIDE this repository — so every
+    close in that test appended a note to the developer's own working repo. A
+    path inside a work tree is not that work tree."""
+    from orchestrator import db as dbm
+    inner = repo / "examples" / "demo-app"
+    inner.mkdir(parents=True)
+    (inner / "x.txt").write_text("x\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "two")
+    _seed(conn, n=1)
+    reg = _registry(tmp_path, "demo-app", inner)
+    review_id, result = _close(conn, "p-inner", "demo-app", reg)
+    assert result["plan_status"] == "COMPLETED"                       # still never blocks
+    assert result["anchor"]["anchored"] is False
+    log = dbm.get_step(conn, review_id)["log_context"]
+    assert "[ANCHOR] not anchored" in log and str(repo) in log        # names the root it would have landed in
+    assert integrity.read_anchors(repo) == []
+    assert _git(repo, "notes", "--ref", integrity.NOTES_REF, "list").strip() == ""
+
+
+def test_anchor_heads_refuses_a_payload_that_pins_nothing(conn, repo):
+    payload = integrity.anchor_payload(conn, plan_id="P0")            # empty ledger
+    with pytest.raises(integrity.AnchorError) as e:
+        integrity.anchor_heads(repo, payload)
+    assert "nothing to anchor" in str(e.value)
+
+
+def test_an_anchor_that_pins_nothing_is_not_counted_as_matched(conn, repo):
+    """The ten notes the suite wrote are still on the ref of the repository that
+    found this bug. They are counted as `empty`, not deleted and not silently
+    passed off as witnesses — an anchor that pins no row vouches for nothing."""
+    _seed(conn, n=1)
+    integrity.anchor_heads(repo, integrity.anchor_payload(conn, plan_id="P0"))
+    empty = {t: {"id": None, "hash": None} for t in integrity.CHAINS}
+    empty.update({"at": "2026-09-17T06:38:53Z", "plan_id": "PU2", "v": 1})
+    _git(repo, "notes", "--ref", integrity.NOTES_REF, "append", "HEAD", "-m", integrity.payload_line(empty))
+    rep = integrity.verify(conn, against_notes=True, repo=repo)
+    assert rep["anchors"]["found"] == 1 and rep["anchors"]["matched"] == 1
+    assert rep["anchors"]["empty"] == 1
+    assert rep["anchors"]["latest"]["plan_id"] == "P0"                # the empty one is never "latest"
+    assert "1 line(s) on the ref pin nothing" in integrity.anchor_line(rep)

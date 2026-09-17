@@ -110,6 +110,13 @@ def payload_line(payload: dict) -> str:
 
 # ── writing and reading the anchors ───────────────────────────────────────────
 
+def pins_something(payload: dict) -> bool:
+    """True when the payload names at least one row. A note full of nulls is not
+    an anchor: it vouches for nothing, and it is indistinguishable on the ref
+    from one that does."""
+    return any((payload.get(t) or {}).get("id") is not None for t in CHAINS)
+
+
 def anchor_heads(repo, payload: dict, *, ref: str = NOTES_REF) -> str:
     """Append one anchor to `refs/notes/<ref>` on HEAD and return the note blob
     sha. Append-only: the previous anchors on that commit stay where they are.
@@ -119,6 +126,19 @@ def anchor_heads(repo, payload: dict, *, ref: str = NOTES_REF) -> str:
         raise AnchorError("no repository to anchor in")
     if not os.path.isdir(str(repo)):
         raise AnchorError(f"not a directory: {repo}")
+    if not pins_something(payload):
+        raise AnchorError("nothing to anchor: the three chains are empty, so a note would pin no row")
+    # A directory INSIDE a work tree is not that work tree: `git notes` run
+    # there writes to the enclosing repository. That is how the phantom-uplift
+    # e2e suite, which registers `examples/phantom-uplift`, appended ten empty
+    # notes to the developer's own checkout.
+    top = _git(repo, "rev-parse", "--show-toplevel", check=False)
+    root = top.stdout.strip()
+    if top.returncode != 0 or not root:
+        raise AnchorError(f"{repo} is not inside a git work tree")
+    if os.path.realpath(root) != os.path.realpath(str(repo)):
+        raise AnchorError(f"{repo} is not the root of its git work tree ({root}) — "
+                          f"the note would land on {root}, which nobody registered")
     head = _head(repo)
     _git(repo, "notes", "--ref", ref, "append", head, "-m", payload_line(payload))
     return note_sha(repo, head, ref=ref) or ""
@@ -171,6 +191,12 @@ def read_anchors(repo, *, ref: str = NOTES_REF) -> list[dict]:
                 out.append({"unreadable": text, "commit": commit, "note_sha": blob})
                 continue
             entry = dict(payload)
+            if not pins_something(payload):
+                # a witness that names no row; counted, never deleted, and never
+                # passed off as an anchor
+                entry.update({"empty": True, "commit": commit, "note_sha": blob})
+                out.append(entry)
+                continue
             entry["commit"] = commit
             entry["note_sha"] = blob
             out.append(entry)
@@ -213,7 +239,7 @@ def verify(conn, *, against_notes: bool = False, repo=None, ref: str = NOTES_REF
                          "head_id": heads[table]["id"], "head_hash": heads[table]["hash"]}
         if not res["ok"]:
             ok = False
-    anchors: dict = {"found": 0, "matched": 0, "unreadable": 0, "first_mismatch": None, "latest": None,
+    anchors: dict = {"found": 0, "matched": 0, "unreadable": 0, "empty": 0, "first_mismatch": None, "latest": None,
                      "reason": "not checked (--against-notes was not asked for)"}
     report = {"ok": ok, "tables": tables, "anchored": False, "anchors": anchors,
               "repo": (str(repo) if repo else None), "notes_ref": ref, "checked_at": _now(), "claim": CLAIM}
@@ -230,11 +256,14 @@ def verify(conn, *, against_notes: bool = False, repo=None, ref: str = NOTES_REF
     if not os.path.isdir(os.path.join(str(repo), ".git")) and not entries:
         anchors["reason"] = f"no git repository at {repo}"
         return report
-    good = [a for a in entries if "unreadable" not in a]
-    anchors["unreadable"] = len(entries) - len(good)
+    good = [a for a in entries if "unreadable" not in a and not a.get("empty")]
+    anchors["unreadable"] = sum(1 for a in entries if "unreadable" in a)
+    anchors["empty"] = sum(1 for a in entries if a.get("empty"))
     anchors["found"] = len(good)
     if not good:
-        anchors["reason"] = f"no note on refs/notes/{ref}: nothing has been anchored in this repository yet"
+        anchors["reason"] = (f"no note on refs/notes/{ref} pins a row"
+                             + (f" ({anchors['empty']} line(s) pin nothing)" if anchors["empty"] else
+                                ": nothing has been anchored in this repository yet"))
         return report
     anchors["reason"] = None
     matched = 0
@@ -268,6 +297,8 @@ def anchor_line(report: dict) -> str:
             f"({latest.get('at') or '-'}, plan {latest.get('plan_id') or '-'})")
     if a["unreadable"]:
         tail += f" · {a['unreadable']} line(s) on the ref were not written by provledger"
+    if a.get("empty"):
+        tail += f" · {a['empty']} line(s) on the ref pin nothing"
     mm = a["first_mismatch"]
     if mm:
         tail += (f"\n  ** anchor mismatch: {mm['table']} #{mm['id']} was anchored as "

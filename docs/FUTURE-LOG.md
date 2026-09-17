@@ -108,4 +108,6 @@
 | FL-101 | dp-phase3 | DEFERRED | 一个 plan 只在**关闭**时锚定：中途崩掉、被 FAILED、或以 `session:<id>` 形式记录的改动都没有锚点，于是「两次锚点之间的那段」完全靠链自身。应支持按时间/行数触发的周期锚定（Stop 钩子里一次，或 `provledger verify --anchor-now`），并让 `verify` 报出「最近一次锚点之后新增了多少行」这个数 | DP 4 期 |
 | FL-102 | dp-phase3 | DEFERRED | `selfcheck.unanchored_closes` 靠 `log_context LIKE '%[ANCHOR] not anchored%'` 认失败：日志措辞一改这条检查就安静地归零。应把锚定结果写成结构化的一行（`plan_close_log` 或 `trigger_log` 的一种 verdict），让计数从列来而不是从字符串来 | DP 4 期 |
 | FL-103 | dp-phase3 | DEFERRED | H4 的 `context_overhead_tokens ≤ 3000` 是**每个 plan** 一个数，但 pack 的大小跟 `declared_targets` 的条数走：本期 `dp3-t123` 声明了 11 个目标，pack 单独就 2916 token，总计 3063，**超了 2%**。阈值一个字没动（2c 的教训：任务进行中改判据等于把发现抹掉），但这个预算的形状是错的——要么按目标数归一（"每个目标多少 token"），要么让 `context_pack` 在接近预算时按 §5 的裁剪顺序继续砍并把砍掉的记成计数。现在的效果是"计划写得越诚实（目标列得越全），越容易超预算" | DP 4 期 |
+| FL-104 | dp-phase3 | DEFERRED | 十条空锚点已经写进了本仓库的 `refs/notes/provledger`，代码现在把它们数成 `anchors.empty` 而不是删掉——但**没有任何工具能把一条锚点标成"作废"**。只追加的 ref 上，一条错写的记录只能靠读的人识别。需要一条 `provledger verify --annotate <note> --void "<理由>"` 式的追加语义（再写一条指向它的 void 记录），否则"只追加"和"永远背着噪音"是同一件事 | DP 4 期 |
+| FL-105 | dp-phase3 | DEFERRED | 测试会把东西写进开发者自己的仓库这件事，只有在事后看 `git notes list` 时才发现。套件应有一道通用闸门：跑之前记下工作树与 `refs/notes/*` 的状态，跑完比对，**任何计划外的改动都让套件红**。本期临时用一条 diff 断言（`proof.sh`）证明修好了，但那条断言只覆盖 notes，也只在这个 plan 里跑过 | DP 4 期 |
 

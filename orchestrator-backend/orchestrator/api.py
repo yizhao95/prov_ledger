@@ -632,7 +632,19 @@ def _anchor_close(conn: sqlite3.Connection, project: str | None, plan_id: str,
         return {"anchored": True, "mode": "on", "note_sha": note, "commit": commit,
                 "at": payload["at"], "ref": integrity.NOTES_REF,
                 "heads": {t: payload[t] for t in integrity.CHAINS}}
-    except Exception as exc:
+    except integrity.AnchorError as exc:
+        if "nothing to anchor" in str(exc):
+            telemetry.append_step_log(
+                conn, review_step_id,
+                f"[ANCHOR] nothing to anchor: {exc} — {plan_id} closed with no note, because a note full of "
+                "nulls witnesses nothing.")
+            return {"anchored": False, "mode": mode, "reason": str(exc), "empty": True}
+        telemetry.append_step_log(
+            conn, review_step_id,
+            f"[ANCHOR] not anchored: {exc} — {plan_id} closed anyway (spec §7: a notes failure is a warning, "
+            "never a block). The ledger still verifies; it just has no outside witness for this close.")
+        return {"anchored": False, "mode": mode, "reason": str(exc)}
+    except Exception as exc:  # pragma: no cover - defensive
         telemetry.append_step_log(
             conn, review_step_id,
             f"[ANCHOR] not anchored: {exc} — {plan_id} closed anyway (spec §7: a notes failure is a warning, "

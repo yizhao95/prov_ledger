@@ -458,6 +458,16 @@ When a plan closes, `api._anchor_close` appends one line to
   `git push origin refs/notes/provledger`; the log line says so.
 - `provledger-extensions.json` → `{"integrity": {"anchor": "off"}}` switches it
   off. The default is `on`: turning it off is a choice somebody writes down.
+- **An anchor must pin something.** A payload whose three heads are all `null`
+  vouches for nothing, so it is refused (`[ANCHOR] nothing to anchor`) rather
+  than written. Lines like that already on a ref are counted as
+  `anchors.empty` — visible, never deleted, never passed off as a witness.
+- **An anchor must land in the repository somebody registered.** A registered
+  path *inside* a work tree is not that work tree: `git notes` run there writes
+  to the enclosing repository. The refusal names the root the note would
+  otherwise have landed on. This is not hypothetical — the phantom-uplift e2e
+  suite registers `examples/phantom-uplift`, and before this check it appended
+  ten empty notes to the developer's own checkout while the tests ran.
 
 ### 12.3 What none of this proves
 
