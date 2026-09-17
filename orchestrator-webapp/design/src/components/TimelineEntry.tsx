@@ -23,16 +23,16 @@ export interface TimelineEntryProps {
 }
 
 const EVENT_WORDS: Record<string, string> = {
-  node_added: "新增", node_changed: "改动", node_renamed: "改名", node_moved: "移动",
-  column_dropped: "列被移除", node_removed: "被删除", removed: "被删除",
-  identity_asserted: "身份由模型判定", node_matched: "无变化", identity_kept: "无变化",
+  node_added: "added", node_changed: "changed", node_renamed: "renamed", node_moved: "moved",
+  column_dropped: "column removed", node_removed: "removed", removed: "removed",
+  identity_asserted: "identity asserted", node_matched: "unchanged", identity_kept: "unchanged",
 };
 
 /**
  * One moment in a node's life: one row, one dot, the line running through it
  * (layout spec 2). The event is named in plain words; a significant change can
  * expand to before → after in place; the words recorded at the time sit under
- * it in quotes, and "被看到 / 改变了谁的计划" are separate counts that are never
+ * it in quotes, and "surfaced / adopted by a plan" are separate counts that are never
  * derived from each other.
  */
 export function TimelineEntry(p: TimelineEntryProps) {
@@ -48,34 +48,34 @@ export function TimelineEntry(p: TimelineEntryProps) {
                         fontSize: p.emphasis ? tokens.type_scale.title : tokens.type_scale.body}}
                 data-event={p.event}>{word}</span>
           <TierBadge tier={p.tier} />
-          <Hidden id={`run ${p.run.id}`}><Meta>第 {p.run.id} 次分析</Meta></Hidden>
+          <Hidden id={`run ${p.run.id}`}><Meta>analysis run {p.run.id}</Meta></Hidden>
         </div>
       }>
       {p.diff && <BeforeAfter before={p.diff.before} after={p.diff.after} label={p.diff.label} />}
       {p.because ? (
         <div style={{marginTop: tokens.spacing.tight}}>
-          <span style={{color: c["brand-gray"]}}>因为：“{p.because.text}”</span>{" "}
+          <span style={{color: c["brand-gray"]}}>Reason: “{p.because.text}”</span>{" "}
           {p.because.verbatim
-            ? <span data-verbatim="1" style={{fontSize: tokens.type_scale.micro, color: c["brand-blue"]}}>你的原话</span>
-            : <Meta>{p.because.by ?? "agent"} 的判断</Meta>}{" "}
+            ? <span data-verbatim="1" style={{fontSize: tokens.type_scale.micro, color: c["brand-blue"]}}>verbatim</span>
+            : <Meta>{p.because.by ?? "agent"}'s reading</Meta>}{" "}
           {p.because.level && <SourceLevelBadge level={p.because.level} />}
         </div>
       ) : (
-        <Meta>当时未说明</Meta>
+        <Meta>No reason recorded at the time</Meta>
       )}
       <div style={{marginTop: tokens.spacing.tight, display: "flex", flexWrap: "wrap", gap: 10}}>
         {p.run.planId && (
           <a href="#" data-task-link={p.run.planId} title={p.run.planId}
              style={{color: c["brand-blue"], fontSize: tokens.type_scale.meta, textDecoration: "none"}}>
-            回到当时的任务《{p.run.planTitle ?? p.run.planId}》 →
+            Open the task of record: {p.run.planTitle ?? p.run.planId} →
           </a>
         )}
-        <Meta>被看到 {shownTotal} 次</Meta>
+        <Meta>Surfaced {shownTotal}</Meta>
         {p.adoptedBy && p.adoptedBy.length > 0 && (
-          <Disclose summary={`改变了 ${p.adoptedBy.length} 次计划`}>
+          <Disclose summary={`Adopted by ${p.adoptedBy.length} plans`}>
             {p.adoptedBy.map((a) => (
               <div key={a.planId}>
-                <Meta>这条记录改变了《{a.title ?? a.planId}》的计划</Meta>
+                <Meta>Adopted by plan {a.title ?? a.planId}</Meta>
               </div>
             ))}
           </Disclose>

@@ -21,9 +21,9 @@ export interface ViewSwitcherProps {
 }
 
 const VIEWS: [string, string, string][] = [
-  ["graph", "🕸", "整张图"],
-  ["node", "🧬", "这个东西"],
-  ["task", "📋", "那次任务"],
+  ["graph", "🕸", "Graph"],
+  ["node", "🧬", "Node"],
+  ["task", "📋", "Task"],
 ];
 
 /**
@@ -55,13 +55,13 @@ export function ViewSwitcher({current, triple, links = {}, onSearch}: ViewSwitch
             <a key={v} href={href} data-view-link={v} style={style}>{icon} {label}</a>
           ) : (
             <span key={v} data-view-link={v} data-view-disabled="1" style={style}
-                  title={`当前上下文里没有${v === "node" ? "节点" : v === "graph" ? "项目" : "任务"}`}>{icon} {label}</span>
+                  title={`No ${v === "node" ? "node" : v === "graph" ? "project" : "task"} in the current context`}>{icon} {label}</span>
           );
         })}
       </div>
       <div style={{display: "flex", alignItems: "center", gap: tokens.spacing.row}}>
         {onSearch && (
-          <input value={q} placeholder="搜原话、理由、规矩…" data-search
+          <input value={q} placeholder="Search records, reasons, constraints…" data-search
                  onChange={(e) => setQ(e.target.value)}
                  onKeyDown={(e) => e.key === "Enter" && onSearch(q)}
                  style={{border: `1px solid ${c.hairline}`, borderRadius: tokens.radii.chip,
@@ -70,7 +70,7 @@ export function ViewSwitcher({current, triple, links = {}, onSearch}: ViewSwitch
         )}
         <Meta>
           <span data-breadcrumb title={`${triple.project ?? "—"} / ${triple.node ?? "—"} / ${triple.at ?? "latest"}`}>
-            {triple.project ?? "—"} › {(triple.node ?? "—").split(".").pop()} › {triple.at ?? "最新"}
+            {triple.project ?? "—"} › {(triple.node ?? "—").split(".").pop()} › {triple.at ?? "latest"}
           </span>
         </Meta>
       </div>

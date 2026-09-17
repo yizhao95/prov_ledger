@@ -64,8 +64,10 @@ def slots_for_plan(conn, project: str, plan_id: str, psg_db_path: str | None) ->
 def checklist_text(slots: list[dict]) -> str:
     """Closed-form: exactly these N data points, numbered, nothing else to invent."""
     if not slots:
-        return "本次改动没有触及任何数据点（无 node_changed / node_added / node_removed），不需要说明原因。"
-    lines = [f"本次改动触及 {len(slots)} 个数据点，逐个用一句话说明原因；不知道就写 unstated："]
+        return ("This change touched no data points at all (no node_changed / node_added / "
+                "node_removed), so there is nothing to explain.")
+    lines = [f"This change touched {len(slots)} data point(s). Give one sentence for each; "
+             "write unstated when you do not know:"]
     for i, s in enumerate(slots, 1):
         lines.append(f"  {i}. {s['qualified_name']} ({s['node_type']}, {'/'.join(s['event_types'])}) [{s['node_key']}]")
     return "\n".join(lines)

@@ -1,8 +1,8 @@
 """DP phase 2d (Task 0, half of FL-076): the Graph view stops drawing the whole
 project on every load.
 
-User feedback on the 2b screenshots, 2026-09-16: 记全是对的，画全是错的 — recording
-every node is right, DRAWING every node is wrong. So the view has four modes and
+User feedback on the 2b screenshots, 2026-09-16: recording every node is right,
+DRAWING every node is wrong. So the view has four modes and
 the biggest one is never the default:
 
   focus  — the focus node's ±2-hop neighbourhood (the default when there is a focus)

@@ -3,7 +3,9 @@
 All notable changes to provLedger — the `provledger` package, the four
 skills (`writing-plans`, `executing-plans`, `project-state-graph`,
 `update-project-state-graph`) and the read-only dashboard. Dates are the
-merge dates of the phase PRs; FL-nnn refers to `docs/FUTURE-LOG.md`.
+merge dates of the phase PRs. FL-nnn is an entry in the project's internal
+deferred-work ledger, which is not published; the part of it that affects
+users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
 ## 0.3.0 — 2026-09-17
 
@@ -77,6 +79,16 @@ reference, a rule the system applied, or an admitted gap — never by the writer
 - A reproducible demo (`examples/phantom-uplift/demo-provenance.sh`) builds the
   whole scenario in seconds, and a walkthrough recording is generated from it.
 - `provledger` on PyPI now ships the console script the documentation uses.
+- The repository reads in English throughout: the interface wording, the CLI
+  output and the documents. The Chinese vocabulary file stays, because it is
+  what `?lang=zh` is made of. Four Chinese strings that were reaching the
+  English pages regardless of the setting now go through it instead.
+- The deferred-work ledger is split: [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md)
+  publishes the confirmed defects and standing limits with their workarounds,
+  and the working log stays out of the repository.
+- README section 2 shows the map as an animation and the dashboard as the three
+  views a person actually walks: a task turning red on a silent upstream change,
+  the node history behind it, and the graph the warning is computed from.
 
 ## 0.2.0 — 2026-09-15
 

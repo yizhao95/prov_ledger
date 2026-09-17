@@ -13,7 +13,7 @@
     <h1 class="text-lg font-semibold font-mono text-gray-900 break-all">{{ session.session_id }}</h1>
     <div class="text-xs text-brand-muted mt-1">
       {% if session.run %}{{ session.run.project or '—' }} · refresh {{ session.run.refresh_state }}{% if session.run.psg_run_id %} · run {{ session.run.psg_run_id }}{% endif %}{% if session.run.note %} · {{ session.run.note }}{% endif %}{% else %}no session_run row{% endif %}
-      {% if session.degraded %}<span class="ml-2 px-1.5 py-0.5 rounded bg-[#ec835a]/15 text-[#8a3416]" data-degraded-badge>降级（无 plan）</span>{% endif %}
+      {% if session.degraded %}<span class="ml-2 px-1.5 py-0.5 rounded bg-[#ec835a]/15 text-[#8a3416]" data-degraded-badge>degraded (no plan)</span>{% endif %}
     </div>
   </div>
 

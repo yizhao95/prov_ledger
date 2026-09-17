@@ -90,7 +90,7 @@ def test_user_prompt_submit_records_the_prompt_verbatim_with_project_and_plan(ho
     c.execute("INSERT INTO Plans (plan_id, original_goal, status, project, project_source, created_at) VALUES "
               "('done', 'g', 'COMPLETED', 'outer', 'declared', '2026-09-15 11:00:00')")
     c.commit(); c.close()
-    text = "  please keep fiscal weeks — 不要改成自然周\n第二行 "
+    text = "  please keep fiscal weeks — do not switch them to calendar weeks\nsecond line "
     _feed(monkeypatch, {"session_id": "s9", "cwd": "/home/x/repo/pkg", "hook_event_name": "UserPromptSubmit", "prompt": text})
     assert hooks.main(["UserPromptSubmit"]) == 0 and capsys.readouterr().out == ""
     rows = sqlite3.connect(str(dbp)).execute("SELECT session_id, project, plan_id, text, visibility, occurred_at FROM utterance").fetchall()

@@ -3,7 +3,7 @@
 #
 #   Task A (a person)  removes orders.discount from the rollup. The reason is
 #                      their own sentence, carried by an email:
-#                      "收到上游通知，v2 以后不再有 discount 列"
+#                      "Drop orders.discount from the rollup — upstream said the v2 feed no longer carries it"
 #   Task B (an agent)  plans to compute a discount rate from that same column.
 #                      At publish, the heads-up finds the removal AND the words
 #                      behind it, the agent revises and CITES the record, and

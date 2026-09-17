@@ -4,7 +4,7 @@ not something the user said.
 `<task-notification>`, `<system-reminder>`, `<local-command-caveat>` and
 `<command-name>` prompts are harness text; recording them as utterances makes
 them R0 candidates for a `stated` reason — which would let the system quote
-itself as the user (north star: "永不静默" cuts both ways; the ledger must not
+itself as the user (north star: "never go silent" cuts both ways; the ledger must not
 invent a speaker). Utterance #28/#29 of the 2d session were exactly that.
 """
 import io
@@ -73,7 +73,7 @@ def test_a_real_prompt_that_merely_mentions_the_tags_is_still_recorded(hook_env,
     """The filter is a PREFIX filter, never a substring filter — a user may well
     write about `<system-reminder>` and those words are still theirs."""
     dbp, errlog = hook_env
-    text = "别再把 <system-reminder> 当成我的原话记进去 — filter on the prefix only"
+    text = "stop recording <system-reminder> as if it were something I said — filter on the prefix only"
     _feed(monkeypatch, {"session_id": "s", "cwd": "/home/x/repo", "hook_event_name": "UserPromptSubmit", "prompt": text})
     assert hooks.main(["UserPromptSubmit"]) == 0 and capsys.readouterr().out == ""
     assert _utterances(dbp) == [(text,)] and not errlog.exists()

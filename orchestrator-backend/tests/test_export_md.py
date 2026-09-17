@@ -48,7 +48,7 @@ def test_export_md_one_file_per_node_shareable_rows_only(conn, graph, tmp_path):
     assert "the boss prefers it" not in a and "finance said so" not in a                   # personal rationale never leaves
     assert "nulls broke the join" in b and "re: paid orders" in b and "mail:42" in b        # shareable rationale + linked source
     assert "TOPSECRET" not in b and "TOPSECRET" not in a                                    # a personal statement is not exported at all
-    assert "来源等级" in a and "履历：1 次事件" in a
+    assert "source level" in a and "history: 1 event(s)" in a
     grep = subprocess.run(["grep", "-rl", "keep paid orders only", str(tmp_path / "md")], capture_output=True, text=True)
     assert grep.stdout.strip().endswith("pkg.m.load_orders.md")
 
@@ -86,7 +86,7 @@ def test_init_agents_md_is_idempotent(tmp_path):
     (tmp_path / "AGENTS.md").write_text("# other\n")
     assert why.init_agents_md(str(tmp_path))["action"] == "appended"
     assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8").startswith("# other\n\n<!-- provledger:begin -->")
-    for w in ("追责", "甩锅", "防老板", "呈堂", "证据等级"):
+    for w in ("blame", "scapegoat", "pass the buck", "for the boss", "evidence level"):
         assert w not in why.AGENTS_SNIPPET
 
 

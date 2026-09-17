@@ -1,6 +1,6 @@
 <!-- @dsCard group="Provenance" -->
 <!doctype html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -19,22 +19,22 @@
 <main>
   <header>
     <h1>OutcomeRow</h1>
-    <p>一条声明后来怎么样了。“没测过”和“没事”是两件事。</p>
+    <p>What became of one claim. “never checked” and “it was fine” are two different facts.</p>
   </header>
-  <section data-variant="量到了 / 还在 / 没测过">
-    <h2 class="variant-label">量到了 / 还在 / 没测过</h2>
+  <section data-variant="observed / survival / never checked">
+    <h2 class="variant-label">observed / survival / never checked</h2>
     <div data-host="0"></div>
   </section>
-  <section data-variant="没有可观测的后果">
-    <h2 class="variant-label">没有可观测的后果</h2>
+  <section data-variant="nothing to observe">
+    <h2 class="variant-label">nothing to observe</h2>
     <div data-host="1"></div>
   </section>
 </main>
 <script src="../dist/_ds_bundle.js"></script>
 <script>
   var D = window.ProvLedgerDS, React = D.__React;
-  D.__render(React.createElement('div',null,React.createElement(D.OutcomeRow,{claim:'折扣率口径不变，误差 ±5%',target:'pkg.m.discount_rate',targetKind:'node',latest:{kind:'observed',tier:'observed',delta_pct:23,at:'2026-09-15'}}),React.createElement(D.OutcomeRow,{claim:'clean 仍然吃 load_orders 的输出',target:'pkg.m.clean',latest:{kind:'survival',tier:'observed',signal:'untouched_consumed',at:'2026-09-15'}}),React.createElement(D.OutcomeRow,{claim:'报表数不变',target:'reports.weekly',latest:null})), document.querySelector('[data-host="0"]'));
-  D.__render(React.createElement(D.OutcomeRow,{claim:'重构不改变行为',target:'pkg.m.parse',latest:{kind:'none_available',tier:'derived',at:'2026-09-10'}}), document.querySelector('[data-host="1"]'));
+  D.__render(React.createElement('div',null,React.createElement(D.OutcomeRow,{claim:'the discount rate definition is unchanged, within ±5%',target:'pkg.m.discount_rate',targetKind:'node',latest:{kind:'observed',tier:'observed',delta_pct:23,at:'2026-09-15'}}),React.createElement(D.OutcomeRow,{claim:'clean still consumes the output of load_orders',target:'pkg.m.clean',latest:{kind:'survival',tier:'observed',signal:'untouched_consumed',at:'2026-09-15'}}),React.createElement(D.OutcomeRow,{claim:'the report figures do not change',target:'reports.weekly',latest:null})), document.querySelector('[data-host="0"]'));
+  D.__render(React.createElement(D.OutcomeRow,{claim:'the refactor does not change behaviour',target:'pkg.m.parse',latest:{kind:'none_available',tier:'derived',at:'2026-09-10'}}), document.querySelector('[data-host="1"]'));
 </script>
 </body>
 </html>

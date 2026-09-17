@@ -158,23 +158,25 @@ Run each test suite **separately** (each has its own pyproject/pythonpath —
 one combined invocation breaks). A healthy install passes all of them:
 
 ```bash
-python3 -m pytest scripts/tests                         -q   #   22
-python3 -m pytest orchestrator-backend                  -q   #  751
-python3 -m pytest orchestrator-webapp                   -q   #  260
+python3 -m pytest scripts/tests                         -q   #   27
+python3 -m pytest orchestrator-backend                  -q   #  830, 4 deselected
+python3 -m pytest orchestrator-webapp                   -q   #  267
 python3 -m pytest skills/writing-plans/tests            -q   #   93
 python3 -m pytest skills/executing-plans                -q   #   77
 python3 -m pytest skills/update-project-state-graph/scripts/tests -q   #   90
-(cd skills/project-state-graph/scripts && python3 -m pytest tests -q)   #  425, 1 deselected
+python3 -m pytest examples                              -q   #   18
+(cd skills/project-state-graph/scripts && python3 -m pytest tests -q)   #  429, 1 deselected
 ```
 
-Total: **1826 collected** across the eight suites (run `scripts/count_tests.sh` to
+Total: **1831 collected** across the eight suites (run `scripts/count_tests.sh` to
 re-derive; a few are deselected by default). A healthy install passes all of
 them. The project-state-graph suite is the long one (~8 min); run it in three
 segments if you want to see progress — scenarios + runner, the corpus, and the
 rest. The `llm_consistency` marker and the manual arbiter evaluations are
 deselected by default and never run in CI. Run each suite on its own: they set
 their import paths from their own directory, so a combined run reports failures
-that a separate run does not have (FL-122).
+that a separate run does not have; see
+[`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
 The quickest end-to-end check is the demo — one command, deterministic,
 self-verifying. It runs `examples/phantom-uplift`: a revenue number that jumps
@@ -193,7 +195,7 @@ The failure class itself, with numbers, is written up in
 | level | command | expect |
 |---|---|---|
 | quickest — end to end | `make demo` | MISMATCH → revise → VERIFIED, `SELF-CHECK OK`, exit 0 |
-| full — every suite | the seven `pytest` commands above, **run separately** | 1826 tests, all passing |
+| full — every suite | the eight `pytest` commands above, **run separately** | 1831 tests, all passing |
 | packaging — the pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
 
 ---

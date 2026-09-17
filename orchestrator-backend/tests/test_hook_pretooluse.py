@@ -69,7 +69,7 @@ def test_hit_injects_statements_not_rationale_and_writes_read_hits(world, monkey
     hso = out["hookSpecificOutput"]
     assert hso["hookEventName"] == "PreToolUse" and "permissionDecision" not in hso   # additive, never a veto by default
     ctx = hso["additionalContext"]
-    assert "keep paid orders only" in ctx and "下游 pkg.m.clean: clean must keep the label column" in ctx
+    assert "keep paid orders only" in ctx and "downstream pkg.m.clean: clean must keep the label column" in ctx
     assert "SECRET" not in ctx and "provledger why pkg.m.load_orders" in ctx and len(ctx) <= 700
     rows = sqlite3.connect(str(world["db"])).execute("SELECT reason_id, moment, session_id, injected_chars FROM read_hit ORDER BY reason_id").fetchall()
     assert rows == [(world["ca"], "edit", "sess-9", len(ctx)), (world["cx"], "edit", "sess-9", len(ctx))]

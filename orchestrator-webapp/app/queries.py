@@ -666,9 +666,13 @@ def tier_badge(tier: str | None) -> tuple[str, str]:
     return TIER_BADGES.get(tier or "unstated", TIER_BADGES["unstated"])
 
 
-# 来源等级 (source level) — the computed evidence_level of change_reason_v, shown as words
-SOURCE_LEVELS = {"linked": "来源等级 linked · 有可核对的引用", "verbal": "来源等级 verbal · 原话或口头来源",
-                 "task_context": "来源等级 task_context · 仅任务脉络", "unstated": "来源等级 unstated · 未说明"}
+# Source level — the computed evidence_level of change_reason_v, shown as words.
+# English only: this phrase is language-independent here, and the one page that
+# prints it branches on `lang` and asks vocab for the Chinese word instead.
+SOURCE_LEVELS = {"linked": "source level linked · a reference you can open",
+                 "verbal": "source level verbal · the words themselves",
+                 "task_context": "source level task-context · inferred from the surrounding task",
+                 "unstated": "source level unstated · nothing was recorded"}
 
 
 def get_node_reasons(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
@@ -1030,7 +1034,7 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str,
         base["reasons"] = [dict(r, display_tier=r["tier"], source_level=SOURCE_LEVELS.get(r["evidence_level"] or "", "—")) for r in rows]
     except sqlite3.Error:
         base["reasons"] = []
-    # DP phase 2 (Task 7): 展示 per moment (never summed) + 采用 with the adopting plans, per record
+    # DP phase 2 (Task 7): surfaced per moment (never summed) + adopted with the adopting plans, per record
     stats = record_stats(conn, [r["id"] for r in base["reasons"]])
     for r in base["reasons"]:
         r["stats"] = stats.get(r["id"])
@@ -1143,7 +1147,7 @@ except Exception:  # pragma: no cover — the dashboard still renders without th
 
 def get_headline(conn: sqlite3.Connection, plan_id: str) -> dict | None:
     """The plan's latest headline (headline + headline_response, read-only):
-    findings with their response or 未回答, an `agent_proceeded` flag, and the
+    findings with their response or `unanswered`, an `agent_proceeded` flag, and the
     summary recomputed from the responses. None on an older DB or no row."""
     try:
         row = conn.execute("SELECT id, findings_json, computed_at FROM headline WHERE plan_id = ? ORDER BY id DESC LIMIT 1", (plan_id,)).fetchone()
@@ -1183,7 +1187,7 @@ def _reason_text_map(conn: sqlite3.Connection, ids: list[int]) -> dict[int, dict
 
 def get_shown_adopted(conn: sqlite3.Connection, plan_id: str) -> dict:
     """{"plan": {shown, adopted}, "steps": {step_id: {shown, adopted}}} — read_hit
-    rows (展示过) and influence rows (采用了) of the plan, per step; rows without
+    rows (surfaced) and influence rows (adopted) of the plan, per step; rows without
     a step land in the plan bucket. Each entry carries the record's node_key and
     text so the template can link /node/<project>/<key>?at=<id>. Never derived
     from each other (I11); empty on an older DB."""
@@ -1356,7 +1360,7 @@ def parse_at(at) -> dict:
     """DP phase 2d (Task 0): `at` says WHAT it points at — `run:<id>` (a state-graph
     analysis run) or `reason:<id>` (one recorded record). 2b shipped a bare id and
     the three views disagreed about what it meant: Node treated it as both, Graph
-    always as a run, so the "被 <plan> 采用" link sent a reason id to a run lookup.
+    always as a run, so the "adopted by <plan>" link sent a reason id to a run lookup.
 
     A bare number still reads as a run for one version (compatibility). Anything
     else — a plan id, a malformed prefix — stays untyped rather than being guessed
@@ -1562,7 +1566,7 @@ def search_records(conn: sqlite3.Connection, q: str, project: str | None = None)
         d = dict(r)
         d["source_level"] = SOURCE_LEVELS.get(d.get("evidence_level") or "", "—")
         d["verbatim"] = d["tier"] == "stated"
-        key = d["node_key"] or "(没有锚点)"
+        key = d["node_key"] or "(no anchor)"
         g = grouped.setdefault(key, {"node_key": key, "project": d["project"], "hits": [],
                                      "qualified_name": _qualified_for(d["project"], key)})
         g["hits"].append(d)

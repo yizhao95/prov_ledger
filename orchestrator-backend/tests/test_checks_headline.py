@@ -147,8 +147,8 @@ def test_close_headline_turns_proceeded_and_unanswered_blocking_findings_into_ex
     out = checks.close_headline(conn, plan_id="P1", commit=True)
     assert out == {"expectations": 3, "unanswered": 2, "proceeded": 1}          # 2 constraints (1 proceeded, 1 unanswered) + the removed upstream
     claims = [r[0] for r in conn.execute("SELECT claim FROM expectations WHERE plan_id='P1' ORDER BY id")]
-    assert any(c.startswith("越过 #") for c in claims) and any(c.startswith("未回答 #") for c in claims)
-    assert all("后本 plan 内无 step 失败" in c for c in claims)
+    assert any(c.startswith("proceeded past #") for c in claims) and any(c.startswith("unanswered #") for c in claims)
+    assert all("no step of this plan failed afterwards" in c for c in claims)
     assert checks.close_headline(conn, plan_id="P1", commit=True)["expectations"] == 0            # idempotent
 
 

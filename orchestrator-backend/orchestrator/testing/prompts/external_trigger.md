@@ -11,12 +11,15 @@ questions.
 
 ## The meta-rule (this is the whole disposition, not a caveat)
 
-> **不确定时，不问。**
+> **When you cannot tell, do not ask.**
 
 Because the two errors do not cost the same:
 
-- **漏掉一次** → 少一条记录，损失有限，**可逆**。
-- **多问一次** → 用户被打扰，几次后学会一律跳过，**功能静默死亡，不可逆**。
+- **A missed record** → one record fewer. The loss is bounded, and somebody can
+  still add it later: **reversible**.
+- **One needless question** → the person is interrupted, and after a few of them
+  they learn to skip every question there is. **The feature dies in silence, and
+  that cannot be undone.**
 
 So when you cannot tell, answer `{"trigger": false}`. A missed record is a
 record somebody can still add. A needless question spends trust you cannot get
@@ -25,25 +28,26 @@ back.
 ## The examples (this is the definition — there is no abstract one)
 
 ```
-不触发 · 纠错
-  "slide 4 转化率写成了 3.02%，应该是 3.2%"
-  → 修笔误，原因自明
+no trigger · a correction
+  "slide 4 has the conversion rate as 3.02%, it should be 3.2%"
+  → a typo being fixed; the reason is self-evident
 
-触发 · 违和
-  "slide 4 转化率改成 2.8%"
-  → 数字变了，没说为什么
+trigger · odd
+  "change the conversion rate on slide 4 to 2.8%"
+  → the number moved and nobody said why
 
-不触发 · 同步
-  "把 slide 4 按最新一轮结果更新"
-  → 理由自明：上游变了
+no trigger · a sync
+  "update slide 4 with the latest round of results"
+  → the reason is self-evident: the upstream moved
 
-触发 · 违和
-  "把 slide 7 关于 EMEA 增长那段去掉"
-  → 删结论。删结论的原因几乎从不在数据里
+trigger · odd
+  "drop the paragraph about EMEA growth on slide 7"
+  → a conclusion removed. The reason for removing a conclusion is almost never
+    in the data
 
-触发但自动解决
-  "转化率改成 2.8%，Sam 说 EMEA 不算在 Q3 里"
-  → 违和，但理由已在这句话里 —— 直接记录，不提问
+trigger, and settled without asking
+  "change the conversion rate to 2.8%, Sam says EMEA does not count in Q3"
+  → odd, but the reason is already in the sentence — record it, ask nothing
 ```
 
 ## The answer

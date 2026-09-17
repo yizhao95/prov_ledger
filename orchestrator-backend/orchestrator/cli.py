@@ -938,7 +938,7 @@ def build_parser() -> argparse.ArgumentParser:
     hr.add_argument("--by", default="agent", choices=["agent", "human"]); hr.add_argument("--cite", action="append", type=int, default=[], metavar="REASON_ID")
     ha = hs.add_parser("ack", help="a person proceeds past a finding (by human)"); ha.add_argument("plan_id"); ha.add_argument("finding_id")
     ha.add_argument("--rationale", default=None); ha.add_argument("--cite", action="append", type=int, default=[], metavar="REASON_ID")
-    w = sub.add_parser("why", help="one bounded read of a node: its history, constraints (with 来源等级), rejected paths, prior claims and blast radius; every record shown is counted as shown")
+    w = sub.add_parser("why", help="one bounded read of a node: its history, constraints (with their source level), rejected paths, prior claims and blast radius; every record shown is counted as shown")
     w.add_argument("target", nargs="?", default=None, help="qualified name, nk_… node key, or file:line")
     w.add_argument("--project", default=None, help="registered project (default: the one whose repo contains the cwd)")
     w.add_argument("--impact", action="store_true", help="expand the blast radius (callers, consumers, lineage)")

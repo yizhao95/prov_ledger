@@ -94,12 +94,12 @@ def _span_of(text: str, fragment: str) -> list[int]:
 
 
 PAIRS = [
-    ("correction", "slide 4 转化率写成了 3.02%，应该是 3.2%", "metric:q3_conv", False, None, "silent"),
-    ("bare_change", "slide 4 转化率改成 2.8%", "metric:q3_conv", True, None, "ask"),
-    ("sync", "把 slide 4 按最新一轮结果更新", "metric:q3_conv", False, None, "silent"),
-    ("deleted_conclusion", "把 slide 7 关于 EMEA 增长那段去掉", "declared:emea-growth", True, None, "ask"),
-    ("reason_in_the_sentence", "转化率改成 2.8%，Sam 说 EMEA 不算在 Q3 里", "metric:q3_conv", True,
-     "Sam 说 EMEA 不算在 Q3 里", "auto"),
+    ("correction", "slide 4 has the conversion rate as 3.02%, it should be 3.2%", "metric:q3_conv", False, None, "silent"),
+    ("bare_change", "change the conversion rate on slide 4 to 2.8%", "metric:q3_conv", True, None, "ask"),
+    ("sync", "update slide 4 with the latest round of results", "metric:q3_conv", False, None, "silent"),
+    ("deleted_conclusion", "drop the paragraph about EMEA growth on slide 7", "declared:emea-growth", True, None, "ask"),
+    ("reason_in_the_sentence", "change the conversion rate to 2.8%, Sam says EMEA does not count in Q3", "metric:q3_conv", True,
+     "Sam says EMEA does not count in Q3", "auto"),
 ]
 
 
@@ -143,8 +143,8 @@ def test_c3_the_five_paired_examples_are_judged_as_labelled(ledger, name, text, 
 def test_a_reason_already_in_the_users_words_is_recorded_stated_and_nobody_is_asked(ledger):
     # The fifth example is a follow-up: the deck is named in the sentence before
     # it, and the reason is in a sentence that never says "slide".
-    _said(ledger, "slide 4 上那个数字我们再看一下")
-    text = "转化率改成 2.8%，Sam 说 EMEA 不算在 Q3 里"
+    _said(ledger, "let us take another look at that number on slide 4")
+    text = "change the conversion rate to 2.8%, Sam says EMEA does not count in Q3"
     uid = _said(ledger, text)
     out = et.evaluate_external(ledger, project=PROJECT, plan_id=PLAN, psg_db_path=None,
                                runner=_oracle({text: uid}), mode="on", commit=True)
@@ -155,13 +155,13 @@ def test_a_reason_already_in_the_users_words_is_recorded_stated_and_nobody_is_as
     assert r["tier"] == "stated" and r["rule_id"] == "X1" and r["recorded_by"] == "system"
     assert r["verbatim_utterance_id"] == uid
     said = pv.get_utterance(ledger, uid)["text"][r["verbatim_start"]:r["verbatim_end"]]
-    assert said == "Sam 说 EMEA 不算在 Q3 里"
+    assert said == "Sam says EMEA does not count in Q3"
     asks = ledger.execute("SELECT COUNT(*) FROM trigger_log WHERE plan_id = ? AND verdict = 'ask'", (PLAN,)).fetchone()[0]
     assert asks == 0
 
 
 def test_an_answer_that_is_not_json_is_silent_and_says_so(ledger):
-    _said(ledger, "slide 4 转化率改成 2.8%")
+    _said(ledger, "change the conversion rate on slide 4 to 2.8%")
 
     def prose(prompt, *, model=None, timeout_s=None):
         return "Hard to say — it might be a correction, it might not."
@@ -172,7 +172,7 @@ def test_an_answer_that_is_not_json_is_silent_and_says_so(ledger):
 
 
 def test_a_span_the_utterance_does_not_contain_records_nothing_and_asks_nothing(ledger):
-    text = "slide 4 转化率改成 2.8%"
+    text = "change the conversion rate on slide 4 to 2.8%"
     uid = _said(ledger, text)
 
     def out_of_range(prompt, *, model=None, timeout_s=None):
@@ -187,7 +187,7 @@ def test_a_span_the_utterance_does_not_contain_records_nothing_and_asks_nothing(
 
 
 def test_c4_every_verdict_is_one_trigger_log_row_on_the_external_path(ledger):
-    text = "slide 4 转化率改成 2.8%"
+    text = "change the conversion rate on slide 4 to 2.8%"
     uid = _said(ledger, text)
     et.evaluate_external(ledger, project=PROJECT, plan_id=PLAN, psg_db_path=None,
                          runner=_oracle({text: uid}), mode="on", commit=True)
@@ -203,7 +203,7 @@ def test_c4_every_verdict_is_one_trigger_log_row_on_the_external_path(ledger):
 
 
 def test_an_external_change_needs_both_an_external_node_and_a_word_about_the_artifact(ledger):
-    _said(ledger, "slide 4 转化率改成 2.8%")
+    _said(ledger, "change the conversion rate on slide 4 to 2.8%")
     ctx = _ctx(ledger)
     assert et.is_external_change(ctx, _node("metric:q3_conv")) is True
     assert et.is_external_change(ctx, {"node_key": "nk_abc", "qualified_name": "pkg.mod.load_orders",
@@ -214,19 +214,19 @@ def test_an_external_change_needs_both_an_external_node_and_a_word_about_the_art
 def test_without_a_word_about_the_artifact_an_external_node_is_not_an_external_change(conn):
     _plan(conn)
     _occurrence(conn, "metric:q3_conv", "slide 4", "3.2")
-    _said(conn, "把 compute_conversion 的分母改一下")
+    _said(conn, "tweak the denominator inside compute_conversion")
     assert et.is_external_change(_ctx(conn), _node("metric:q3_conv")) is False
 
 
 def test_the_meta_rule_and_the_five_examples_are_in_the_prompt_verbatim():
     prompt = et.prompt_text()
-    assert "不确定时，不问" in prompt
+    assert et.META_RULE in prompt
     for _name, text, _key, _trigger, _fragment, _verdict in PAIRS:
         assert text in prompt, f"the prompt lost the {_name} example"
 
 
 def test_the_prompt_carries_the_words_and_the_places_the_number_turned_up(ledger):
-    text = "slide 4 转化率改成 2.8%"
+    text = "change the conversion rate on slide 4 to 2.8%"
     uid = _said(ledger, text)
     prompt = et.prompt_for(_ctx(ledger), _node("metric:q3_conv"))
     assert text in prompt and str(uid) in prompt
@@ -235,7 +235,7 @@ def test_the_prompt_carries_the_words_and_the_places_the_number_turned_up(ledger
 
 
 def test_with_the_switch_off_no_model_is_asked_and_the_verdict_is_still_logged(ledger):
-    _said(ledger, "slide 4 转化率改成 2.8%")
+    _said(ledger, "change the conversion rate on slide 4 to 2.8%")
     calls = []
 
     def never(prompt, *, model=None, timeout_s=None):
@@ -253,7 +253,7 @@ def test_with_the_switch_off_no_model_is_asked_and_the_verdict_is_still_logged(l
 
 
 def test_with_the_switch_on_the_runner_is_asked_once_per_candidate(ledger):
-    text = "slide 4 转化率改成 2.8%"
+    text = "change the conversion rate on slide 4 to 2.8%"
     uid = _said(ledger, text)
     calls = []
     oracle = _oracle({text: uid})
@@ -268,26 +268,28 @@ def test_with_the_switch_on_the_runner_is_asked_once_per_candidate(ledger):
 
 
 def test_c5_the_false_ask_rate_is_the_share_of_asks_the_person_had_nothing_to_say_to(ledger):
-    _said(ledger, "slide 4 转化率改成 2.8%")
+    _said(ledger, "change the conversion rate on slide 4 to 2.8%")
     for key, tier in (("metric:q3_conv", "unstated"), ("declared:emea-growth", "stated")):
         et._log(ledger, project=PROJECT, plan_id=PLAN, node_key=key, rule_id=None, verdict="ask", basis="odd")
     pv.insert_reason(ledger, project=PROJECT, plan_id=PLAN, node_key="metric:q3_conv", kind="technical",
                      recorded_by="human", commit=False)                       # nothing to say -> unstated
-    uid = _said(ledger, "Sam 说 EMEA 不算在 Q3 里")
+    said = "Sam says EMEA does not count in Q3"                              # and this one had something to say
+    uid = _said(ledger, said)
     pv.insert_reason(ledger, project=PROJECT, plan_id=PLAN, node_key="declared:emea-growth", kind="organizational",
-                     verbatim=(uid, 0, 19), recorded_by="human", commit=True)
+                     verbatim=(uid, 0, len(said)), recorded_by="human", commit=True)
     r = et.rates(ledger, project=PROJECT)
     assert r["asks"] == 2 and r["asks_answered"] == 2 and r["false_asks"] == 1
     assert r["external_false_ask_rate"] == 0.5
 
 
 def test_c5_the_miss_rate_is_the_share_of_silences_the_person_came_back_to(ledger):
-    _said(ledger, "slide 4 转化率改成 2.8%")
+    _said(ledger, "change the conversion rate on slide 4 to 2.8%")
     for key in ("metric:q3_conv", "declared:emea-growth"):
         et._log(ledger, project=PROJECT, plan_id=PLAN, node_key=key, rule_id=None, verdict="silent", basis="not odd")
-    uid = _said(ledger, "其实那个数字是因为 Sam 把 EMEA 拿掉了")
+    volunteered = "that number moved because Sam took EMEA out"
+    uid = _said(ledger, volunteered)
     pv.insert_reason(ledger, project=PROJECT, plan_id=PLAN, node_key="metric:q3_conv", kind="organizational",
-                     verbatim=(uid, 0, 10), recorded_by="human", commit=True)
+                     verbatim=(uid, 0, len(volunteered)), recorded_by="human", commit=True)
     r = et.rates(ledger, project=PROJECT)
     assert r["silences"] == 2 and r["misses"] == 1
     assert r["external_miss_rate"] == 0.5
@@ -330,7 +332,7 @@ def test_the_code_rules_answer_first_and_the_judge_only_sees_what_is_left(ledger
     ps.add_event(g, 1, 1, "node_added", "nk_code")
     g.commit()
     g.close()
-    text = "slide 4 转化率改成 2.8%"
+    text = "change the conversion rate on slide 4 to 2.8%"
     uid = _said(ledger, text)
     out = triggers.evaluate(ledger, project=PROJECT, plan_id=PLAN, psg_db_path=str(graph),
                             external_mode="on", external_runner=_oracle({text: uid}), commit=True)
@@ -341,7 +343,7 @@ def test_the_code_rules_answer_first_and_the_judge_only_sees_what_is_left(ledger
 
 
 def test_a_node_a_code_rule_already_answered_is_not_judged_again_by_the_model(ledger):
-    text = "slide 4 转化率改成 2.8%"
+    text = "change the conversion rate on slide 4 to 2.8%"
     uid = _said(ledger, text)
     pv.insert_reason(ledger, project=PROJECT, plan_id=PLAN, node_key="metric:q3_conv", kind="technical",
                      interpretation="a rule already answered for this node", rule_id="R5",

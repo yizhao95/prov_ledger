@@ -46,7 +46,7 @@
       {% for s in recent_sessions %}
       <a href="/session/{{ s.session_id }}" class="border border-hairline rounded-lg px-3 py-2 hover:bg-brand-bg" data-session-card="{{ s.session_id }}"{% if s.degraded %} data-degraded="1"{% endif %}>
         <div class="font-mono text-gray-900">{{ s.session_id[:12] }}…</div>
-        <div class="text-brand-muted">{{ s.utterances }} said · {{ s.calls }} calls · {% if s.plans %}{{ s.plans }} plan{{ '' if s.plans == 1 else 's' }}{% else %}<span class="text-[#8a3416]">降级（无 plan）</span>{% endif %}{% if s.refresh_state %} · refresh {{ s.refresh_state }}{% endif %}</div>
+        <div class="text-brand-muted">{{ s.utterances }} said · {{ s.calls }} calls · {% if s.plans %}{{ s.plans }} plan{{ '' if s.plans == 1 else 's' }}{% else %}<span class="text-[#8a3416]">{{ 'degraded (no plan)' if lang != 'zh' else '降级（无 plan）' }}</span>{% endif %}{% if s.refresh_state %} · refresh {{ s.refresh_state }}{% endif %}</div>
         <div class="text-[11px] text-brand-muted">{{ s.last_at }}</div>
       </a>
       {% endfor %}

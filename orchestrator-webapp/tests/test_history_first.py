@@ -2,13 +2,13 @@
 
 provLedger's claim is "a past decision changed this plan". Until now you could
 only find that by scrolling to a stats line on a node page. So the Task page's
-first block is 因历史而变的决定 — every record this plan adopted, quoted, with a
+first block is the decisions history changed — every record this plan adopted, quoted, with a
 link back to the task and the words that caused it; every node gets a trace
 strip of its last significant moments; and a `?at=reason:<id>` marks the exact
 span of the user's words the record cites, rather than making you find it.
 
 The empty case is the one that matters: a plan that adopted nothing says so.
-"本 plan 未采用任何历史记录" is information — a hidden block is not.
+"No prior decisions relied on." is information — a hidden block is not.
 """
 from __future__ import annotations
 
@@ -241,7 +241,7 @@ def test_the_task_page_carries_no_leftover_chinese(client):
     # the seeded fixtures quote Chinese user words on purpose; those are DATA
     for quoted in (VERBATIM, PRE):
         prose = prose.replace(quoted, " ")
-    cjk = _re.findall(r"[一-鿿]+", prose)
+    cjk = _re.findall(r"[\u4e00-\u9fff]+", prose)
     assert cjk == [], f"Chinese chrome left on the Task page: {cjk[:6]}"
 
 

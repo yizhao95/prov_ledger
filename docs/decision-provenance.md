@@ -41,7 +41,7 @@ chain (`provenance.verify_chain`).
 | `derived` | a rule inferred it from the ledger and the graph | a `rule_id` |
 | `unstated` | nobody knows — recorded as a gap | no text at all |
 
-**来源等级 / source level** (`evidence_level` in `change_reason_v`) is *what
+**Source level** (`evidence_level` in `change_reason_v`) is *what
 the reason can be checked against*, computed from the row's links, never
 stored:
 
@@ -137,14 +137,14 @@ numbers, and `test_h1_threshold` fails when the last measured plans exceed
 ## 8 · Phase 2 — the value points: shown, adopted, asked
 
 Phase 0/1 recorded reasons; phase 2 is where they are taken out again. Four
-places, and only four (NORTH-STAR: 不过度干涉):
+places, and only four (NORTH-STAR: "do not overreach"):
 
 | moment | what happens | what is written |
 |---|---|---|
 | **publish** | `context_pack.build` — one bounded read per target (identity chain, constraints, rejected paths, reasons, prior claims, the card) trimmed to a token budget in a fixed order (reasons → rejected paths → neighbour constraints → constraints), cuts shown as counts; `checks.headline` — the two-layer check printed as the plan headline, stored as a new `headline` row every time | `read_hit(moment='plan')` per record shown |
 | **edit** (PreToolUse: Edit / Write / MultiEdit) | the active constraints anchored on the lines about to change and one hop downstream, injected as `additionalContext` (statements only, ≤ 600 chars, ending with `provledger why <qn>`); not one byte when nothing anchors there; nothing opened for a file outside every registered repo | `read_hit(moment='edit', injected_chars)` |
 | **close** | rules R0–R6, the unstated backstop, `close_headline` (proceeded / unanswered blocking findings → survival expectations) | `change_reason`, `expectations` |
-| **why** (`provledger why <qn|nk_…|file:line>`) | the same pack, printed: `node · 下游 n · 履历 m 次 · 约束 k（生效 j）· 否决 r · 待补 p`, then each record as `#id · tier · 来源等级 · when · 展示 n 次 · 被 <plan> 采用`; `--impact`, `--all`, `--pending`, `--never-read` (constraints nobody was ever shown), `--search` (FTS5, LIKE when unavailable and it says so) | `read_hit(moment='why')` |
+| **why** (`provledger why <qn|nk_…|file:line>`) | the same pack, printed: `node · downstream n · history m · constraints k (j active) · rejected r · pending p`, then each record as `#id · tier · source level · when · shown n · adopted by <plan>`; `--impact`, `--all`, `--pending`, `--never-read` (constraints nobody was ever shown), `--search` (FTS5, LIKE when unavailable and it says so) | `read_hit(moment='why')` |
 
 **Adopted** is written by exactly three paths, all of which cite a record id: a
 headline response (`headline-respond`, `provledger headline respond|ack`), a
@@ -224,9 +224,9 @@ means Graph and Node say `state graph unavailable` and the bar stays.
 | view | answers | what it shows |
 |---|---|---|
 | **Graph** `/graph/{project}` | what does the project look like now (or at run N), which nodes have a story | nodes of `node_snapshot` at the run (functions / methods / routes by default, `level=full` for everything), a **badge** per node = `node_badge_v` (reasons whose effective significance is not minor + rejected paths + active constraints), the colour of the latest event's tier; the graph keeps no edge history, so a historical run shows today's edges mapped by node_key and says `edges_from: latest`; vis-network from the CDN with the full node table underneath, so an offline page still answers |
-| **Node** `/node/{project}/{qn}` | what happened to this node at each moment, who was shown it, who used it | the timeline (the run at `at` highlighted), every record with 展示 per moment and 被 <plan> 采用 links that carry the triple back into the Task view |
-| **Task** `/plan/{plan_id}` | what did this task read, what did it decide | the headline, the per-step 展示过 / 采用了 columns, the focused node highlighted, the session it was published from and that session's other plans |
-| **Session** `/session/{id}` | what was said, what it cost, what changed — with or without a plan | utterances (a personal one marked), tool calls in the two buckets, the session refresh's nodes, the never-printed session headline, the plans; `降级（无 plan）` when there were none |
+| **Node** `/node/{project}/{qn}` | what happened to this node at each moment, who was shown it, who used it | the timeline (the run at `at` highlighted), every record with its shown count per moment and adopted-by-`<plan>` links that carry the triple back into the Task view |
+| **Task** `/plan/{plan_id}` | what did this task read, what did it decide | the headline, the per-step shown / adopted columns, the focused node highlighted, the session it was published from and that session's other plans |
+| **Session** `/session/{id}` | what was said, what it cost, what changed — with or without a plan | utterances (a personal one marked), tool calls in the two buckets, the session refresh's nodes, the never-printed session headline, the plans; a `degraded (no plan)` marker when there were none |
 
 ### 9.2 · Significance — a hint on every reason, a verdict on the record
 
@@ -258,7 +258,8 @@ sentence matched every node in the file and was judged generic (FL-066): the
 basename is its own rule now and anchors to `psg_bridge.changed_in_file` —
 the nodes the plan changed in that file, all of them, never the untouched
 ones, outside the "> 3 nodes" limit. The local-name rule (≥ 4 characters,
-stopwords, > 3 nodes per sentence = generic) is unchanged: 挂错比不挂糟.
+stopwords, > 3 nodes per sentence = generic) is unchanged: anchoring to the
+wrong node is worse than not anchoring at all.
 
 ### 9.4 · Honest boundaries, continued
 
@@ -573,7 +574,7 @@ card, the bundle README and this section, so the three cannot drift apart. In
 particular: an anchor is only as good as the repository it lives in. Anyone who
 can rewrite the ledger *and* force-push the notes ref can rewrite both. A remote
 that rejects non-fast-forward notes, or a third-party timestamp, would close
-that gap; neither is built (FUTURE-LOG).
+that gap; neither is built ([known issues](KNOWN-ISSUES.md)).
 
 ### 12.4 The export bundle
 
@@ -768,11 +769,16 @@ into one:
 2. **Is the reason already in what the person said?**
 
 ```
-不触发 · 纠错      "slide 4 转化率写成了 3.02%，应该是 3.2%"   修笔误，原因自明
-触发 · 违和        "slide 4 转化率改成 2.8%"                   数字变了，没说为什么
-不触发 · 同步      "把 slide 4 按最新一轮结果更新"             理由自明：上游变了
-触发 · 违和        "把 slide 7 关于 EMEA 增长那段去掉"         删结论
-触发但自动解决      "转化率改成 2.8%，Sam 说 EMEA 不算在 Q3 里"  理由已在这句话里
+no trigger · correction   "slide 4 has the conversion rate as 3.02%, it should be 3.2%"
+                          a typo being fixed; the reason is self-evident
+trigger · odd             "change the conversion rate on slide 4 to 2.8%"
+                          the number moved and nothing says why
+no trigger · sync         "update slide 4 from the latest run"
+                          self-evident: upstream changed
+trigger · odd             "drop the paragraph on slide 7 about EMEA growth"
+                          a conclusion deleted
+trigger, answered         "change the conversion rate to 2.8%, Sam says EMEA is not in Q3"
+                          the reason is already in the sentence
 ```
 
 Three of the five are odd; only two become questions. **Odd is not ask**, and
@@ -783,10 +789,12 @@ nobody is asked anything.
 
 ### 14.2 The disposition, in the prompt, with its argument
 
-> **不确定时，不问。**
+> **When in doubt, do not ask.**
 >
-> 漏掉一次 → 少一条记录，损失有限，**可逆**。
-> 多问一次 → 用户被打扰，几次后学会一律跳过，**功能静默死亡，不可逆**。
+> Miss one → one record fewer. The loss is bounded and **reversible**.
+> Ask one too many → the person is interrupted, and after a few times they
+> learn to skip every prompt. **The feature dies silently, and that is
+> irreversible.**
 
 The two errors do not cost the same, and the model is told why, not merely told
 to be careful (D8). Everything ambiguous therefore ends in `silent`:
@@ -810,7 +818,8 @@ Both halves are required: an **external node** (identity `metric:<name>` /
 `declared:<slug>`, node type `metric` / `manual_figure` / `declared`, a node
 with an `occurrence`, or a node the plan changed inside a known
 `artifact_file`) **and** a plan whose words are about the artifact (`deck`,
-`slide`, `sheet`, `report`, `幻灯`, `报表`, `图表` …). A metric named in a
+`slide`, `sheet`, `report`, and the Chinese equivalents in
+`external_trigger.ARTIFACT_WORDS_ZH` …). A metric named in a
 sentence about `compute_conversion` is a code change; a sentence about a deck
 that happens to name a function is not licence to judge the function.
 

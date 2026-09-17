@@ -11,8 +11,14 @@ Chinese ("因历史而变的决定", "还管着它的规矩"). The page is an au
 register is professional, precise and restrained — readable without being
 chatty. A count states a measurement; it does not narrate one.
 
-**Language.** English is the default because that is who uses the package;
-Chinese is available under `?lang=zh`, in the same professional register.
+**Language.** This module is the vocabulary table behind the dashboard's Chinese
+UI, and it is the one file in the package where Chinese belongs. English is the
+default: every page renders in English unless the request asks for another
+language, and Chinese is served only under `?lang=zh`, in the same professional
+register. Chinese anywhere else — a comment, a docstring, a phrase a template
+prints without a `lang` check — is a leak an English reader would see, not a
+feature, and the place to fix it is here or at the `lang` branch that should
+have guarded it.
 
 Three rules hold this together:
 
