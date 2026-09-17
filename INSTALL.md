@@ -167,11 +167,14 @@ python3 -m pytest skills/update-project-state-graph/scripts/tests -q   #   90
 (cd skills/project-state-graph/scripts && python3 -m pytest tests -q)   #  425, 1 deselected
 ```
 
-Total: **1718 tests** (collected on `main`, 2026-09-17; 5 more are deselected by default). A healthy install passes all of them. The project-state-graph
-suite is the long one (~8 min); run it in three segments if you want to see
-progress — scenarios + runner, the corpus, and the rest. The
-`llm_consistency` marker and the manual arbiter evaluations are deselected by
-default and never run in CI.
+Total: **1826 collected** across the eight suites (run `scripts/count_tests.sh` to
+re-derive; a few are deselected by default). A healthy install passes all of
+them. The project-state-graph suite is the long one (~8 min); run it in three
+segments if you want to see progress — scenarios + runner, the corpus, and the
+rest. The `llm_consistency` marker and the manual arbiter evaluations are
+deselected by default and never run in CI. Run each suite on its own: they set
+their import paths from their own directory, so a combined run reports failures
+that a separate run does not have (FL-122).
 
 The quickest end-to-end check is the demo — one command, deterministic,
 self-verifying. It runs `examples/phantom-uplift`: a revenue number that jumps
@@ -190,7 +193,7 @@ The failure class itself, with numbers, is written up in
 | level | command | expect |
 |---|---|---|
 | quickest — end to end | `make demo` | MISMATCH → revise → VERIFIED, `SELF-CHECK OK`, exit 0 |
-| full — every suite | the seven `pytest` commands above, **run separately** | 1718 tests, all passing |
+| full — every suite | the seven `pytest` commands above, **run separately** | 1826 tests, all passing |
 | packaging — the pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
 
 ---

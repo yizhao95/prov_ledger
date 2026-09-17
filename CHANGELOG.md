@@ -5,9 +5,49 @@ skills (`writing-plans`, `executing-plans`, `project-state-graph`,
 `update-project-state-graph`) and the read-only dashboard. Dates are the
 merge dates of the phase PRs; FL-nnn refers to `docs/FUTURE-LOG.md`.
 
-## Unreleased
+## 0.3.0 — 2026-09-17
 
-### fix(ask): the model path
+Decision provenance: why each change exists, kept next to the code, the data and
+the numbers, and put in front of whoever is about to change the thing again.
+The tier of a reason is decided by what it points at — your own words, a
+reference, a rule the system applied, or an admitted gap — never by the writer.
+
+### Recording the reasons
+- **Verbatim capture and typed reasons** (#45): a `UserPromptSubmit` hook records
+  what you actually said; `utterance` / `reference` / `change_reason` replace the
+  old single reason table; free text can no longer be filed as something you
+  stated. Rules R0–R6 fill in the reasons that follow from the code itself.
+- **Two-layer pre-change check and the plan headline** (#46): what a plan is
+  about to touch is checked against that thing's own history and against its
+  blast radius; findings are recorded and shown, never blocking. `read_hit`
+  records what was surfaced, `influence` records what actually changed a plan.
+  `provledger why`, the `PreToolUse` hook, and a hooks-only degraded mode.
+- **Three views on one anchor** (#47): Graph, Node and Task share a project /
+  node / point-in-time anchor; a decision is one row with a count, never a
+  repeated paragraph; significance is a computed hint with an optional, logged
+  model verdict.
+
+### Asking, declaring, proving, anchoring
+- **`/ledger`** (#49): ask in words why something is the way it is, or whether an
+  alternative was ever tried. Code finds the candidates, computes the facts and
+  computes the absences; a model may only restate that table; then code deletes
+  any sentence that cites nothing, cites an id that does not exist, or carries a
+  number the table does not state — and counts every deletion. Also
+  `provledger ask` and a read-only `/ledger` page with an evidence card.
+- **Declared nodes** (#50): one sentence puts an external system, a business
+  rule, a stakeholder decision or a hand-made figure into the same graph, with
+  the same history, rules and views as code. Nothing enters until you confirm it
+  in your own words.
+- **Integrity and export** (#51): `provledger verify` walks the three hash
+  chains and checks them against git-note anchors written when a plan closes;
+  `provledger export` produces a bundle by whitelist, and personal records never
+  leave — enforced in code, not by convention.
+- **Numbers in decks and reports** (#52): a figure's identity is its data source,
+  and a file is only where it appeared. Anchors are placed by hand, can be
+  reported lost, and are never silently moved; figures with no source are
+  declared as such and counted.
+
+### Fixed along the way
 - **The summarize prompt is found under the installed package name** (FL-067, again). `ask/summarize.py` asked `importlib.resources` for `orchestrator.testing`; the wheel installs the backend as `provledger`, so every installed copy raised `ModuleNotFoundError` **inside** the `try` around the model call, and `provledger ask --runner claude` printed `summary unavailable: no model` at a model that was right there. The repo suite could not see it (pytest puts `orchestrator-backend` on the path) — `scripts/pkg_smoke_test.py` now asserts the prompt loads from the wheel.
 - **One note per cause.** `summary unavailable: no model` was printed for four different things. Now: `no model configured` · `no candidate nodes matched the question` · `model returned nothing (rc 3; stderr: …)` · `model call failed: <exception>` · `model call timed out after N s`, with `degraded_reason` on the doc and on the page (`data-degraded-reason`).
 - **`ask_log.runner_detail`** (migration 029, append-only): per model call — outcome, the note the reader got, the command, rc, the head of stderr, wall time, prompt/answer sizes and the head of the raw answer.
@@ -18,6 +58,25 @@ merge dates of the phase PRs; FL-nnn refers to `docs/FUTURE-LOG.md`.
 - **The summary is a JSON object, so plugin noise falls off.** The host's plugins write into `result`: claude-mem prepends "Memory capture is currently paused due to a quota cooldown…" to every answer, and `enabledPlugins: {}` in our settings does not stop it. Parsed as prose it counted as *a sentence the model invented with no citation*. `prompts/ask.md` now demands `{"sentences": [...]}` and `summarize.parse_sentences` takes that object out of the reply; a reply that is not that shape is its own degraded reason (`not_json`) with the raw head kept.
 - **The answer is in the language you asked in, and that is reported, never enforced by deletion.** `--lang` / `?lang=` switched the scope line only, so a model answering in Chinese against an English prompt went through unremarked; `prompts/ask.md` now asks for English right after the answer shape, with an English example. Deleting a CJK sentence from an `en` answer produced `(nothing survived the checks)` over a paragraph whose every citation was right. Citations and numbers are correctness and still delete; language is a preference, so `dropped["language"]` is gone and `language_mismatch` (`None` | `some` | `all`) travels with the answer, with a note naming the fix.
 - **CLI**: `--runner` defaults to `$PROVLEDGER_ASK_RUNNER` (the dashboard has read it since phase 2e and the CLI ignored it), accepts `none`, and `--timeout S` (default 180) bounds each model call.
+
+### Implemented, and not switched on
+- **A judge for changes to decks and reports**: when a change lands on a figure
+  or a conclusion rather than on code, a model decides — from five worked pairs,
+  and under the rule that it stays quiet when unsure — whether the change is one
+  nobody explained, and whether the reason is already in what you said. Every
+  verdict is logged so the false-question and missed-change rates can be counted.
+  It must clear the same numeric gate as the identity arbiter before it may ask
+  anyone anything; on this release's evaluation it did not (consistency 0.60,
+  accuracy 0.60), so it stays off. A refusal is a result, not a failure.
+- The identity arbiter (0.2.0) is still behind its own gate for the same reason.
+
+### Design and packaging
+- A shared token file feeds both the dashboard and a React component library;
+  the interface reads in plain professional English, with Chinese under
+  `?lang=zh`; switching views glides instead of reloading.
+- A reproducible demo (`examples/phantom-uplift/demo-provenance.sh`) builds the
+  whole scenario in seconds, and a walkthrough recording is generated from it.
+- `provledger` on PyPI now ships the console script the documentation uses.
 
 ## 0.2.0 — 2026-09-15
 

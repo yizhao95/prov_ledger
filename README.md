@@ -10,7 +10,7 @@ provLedger helps you remember what was decided, who said it, and why — and rem
 
 A Claude Code plugin that keeps the reasons behind a project's changes — your words, the email, the agent's reading, kept apart — and puts them in front of whoever is about to change the thing again.
 
-![tests](https://img.shields.io/badge/tests-1718-brightgreen)
+![tests](https://img.shields.io/badge/tests-1826-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -389,7 +389,7 @@ Seven suites, each with its own pyproject and pythonpath — run them separately
 | `skills/update-project-state-graph/scripts/tests` | 90 |
 | `skills/project-state-graph/scripts/tests` | 425 |
 
-Total **1718 collected** on `main` at 2026-09-17, plus 5 deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
+Total **1826 collected** across the eight suites (`scripts/count_tests.sh`), plus a few deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
 
 ### Origin
 
