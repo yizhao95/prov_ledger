@@ -34,6 +34,12 @@ CJK_SET = frozenset(chr(c) for c in CJK)
 
 # path -> why this file is allowed to contain Chinese.
 ALLOWED: dict[str, str] = {
+    # ── the published walkthrough ────────────────────────────────────────────
+    "docs/walkthrough.html":
+        "The walkthrough's captions ship in both languages behind the same "
+        "switch the dashboard uses: English by default, Chinese on request. "
+        "The Chinese here is the zh caption track — product copy, the same "
+        "kind of thing as vocab.py — not prose about the code.",
     # ── the vocabulary table and the pages it feeds ──────────────────────────
     "orchestrator-webapp/app/vocab.py":
         "The term table itself: every ledger token paired with the English and "
