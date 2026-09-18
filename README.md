@@ -438,7 +438,7 @@ The PyPI package is the stdlib-only core library — plans, steps, profiling, dr
 
 ### See it run
 
-<video src="https://raw.githubusercontent.com/yizhao95/prov_ledger/main/docs/media/walkthrough.mp4" controls muted playsinline width="880" poster="https://raw.githubusercontent.com/yizhao95/prov_ledger/main/docs/media/walkthrough-cover.png"></video>
+<video src="https://yizhao95.github.io/prov_ledger/media/walkthrough.mp4" controls muted playsinline width="880" poster="https://yizhao95.github.io/prov_ledger/media/walkthrough-cover.png"></video>
 
 *Forty-five seconds, no narration. A task reaches the agent; the check runs before anything is edited; one finding turns out to be an experiment that was already tried and rejected; the record behind it opens with the words that were said at the time; the graph shows how far the change would reach.*
 
