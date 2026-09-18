@@ -1,0 +1,1068 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A walkthrough of provLedger: a task reaches the coding agent, the check runs before anything is edited, and the reason it fires — an experiment already tried and rejected — is already on the record.">
+<meta name="color-scheme" content="dark light">
+<link rel="canonical" href="https://yizhao95.github.io/prov_ledger/walkthrough.html">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="provLedger">
+<meta property="og:title" content="provLedger — one change, checked against everything already decided">
+<meta property="og:description" content="A walkthrough of provLedger: a task reaches the coding agent, the check runs before anything is edited, and the reason it fires — an experiment already tried and rejected — is already on the record.">
+<meta property="og:url" content="https://yizhao95.github.io/prov_ledger/walkthrough.html">
+<meta property="og:image" content="https://yizhao95.github.io/prov_ledger/media/walkthrough-cover.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="provLedger — one change, checked against everything already decided">
+<meta name="twitter:description" content="A walkthrough of provLedger: a task reaches the coding agent, the check runs before anything is edited, and the reason it fires — an experiment already tried and rejected — is already on the record.">
+<meta name="twitter:image" content="https://yizhao95.github.io/prov_ledger/media/walkthrough-cover.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%AC%3C/text%3E%3C/svg%3E">
+<title>provLedger Walkthrough</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root{
+  /* provLedger's own tokens (orchestrator-webapp/app/static/tokens.json) */
+  --brand-blue:#2a78d6; --brand-spark:#fab219; --brand-green:#0ca30c;
+  --brand-red:#d03b3b; --brand-serious:#ec835a; --brand-gray:#52514e;
+  --brand-muted:#898781; --brand-bg:#f9f9f7; --surface:#fcfcfb;
+  --hairline:#e1e0d9; --blue-ink:#256abf; --blue-ink-active:#1c5cab;
+  --blue-wash:#eef4fc; --spark-ink:#7a5200; --spark-wash:#fff3d6;
+  --green-ink:#006300; --red-ink:#8a1f1f; --serious-ink:#8a3416; --line:#c9c8c1;
+  --red-wash:#fdf0ef; --green-wash:#eef7ee;
+  /* the room the screen sits in */
+  --room:#191817; --room-2:#232120; --room-line:#38352f;
+  --room-ink:#e9e6df; --room-muted:#948f85;
+  --term-bg:#14130f; --term-ink:#e4e1d8; --term-dim:#8f8a7e;
+  --r-card:.75rem; --r-chip:.5rem;
+  --ui:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--room); color:var(--room-ink);
+  font-family:var(--ui); font-size:14px; line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{padding-block:28px 40px; padding-left:16px; padding-right:16px; max-width:1180px; margin:0 auto}
+
+/* ---------- page head ---------- */
+.head{display:flex; flex-wrap:wrap; align-items:baseline; gap:10px 14px; margin-bottom:18px}
+.head h1{
+  margin:0; font-size:19px; font-weight:600; letter-spacing:-.01em;
+  color:var(--room-ink); text-wrap:balance;
+}
+.head .sub{margin:0; color:var(--room-muted); font-size:13px; max-width:62ch}
+.langbtn{
+  margin-left:auto; display:inline-flex; gap:0; border:1px solid var(--room-line);
+  border-radius:999px; overflow:hidden; background:var(--room-2);
+}
+.langbtn button{
+  appearance:none; border:0; background:transparent; color:var(--room-muted);
+  font:500 12px/1 var(--ui); padding:7px 13px; cursor:pointer;
+}
+.langbtn button[aria-pressed="true"]{background:var(--brand-blue); color:#fff}
+.langbtn button:focus-visible{outline:2px solid var(--brand-spark); outline-offset:-2px}
+
+/* ---------- the screen ---------- */
+.screenwrap{position:relative; width:100%}
+.scaler{transform-origin:top left}
+.stage{
+  position:relative; width:1120px; height:700px; border-radius:14px;
+  background:var(--room-2); border:1px solid var(--room-line);
+  box-shadow:0 30px 70px -30px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.03) inset;
+  overflow:hidden; font-size:14px;
+}
+
+/* chrome: browser / terminal bar */
+.chrome{
+  height:38px; display:flex; align-items:center; gap:10px; padding:0 12px;
+  background:var(--room-2); border-bottom:1px solid var(--room-line); position:relative; z-index:6;
+}
+.dots{display:flex; gap:6px}
+.dots i{width:10px; height:10px; border-radius:999px; background:#3d3934; display:block}
+.dots i:nth-child(1){background:#d0554f}.dots i:nth-child(2){background:#d8a33a}.dots i:nth-child(3){background:#54a457}
+.urlbar{
+  flex:1; min-width:0; height:24px; border-radius:6px; background:#141312;
+  border:1px solid var(--room-line); display:flex; align-items:center; gap:7px;
+  padding:0 9px; font-family:var(--mono); font-size:11.5px; color:var(--room-muted);
+}
+.urlbar .lock{color:var(--brand-green); font-size:10px}
+.urlbar .u{color:#cfcabf; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.chrome .tag{
+  font:600 10.5px/1 var(--ui); letter-spacing:.07em; text-transform:uppercase;
+  color:var(--room-muted); padding:4px 8px; border:1px solid var(--room-line); border-radius:999px;
+}
+
+/* screens */
+.screens{position:absolute; inset:38px 0 0 0; overflow:hidden}
+.screen{
+  position:absolute; inset:0; opacity:0; visibility:hidden;
+  transition:opacity .26s ease, transform .26s ease; transform:translateY(8px);
+}
+.screen.on{opacity:1; visibility:visible; transform:none}
+
+/* ---------- terminal ---------- */
+.term{
+  height:100%; background:var(--term-bg); color:var(--term-ink);
+  font-family:var(--mono); font-size:14px; line-height:1.7; padding:26px 30px; overflow:hidden;
+}
+.term .path{color:#7fa7d8}
+.term .prompt{color:var(--brand-spark)}
+.term .dim{color:var(--term-dim)}
+.term .ok{color:#7bbd7b}
+.term .warn{color:#e8927a}
+.term .blue{color:#7fa7d8}
+.term .line{white-space:pre-wrap; word-break:break-word}
+.term .blk{margin-top:14px}
+.caret{
+  display:inline-block; width:8px; height:16px; vertical-align:-3px;
+  background:var(--term-ink); margin-left:2px; animation:blink 1.05s steps(1,end) infinite;
+}
+@keyframes blink{50%{opacity:0}}
+.term .panel{
+  margin-top:16px; border:1px solid #33302a; border-left:3px solid var(--brand-red);
+  border-radius:8px; padding:12px 14px; background:#191712;
+}
+.term .panel.quiet{border-left-color:#3a3730}
+.term .panel h4{
+  margin:0 0 8px; font:600 12px/1.3 var(--mono); color:#f0b9a4; letter-spacing:.01em;
+}
+.term .fnd{display:flex; gap:9px; margin-top:7px}
+.term .fnd .n{color:var(--term-dim); flex:none}
+.term .fnd .t{color:var(--term-ink)}
+.term .fnd .t em{font-style:normal; color:var(--term-dim); display:block; font-size:12.5px}
+.term .hint{margin-top:11px; color:#7fa7d8}
+
+/* ---------- product pages ---------- */
+.app{height:100%; background:var(--brand-bg); color:#1b1a18; overflow:hidden; position:relative}
+.appnav{
+  height:44px; display:flex; align-items:center; gap:8px; padding:0 20px;
+  border-bottom:1px solid var(--hairline); background:var(--surface);
+}
+.navchip{
+  display:inline-flex; align-items:center; gap:6px; padding:5px 11px;
+  border:1px solid var(--hairline); border-radius:var(--r-chip); background:var(--surface);
+  color:var(--blue-ink); font:600 11.5px/1 var(--ui);
+}
+.appnav .who{
+  margin-left:auto; color:var(--brand-muted); font:italic 400 11.5px/1 var(--ui);
+}
+.pagescroll{position:absolute; inset:44px 0 0 0; overflow:hidden}
+.page{
+  transition:transform .85s cubic-bezier(.33,.02,.18,1);
+  padding:20px 0 60px; width:100%;
+}
+.col{width:880px; max-width:calc(100% - 40px); margin:0 auto; display:flex; flex-direction:column; gap:14px}
+
+.card{
+  background:var(--surface); border:1px solid var(--hairline); border-radius:var(--r-card);
+  padding:16px 18px;
+}
+.card.flush{padding:0; overflow:hidden}
+.eyebrow{
+  font:600 10.5px/1 var(--ui); letter-spacing:.09em; text-transform:uppercase;
+  color:var(--brand-muted);
+}
+.h1{margin:6px 0 0; font:600 19px/1.3 var(--ui); letter-spacing:-.01em; color:#1b1a18}
+.h2{margin:0; font:600 13.5px/1.3 var(--ui); color:#1b1a18}
+.meta{color:var(--brand-muted); font-size:12px}
+.mono{font-family:var(--mono)}
+.rowmeta{display:flex; flex-wrap:wrap; gap:6px 16px; color:var(--brand-muted); font-size:12px; margin-top:8px}
+
+.pill{
+  display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:999px;
+  font:600 10.5px/1.35 var(--ui); white-space:nowrap;
+}
+.pill.stated{background:rgba(82,81,78,.1); color:var(--brand-gray)}
+.pill.asserted{background:rgba(250,178,25,.16); color:var(--spark-ink)}
+.pill.derived{background:rgba(42,120,214,.1); color:var(--brand-blue)}
+.pill.observed{background:rgba(12,163,12,.1); color:var(--green-ink)}
+.pill.unstated{background:rgba(208,59,59,.1); color:var(--brand-red)}
+.pill.blocking{background:rgba(208,59,59,.1); color:var(--red-ink)}
+.pill.hits{background:var(--blue-wash); color:var(--blue-ink); font-variant-numeric:tabular-nums}
+
+/* findings */
+.findings{border-color:rgba(208,59,59,.35); background:var(--red-wash)}
+.findings .top{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
+.findings .top .h2{color:var(--red-ink)}
+.finding{
+  display:flex; gap:11px; padding:12px 13px; border-radius:10px;
+  background:var(--surface); border:1px solid rgba(208,59,59,.22); margin-top:10px;
+  transition:box-shadow .3s ease, border-color .3s ease, transform .3s ease;
+}
+.finding .ico{color:var(--brand-red); font-size:13px; line-height:1.5; flex:none}
+.finding .body{min-width:0; display:flex; flex-direction:column; gap:5px}
+.finding .t{font:600 13px/1.45 var(--ui); color:#1b1a18}
+.finding .d{font-size:12.5px; color:var(--brand-gray); line-height:1.55}
+.finding .f{display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; font-size:11.5px; color:var(--brand-muted)}
+.finding .open{color:var(--blue-ink); font-weight:600}
+.unanswered{
+  margin-top:10px; font:600 12px/1 var(--ui); color:var(--brand-red);
+  display:flex; align-items:center; gap:7px;
+}
+.unanswered .dot{width:7px; height:7px; border-radius:999px; background:var(--brand-red); display:block}
+
+/* decisions relied on */
+.relied{background:var(--blue-wash); border-color:rgba(42,120,214,.28)}
+.relied .h2{color:var(--blue-ink)}
+.relied ul{list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:8px}
+.relied li{
+  background:var(--surface); border:1px solid rgba(42,120,214,.2); border-radius:9px;
+  padding:9px 11px; font-size:12.5px; color:var(--brand-gray); display:flex; gap:9px; align-items:baseline;
+}
+.relied li .k{font-family:var(--mono); font-size:11.5px; color:var(--blue-ink); flex:none}
+
+/* steps */
+.steps{display:flex; flex-direction:column}
+.step{
+  display:flex; align-items:center; gap:10px; padding:9px 16px;
+  border-bottom:1px solid var(--hairline); font-size:12.5px; color:var(--brand-gray);
+}
+.step:last-child{border-bottom:0}
+.step .s{width:8px; height:8px; border-radius:999px; flex:none}
+.step.done .s{background:var(--brand-green)} .step.run .s{background:var(--brand-spark)}
+.step.wait .s{background:var(--line)}
+.step .n{font-family:var(--mono); font-size:11px; color:var(--brand-muted); flex:none; width:22px}
+
+/* node history */
+.hist{display:flex; flex-direction:column}
+.hrow{
+  display:grid; grid-template-columns:78px 1fr auto; gap:12px; align-items:start;
+  padding:12px 16px; border-bottom:1px solid var(--hairline);
+  transition:background .35s ease, box-shadow .35s ease;
+}
+.hrow:last-child{border-bottom:0}
+.hrow .when{font-family:var(--mono); font-size:11px; color:var(--brand-muted); padding-top:2px}
+.hrow .what{display:flex; flex-direction:column; gap:5px; min-width:0}
+.hrow .t{font-size:12.8px; line-height:1.5; color:#1b1a18}
+.hrow .sub{font-size:11.5px; color:var(--brand-muted); display:flex; flex-wrap:wrap; gap:5px 10px; align-items:center}
+.hrow .right{display:flex; align-items:center; gap:7px; flex:none; padding-top:1px}
+.hrow.rejected .t{color:var(--red-ink)}
+
+/* the record detail */
+.detail{
+  margin:0 16px 14px; border:1px solid rgba(42,120,214,.3); border-radius:10px;
+  background:var(--blue-wash); overflow:hidden;
+  max-height:0; opacity:0; transition:max-height .5s ease, opacity .35s ease, margin .5s ease;
+}
+.detail.open{max-height:320px; opacity:1}
+.detail .in{padding:13px 15px; display:flex; flex-direction:column; gap:10px}
+.quote{
+  font:500 13px/1.6 var(--ui); color:#1b1a18; border-left:3px solid var(--brand-blue);
+  padding-left:11px;
+}
+.kv{display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:12px}
+.kv dt{color:var(--brand-muted)}
+.kv dd{margin:0; color:var(--brand-gray)}
+.kv dd .mono{font-size:11.5px}
+.detail .cmd{
+  font-family:var(--mono); font-size:11.5px; color:var(--blue-ink);
+  background:var(--surface); border:1px solid rgba(42,120,214,.2);
+  border-radius:7px; padding:7px 10px;
+}
+
+/* constraints panel */
+.cons{display:flex; flex-direction:column; gap:9px; margin-top:10px}
+.con{
+  border:1px solid var(--hairline); border-radius:9px; padding:10px 12px; background:var(--surface);
+  display:flex; gap:10px; align-items:flex-start;
+  transition:background .35s ease, box-shadow .35s ease, border-color .35s ease;
+}
+.con .t{font-size:12.5px; color:var(--brand-gray); line-height:1.5}
+.con .mark{
+  width:6px; align-self:stretch; border-radius:999px; background:var(--line); flex:none;
+  transition:background .35s ease;
+}
+
+/* graph */
+.graphcard{padding:0; overflow:hidden}
+.graphhead{padding:14px 18px 12px; border-bottom:1px solid var(--hairline)}
+.modes{display:flex; gap:7px; margin-top:10px; flex-wrap:wrap}
+.mode{
+  padding:5px 11px; border-radius:var(--r-chip); border:1px solid var(--hairline);
+  font:600 11.5px/1 var(--ui); color:var(--blue-ink); background:var(--surface);
+}
+.mode.sel{background:var(--brand-blue); border-color:var(--brand-blue); color:#fff}
+.gsvg{display:block; width:100%; height:auto; background:var(--surface)}
+.gnode rect{fill:var(--blue-wash); stroke:var(--brand-blue); stroke-width:1.2}
+.gnode text{font-family:var(--ui); font-size:11px; fill:#1b1a18}
+.gnode text.sm{font-size:9.5px; fill:var(--brand-muted); font-family:var(--mono)}
+.gnode.dim rect{fill:#f4f3ef; stroke:var(--line)}
+.gnode.dim text{fill:var(--brand-gray)}
+.gnode.hot rect{fill:var(--spark-wash); stroke:var(--brand-spark); stroke-width:2}
+.gedge{stroke:var(--line); stroke-width:1.6; fill:none; marker-end:url(#arw)}
+.gedge.flow{stroke:var(--brand-spark); stroke-width:2.6; marker-end:url(#arwhot)}
+.gband{font-family:var(--ui); font-size:9.5px; fill:var(--brand-muted); letter-spacing:.08em; text-transform:uppercase}
+
+/* highlight ring used across screens */
+.hl{
+  box-shadow:0 0 0 2px var(--brand-spark), 0 0 0 7px rgba(250,178,25,.22) !important;
+  border-color:var(--brand-spark) !important;
+}
+.hl-soft{background:var(--spark-wash) !important; box-shadow:inset 0 0 0 1px rgba(250,178,25,.55) !important}
+.bump{animation:bump .5s cubic-bezier(.2,1.4,.4,1)}
+@keyframes bump{0%{transform:scale(.7);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
+
+/* ---------- cursor ---------- */
+.cursor{
+  position:absolute; left:0; top:0; width:22px; height:22px; z-index:40; pointer-events:none;
+  transform:translate(560px,340px); transition:transform .72s cubic-bezier(.36,.06,.16,1);
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.35));
+}
+.cursor svg{display:block}
+.ring{
+  position:absolute; left:-13px; top:-13px; width:48px; height:48px; border-radius:999px;
+  border:2px solid var(--brand-spark); opacity:0; transform:scale(.3);
+}
+.cursor.tap .ring{animation:tap .55s ease-out}
+@keyframes tap{0%{opacity:.9;transform:scale(.25)}70%{opacity:.35}100%{opacity:0;transform:scale(1)}}
+.cursor.tap svg{animation:press .2s ease}
+@keyframes press{50%{transform:scale(.86)}}
+
+/* ---------- captions ---------- */
+.caption{
+  position:absolute; left:0; right:0; bottom:0; z-index:30; padding:34px 26px 18px;
+  background:linear-gradient(to top,rgba(10,10,9,.9) 18%,rgba(10,10,9,.55) 58%,rgba(10,10,9,0));
+  pointer-events:none;
+}
+.caption .txt{
+  max-width:74ch; margin:0 auto; text-align:center; color:#f4f2ec;
+  font:500 15.5px/1.5 var(--ui); text-wrap:balance;
+  opacity:0; transform:translateY(6px); transition:opacity .28s ease, transform .28s ease;
+  text-shadow:0 1px 10px rgba(0,0,0,.6);
+}
+.caption .txt.on{opacity:1; transform:none}
+.caption .txt b{color:var(--brand-spark); font-weight:600}
+
+/* chapter flag — sits in the caption's gradient, clear of every page's header */
+.flag{
+  position:absolute; left:18px; bottom:84px; z-index:32;
+  display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border-radius:999px;
+  background:rgba(20,19,17,.9); color:#efece4; font:600 11px/1 var(--ui);
+  letter-spacing:.04em; opacity:0; transform:translateY(5px);
+  transition:opacity .3s ease, transform .3s ease; pointer-events:none;
+  box-shadow:0 2px 12px rgba(0,0,0,.4);
+}
+.flag.on{opacity:1; transform:none}
+.flag .no{color:var(--brand-spark); font-family:var(--mono); font-size:10.5px}
+
+/* ---------- controls ---------- */
+.controls{margin-top:16px; display:flex; flex-direction:column; gap:12px}
+.bar{display:flex; align-items:center; gap:12px; flex-wrap:wrap}
+.play{
+  appearance:none; border:1px solid var(--room-line); background:var(--brand-blue); color:#fff;
+  border-radius:999px; padding:9px 18px; font:600 13px/1 var(--ui); cursor:pointer;
+  display:inline-flex; align-items:center; gap:8px; min-width:112px; justify-content:center;
+}
+.play.sec{background:var(--room-2); color:var(--room-ink)}
+.play:focus-visible{outline:2px solid var(--brand-spark); outline-offset:2px}
+.track{
+  flex:1; min-width:180px; height:6px; border-radius:999px; background:#2c2926;
+  position:relative; overflow:hidden;
+}
+.track .fill{position:absolute; inset:0 auto 0 0; width:0; background:var(--brand-spark); border-radius:999px}
+.tnum{font-family:var(--mono); font-size:12px; color:var(--room-muted); font-variant-numeric:tabular-nums}
+.chapters{display:flex; gap:8px; flex-wrap:wrap}
+.ch{
+  appearance:none; border:1px solid var(--room-line); background:var(--room-2); color:var(--room-muted);
+  border-radius:999px; padding:7px 13px; font:500 12px/1 var(--ui); cursor:pointer; text-align:left;
+}
+.ch .n{font-family:var(--mono); font-size:10.5px; color:#6f6a61; margin-right:7px}
+.ch[aria-current="true"]{border-color:var(--brand-spark); color:#f4f2ec; background:#2a2622}
+.ch[aria-current="true"] .n{color:var(--brand-spark)}
+.ch:focus-visible{outline:2px solid var(--brand-spark); outline-offset:2px}
+
+.foot{
+  margin-top:26px; padding-top:16px; border-top:1px solid var(--room-line);
+  color:var(--room-muted); font-size:12.5px; max-width:80ch;
+}
+.foot code{font-family:var(--mono); font-size:11.5px; color:#cfcabf}
+
+@media (prefers-reduced-motion:reduce){
+  .cursor,.page,.screen,.detail,.caption .txt,.flag,.finding,.hrow,.con{transition-duration:.001ms !important}
+  .bump,.cursor.tap .ring,.cursor.tap svg,.caret{animation:none !important}
+}
+</style>
+<style>
+html,body{min-height:100%}
+img{max-width:100%}
+[hidden]{display:none!important}
+.repo{
+  margin-top:18px; display:inline-flex; align-items:center; gap:9px;
+  color:#cfcabf; text-decoration:none; font:500 13px/1 var(--ui);
+  border:1px solid var(--room-line); background:var(--room-2);
+  border-radius:999px; padding:9px 15px;
+}
+.repo:hover{border-color:var(--brand-spark); color:#f4f2ec}
+.repo:focus-visible{outline:2px solid var(--brand-spark); outline-offset:2px}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <div class="head">
+    <div>
+      <h1 data-t="title">One change, checked against everything already decided</h1>
+      <p class="sub" data-t="sub">A walkthrough of provLedger: a task goes to the coding agent, the check runs before anything is edited, and the reason it fires is already on the record.</p>
+    </div>
+    <div class="langbtn" role="group" aria-label="Caption language">
+      <button id="lang-en" aria-pressed="true">EN</button>
+      <button id="lang-zh" aria-pressed="false">中文</button>
+    </div>
+  </div>
+
+  <div class="screenwrap">
+    <div class="scaler" id="scaler">
+      <div class="stage" id="stage">
+
+        <div class="chrome">
+          <div class="dots"><i></i><i></i><i></i></div>
+          <div class="urlbar"><span class="lock" id="url-lock">●</span><span class="u" id="url">~/churn-model — claude</span></div>
+          <span class="tag" id="chrome-tag">terminal</span>
+        </div>
+
+        <div class="flag" id="flag"><span class="no" id="flag-no">01</span><span id="flag-txt">The task</span></div>
+
+        <div class="screens">
+
+          <!-- ============ 1 · terminal ============ -->
+          <section class="screen on" id="sc-term">
+            <div class="term">
+              <div class="line"><span class="path">~/churn-model</span> <span class="dim">on</span> <span class="blue">main</span></div>
+              <div class="line"><span class="prompt">&gt;</span> <span id="typed"></span><span class="caret" id="caret"></span></div>
+
+              <div class="blk" id="t-plan" style="visibility:hidden">
+                <div class="line"><span class="ok">●</span> Planning · 4 steps · <span class="dim">churn-t118</span></div>
+                <div class="line dim">  Read  <span class="blue">pkg/training/split_dataset.py</span> <span class="dim">· 62 lines</span></div>
+                <div class="line dim">  Read  <span class="blue">pkg/training/train_churn.py</span> <span class="dim">· 148 lines</span></div>
+                <div class="line dim">  provledger · declaring 3 targets, checking each against its own history</div>
+                <div class="line dim">  provledger · computing what reads them — 5 consumers, 3 steps deep</div>
+              </div>
+
+              <div class="panel" id="t-panel" style="visibility:hidden">
+                <h4>⚠ 2 findings before anything is edited</h4>
+                <div class="fnd"><span class="n">1</span><span class="t">This experiment has been run before
+                  <em>80/20 was tried on 2026-08-14 and rejected · split_dataset</em></span></div>
+                <div class="fnd"><span class="n">2</span><span class="t">weekly_report reads this split, three steps downstream
+                  <em>computed from the graph, not from the diff</em></span></div>
+                <div class="hint">↳ nothing is blocked · recorded, and put in front of you</div>
+              </div>
+
+              <div class="blk" id="t-wait" style="visibility:hidden">
+                <div class="line dim">Answer them, or say go ahead — either way it is on the record.</div>
+                <div class="line"><span class="prompt">&gt;</span> <span class="caret"></span></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ 2 · task ============ -->
+          <section class="screen" id="sc-task">
+            <div class="app">
+              <div class="appnav">
+                <span class="navchip">🏠 Home</span>
+                <span class="navchip">🎯 Outcomes</span>
+                <span class="who">📋 Task · read only</span>
+              </div>
+              <div class="pagescroll">
+                <div class="page" id="page-task">
+                  <div class="col">
+
+                    <div class="card">
+                      <div class="eyebrow">CHURN-MODEL</div>
+                      <h2 class="h1">Retrain the churn model on an 80/20 split</h2>
+                      <div class="rowmeta">
+                        <span class="mono">churn-t118</span>
+                        <span>published 14:22</span>
+                        <span>4 steps</span>
+                        <span>3 things touched</span>
+                      </div>
+                    </div>
+
+                    <div class="card findings" id="findings">
+                      <div class="top">
+                        <h3 class="h2">Findings</h3>
+                        <span class="pill blocking">2 blocking</span>
+                      </div>
+
+                      <div class="finding" id="fnd-1">
+                        <span class="ico">⚠</span>
+                        <div class="body">
+                          <div class="t">This experiment has been run before</div>
+                          <div class="d">80/20 was tried on 2026-08-14 and rejected: the holdout leaked week-52 promotions, so the lift was the promotion and not the model.</div>
+                          <div class="f">
+                            <span class="mono">pkg.training.split_dataset</span>
+                            <span class="pill hits" id="fnd-hits">3 hits</span>
+                            <span class="open">open the record →</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="finding" id="fnd-2">
+                        <span class="ico">⚠</span>
+                        <div class="body">
+                          <div class="t">weekly_report depends on this split</div>
+                          <div class="d">Computed downstream: split_dataset → train_churn → weekly_report → the churn figure in the Monday deck.</div>
+                          <div class="f">
+                            <span class="mono">3 steps · 5 consumers</span>
+                            <span class="open">open the graph →</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="unanswered"><span class="dot"></span>1 unanswered</div>
+                    </div>
+
+                    <div class="card relied">
+                      <h3 class="h2">Decisions relied on</h3>
+                      <ul>
+                        <li><span class="k">reason:96</span><span>Stratify on churn, not on tenure — the tenure buckets are not balanced after 2026-06.</span></li>
+                        <li><span class="k">reason:104</span><span>Seed is fixed at 20260614 so a rerun is comparable.</span></li>
+                        <li><span class="k">reason:118</span><span>Holdout must not contain a promotion week.</span></li>
+                      </ul>
+                    </div>
+
+                    <div class="card flush">
+                      <div class="steps">
+                        <div class="step done"><span class="n">1</span><span class="s"></span><span>read the current split and its history</span></div>
+                        <div class="step run"><span class="n">2</span><span class="s"></span><span>answer the findings before editing</span></div>
+                        <div class="step wait"><span class="n">3</span><span class="s"></span><span>change the split and retrain</span></div>
+                        <div class="step wait"><span class="n">4</span><span class="s"></span><span>compare against the recorded expectation</span></div>
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ 3 · node ============ -->
+          <section class="screen" id="sc-node">
+            <div class="app">
+              <div class="appnav">
+                <span class="navchip">🏠 Home</span>
+                <span class="navchip">🎯 Outcomes</span>
+                <span class="who">🧬 Node ledger · read only</span>
+              </div>
+              <div class="pagescroll">
+                <div class="page" id="page-node">
+                  <div class="col">
+
+                    <div class="card">
+                      <div class="eyebrow">CHURN-MODEL</div>
+                      <h2 class="h1 mono" style="font-size:16px">pkg.training.split_dataset</h2>
+                      <div class="rowmeta">
+                        <span class="pill derived">derived</span>
+                        <span>upstream 2 · downstream 5</span>
+                        <span>14 records · 6 analysis runs</span>
+                      </div>
+                    </div>
+
+                    <div class="card flush">
+                      <div style="padding:14px 16px 4px"><h3 class="h2">Change history</h3></div>
+                      <div class="hist">
+
+                        <div class="hrow">
+                          <div class="when">2026-09-17</div>
+                          <div class="what">
+                            <div class="t">Proposed: move the split to 80/20 and retrain.</div>
+                            <div class="sub"><span class="mono">churn-t118</span><span>open</span></div>
+                          </div>
+                          <div class="right"><span class="pill stated">stated</span></div>
+                        </div>
+
+                        <div class="hrow rejected" id="hrow-hit">
+                          <div class="when">2026-08-14</div>
+                          <div class="what">
+                            <div class="t">Rejected: 80/20 leaked week-52 promotions into the holdout. Keep 70/30 until the promotion calendar is a column.</div>
+                            <div class="sub"><span class="mono">churn-t094</span><span>rejected alternative</span><span>source level verbal</span></div>
+                          </div>
+                          <div class="right">
+                            <span class="pill hits" id="hits">2 hits</span>
+                            <span class="pill stated">stated</span>
+                          </div>
+                        </div>
+
+                        <div class="detail" id="detail">
+                          <div class="in">
+                            <div class="quote">“We tried eighty-twenty in August and the holdout had week fifty-two in it — the lift was the promotion, not the model. Leave it at seventy-thirty until the promotion calendar is its own column.”</div>
+                            <dl class="kv">
+                              <dt>tier</dt><dd>stated — the user's own words, with the span</dd>
+                              <dt>source level</dt><dd>verbal · the words themselves</dd>
+                              <dt>recorded in</dt><dd><span class="mono">churn-t094</span>, 2026-08-14 11:07</dd>
+                              <dt>surfaced</dt><dd>3 times · adopted by 1 plan</dd>
+                            </dl>
+                            <div class="cmd">provledger why pkg.training.split_dataset</div>
+                          </div>
+                        </div>
+
+                        <div class="hrow">
+                          <div class="when">2026-06-02</div>
+                          <div class="what">
+                            <div class="t">Stratify on churn, not on tenure — the tenure buckets stopped being balanced.</div>
+                            <div class="sub"><span class="mono">churn-t061</span><span>reason</span></div>
+                          </div>
+                          <div class="right"><span class="pill hits">5 hits</span><span class="pill stated">stated</span></div>
+                        </div>
+
+                        <div class="hrow">
+                          <div class="when">2026-05-19</div>
+                          <div class="what">
+                            <div class="t">Signature changed: returns (train, test, meta) instead of (train, test).</div>
+                            <div class="sub"><span class="mono">run 71</span><span>measured from the source</span></div>
+                          </div>
+                          <div class="right"><span class="pill derived">derived</span></div>
+                        </div>
+
+                        <div class="hrow">
+                          <div class="when">2026-04-03</div>
+                          <div class="what">
+                            <div class="t">No reason on record for the original 70/30 choice.</div>
+                            <div class="sub"><span class="mono">run 44</span><span>gap, kept as a gap</span></div>
+                          </div>
+                          <div class="right"><span class="pill unstated">unstated</span></div>
+                        </div>
+
+                      </div>
+                    </div>
+
+                    <div class="card">
+                      <h3 class="h2">Constraints in force</h3>
+                      <div class="cons">
+                        <div class="con" id="con-hit">
+                          <span class="mark" id="con-mark"></span>
+                          <span class="t">Do not move to 80/20 until the promotion calendar is a column of its own. <span class="meta">— from churn-t094</span></span>
+                        </div>
+                        <div class="con">
+                          <span class="mark"></span>
+                          <span class="t">Seed stays 20260614 so two runs can be compared. <span class="meta">— from churn-t104</span></span>
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- ============ 4 · graph ============ -->
+          <section class="screen" id="sc-graph">
+            <div class="app">
+              <div class="appnav">
+                <span class="navchip">🏠 Home</span>
+                <span class="navchip">🎯 Outcomes</span>
+                <span class="who">🕸 Project state graph · read only</span>
+              </div>
+              <div class="pagescroll">
+                <div class="page" id="page-graph">
+                  <div class="col">
+                    <div class="card graphcard">
+                      <div class="graphhead">
+                        <div class="eyebrow">CHURN-MODEL</div>
+                        <h2 class="h1" style="font-size:16px">run 87 · 2026-09-17 · 612 nodes · 188 with records</h2>
+                        <div class="meta" style="margin-top:6px">Data flow — what is read, what processes it, what comes out. Only what has a story is drawn.</div>
+                        <div class="modes">
+                          <span class="mode">Focus</span><span class="mode">Story</span>
+                          <span class="mode sel">Data flow</span><span class="mode">Full</span>
+                        </div>
+                      </div>
+
+                      <svg class="gsvg" viewBox="0 0 860 330" role="img"
+                           aria-label="Data flow: two data sources feed split_dataset, which feeds train_churn, which feeds weekly_report and the churn_rate metric.">
+                        <defs>
+                          <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                            <path d="M0,1 L9,5 L0,9 z" fill="#c9c8c1"></path>
+                          </marker>
+                          <marker id="arwhot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                            <path d="M0,1 L9,5 L0,9 z" fill="#fab219"></path>
+                          </marker>
+                        </defs>
+
+                        <text class="gband" x="24" y="38">read</text>
+                        <text class="gband" x="24" y="168">processed</text>
+                        <text class="gband" x="24" y="288">produced</text>
+
+                        <path class="gedge" d="M196,74 L262,126"></path>
+                        <path class="gedge" d="M470,74 L330,126"></path>
+                        <path class="gedge flow" id="e1" d="M300,160 L300,196" style="opacity:0"></path>
+                        <path class="gedge" d="M300,160 L300,196"></path>
+                        <path class="gedge flow" id="e2" d="M372,222 L560,262" style="opacity:0"></path>
+                        <path class="gedge" d="M372,222 L560,262"></path>
+                        <path class="gedge flow" id="e3" d="M330,236 L250,262" style="opacity:0"></path>
+                        <path class="gedge" d="M330,236 L250,262"></path>
+                        <path class="gedge" d="M600,74 L640,126"></path>
+
+                        <g class="gnode dim"><rect x="96" y="38" width="200" height="38" rx="7"></rect>
+                          <text x="196" y="56" text-anchor="middle">data/orders.parquet</text>
+                          <text class="sm" x="196" y="69" text-anchor="middle">18 columns</text></g>
+                        <g class="gnode dim"><rect x="372" y="38" width="196" height="38" rx="7"></rect>
+                          <text x="470" y="56" text-anchor="middle">data/customers.parquet</text>
+                          <text class="sm" x="470" y="69" text-anchor="middle">11 columns</text></g>
+                        <g class="gnode dim"><rect x="600" y="38" width="160" height="38" rx="7"></rect>
+                          <text x="680" y="56" text-anchor="middle">feeds/promotions</text>
+                          <text class="sm" x="680" y="69" text-anchor="middle">external</text></g>
+
+                        <g class="gnode" id="gn-split"><rect x="186" y="126" width="228" height="42" rx="7"></rect>
+                          <text x="300" y="145" text-anchor="middle">pkg.training.split_dataset</text>
+                          <text class="sm" x="300" y="159" text-anchor="middle">14 records · 2 constraints</text></g>
+                        <g class="gnode" id="gn-train"><rect x="186" y="196" width="228" height="42" rx="7"></rect>
+                          <text x="300" y="215" text-anchor="middle">pkg.training.train_churn</text>
+                          <text class="sm" x="300" y="229" text-anchor="middle">9 records</text></g>
+                        <g class="gnode dim"><rect x="560" y="126" width="200" height="42" rx="7"></rect>
+                          <text x="660" y="145" text-anchor="middle">pkg.features.promo_flag</text>
+                          <text class="sm" x="660" y="159" text-anchor="middle">declared</text></g>
+
+                        <g class="gnode" id="gn-report"><rect x="470" y="262" width="210" height="42" rx="7"></rect>
+                          <text x="575" y="281" text-anchor="middle">pkg.rollup.weekly_report</text>
+                          <text class="sm" x="575" y="295" text-anchor="middle">Monday deck</text></g>
+                        <g class="gnode" id="gn-metric"><rect x="118" y="262" width="176" height="42" rx="7"></rect>
+                          <text x="206" y="281" text-anchor="middle">metric: churn_rate</text>
+                          <text class="sm" x="206" y="295" text-anchor="middle">tracked since 2026-03</text></g>
+                      </svg>
+                    </div>
+
+                    <div class="card">
+                      <h3 class="h2">What this change would reach</h3>
+                      <div class="rowmeta" style="margin-top:9px">
+                        <span><b style="color:var(--spark-ink)">3 steps downstream</b></span>
+                        <span>5 consumers</span>
+                        <span>1 metric on the end of it</span>
+                      </div>
+                      <div class="meta" style="margin-top:9px">Computed from the graph on this run and compared with the run before it — not reported by the agent.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+        </div>
+
+        <div class="cursor" id="cursor">
+          <span class="ring"></span>
+          <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
+            <path d="M2 1.5 L2 17.2 L6.2 13.3 L8.9 19.4 L11.9 18.1 L9.2 12.1 L15 12.1 Z"
+                  fill="#f7f5f0" stroke="#1b1a18" stroke-width="1.3" stroke-linejoin="round"></path>
+          </svg>
+        </div>
+
+        <div class="caption"><div class="txt" id="cap"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="bar">
+      <button class="play" id="play">❚❚ <span id="play-label">Pause</span></button>
+      <button class="play sec" id="restart">↺ <span data-t="restart">Restart</span></button>
+      <div class="track" aria-hidden="true"><div class="fill" id="fill"></div></div>
+      <span class="tnum" id="clock">0:00 / 1:12</span>
+    </div>
+    <div class="chapters" id="chapters"></div>
+  </div>
+
+  <p class="foot" data-t="foot">Interface wording is the product's own; the ledger shown here is a worked example, not a live database. The dashboard is read-only and opens the database read-only, so it can never block or change what it is showing — the check records and surfaces, it never vetoes. Try it with <code>claude plugin marketplace add yizhao95/prov_ledger</code>.</p>
+  <a class="repo" href="https://github.com/yizhao95/prov_ledger">↗ github.com/yizhao95/prov_ledger</a>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var stage = $("stage"), cursor = $("cursor"), cap = $("cap"), scaler = $("scaler");
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---------- copy, both languages ---------- */
+  var LANG = "en";
+  var STR = {
+    en: {
+      title: "One change, checked against everything already decided",
+      sub: "A walkthrough of provLedger: a task goes to the coding agent, the check runs before anything is edited, and the reason it fires is already on the record.",
+      restart: "Restart", pause: "Pause", play: "Play",
+      foot: "Interface wording is the product's own; the ledger shown here is a worked example, not a live database. The dashboard is read-only and opens the database read-only, so it can never block or change what it is showing — the check records and surfaces, it never vetoes.",
+      chapters: ["The task","The check","A reason that already exists","The whole history","What it would reach"]
+    },
+    zh: {
+      title: "一次改动，对照此前所有已定的决定",
+      sub: "provLedger 走查：把任务交给编码代理，改动发生之前先做检查，而触发检查的那条理由早已在册。",
+      restart: "重播", pause: "暂停", play: "播放",
+      foot: "界面用词取自产品本身；此处账本为示例数据，非实时数据库。仪表盘只读，并以只读方式打开数据库，因此永远无法阻断或改变它所展示的内容——检查只记录与呈现，从不否决。",
+      chapters: ["任务","检查","一条早已存在的理由","完整历史","会波及到哪里"]
+    }
+  };
+  var CAPS = {
+    en: {
+      c1: "An ordinary Monday task: <b>move the split to 80/20</b> and retrain.",
+      c2: "Before a single line is edited, the plan is checked against what it is about to touch.",
+      c3: "Two findings. Nothing is blocked — they are recorded, and put in front of the person.",
+      c4: "The first one is the interesting one: <b>this experiment has been run before</b>.",
+      c5: "August 2026. Someone tried 80/20, and wrote down why it was dropped.",
+      c6: "Open the record and you get the thing's whole history, not just this week's.",
+      c7: "This is the row that fired. A rule that comes up again <b>raises a count — it is never written twice</b>.",
+      c8: "The record itself: the words, who said them, and how far it can be checked.",
+      c9: "Nothing here is the agent's summary. It is what was said, kept verbatim.",
+      c10: "Then the other half of the question: <b>what would this change reach?</b>",
+      c11: "Three steps downstream, the churn figure in Monday's deck.",
+      c12: "The arrows are computed from the source on every run — the part a diff cannot show."
+    },
+    zh: {
+      c1: "一个普通的周一任务：<b>把切分改成 80/20</b>，重新训练。",
+      c2: "在改动任何一行之前，计划先与它将要触碰的东西做一次比对。",
+      c3: "两条发现。不阻断任何事——只是记录下来，并摆到人面前。",
+      c4: "第一条才是关键：<b>这个实验以前做过</b>。",
+      c5: "2026 年 8 月。有人试过 80/20，并写下了放弃的理由。",
+      c6: "点开这条记录，看到的是这个节点的完整历史，而不只是本周。",
+      c7: "被击中的就是这一行。同一条规则再次出现时<b>只让计数加一，绝不重复成文</b>。",
+      c8: "记录本身：原话、出自谁、以及能核对到哪一步。",
+      c9: "这里没有任何一句是代理的复述，都是当时的原话。",
+      c10: "然后是问题的另一半：<b>这次改动会波及到哪里？</b>",
+      c11: "往下游三步，就是周一那份材料里的流失率数字。",
+      c12: "这些箭头每次运行都从源码重算——这正是 diff 给不了的部分。"
+    }
+  };
+
+  /* ---------- fit the 1120px stage into the column ---------- */
+  function fit(){
+    var avail = scaler.parentElement.clientWidth;
+    var k = Math.min(1, avail / 1120);
+    scaler.style.transform = "scale(" + k + ")";
+    scaler.parentElement.style.height = (700 * k) + "px";
+    return k;
+  }
+  var scale = fit();
+  window.addEventListener("resize", function(){ scale = fit(); });
+
+  /* ---------- cursor ---------- */
+  function pointAt(el, dx, dy){
+    if(!el) return;
+    var a = stage.getBoundingClientRect(), b = el.getBoundingClientRect();
+    var x = (b.left - a.left) / scale + (b.width / scale) / 2 + (dx || 0);
+    var y = (b.top - a.top) / scale + (b.height / scale) / 2 + (dy || 0);
+    x = Math.max(6, Math.min(1108, x));
+    y = Math.max(6, Math.min(688, y));
+    cursor.style.transform = "translate(" + x + "px," + y + "px)";
+  }
+  function tap(){
+    cursor.classList.remove("tap");
+    void cursor.offsetWidth;
+    cursor.classList.add("tap");
+  }
+
+  /* ---------- screens ---------- */
+  var SCREENS = { term: $("sc-term"), task: $("sc-task"), node: $("sc-node"), graph: $("sc-graph") };
+  var URLS = {
+    term:  ["~/churn-model — claude", "terminal"],
+    task:  ["127.0.0.1:8765/session/churn-t118", "task"],
+    node:  ["127.0.0.1:8765/node/churn/pkg.training.split_dataset?at=reason:118", "node ledger"],
+    graph: ["127.0.0.1:8765/graph/churn?mode=data", "project state graph"]
+  };
+  function show(name){
+    for(var k in SCREENS){ SCREENS[k].classList.toggle("on", k === name); }
+    $("url").textContent = URLS[name][0];
+    $("chrome-tag").textContent = URLS[name][1];
+    $("url-lock").style.color = name === "term" ? "var(--brand-spark)" : "var(--brand-green)";
+  }
+  function scrollPage(id, y){
+    var p = $(id); if(p) p.style.transform = "translateY(" + (-y) + "px)";
+  }
+  function say(html){
+    var t = $("cap");
+    t.classList.remove("on");
+    window.setTimeout(function(){ t.innerHTML = html; t.classList.add("on"); }, reduce ? 0 : 150);
+  }
+  function flag(no, txt){
+    var f = $("flag");
+    $("flag-no").textContent = no;
+    $("flag-txt").textContent = txt;
+    f.classList.add("on");
+  }
+
+  /* ---------- typing ---------- */
+  var TASK_TEXT = "change the train/test split to 80/20 and retrain the churn model";
+  var typeTimer = null;
+  function typeTo(n){
+    $("typed").textContent = TASK_TEXT.slice(0, n);
+  }
+  function startTyping(){
+    window.clearInterval(typeTimer);
+    var i = 0;
+    typeTimer = window.setInterval(function(){
+      i += 1; typeTo(i);
+      if(i >= TASK_TEXT.length){ window.clearInterval(typeTimer); }
+    }, 34);
+  }
+
+  /* ---------- reset to frame zero ---------- */
+  function reset(){
+    window.clearInterval(typeTimer);
+    show("term");
+    typeTo(0);
+    $("caret").style.display = "";
+    $("t-plan").style.visibility = "hidden";
+    $("t-panel").style.visibility = "hidden";
+    $("t-wait").style.visibility = "hidden";
+    ["page-task","page-node","page-graph"].forEach(function(id){ scrollPage(id, 0); });
+    ["findings","fnd-1","fnd-2","hrow-hit","con-hit","gn-split","gn-train","gn-report"].forEach(function(id){
+      var el = $(id); if(el){ el.classList.remove("hl","hl-soft"); }
+    });
+    $("con-mark").style.background = "";
+    $("detail").classList.remove("open");
+    $("hits").textContent = "2 hits";
+    $("hits").classList.remove("bump");
+    $("fnd-hits").textContent = "3 hits";
+    ["e1","e2","e3"].forEach(function(id){ $(id).style.opacity = "0"; });
+    $("flag").classList.remove("on");
+    cap.classList.remove("on");
+    cursor.style.transform = "translate(560px,340px)";
+  }
+
+  /* ---------- the score ---------- */
+  var C = function(k){ return CAPS[LANG][k]; };
+  var beats = [
+    [   0, function(){ reset(); flag("01", STR[LANG].chapters[0]); }],
+    [ 350, function(){ startTyping(); say(C("c1")); }],
+    [2900, function(){ $("caret").style.display = "none"; $("t-plan").style.visibility = "visible"; say(C("c2")); }],
+    [4600, function(){ $("t-panel").style.visibility = "visible"; say(C("c3")); }],
+    [6200, function(){ $("t-wait").style.visibility = "visible"; }],
+
+    [7600, function(){ flag("02", STR[LANG].chapters[1]); show("task"); pointAt($("findings"), 0, -40); }],
+    [8600, function(){ scrollPage("page-task", 70); pointAt($("fnd-1")); }],
+    [10200,function(){ $("fnd-1").classList.add("hl"); say(C("c4")); }],
+    [12400,function(){ scrollPage("page-task", 150); pointAt($("fnd-1"), 0, 18); }],
+    [13600,function(){ say(C("c5")); }],
+    [15200,function(){ pointAt($("fnd-1"), 150, 26); }],
+    [16000,function(){ tap(); }],
+
+    [16700,function(){ flag("03", STR[LANG].chapters[2]); show("node"); scrollPage("page-node", 0); pointAt($("hrow-hit"), 0, -60); say(C("c6")); }],
+    [18600,function(){ scrollPage("page-node", 60); pointAt($("hrow-hit")); }],
+    [20200,function(){ $("hrow-hit").classList.add("hl-soft"); $("con-hit").classList.add("hl"); $("con-mark").style.background = "var(--brand-spark)"; say(C("c7")); }],
+    [21400,function(){
+      var h = $("hits"); h.textContent = "3 hits";
+      h.classList.remove("bump"); void h.offsetWidth; h.classList.add("bump");
+    }],
+    [23600,function(){ pointAt($("hrow-hit"), -140, 0); }],
+    [24400,function(){ tap(); }],
+    [24900,function(){ flag("04", STR[LANG].chapters[3]); $("detail").classList.add("open"); say(C("c8")); }],
+    [26600,function(){ scrollPage("page-node", 150); pointAt($("detail"), 0, 10); }],
+    [28600,function(){ say(C("c9")); }],
+    [31000,function(){ scrollPage("page-node", 250); pointAt($("detail"), 0, 60); }],
+
+    [33200,function(){ flag("05", STR[LANG].chapters[4]); show("graph"); scrollPage("page-graph", 0); pointAt($("gn-split")); say(C("c10")); }],
+    [34600,function(){ $("gn-split").classList.add("hl-soft"); $("e1").style.opacity = "1"; }],
+    [35600,function(){ $("gn-train").classList.add("hl-soft"); $("e2").style.opacity = "1"; $("e3").style.opacity = "1"; pointAt($("gn-train")); }],
+    [36800,function(){ $("gn-report").classList.add("hl-soft"); pointAt($("gn-report")); say(C("c11")); }],
+    [39400,function(){ scrollPage("page-graph", 120); pointAt($("gn-report"), 0, -80); say(C("c12")); }],
+    [43000,function(){ /* hold on the last frame */ }]
+  ];
+  var DURATION = 45000;
+
+  /* ---------- transport ---------- */
+  var t0 = 0, elapsed = 0, playing = false, raf = null, cursorIdx = 0;
+
+  function applyUpTo(ms, instant){
+    if(instant){ stage.classList.add("noanim"); }
+    for(; cursorIdx < beats.length && beats[cursorIdx][0] <= ms; cursorIdx++){
+      beats[cursorIdx][1]();
+    }
+    if(instant){ void stage.offsetWidth; stage.classList.remove("noanim"); }
+  }
+  function seek(ms){
+    cursorIdx = 0;
+    reset();
+    var i = 0;
+    for(; i < beats.length && beats[i][0] <= ms; i++){ beats[i][1](); }
+    cursorIdx = i;
+    elapsed = ms;
+    paint();
+  }
+  function paint(){
+    var pct = Math.max(0, Math.min(1, elapsed / DURATION));
+    $("fill").style.width = (pct * 100) + "%";
+    $("clock").textContent = fmt(elapsed) + " / " + fmt(DURATION);
+    var active = 0;
+    for(var i = 0; i < CH.length; i++){ if(elapsed >= CH[i].at) active = i; }
+    var btns = $("chapters").children;
+    for(var j = 0; j < btns.length; j++){
+      btns[j].setAttribute("aria-current", j === active ? "true" : "false");
+    }
+  }
+  function fmt(ms){
+    var s = Math.round(ms / 1000);
+    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }
+  function tick(now){
+    if(!playing) return;
+    elapsed = now - t0;
+    if(elapsed >= DURATION){ elapsed = DURATION; applyUpTo(elapsed); paint(); pause(); return; }
+    applyUpTo(elapsed);
+    paint();
+    raf = window.requestAnimationFrame(tick);
+  }
+  function play(){
+    if(elapsed >= DURATION){ seek(0); }
+    playing = true;
+    t0 = performance.now() - elapsed;
+    $("play").innerHTML = "❚❚ <span>" + STR[LANG].pause + "</span>";
+    raf = window.requestAnimationFrame(tick);
+  }
+  function pause(){
+    playing = false;
+    if(raf) window.cancelAnimationFrame(raf);
+    $("play").innerHTML = "▶ <span>" + STR[LANG].play + "</span>";
+  }
+
+  /* ---------- chapters ---------- */
+  var CH = [{at:0},{at:7600},{at:16700},{at:24900},{at:33200}];
+  function buildChapters(){
+    var box = $("chapters");
+    box.innerHTML = "";
+    CH.forEach(function(c, i){
+      var b = document.createElement("button");
+      b.className = "ch";
+      b.innerHTML = '<span class="n">' + String(i + 1).padStart(2, "0") + "</span>" + STR[LANG].chapters[i];
+      b.addEventListener("click", function(){
+        seek(c.at + 1);
+        if(!playing) play();
+        else { t0 = performance.now() - elapsed; }
+      });
+      box.appendChild(b);
+    });
+    paint();
+  }
+
+  /* ---------- language ---------- */
+  function setLang(l){
+    LANG = l;
+    $("lang-en").setAttribute("aria-pressed", String(l === "en"));
+    $("lang-zh").setAttribute("aria-pressed", String(l === "zh"));
+    document.querySelectorAll("[data-t]").forEach(function(el){
+      var k = el.getAttribute("data-t");
+      if(STR[l][k]) el.innerHTML = STR[l][k] + (k === "foot" ? ' Try it with <code>claude plugin marketplace add yizhao95/prov_ledger</code>.' : "");
+    });
+    $("play").innerHTML = playing ? "❚❚ <span>" + STR[l].pause + "</span>" : "▶ <span>" + STR[l].play + "</span>";
+    buildChapters();
+    var at = elapsed;
+    seek(at);
+    if(playing){ t0 = performance.now() - elapsed; }
+  }
+  $("lang-en").addEventListener("click", function(){ setLang("en"); });
+  $("lang-zh").addEventListener("click", function(){ setLang("zh"); });
+
+  $("play").addEventListener("click", function(){ playing ? pause() : play(); });
+  $("restart").addEventListener("click", function(){ seek(0); play(); });
+
+  /* ---------- go ---------- */
+  buildChapters();
+  seek(0);
+  window.setTimeout(function(){ play(); }, 600);
+})();
+</script>
+
+</body>
+</html>

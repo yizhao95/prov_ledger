@@ -428,9 +428,18 @@ Issues and pull requests are welcome. Good first contributions: run `make demo` 
 | [`docs/benchmark-silent-class-drop.md`](docs/benchmark-silent-class-drop.md) | the mini-benchmark for the failure class: a silently dropped column, segment purity 0.31 against 0.91 on the same green pipeline |
 | [`examples/phantom-uplift/`](examples/phantom-uplift/) | `make demo` — a revenue number that goes up for the wrong reason, caught offline and deterministically; plus the provenance demo used in section 3 and the anchor walkthrough |
 | [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md) | the confirmed defects and the standing limits, grouped by where you will hit them, with the workaround when there is one |
-| [`CHANGELOG.md`](CHANGELOG.md) | what each phase and release added, 0.1.0 → 0.2.0 |
+| [`CHANGELOG.md`](CHANGELOG.md) | what each phase and release added, 0.1.0 → 0.3.0 |
 | [`LICENSE`](LICENSE) | MIT |
 
 The `superpowers` plugin is a recommended companion: the byte-identical `verification-before-completion` skill is not bundled and comes from superpowers when present. Everything works without it.
 
-The PyPI package is the stdlib-only core library — plans, steps, profiling, drift, the ledger — and the published release is 0.1.0; the plugin, the skills, the hooks, the dashboard and the `provledger` command come from this repository at 0.2.0.
+The PyPI package is the stdlib-only core library — plans, steps, profiling, drift, the ledger — and the published release is 0.1.0; the plugin, the skills, the hooks, the dashboard and the `provledger` command come from this repository at 0.3.0.
+
+
+### See it run
+
+<video src="https://raw.githubusercontent.com/yizhao95/prov_ledger/main/docs/media/walkthrough.mp4" controls muted playsinline width="880" poster="https://raw.githubusercontent.com/yizhao95/prov_ledger/main/docs/media/walkthrough-cover.png"></video>
+
+*Forty-five seconds, no narration. A task reaches the agent; the check runs before anything is edited; one finding turns out to be an experiment that was already tried and rejected; the record behind it opens with the words that were said at the time; the graph shows how far the change would reach.*
+
+The same walkthrough with chapters you can jump to, and captions in English or Chinese: **[yizhao95.github.io/prov_ledger/walkthrough.html](https://yizhao95.github.io/prov_ledger/walkthrough.html)**. The ledger in it is a worked example, not a live database; every piece of interface wording is the product's own.
