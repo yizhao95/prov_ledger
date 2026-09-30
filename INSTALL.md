@@ -19,7 +19,7 @@ Or from a shell:
 ```bash
 claude plugin marketplace add yizhao95/prov_ledger
 claude plugin install provledger@provledger
-claude plugin list          # provledger@provledger · Version: 0.2.0 · Status: ✔ enabled
+claude plugin list          # provledger@provledger · Version: 0.4.0 · Status: ✔ enabled
 ```
 
 Dependencies install themselves on first session: a background `SessionStart`
@@ -159,16 +159,16 @@ one combined invocation breaks). A healthy install passes all of them:
 
 ```bash
 python3 -m pytest scripts/tests                         -q   #   27
-python3 -m pytest orchestrator-backend                  -q   #  830, 4 deselected
+python3 -m pytest orchestrator-backend                  -q   #  1074, 4 deselected
 python3 -m pytest orchestrator-webapp                   -q   #  267
 python3 -m pytest skills/writing-plans/tests            -q   #   93
-python3 -m pytest skills/executing-plans                -q   #   77
-python3 -m pytest skills/update-project-state-graph/scripts/tests -q   #   90
+python3 -m pytest skills/executing-plans                -q   #   83
+python3 -m pytest skills/update-project-state-graph/scripts/tests -q   #   107
 python3 -m pytest examples                              -q   #   18
-(cd skills/project-state-graph/scripts && python3 -m pytest tests -q)   #  429, 1 deselected
+(cd skills/project-state-graph/scripts && python3 -m pytest tests -q)   #  430, 1 deselected
 ```
 
-Total: **1831 collected** across the eight suites (run `scripts/count_tests.sh` to
+Total: **2099 collected** across the eight suites (run `scripts/count_tests.sh` to
 re-derive; a few are deselected by default). A healthy install passes all of
 them. The project-state-graph suite is the long one (~8 min); run it in three
 segments if you want to see progress — scenarios + runner, the corpus, and the
@@ -195,7 +195,7 @@ The failure class itself, with numbers, is written up in
 | level | command | expect |
 |---|---|---|
 | quickest — end to end | `make demo` | MISMATCH → revise → VERIFIED, `SELF-CHECK OK`, exit 0 |
-| full — every suite | the eight `pytest` commands above, **run separately** | 1831 tests, all passing |
+| full — every suite | the eight `pytest` commands above, **run separately** | 2099 tests, all passing |
 | packaging — the pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
 
 ---
@@ -211,9 +211,11 @@ pip install provledger                  # or, from a clone: pip install ./orches
 python3 -c "from provledger import api, db; print('ok')"
 ```
 
-The published release is **0.1.0** (the library core). The `provledger`
-command-line entry point, the skills, the hooks and the dashboard ship with
-the plugin / this repository at 0.2.0.
+The published release is **0.1.0**, which predates decision provenance
+entirely: no `utterance` / `reference` / `change_reason` tables, no hooks, no
+`provledger` command, no dashboard, no `/ledger`. Everything README describes
+ships with the plugin from this repository instead. Install from PyPI only if
+the plan and step machinery really is all you want.
 
 The wheel ships the SQL migrations inside the package, so
 `db.run_migrations()` works from a plain install — no clone needed.

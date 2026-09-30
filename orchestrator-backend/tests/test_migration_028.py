@@ -159,7 +159,7 @@ def test_occurrences_are_hash_chained_and_verify_chain_walks_them(conn):
     rows = [dict(r) for r in conn.execute("SELECT * FROM occurrence ORDER BY id")]
     assert rows[0]["prev_hash"] is None
     assert [r["prev_hash"] for r in rows[1:]] == [r["hash"] for r in rows[:-1]]
-    assert provenance.verify_chain(conn, "occurrence") == {"ok": True, "rows": 3, "first_bad_id": None}
+    assert provenance.verify_chain(conn, "occurrence") == {"ok": True, "rows": 3, "first_bad_id": None, "older_form": 0}
 
 
 def test_a_row_written_around_the_store_is_named(conn):

@@ -18,11 +18,13 @@ neutral on purpose — source, context, traceable — never blame.
 
 | table | holds | written by |
 |---|---|---|
-| `utterance` | the user's words, verbatim, with `occurred_at` and the DB's `recorded_at` | the `UserPromptSubmit` hook, `provledger note` |
+| `utterance` | the user's words, verbatim, with `occurred_at`, the DB's `recorded_at`, and `origin` — which door they came in through: hook / human_cli / agent_cli / import / unknown (migration 030) | the `UserPromptSubmit` hook, `provledger note` |
 | `reference` | a pointer to a source — kind (email / meeting / chat / ticket / doc / commit / verbal / other), label ≤ 512, optional uri, `verifiability` linked / verbal / unreachable | `provledger note --ref`, the ledger import |
 | `change_reason` | why a node changed: `role` reason / rejected_path / constraint, `tier`, an optional verbatim span, `interpretation` / `statement` / `rationale`, `occurred_at` vs `recorded_at`, `recorded_by` human / agent / system, `rule_id` | `reason-fill.sh`, the rules, the backstop, `note --node`, the migration |
-| `reference_link` | reason ↔ reference | with the reason |
+| `reference_link` | what a reason, or a sentence, points at: `reason_id` **xor** `utterance_id`, plus `stance` supports / contradicts / context | with the reason, or `provledger reference add` |
+| `reference_check` | someone opened a pointer on a date and it was there, or it was not: `verdict` ok / gone / moved / no_access (migration 030) | `provledger reference mark` |
 | `trigger_log` | every rule verdict: auto / ask / silent, with its basis | `triggers.evaluate` |
+| `evidence_log` | what became of each evidence slot, so a blank can explain itself: `outcome` attached / found_nothing / timed_out / not_searched, with `searched`, `tool_hint`, `elapsed_ms` and the tier and level it landed at (migration 031). Not hash-chained — it is a log OF the records' making, like `trigger_log` beside it | `provledger review evidence-log` |
 | `tool_call_log` | one row per tool call (phase 0) | the `PostToolUse` hook |
 
 All of them are append-only: no DELETE, and the only UPDATEs the triggers
@@ -545,6 +547,16 @@ When a plan closes, `api._anchor_close` appends one line to
 - **A witness, not a copy.** Three head hashes and nothing else. Row N's hash
   folds in every predecessor, so one comparison per table checks the whole
   prefix before that anchor.
+- **Not tied to success.** Every close anchors — `COMPLETED` and `FAILED` alike
+  — and the payload's `plan_status` says which one it witnessed. A plan can fail
+  because a gate did not pass or because its own bookkeeping jammed, but the
+  rows it recorded do not become untrue when it fails: an anchor attests that
+  these rows existed at this commit and have not been altered since, which is a
+  claim about rows, not about how the work went. While only successes anchored,
+  the records most likely to be disputed — the ones from a run that went wrong —
+  were the only ones with no outside witness. `plan_status` is an addition to
+  `v2`, not a `v3`: older readers ignore a key they do not know, and a version
+  bump would have made today's notes unreadable to the code that wrote them.
 - **Never blocking.** No git, no commit, no repo, a refusing ref: all of them
   leave one `[ANCHOR] not anchored: …` line on the review step and the plan
   closes anyway. `selfcheck` counts those closes (`unanchored_closes`), because
@@ -911,3 +923,110 @@ one. A judge that gives the right answer twice out of three times is not
 calibrated; under D8 it is a judge that will eventually ask a question it
 should not have asked. So nothing was wired: `reasons.external_trigger`
 remains `off`, and that is the phase's honest outcome rather than its failure.
+
+
+## 13 · Evidence: a claim and what backs it are two different things
+
+A change carries a **claim** and, separately, whatever **evidence** backs it.
+The claim comes from the task, from the user's own words, or from nowhere. The
+evidence comes from written communication — an email, a meeting note, a chat, a
+ticket — and is found by the host agent using its own tools, never by provLedger.
+
+Evidence sits where a test sits. A test does not change what the code does; it
+changes how much you can rely on the claim about what the code does. Likewise,
+an email does not change what was decided; it changes how checkable that
+decision is. So **attaching evidence never moves a reason's tier**. It raises
+`evidence_level`, which is computed, and nothing else.
+
+| the user said it | evidence found | tier | source level |
+|---|---|---|---|
+| yes | yes | `stated` | `linked` |
+| yes | no | `stated` | `verbal` |
+| no | yes | `unstated`, with the pointer attached anyway | `unstated` |
+| no | no | `unstated` | `unstated` |
+
+The third row is the one worth stating plainly: **an agent may not read a reason
+out of an email.** That is a guess, and a guess is worse than a blank, because a
+blank is obviously a blank while a fluent guess looks like grounds. What the
+page shows instead is "there is a pointer here that may be relevant, and nobody
+said this change was because of it". When the change is significant enough, the
+agent asks one question; if the user answers, the answer is *their words*, goes
+through `utterance` with a span, and becomes `stated` like any other sentence
+they typed.
+
+### 13.1 · What provLedger will not do
+
+It does not fetch. `reference add` records a label, a time and a link; a test
+reads `cli.py` and `provenance.py` and fails if a network call appears in
+either. Credentials, permissions and privacy stay between you and whichever
+tool your agent already has. The ledger holds **pointers, never bodies** — the
+`reference` table has capped the label at 512 characters since migration 018,
+and the reason is that your counterpart opening the original is stronger than
+your excerpt of it.
+
+### 13.2 · A pointer that stops opening
+
+`reference mark --gone` does not delete anything. It appends a check, and the
+pointer becomes "this stopped opening on this date", which is itself a fact
+about the record. `reference pending` lists the linked pointers nobody has
+opened lately, with the threshold printed next to them, because a count with no
+threshold means nothing.
+
+### 13.3 · Where `origin` fits
+
+`recorded_by` has said human / agent / system since 018, but the writer
+declares that itself: `provledger note` hardcodes `human`, so an agent running
+that command produces a row saying a person wrote it. `utterance.origin` is
+decided by the entry point instead — the hook that captured your keystrokes
+cannot be impersonated by a command-line call. Rows written before migration
+030 read `unknown` and are never backfilled: the append-only trigger refuses
+the UPDATE, so "we do not guess where old words came from" is enforced by the
+table rather than by discipline.
+
+`provledger verify` says how many rows predate the column. A ledger that
+straddles the migration is a fact about that ledger, not a footnote.
+
+### 13.4 · `receipts` — the material, not the reply
+
+Someone challenges a decision. `provledger receipts "<what they said>"` assembles
+the material a reply would need, and stops there.
+
+**It does not write the reply.** Writing a courteous workplace reply is a
+language model's native ability — people already paste the background into a
+model and get a good reply back. What the model lacks is not skill, it is
+**material with sources attached**. So there is no register selector, no tone
+classifier and no citation check over rewritten prose: there is no generated
+prose to check. The reply is the model's job; the material is ours.
+
+What it prints:
+
+- **the record as a timeline** — the order is what answers "wasn't it the other
+  way round"; the source, then the words it produced, then the constraint they
+  became, then every plan that was shown it;
+- **every line ending in the id it rests on** — records, sources, influence rows,
+  change events, expectations and measured values all carry one, from the same
+  cite namespace the fact table defines (`#12`, `#r3`, `#i4`, `#e5`, `#x6`, `#o7`,
+  `#m8`);
+- **the absences, stated as absences** and computed by code, in the language the
+  rest of the product already uses: nothing recorded is a different claim from
+  nothing found;
+- **the range that was searched**, counted off the fact table, never estimated;
+- **a closing instruction that is part of the output**, not advice in this doc:
+  every claim in the reply must map to one of the lines above, and anything those
+  lines do not support does not go in the reply. It is what keeps the model on
+  the record.
+
+It is `/ledger`'s kernel, arranged differently — a fourth renderer over the same
+three stages, not a second pipeline: `ask.locate` picks the nodes, `ask.facts`
+computes the table, `ask.absence` computes the gaps, `ask.scope` states the
+range. Three things differ from `ask`: the input is *their words* rather than a
+question; **no model is called at all** (`locate.choose` runs its code-only
+path, the top matches by score, and says so in its basis); and **nothing is
+written** — not even the `ask_log` row `ask` keeps, because there is no answer to
+log, and not a `read_hit`, because a question is not a plan. The only thing a
+first invocation can leave behind is the FTS5 index over `change_reason` that any
+first search on a ledger builds (migration 019): rows derived from rows already
+there, no record, no chain head.
+
+And it never sends. The material lands in your terminal; the copying and pasting
+is yours, because sending is the one step that cannot be taken back.

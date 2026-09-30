@@ -124,10 +124,10 @@ def test_i5_evidence_level_is_computed_never_stored(conn):
     u = _utt(conn)
     linked = _ref(conn); verbal = _ref(conn, kind="verbal", uri=None, verifiability="verbal")
     a = _reason(conn)                                                                       # only the plan anchors it
-    conn.execute("INSERT INTO reference_link VALUES (?, ?)", (a, linked))
+    conn.execute("INSERT INTO reference_link (reason_id, reference_id) VALUES (?, ?)", (a, linked))
     b = _reason(conn, tier="stated", interpretation=None, verbatim_utterance_id=u, verbatim_start=0, verbatim_end=6)
     c = _reason(conn)
-    conn.execute("INSERT INTO reference_link VALUES (?, ?)", (c, verbal))
+    conn.execute("INSERT INTO reference_link (reason_id, reference_id) VALUES (?, ?)", (c, verbal))
     d = _reason(conn)
     e = _reason(conn, tier="unstated", interpretation=None, recorded_by="system")
     levels = dict(conn.execute("SELECT id, evidence_level FROM change_reason_v").fetchall())

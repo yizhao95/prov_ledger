@@ -33,9 +33,17 @@ def check_immutability(current_status: str) -> None:
 def check_loop_prevention(revision_count: int, max_revisions: int = 5) -> str | None:
     """Check revision_count against max. Returns warning string if approaching, raises HardStop at limit."""
     if revision_count >= max_revisions:
+        # FL-137: every option named here must be one the product can perform.
+        # "raise max_revisions" used to be advice with no implementation — the
+        # only route left was a hand-written UPDATE, which this project forbids,
+        # so the message sent people at the database. raise-budget.sh is that
+        # route, and it asks for the reason because a new ceiling is a decision
+        # about the plan and belongs in its record.
         raise HardStop(
             f"Plan exceeded max_revisions ({revision_count}/{max_revisions}). "
-            "Pause and escalate to user. Options: raise max_revisions, restructure plan, or abandon."
+            "Pause and escalate to user. Options: raise the ceiling with a reason "
+            "(executing-plans/scripts/raise-budget.sh: {plan_id, new_max, reason}), "
+            "restructure the plan, or abandon it."
         )
     if revision_count == max_revisions - 1:
         return (

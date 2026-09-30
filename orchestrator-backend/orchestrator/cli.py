@@ -4,18 +4,26 @@ in the repo, `provledger ...` once installed.
   metrics plan <id>                       what one plan cost in tool calls
   metrics baseline [--since] [--write F]  median / p90 over completed plans
   note "<words>" --at <when> [...]        record something that was said, after the fact
+  reference add --kind K --label L --occurred-at W (--reason ID | --utterance ID) [--uri U] [--stance S]
+                                          register a pointer to a source; nothing here ever opens it
+  reference pending [--older-than-days N]   linked pointers never checked, or checked too long ago
+  reference mark <id> --ok|--gone|--moved|--no-access [--note ...]
+                                          what was found when it was opened; a dead link is kept, dated
   node declare "<sentence>" [...]         put something outside the code into the graph (draft -> --confirm)
   node list|show|retire                   the project's declared nodes
   node add --manual-figure <name> --value <n>   a figure nobody can trace, marked as such and counted
   anchor <file> --at … --node … --value …   pin a number in a deck / workbook / report to its data source
   anchor check [--project] [--occurrence N]  look at every anchor again: ok, or anchor_lost with the reason
   anchor candidates <file>                  what auto-discovery would propose (off by default; proposes only)
+  review evidence-slots --plan <id>       what is still worth finding a source for, and where to look
+  review evidence-log --plan <id> [...]   what became of each slot: why this one is blank
   reasons reclass-status                  the state of the legacy-reason migration
   why <node|nk_…|file:line> [...]         one bounded read: history, constraints, rejected paths, blast radius
   ask "<question>" [--project] [...]      ask the ledger: fact table, cited summary, scope, evidence card
   ask submit <ask_id> --answer-file F     check a draft written by the session's model and record it
   ask card <ask_id> --out FILE            the evidence card of a logged question
   ask feedback <ask_id> wrong|partial|right   a person's word on one answer
+  receipts "<what they said>" [--project]   the material a reply would need: the timeline, the gaps, the range
   verify [--against-notes] [--project]    walk the three hash chains, and the git anchors they must agree with
   export <project> --out DIR [--zip]      a whitelisted bundle; personal rows are refused by code
   export <project> --md DIR               one markdown per node (shareable rows only)
@@ -90,6 +98,25 @@ def _check_at(value: str) -> str:
     raise SystemExit(f"--at must be a date/time like 2026-09-15 14:30, got {value!r}")
 
 
+def _cli_origin() -> str:
+    """Which door these words came in through (A1): 'human_cli' when stdin is a
+    terminal, 'agent_cli' otherwise.
+
+    `recorded_by` cannot answer this — `note` declares "human" itself, so an agent
+    running the command produces a row that says a person wrote it. The entry point
+    can answer it, which is why origin is decided here and not by the caller.
+
+    Every failure lands on 'agent_cli': a closed stream, a replaced stdin, a
+    wrapper with no isatty, sys.stdin set to None. Guessing 'human_cli' would
+    manufacture the one claim this column exists to make checkable, so the
+    unanswerable case is answered with the weaker value, always.
+    """
+    try:
+        return "human_cli" if sys.stdin.isatty() else "agent_cli"
+    except Exception:
+        return "agent_cli"
+
+
 def _note(args) -> int:
     from . import provenance, psg_bridge
     text = args.text.strip()
@@ -101,7 +128,7 @@ def _note(args) -> int:
         project = args.project or psg_bridge.project_for_cwd(os.getcwd())
         with db.transaction(conn):
             uid = provenance.insert_utterance(conn, session_id=args.session or "note", project=project, plan_id=args.plan,
-                                              text=text, occurred_at=at, commit=False)
+                                              text=text, occurred_at=at, origin=_cli_origin(), commit=False)
             refs = []
             for spec in args.ref or ():
                 r = _parse_ref(spec)
@@ -123,6 +150,248 @@ def _note(args) -> int:
         return 0
     finally:
         conn.close()
+
+
+# ── reference: a pointer to something outside the ledger (A2) ────────────────
+# A reference is a label, a time and — when someone can produce one — a permalink.
+# It is never a copy of the email: the other side of a disagreement opening the
+# original beats any excerpt we could quote, and a ledger full of mail bodies is a
+# governance problem nobody asked for.
+#
+# Nothing in here fetches anything. Locating the source is the host agent's job,
+# with the host agent's credentials (its own msgraph / gmail / file tools); this
+# command records the pointer it was handed and stops. That is the whole reason the
+# permission and privacy surface stays on the host's side of the line.
+
+
+def _evidence_outcomes() -> tuple:
+    from . import evidence
+    return evidence.OUTCOMES
+
+
+def _reference_kinds() -> tuple:
+    """The store's own enum, read rather than repeated: a second list of kinds in
+    the parser is a list that will one day disagree with the one the table checks."""
+    from . import provenance
+    return provenance.REFERENCE_KINDS
+
+
+def _reference_add(args) -> int:
+    """Register one pointer and hang it on a reason or on an utterance.
+
+    No uri means `verifiability='unreachable'` — the true statement, not a
+    placeholder that reads like a link. The row still exists, so the link can be
+    added later; what it never does is claim to be checkable before it is.
+    """
+    from . import provenance, psg_bridge
+    project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+    if not project:
+        print("provledger reference add: no --project and the cwd is not inside a registered project", file=sys.stderr)
+        return 2
+    try:
+        at = _check_at(args.occurred_at)
+    except SystemExit as e:                # _check_at speaks in SystemExit; bad input is exit 2 here
+        print(f"provledger reference add: {e}".replace("--at", "--occurred-at"), file=sys.stderr)
+        return 2
+    conn = _open()
+    try:
+        # The anchor is checked before anything is written. A pointer hanging on a
+        # row that does not exist is worse than no pointer at all: it still reads
+        # like evidence, and nothing downstream can tell it apart from one that works.
+        if args.reason is not None and provenance.get_reason(conn, args.reason) is None:
+            print(f"provledger reference add: no reason {args.reason} in this ledger", file=sys.stderr)
+            return 2
+        if args.utterance is not None and provenance.get_utterance(conn, args.utterance) is None:
+            print(f"provledger reference add: no utterance {args.utterance} in this ledger", file=sys.stderr)
+            return 2
+        try:
+            with db.transaction(conn):
+                ref = provenance.insert_reference(conn, project=project, kind=args.kind, label=args.label,
+                                                  occurred_at=at, uri=args.uri or None,
+                                                  visibility=args.visibility, commit=False)
+                provenance.link_reference(conn, args.reason, ref, utterance_id=args.utterance,
+                                          stance=args.stance, commit=False)
+        except ValueError as e:
+            # insert_reference owns the kind / label / verbal-with-a-uri rules and
+            # link_reference owns the one-anchor rule; neither is restated here, so
+            # the two cannot drift apart into two different answers.
+            print(f"provledger reference add: {e}", file=sys.stderr)
+            return 2
+        verifiability = conn.execute("SELECT verifiability FROM reference WHERE id = ?", (ref,)).fetchone()[0]
+        out = {"reference_id": ref, "project": project, "kind": args.kind, "label": args.label,
+               "uri": args.uri or None, "occurred_at": at, "verifiability": verifiability,
+               "visibility": args.visibility, "stance": args.stance,
+               "reason_id": args.reason, "utterance_id": args.utterance}
+        _print(out, args.json, f"reference {ref}: {args.kind} · {args.label} · {verifiability}"
+                               + (f" · {args.stance}" if args.stance != "supports" else ""))
+        return 0
+    finally:
+        conn.close()
+
+
+def _reference_mark(args) -> int:
+    """Write down what happened when someone opened this pointer.
+
+    The opening is the host's job — it holds the credentials — so this records a
+    verdict it was handed and does nothing else. A dead link is not deleted and not
+    downgraded: the reference keeps saying `linked`, and the check says it did not
+    open on this date, which is a fact about the link and worth keeping.
+    """
+    from . import provenance
+    verdict = next((v for v in provenance.CHECK_VERDICTS if getattr(args, v, False)), None)
+    if verdict is None:                     # argparse's required group should have caught this
+        print("provledger reference mark: say what was found: --ok | --gone | --moved | --no-access", file=sys.stderr)
+        return 2
+    conn = _open()
+    try:
+        try:
+            with db.transaction(conn):
+                cid = provenance.insert_reference_check(conn, reference_id=args.reference_id, verdict=verdict,
+                                                        note=args.note, commit=False)
+        except ValueError as e:
+            print(f"provledger reference mark: {e}", file=sys.stderr)
+            return 2
+        row = provenance.get_reference(conn, args.reference_id)
+        out = {"check_id": cid, "reference_id": args.reference_id, "verdict": verdict, "note": args.note,
+               "checked_at": row["last_checked"], "verifiability": row["verifiability"], "label": row["label"],
+               "checks": len(provenance.checks_for_reference(conn, args.reference_id))}
+        _print(out, args.json, f"reference {args.reference_id} · {verdict} on {row['last_checked']} · {row['label']}"
+                               + (f"\n  {args.note}" if args.note else ""))
+        return 0
+    finally:
+        conn.close()
+
+
+def _reference_pending(args) -> int:
+    """What is worth opening: `linked` pointers never checked, or checked too long ago."""
+    from . import provenance, psg_bridge
+    project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+    conn = _open()
+    try:
+        try:
+            rows = provenance.pending_references(conn, project=project, older_than_days=args.older_than_days)
+        except ValueError as e:
+            print(f"provledger reference pending: {e}", file=sys.stderr)
+            return 2
+        pending = [{"id": r["id"], "project": r["project"], "kind": r["kind"], "label": r["label"], "uri": r["uri"],
+                    "occurred_at": r["occurred_at"], "last_checked": r["last_checked"],
+                    "mark_with": f"provledger reference mark {r['id']} --ok|--gone|--moved|--no-access"}
+                   for r in rows]
+        # The threshold is printed with the list: "3 pending" means nothing without
+        # the number of days it was computed against.
+        out = {"project": project, "older_than_days": args.older_than_days, "count": len(pending), "pending": pending}
+        text = "\n".join(f"  #{p['id']} {p['kind']} · {p['label']} · last checked {p['last_checked'] or 'never'}\n"
+                         f"    {p['uri']}" for p in pending)
+        _print(out, args.json,
+               (f"{len(pending)} pointer(s) not opened in the last {args.older_than_days} day(s):\n" + text)
+               if pending else f"no linked pointer has gone {args.older_than_days} day(s) unchecked")
+        return 0
+    finally:
+        conn.close()
+
+
+def _reference_cmd(args) -> int:
+    if args.sub == "add":
+        return _reference_add(args)
+    if args.sub == "mark":
+        return _reference_mark(args)
+    if args.sub == "pending":
+        return _reference_pending(args)
+    return 2
+
+
+# ── review: the evidence work of a close (A6) ────────────────────────────────
+# Both of these are provLedger's half of a job it deliberately does not finish.
+# `evidence-slots` says what is worth looking for and where the window ends; the
+# host agent does the looking with its own tools and its own credentials, and
+# writes what it found back through `reference add`. Nothing here opens a link.
+
+
+def _plan_project(conn, plan_id: str, given: str | None) -> str | None:
+    from . import psg_bridge
+    if given:
+        return given
+    row = conn.execute("SELECT project FROM Plans WHERE plan_id = ?", (plan_id,)).fetchone()
+    if row and row[0]:
+        return row[0]
+    return psg_bridge.project_for_cwd(os.getcwd())
+
+
+def _review_evidence_slots(args) -> int:
+    """The to-check list of one plan. Reads only."""
+    from . import evidence, psg_bridge
+    conn = _open()
+    try:
+        if conn.execute("SELECT 1 FROM Plans WHERE plan_id = ?", (args.plan,)).fetchone() is None \
+                and not str(args.plan).startswith("session:"):
+            print(f"provledger review evidence-slots: no plan {args.plan} in this ledger", file=sys.stderr)
+            return 2
+        project = _plan_project(conn, args.plan, args.project)
+        if not project:
+            print("provledger review evidence-slots: no --project and the plan names none", file=sys.stderr)
+            return 2
+        slots = evidence.slots_for_plan(conn, project=project, plan_id=args.plan,
+                                        psg_db_path=psg_bridge.db_path_for(project))
+        out = {"plan_id": args.plan, "project": project, "cap": evidence.slot_cap(), "slots": slots,
+               "attach_with": ('provledger reference add --reason <id> --kind email|chat|meeting|ticket '
+                               '--uri <permalink> --label "<subject · who>" --occurred-at <when> '
+                               '[--stance contradicts]')}
+        _print(out, args.json,
+               "\n".join(f"{s['significance_level']:<6} {s['significance']:>6}  {s['node']}\n"
+                          f"       what changed: {s['what_changed']}\n"
+                          f"       window: {s['window'][0]} .. {s['window'][1]}\n"
+                          f"       hints: {', '.join(s['hints'])}\n"
+                          f"       reason: {s['reason_id'] if s['reason_id'] is not None else 'none yet'}"
+                          f" ({s['reason_tier'] or 'no row'})" for s in slots)
+               or f"plan {args.plan}: nothing to explain (no changed data point without a checkable source)")
+        return 0
+    finally:
+        conn.close()
+
+
+def _review_evidence_log(args) -> int:
+    """With --node and --outcome, append one slot's ending; without them, read the
+    plan's log back. The reading is the answer to "why is this one blank"."""
+    from . import evidence
+    conn = _open()
+    try:
+        if args.node or args.outcome:
+            if not (args.node and args.outcome):
+                print("provledger review evidence-log: recording an ending needs both --node and --outcome",
+                      file=sys.stderr)
+                return 2
+            try:
+                rid = evidence.record(conn, plan_id=args.plan, node_key=args.node, outcome=args.outcome,
+                                      reason_tier=args.reason_tier, evidence_level=args.evidence_level,
+                                      tool_hint=args.tool_hint, elapsed_ms=args.elapsed_ms)
+            except (ValueError, sqlite3.IntegrityError) as e:
+                print(f"provledger review evidence-log: {e}", file=sys.stderr)
+                return 2
+            row = conn.execute("SELECT * FROM evidence_log WHERE id = ?", (rid,)).fetchone()
+            out = {"evidence_log_id": rid, "plan_id": args.plan, "node_key": args.node, "outcome": args.outcome,
+                   "searched": bool(row["searched"]), "reason_tier": row["reason_tier"],
+                   "evidence_level": row["evidence_level"], "tool_hint": row["tool_hint"],
+                   "elapsed_ms": row["elapsed_ms"], "at": row["at"]}
+            _print(out, args.json, f"evidence_log {rid}: {args.node} · {args.outcome}"
+                                   f"{' · ' + row['tool_hint'] if row['tool_hint'] else ''}")
+            return 0
+        entries = evidence.log_for_plan(conn, args.plan)
+        _print({"plan_id": args.plan, "entries": entries}, args.json,
+               "\n".join(f"{e['at']}  {e['outcome']:<14} searched={bool(e['searched'])!s:<5} "
+                          f"{e['reason_tier'] or 'no reason row'}/{e['evidence_level'] or '-'}  {e['node_key']}"
+                          f"{'  via ' + e['tool_hint'] if e['tool_hint'] else ''}" for e in entries)
+               or f"plan {args.plan}: no evidence work recorded")
+        return 0
+    finally:
+        conn.close()
+
+
+def _review_cmd(args) -> int:
+    if args.sub == "evidence-slots":
+        return _review_evidence_slots(args)
+    if args.sub == "evidence-log":
+        return _review_evidence_log(args)
+    return 2
 
 
 # ── node: the entry point for the world outside the code (DP phase 2c, §18) ──
@@ -640,6 +909,28 @@ def _ask_cmd(args) -> int:
         conn.close()
 
 
+def _receipts_cmd(args) -> int:
+    """`receipts "<what they said>"` — the material behind one challenge (spec §8, G).
+
+    A fourth renderer over `ask`'s three stages, and the only read-only one that
+    logs nothing: there is no answer here to log. No model is called — the reply
+    is written by the model already in the room, from the lines this prints."""
+    from . import psg_bridge
+    from .ask import receipts as receipts_mod
+
+    project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+    if not project:
+        print("provledger receipts: no --project and the cwd is not inside a registered project", file=sys.stderr)
+        return 2
+    conn = _open()
+    try:
+        doc = receipts_mod.assemble(conn, project=project, challenge=args.challenge, lang=args.lang)
+        _print(receipts_mod.as_json(doc), args.json, receipts_mod.render_text(doc))
+        return 0
+    finally:
+        conn.close()
+
+
 def _verify_repo(args) -> str | None:
     """--repo, else the repo of --project / the cwd's registered project, else the
     cwd when it is itself a git work tree. None means "there is nothing to ask"."""
@@ -880,6 +1171,45 @@ def build_parser() -> argparse.ArgumentParser:
     n.add_argument("--ref", action="append", default=[], metavar="kind=…,label=…[,uri=…]",
                    help="a source to register and link (email, meeting, chat, ticket, doc, commit, verbal, other); repeatable")
     n.add_argument("--session", default=None, help=argparse.SUPPRESS)
+    rf = sub.add_parser("reference", help="a pointer to something outside the ledger: an email, a meeting, a ticket. "
+                                          "provLedger records the pointer and never opens it — finding the link is the "
+                                          "host agent's job, with the host agent's credentials")
+    rfs = rf.add_subparsers(dest="sub", required=True)
+    rfa = rfs.add_parser("add", help="register one pointer and hang it on a reason or on the words that named it "
+                                     "(with --uri it is linked; without one it says unreachable, and says so plainly)")
+    rfa.add_argument("--kind", required=True, choices=list(_reference_kinds()),
+                     help="what the source is; `verbal` means there is nothing to open, so it takes no --uri")
+    rfa.add_argument("--label", required=True, help='how to find it: "re: Q3 scope · sarah@example.com" — a pointer, at most 512 characters, never the body')
+    rfa.add_argument("--occurred-at", required=True, dest="occurred_at",
+                     help="when the source is dated (YYYY-MM-DD HH:MM[:SS]); the record time is the database's")
+    rfa.add_argument("--uri", default=None, metavar="PERMALINK",
+                     help="a link someone can open. Without it the row reads unreachable rather than pretending")
+    anchor = rfa.add_mutually_exclusive_group(required=True)
+    anchor.add_argument("--reason", type=int, default=None, metavar="ID", help="the reason this pointer backs")
+    anchor.add_argument("--utterance", type=int, default=None, metavar="ID",
+                        help="the words that named the source, for when no plan — and so no reason — exists yet")
+    rfa.add_argument("--stance", default="supports", choices=["supports", "contradicts", "context"],
+                     help="what this source does to the reason. A source that disagrees is recorded as disagreeing; "
+                          "dropping it is not an option (default: supports)")
+    rfa.add_argument("--visibility", default="shareable", choices=["personal", "shareable"])
+    rfp = rfs.add_parser("pending", help="the pointers worth opening: linked ones never checked, or checked too long "
+                                         "ago. Unreachable and verbal rows are never listed — there is nothing to open")
+    rfp.add_argument("--older-than-days", dest="older_than_days", type=int, default=30, metavar="N",
+                     help="how stale a check has to be before the pointer comes round again (default 30)")
+    rfm = rfs.add_parser("mark", help="record what was found when this pointer was opened. A dead link is not removed: "
+                                      "it becomes 'this stopped opening on this date', which is itself a record")
+    rfm.add_argument("reference_id", type=int)
+    found = rfm.add_mutually_exclusive_group(required=True)
+    found.add_argument("--ok", action="store_true", help="it opened, and it is what the label says")
+    found.add_argument("--gone", action="store_true", help="it did not open, and nothing says where it went")
+    found.add_argument("--moved", action="store_true", help="it is somewhere else now")
+    found.add_argument("--no-access", dest="no_access", action="store_true",
+                       help="it is there, behind a login this checker does not hold — which is not the same as gone")
+    rfm.add_argument("--note", default=None, help="what was seen, in words")
+    for q in (rfa, rfp):
+        q.add_argument("--project", default=None, help="registered project (default: the one whose repo contains the cwd)")
+    for q in (rfa, rfp, rfm):
+        q.add_argument("--json", action="store_true", help="machine-readable output")
     nd = sub.add_parser("node", help="declare the world outside the code: business rules, external systems, "
                                      "stakeholder decisions, external datasets, hand-computed figures")
     nds = nd.add_subparsers(dest="sub", required=True)
@@ -974,6 +1304,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="`ask submit <ask_id> --answer-file F`: a draft written by the session's own model; the same "
                         "checks apply — every sentence cites, no number outside the fact table, drops are counted")
     a.add_argument("--out", default=None, metavar="FILE", help="`ask card <ask_id> --out F`: write the evidence card here")
+    rc = sub.add_parser("receipts", help="someone challenged a decision: assemble the material a reply would need — "
+                                         "the record as a timeline, the gaps, the range searched. It writes the reply "
+                                         "for nobody and records nothing")
+    rc.add_argument("challenge", metavar="WHAT-THEY-SAID", help="their words, as they said them")
+    rc.add_argument("--project", default=None, help="registered project (default: the one whose repo contains the cwd)")
+    rc.add_argument("--json", action="store_true", help="machine-readable material, same content as the text")
+    rc.add_argument("--lang", default="en", choices=["en", "zh"], help="the language of the scope line")
     v = sub.add_parser("verify", help="walk the three hash chains and, with --against-notes, the git anchors they must agree with (exit 3 on a broken chain)")
     v.add_argument("--against-notes", action="store_true", help="also compare the chain heads with the anchors in refs/notes/provledger")
     v.add_argument("--project", default=None, help="registered project whose repo holds the notes (default: the one containing the cwd)")
@@ -1020,6 +1357,32 @@ def build_parser() -> argparse.ArgumentParser:
     tl.add_argument("trigger_log_id", type=int)
     tl.add_argument("mark", choices=["right", "wrong"])
     tl.add_argument("--note", default=None, help="one sentence: what made it right or wrong")
+    rv = sub.add_parser("review", help="the evidence work of a close: what is still worth looking for, and what came "
+                                       "of each look. provLedger never searches — it hands the list to the host agent, "
+                                       "which owns the tools and the credentials")
+    rvs = rv.add_subparsers(dest="sub", required=True)
+    rvs_slots = rvs.add_parser("evidence-slots", help="the changed data points of one plan that still have no checkable "
+                                                      "source: node, what changed, the plan's own time window, the "
+                                                      "identifiers to search on, and how significant the change is")
+    rvs_slots.add_argument("--plan", required=True, help="the plan whose close this is")
+    rvs_slots.add_argument("--project", default=None, help="the registered project (default: the plan's own, else the cwd's)")
+    rvs_slots.add_argument("--json", action="store_true")
+    rvs_log = rvs.add_parser("evidence-log", help="what became of each slot: append one ending (--node --outcome), or "
+                                                  "read the plan's log back. This is the answer to 'why is this one "
+                                                  "blank' — nobody looked, the window held nothing, or the look ran out "
+                                                  "of time")
+    rvs_log.add_argument("--plan", required=True)
+    rvs_log.add_argument("--node", default=None, help="the node_key whose slot this was")
+    rvs_log.add_argument("--outcome", default=None, choices=list(_evidence_outcomes()),
+                         help="attached (a pointer was hung) | found_nothing (searched, the window held nothing) | "
+                              "timed_out (the look started and ran out of time) | not_searched (never entered a search)")
+    rvs_log.add_argument("--reason-tier", default=None, dest="reason_tier",
+                         choices=["stated", "asserted", "derived", "unstated"], help="the tier the slot landed at")
+    rvs_log.add_argument("--evidence-level", default=None, dest="evidence_level",
+                         choices=["linked", "verbal", "task_context", "unstated"], help="how checkable it ended up")
+    rvs_log.add_argument("--tool-hint", default=None, dest="tool_hint", help="which of your tools looked, in your words")
+    rvs_log.add_argument("--elapsed-ms", default=None, dest="elapsed_ms", type=int, help="how long the look took")
+    rvs_log.add_argument("--json", action="store_true")
     r = sub.add_parser("reasons", help="the reasons ledger")
     rs = r.add_subparsers(dest="sub", required=True)
     rs.add_parser("reclass-status", help="whether the legacy node_reason / ledger rows were migrated into change_reason, and the tier counts")
@@ -1040,6 +1403,10 @@ def main(argv=None) -> int:
         return _reasons_cmd(args)
     if args.cmd == "why":
         return _why_cmd(args)
+    if args.cmd == "reference":
+        return _reference_cmd(args)
+    if args.cmd == "review":
+        return _review_cmd(args)
     if args.cmd == "reason":
         return _reason_cmd(args)
     if args.cmd == "significance":
@@ -1048,6 +1415,8 @@ def main(argv=None) -> int:
         return _trigger_cmd(args)
     if args.cmd == "ask":
         return _ask_cmd(args)
+    if args.cmd == "receipts":
+        return _receipts_cmd(args)
     if args.cmd == "verify":
         return _verify_cmd(args)
     if args.cmd == "export":

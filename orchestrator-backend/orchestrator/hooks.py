@@ -2,20 +2,22 @@
 
 `python -m orchestrator.hooks <event>` reads the hook's JSON on stdin and
 records it: PostToolUse → one tool_call_log row (phase 0, what a plan costs);
-UserPromptSubmit → the user's words verbatim into utterance (phase 1, Task 3);
+UserPromptSubmit → the user's words verbatim into utterance (phase 1, Task 3),
+plus the source-mention hint when the sentence named an outside source (A3);
 PreToolUse (Edit | Write | MultiEdit) → the active constraints anchored on the
 lines about to change (and one hop downstream) as additionalContext (phase 2,
 Task 5) — additive, never a veto unless a HUMAN constraint is declared
 block: true in the extensions file; Stop → session_run and, in the degraded
 mode (no plan in the session), a queued background graph refresh (Task 7b).
 
-A hook process must never get in Claude Code's way: stdout stays EMPTY (a
-UserPromptSubmit hook's stdout is injected as context), the exit code is
-always 0 — PreToolUse is the one event that writes stdout, and only the hook
-JSON — and anything that goes wrong is one line in the error log
-(PROVLEDGER_HOOK_ERRORS, default ~/skill-workspace/hook-errors.log) that
-selfcheck counts as hook_failures. The DB is opened with a 2 s busy timeout so
-a locked orchestrator DB costs at most that.
+A hook process must never get in Claude Code's way. The exit code is always 0,
+and only two events write stdout at all: PreToolUse prints its hook JSON, and
+UserPromptSubmit prints at most one plain line — its stdout is injected as
+context, so that line is an addition to the turn and never a condition on it.
+Every other event stays silent. Anything that goes wrong is one line in the
+error log (PROVLEDGER_HOOK_ERRORS, default ~/skill-workspace/hook-errors.log)
+that selfcheck counts as hook_failures. The DB is opened with a 2 s busy timeout
+so a locked orchestrator DB costs at most that.
 """
 from __future__ import annotations
 
@@ -116,13 +118,51 @@ def record_utterance(conn, data: dict) -> int | None:
     project = psg_bridge.project_for_cwd(data.get("cwd"))
     plan_id = _current_plan_id(conn, project)
     occurred_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    # origin='hook' (A1) is this path's one privilege and it is not transferable:
+    # the words arrived through UserPromptSubmit, so this is the only writer that
+    # can say they were captured as they were typed rather than recalled later.
     return provenance.insert_utterance(conn, session_id=str(data.get("session_id") or ""), project=project,
-                                       plan_id=plan_id, text=prompt, occurred_at=occurred_at)
+                                       plan_id=plan_id, text=prompt, occurred_at=occurred_at, origin="hook")
 
 
-def handle(event: str, data: dict) -> dict | None:
-    """Dispatch one hook payload. Unknown events are ignored on purpose. Only
-    PreToolUse may return something — the hook JSON main() prints."""
+# A3: the sentence named a source, so ask for the pointer while it is still cheap.
+# One line, and it only ever asks. `--utterance` rather than `--reason` because at
+# UserPromptSubmit no plan exists yet, so no reason exists either; migration 030 lets
+# the pointer hang on the words, and reason-fill carries it across later.
+SOURCE_HINT = (
+    'provledger: that sentence points at an outside source ("{word}"). If you have a tool that can locate it, '
+    'record the pointer: provledger reference add --utterance {uid} '
+    '--kind email|meeting|chat|ticket|doc|commit --label "<subject · who>" --occurred-at "<when>" --uri <permalink>'
+)
+
+
+def source_hint(utterance_id: int | None, prompt: str | None) -> str | None:
+    """One line of context when the words just recorded named an outside source.
+
+    None whenever there is nothing honest to say: no utterance was written (a slash
+    command, an empty prompt, a failed database), so there is no id for a pointer to
+    hang on; or the text is Claude Code's own injected output, which is filtered here
+    as well as upstream — a task-notification full of the word "email" must never
+    make the hook ask the user to pin a source for a sentence they never said.
+
+    The rule is deterministic string matching (see testing.source_words), so it is a
+    rule and not a model feature: no gate, no runner, nothing fetched.
+    """
+    if not utterance_id or not isinstance(prompt, str):
+        return None
+    if is_injected_prompt(prompt):
+        return None
+    from .testing import source_words
+    word = source_words.mentions_a_source(prompt)
+    if not word:
+        return None
+    return SOURCE_HINT.format(word=word, uid=int(utterance_id))
+
+
+def handle(event: str, data: dict) -> dict | str | None:
+    """Dispatch one hook payload. Unknown events are ignored on purpose. Two events
+    may return something for main() to print: PreToolUse its hook JSON, and
+    UserPromptSubmit the one-line source hint (A3)."""
     if event == "PostToolUse":
         conn = _open()
         try:
@@ -132,9 +172,12 @@ def handle(event: str, data: dict) -> dict | None:
     elif event == "UserPromptSubmit":
         conn = _open()
         try:
-            record_utterance(conn, data)
+            uid = record_utterance(conn, data)
         finally:
             conn.close()
+        # The words are down first, and they stay down whatever the rule decides:
+        # the hint is an addition to the turn, never a condition on it.
+        return source_hint(uid, data.get("prompt"))
     elif event == "Stop":
         # DP phase 2 (Task 7b): the degraded mode — record the session, queue a graph
         # refresh when nothing else will; stdout stays empty
@@ -169,9 +212,17 @@ def main(argv=None) -> int:
         if not isinstance(data, dict):
             raise ValueError("hook input is not a JSON object")
         out = handle(event, data)
-        if out is not None and event == "PreToolUse":
-            # the ONE case a hook writes stdout: the PreToolUse JSON (additionalContext)
+        if out is None:
+            pass
+        elif event == "PreToolUse":
+            # the hook JSON (additionalContext, and a deny only for a declared hard constraint)
             sys.stdout.write(json.dumps(out, ensure_ascii=False))
+            sys.stdout.flush()
+        elif event == "UserPromptSubmit":
+            # A UserPromptSubmit hook's stdout is injected as context, so this is one
+            # plain line and nothing else — no hook JSON, no permission field, nothing
+            # that could turn an offer into a condition.
+            sys.stdout.write(out.rstrip("\n") + "\n")
             sys.stdout.flush()
     except Exception as exc:
         log_error(event, exc)

@@ -17,14 +17,14 @@ import selfcheck  # noqa: E402
 from .test_session_trigger import _repo  # noqa: E402
 
 
-def _orch(tmp_path, *logs):
+def _orch(tmp_path, *logs, status="COMPLETED"):
     orch = tmp_path / "orch.db"
     c = sqlite3.connect(str(orch))
     c.executescript("CREATE TABLE Steps (step_id TEXT PRIMARY KEY, plan_id TEXT, status TEXT, "
                     "is_review TEXT, log_context TEXT);")
     for i, log in enumerate(logs):
         c.execute("INSERT INTO Steps (step_id, plan_id, status, is_review, log_context) VALUES (?, ?, ?, ?, ?)",
-                  (f"p{i}-REVIEW", f"p{i}", "COMPLETED", "1", log))
+                  (f"p{i}-REVIEW", f"p{i}", status, "1", log))
     c.commit()
     c.close()
     return orch
@@ -53,3 +53,20 @@ def test_selfcheck_says_zero_when_there_is_no_orchestrator_db(tmp_path, monkeypa
     monkeypatch.setenv("ORCH_DB", str(tmp_path / "missing.db"))
     chk = next(x for x in selfcheck.run(str(dbp))["checks"] if x["name"] == "unanchored_closes")
     assert chk["ok"] is True and "0 closes" in chk["detail"]
+
+
+def test_a_failed_close_is_counted_like_any_other(tmp_path, monkeypatch):
+    """Failed plans anchor too, so their anchor outcomes have to be visible here.
+    Counting only COMPLETED review steps would rebuild, one layer up, exactly the
+    blindness that tied the witness to success."""
+    repo = _repo(tmp_path)
+    dbp = tmp_path / "g.db"
+    cli.main([str(repo), "--project", "proj", "--db-path", str(dbp)])
+    orch = _orch(tmp_path,
+                 "[ANCHOR] chain heads anchored in refs/notes/provledger: note abc @ def",
+                 "[ANCHOR] not anchored: git is not on PATH — p1 closed anyway",
+                 "[ANCHOR] off: provledger-extensions.json says integrity.anchor=off",
+                 status="FAILED")
+    monkeypatch.setenv("ORCH_DB", str(orch))
+    chk = next(x for x in selfcheck.run(str(dbp))["checks"] if x["name"] == "unanchored_closes")
+    assert chk["count"] == 1 and chk["anchored"] == 1 and chk["switched_off"] == 1

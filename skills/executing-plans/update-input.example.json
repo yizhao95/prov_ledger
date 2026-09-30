@@ -1,5 +1,5 @@
 {
-  "_comment": "8 worked examples — one per op. Each is a valid input file you'd pass to the matching scripts/<op>.sh. Pick the one matching your write op, copy, edit values, save, then: bash ~/.code_puppy/skills/executing-plans/scripts/<op>.sh path/to/input.json",
+  "_comment": "One worked example per op. Each is a valid input file you'd pass to the matching scripts/<op>.sh. Pick the one matching your write op, copy, edit values, save, then: bash ~/.code_puppy/skills/executing-plans/scripts/<op>.sh path/to/input.json",
 
   "run_step__shell_command": {
     "_use_with": "scripts/run-step.sh",
@@ -81,6 +81,14 @@
     "source": "deferred-load",
     "step_id": "deep-health-20260514153045-E",
     "reason": "Test failure at step E surfaced — activating systematic-debugging to root-cause before proceeding"
+  },
+
+  "raise_budget__after_the_loop_breaker": {
+    "_use_with": "scripts/raise-budget.sh",
+    "_why": "The loop breaker refused a deviate at 5/5 and the extra revisions are warranted. This is the ONLY way to lift the ceiling; the reason is required and the raise is recorded as a deviation on the plan, so the new budget is itself auditable.",
+    "plan_id": "deep-health-20260514153045",
+    "new_max": 7,
+    "reason": "two of the five revisions were mid-flight corrections from the coordinator, not plan defects; one recovery sub-step is still to open"
   },
 
   "finish_plan": {

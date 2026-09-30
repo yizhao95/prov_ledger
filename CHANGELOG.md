@@ -7,6 +7,145 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
+## 0.4.0 — 2026-09-30
+
+Evidence. A decision now carries two separate things: a **claim**, which comes from
+the task, from your own words, or from nowhere; and **evidence**, which comes from
+written communication and is found by your agent with your agent's own credentials.
+They never move each other. Attaching an email to a reason does not change what kind
+of statement that reason is — it changes how far the statement can be checked.
+
+The rule underneath all of it: **an agent may not guess.** A reason it cannot ground
+in what you said is written `unstated`, and a pointer that turns up with nobody having
+said anything is attached to that blank rather than converted into a plausible reason.
+A blank is a fact. A fluent guess is a liability.
+
+### Where a claim came from
+- **`utterance.origin`** (migration 030): which door the words came through — the hook
+  that captured your keystrokes, a person at a terminal, an agent running the CLI.
+  `recorded_by` has existed since 018, but the writer declares it itself: `provledger
+  note` hardcodes `human`, so an agent running that command produced a row saying a
+  person wrote it. Origin is decided by the entry point, so it is the half that can be
+  checked. Rows written before 030 read `unknown` and are never backfilled — the
+  append-only trigger refuses the update, so "we do not guess where old words came
+  from" is enforced by the table rather than by discipline.
+- The dashboard and every answer now distinguish *captured as you typed it* from
+  *entered afterwards*, at the same tier and the same `recorded_by`.
+
+### Evidence, and who goes and gets it
+- **`provledger reference add`** attaches a pointer to a reason or, before a reason
+  exists, to the sentence that named the source. A label, a time, a link — **never the
+  body**. A test reads `cli.py` and `provenance.py` and fails if a network call appears
+  in either: provLedger records pointers, your agent fetches them.
+- **`reference pending` / `reference mark`** (migration 030, `reference_check`): which
+  pointers nobody has opened lately, and a verdict when somebody does. A dead link does
+  not disappear — it becomes "this stopped opening on this date", which is itself
+  evidence. Append-only: a later check sits beside the earlier one.
+- **`reference_link` gained `stance`**: evidence is allowed to contradict. An email that
+  cuts against the reason is recorded as contradicting it rather than dropped, because
+  silently discarding the inconvenient half is the failure this product exists to prevent.
+- **A deterministic hint on `UserPromptSubmit`**: when a sentence names an outside source
+  ("Sarah emailed…", and the same phrases in Chinese), one line suggests recording the
+  pointer. Plain keyword matching in both languages, no model, and it never blocks. Pinning a source the moment
+  you mention it costs nothing; finding it again in four months costs a lot.
+- **`provledger review evidence-slots`** hands the review step a list — node, what
+  changed, the plan's own time window, deterministic hints, significance — and stops.
+  Your agent searches with its own tools and writes back what it found. No credential,
+  mailbox or permalink body ever enters the ledger.
+- **`evidence_log`** (migration 031): why a given slot is blank. "Nobody looked",
+  "somebody looked and found nothing" and "the look ran out of time" are three different
+  facts, and folded into one they are indistinguishable.
+
+### Answering for a decision
+- **`provledger receipts "<what they said>"`** assembles what a reply needs and stops
+  there. A timeline, every line ending in its record id, outside sources with their
+  links, absences stated as absences, the search range counted rather than estimated,
+  and a closing instruction that every claim must map to one of those lines.
+  It does **not** write the reply: composing a courteous reply is a model's native
+  ability, and the material with its sources attached is the part a model does not have.
+  Read-only, like `ask` — a question is not a plan.
+
+### The witness is no longer tied to success
+- **Every plan close anchors**, not only the successful ones, and the payload says which
+  (`plan_status`). A plan can fail because a gate did not pass or because its own
+  bookkeeping jammed, but the rows it recorded do not become untrue when it fails. What
+  an anchor attests is that these rows existed at this commit and have not been altered
+  — a claim about rows, not about how the work went. Anchoring only successes left the
+  records most likely to be disputed as the ones with no witness.
+- **`reference_check` joined the anchored chains.** In a dispute the check record is
+  exactly what gets doubted — *you say you opened that link* — so it needs the same
+  external witness as the words and the reasons. Payload version 2; version 1 notes stay
+  readable, because a bump that made past evidence unreadable would be the opposite of
+  the point.
+
+### Fixed
+- **A dry run said PASS where the real run FAILed, and never said what it had not
+  looked at.** `--dry-run` covers steps 0–3; the dirty-working-tree gate is at 4b. A
+  pre-flight whose whole job is to look before anything is written stayed silent about
+  the gate that then auto-failed the plan. It now names every gate it did not evaluate
+  — `dirty_working_tree`, `graph_refresh`, `tests`, `selfcheck`, `close_reasons`, each
+  with the step it sits at — in the report and in `--json`. It checks nothing more than
+  before and costs nothing more; it just stops claiming more than it checked. A
+  pre-flight that does not say what it skipped is worse than no pre-flight, because the
+  silence reads as a clean bill of health.
+- **A review retry became a sibling of the attempt it retried, and the plan
+  deadlocked.** Recovery asks whether every sub-task came through, so a FAILED
+  `REVIEW.1.1` outvoted a COMPLETED `REVIEW.1.2` that had done the entire job: the
+  reopen never fired and the plan could not close. Fixed where the shape was wrong
+  rather than by special-casing the rollup — a retry is now a **child** of the attempt
+  it retries (`REVIEW.1.1.1`), so the recursive semantics that already existed apply
+  unchanged and no new concept enters the model. `--as-recovery` accepts a retry
+  anywhere down that chain and refuses to run as a sibling of an attempt that has not
+  recovered, naming the step to nest under instead. The cost is one depth level per
+  retry: `depth_level <= 3` allows two, and a third attempt is refused loudly rather
+  than quietly recreating the deadlock.
+- **`review_run.py` exited 0 while reporting `{"closed": "FAILED"}`**, against its own
+  documented contract. Exit 0 now means the plan closed COMPLETED and nothing else;
+  completing the review step while the plan is still short of that exits 1.
+- **The loop breaker offered an action the product could not perform.** At
+  `revision_count == max_revisions` it said "Options: raise max_revisions, restructure
+  plan, or abandon" — but `max_revisions` could only be set at publish and no script
+  could change it, so the one way out it named left a hand-written `UPDATE`, which this
+  project's own rules forbid. `executing-plans/scripts/raise-budget.sh` is that way out:
+  `{plan_id, new_max, reason}`, validated through `orchestrator.api`, upwards only,
+  `reason` required, and the raise is appended to the plan's record as a deviation
+  rather than silently changing a column — a new ceiling is a decision about a plan and
+  belongs in its log like any other. `revision_count` is untouched, so the raise does
+  not spend the budget it grants, and the breaker's message now names the script.
+- **A migration broke the hash chain, and the live ledger caught it.** Adding `origin` to
+  a chained table changed what `canonical()` hashes, so all 126 existing utterances
+  stopped verifying. No suite saw it — every suite starts from a fresh database. The
+  verifier now accepts the pre-migration form only for a row claiming `unknown`, which
+  asserts nothing: a forger can downgrade a record into worthlessness, but claiming
+  `hook` requires the current form and therefore requires re-hashing every row after it.
+  `verify` says how many rows predate the column rather than reporting a uniform `ok`.
+- **The review step had no time limit at all.** Three `subprocess.run` calls, one of them
+  running a whole test suite, none with a timeout. Now 60 / 4800 / 600 seconds, and a
+  timeout kills the process group so a graph refresh cannot leave an analyzer still
+  writing. The first ceiling was 300s — below every refresh this repository has on record
+  (795 to 3085 seconds) — and it failed the first review it ran. The constant now comes
+  from that table, and the test asserts the margin rather than the literal.
+- **The overhead budgets were invisible to CI.** H1 and H4 were both `@pytest.mark.live`,
+  so an ordinary test run checked the constants and never the reading path. A fixture
+  ledger now drives the real path.
+- **`selfcheck` counted unanchored closes only among successful reviews**, which would
+  have rebuilt, one layer up, the blindness the anchor change had just removed.
+- The export bundle printed `head #None` for an empty chain.
+
+### Documentation
+- README section 2 was rebuilt around what the product actually is: one view of a
+  project across three axes — nodes, time and tasks — rather than four features side by
+  side. Rejected paths are stated as a first-class part of the record, because a failed
+  experiment leaves no trace in a diff.
+- The README opening now runs a real question through the tool and shows the answer
+  before making any claim about the tool.
+- The PyPI gap is stated at the install step instead of at the foot of the document:
+  the published package is 0.1.0 and predates all of this.
+
+### Tests
+2089 collected across the eight suites, up from 1826. Every one of the 263 added was
+written before the code it covers.
+
 ## 0.3.0 — 2026-09-17
 
 Decision provenance: why each change exists, kept next to the code, the data and

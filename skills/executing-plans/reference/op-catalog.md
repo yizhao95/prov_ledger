@@ -187,6 +187,33 @@ Common mistakes: recording a metric the command did not print (write it where
 it is measured, not where it is remembered); forgetting `project` on a plan
 that has no attribution (exit non-zero: `'project' is required`).
 
+## 9. `raise-budget.sh` — raise `Plans.max_revisions`, with the reason on the record
+
+```json
+{"plan_id": "my-plan-20260930120000", "new_max": 7, "reason": "two of the five revisions were coordinator corrections, not plan defects"}
+```
+
+The only way past the loop breaker. Until this existed, the breaker's own advice
+("raise max_revisions") named an action nothing could perform, which left a
+hand-written `UPDATE` as the last resort — the one thing this skill exists to
+prevent.
+
+**Side effects**:
+- `Plans.max_revisions` = `new_max`
+- one `Deviations` row (`target_step_id` NULL) reading `[BUDGET RAISED] max_revisions 5 -> 7: <reason>`
+- `Plans.revision_count` is **untouched** — the raise must not spend the budget it grants
+
+**Refused (exit non-zero, nothing written)**:
+- a missing, empty or blank `reason` — the raise is a recorded decision, not a dial
+- a `new_max` that is not an integer, or is not GREATER than the current ceiling (this flow only raises)
+- an unknown `plan_id`
+
+**Common mistakes**:
+- ❌ Raising the ceiling because a step keeps failing. The breaker is usually right; the budget is for the case where the revisions were genuinely warranted (a coordinator's mid-flight correction, a recovery sub-step still to open) — and the reason you type is what a later reader judges that by.
+- ❌ Editing `max_revisions` with SQL. Then the new ceiling has no reason attached and the plan's record does not show it moved.
+
+**Test**: `tests/test_raise_budget.py`
+
 ## State machine summary
 
 ```
@@ -197,4 +224,4 @@ PENDING ──→ │ STARTING / IN_PROG │ ── append-log ─→ │ IN_PRO
                   └─────────── fail-step ──────────────────────┴──→ FAILED [terminal]
 ```
 
-`deviate` doesn't transition the parent — it inserts new PENDING children. `record-skill` and `finish-plan` operate at plan-level.
+`deviate` doesn't transition the parent — it inserts new PENDING children. `record-skill`, `raise-budget` and `finish-plan` operate at plan-level.

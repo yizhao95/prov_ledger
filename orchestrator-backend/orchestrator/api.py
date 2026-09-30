@@ -257,6 +257,51 @@ def complete_plan(conn: sqlite3.Connection, plan_id: str) -> dict:
     return db.get_plan(conn, plan_id)
 
 
+def raise_revision_budget(conn: sqlite3.Connection, plan_id: str, new_max, reason: str) -> dict:
+    """Raise a plan's `max_revisions`, with the reason on the plan's record (FL-137).
+
+    The loop breaker stops a plan at `revision_count >= max_revisions` and tells
+    the agent to escalate; raising the ceiling is one of the ways forward, and
+    until this existed it was the one the product could not perform — the only
+    route left was a hand-written UPDATE, which this project forbids.
+
+    A raise is a decision about a plan, so it is recorded like one: the reason is
+    REQUIRED and the raise lands in Deviations, the durable "why this plan
+    changed" trail, next to the deviations it makes room for. It only ever goes
+    upwards (lowering a ceiling mid-flight would retroactively invalidate work),
+    and `revision_count` is deliberately untouched — the raise must not spend the
+    budget it grants.
+    """
+    plan = db.get_plan(conn, plan_id)
+    if not plan:
+        raise ValueError(f"plan_id not found: {plan_id}")
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError("reason is required: raising a budget is a recorded decision, not a dial")
+    if isinstance(new_max, bool) or not isinstance(new_max, int):
+        raise ValueError(f"new_max must be an integer; got {new_max!r}")
+    current = int(plan["max_revisions"])
+    if new_max <= current:
+        raise ValueError(f"new_max must be greater than the plan's current max_revisions ({current}); "
+                         f"got {new_max} — this flow only raises the ceiling")
+    justification = f"[BUDGET RAISED] max_revisions {current} -> {new_max}: {reason}"
+    with db.transaction(conn):
+        db.set_plan_max_revisions(conn, plan_id, new_max, commit=False)
+        deviation_id = db.insert_deviation(
+            conn, plan_id, None, justification,
+            new_step_ids=[], revision_count=plan["revision_count"], commit=False,
+        )
+    return {
+        "plan_id": plan_id,
+        "max_revisions": new_max,
+        "previous_max_revisions": current,
+        "revision_count": plan["revision_count"],
+        "reason": reason,
+        "deviation_id": deviation_id,
+        "justification_logged": justification,
+    }
+
+
 # ── Deterministic auto-review-and-complete procedure (migration 006) ───────────────
 TERMINAL_STEP_STATES = {"COMPLETED", "FAILED"}
 
@@ -564,7 +609,7 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
     # is no longer kept by the thing being checked. Its own try/except: a repo
     # without git, without a commit, or with a refusing notes ref is a logged
     # warning, never a plan that will not close.
-    anchor = _anchor_close(conn, project, plan_id, review_step_id, registry_path)
+    anchor = _anchor_close(conn, project, plan_id, review_step_id, registry_path, "COMPLETED")
     return {
         "ready": True,
         "plan_status": "COMPLETED",
@@ -604,11 +649,14 @@ def _anchor_mode(project: str | None, registry_path) -> str:
 
 
 def _anchor_close(conn: sqlite3.Connection, project: str | None, plan_id: str,
-                  review_step_id: str, registry_path) -> dict:
-    """Append the three chain heads to `git notes --ref provledger` on the repo's
+                  review_step_id: str, registry_path, plan_status: str) -> dict:
+    """Append every chain head (integrity.CHAINS) to `git notes --ref provledger` on the repo's
     HEAD. Every outcome — written, switched off, or failed — leaves one
     `[ANCHOR]` line on the review step, because an anchor that quietly did not
-    happen is exactly the kind of silence this product exists to remove."""
+    happen is exactly the kind of silence this product exists to remove.
+
+    `plan_status` is the terminal status being written (COMPLETED or FAILED) and
+    goes into the payload: the witness should say which close it saw."""
     from . import integrity
     if not project:
         return {"anchored": False, "mode": "on", "reason": "the plan belongs to no registered project"}
@@ -623,7 +671,7 @@ def _anchor_close(conn: sqlite3.Connection, project: str | None, plan_id: str,
     try:
         if not repo:
             raise integrity.AnchorError(f"no repo registered for project {project!r}")
-        payload = integrity.anchor_payload(conn, plan_id=plan_id)
+        payload = integrity.anchor_payload(conn, plan_id=plan_id, plan_status=plan_status)
         note = integrity.anchor_heads(repo, payload)
         commit = integrity.head_commit(repo)
         heads = ", ".join(f"{t} #{payload[t]['id']} {(payload[t]['hash'] or '')[:12]}" for t in integrity.CHAINS)
@@ -868,6 +916,8 @@ def review_and_complete(
             db.update_step_status(conn, review_step_id, "FAILED", set_completed=True)
             db.update_plan_status(conn, plan_id, "FAILED")
             db.set_review_state(conn, plan_id, "reviewed")  # BE-D4
+            anchor = _anchor_close(conn, _project_for_review(conn, plan_id, registry_path)[0],
+                                   plan_id, review_step_id, registry_path, "FAILED")
             return {
                 "ready": True,
                 "plan_status": "FAILED",
@@ -875,6 +925,7 @@ def review_and_complete(
                 "review_status": "FAILED",
                 "review_child_step_id": child["step_id"],
                 "reason": "agent review child step FAILED; propagating FAILED to plan",
+                "anchor": anchor,
             }
         # child still PENDING / IN_PROGRESS — keep waiting (idempotent no-op)
         return {
@@ -979,8 +1030,13 @@ def review_and_complete(
     # path is never intercepted — unrecovered failures propagate immediately.
     # S1 (spec §2.10): when we do NOT review, the reason is written down.
     review_skipped: str | None = None
+    # The plan's project, needed for the anchor below as well as for the routing.
+    # A FAILED close is never routed to an agent review, so nothing has looked it
+    # up on that path — and a failed close needs its witness just the same.
+    anchor_project: str | None = None
     if new_plan_status == "COMPLETED":
         project, why, project_source = _project_for_review(conn, plan_id, registry_path)
+        anchor_project = project
         review_skipped = why if project is None else None
         if project is not None:
             child_id = _open_agent_review(conn, plan_id, review_step_id)
@@ -1010,12 +1066,26 @@ def review_and_complete(
             db.set_review_skip_reason(conn, plan_id, review_skipped, commit=False)
             telemetry.append_step_log(conn, review_step_id, f"[REVIEW SKIPPED] {review_skipped}", commit=False)
 
+    # The witness is not tied to success. A plan can close FAILED because a gate
+    # did not pass or because its own bookkeeping jammed, but the rows it
+    # recorded do not become untrue when it fails: what an anchor attests is
+    # "these rows existed at this commit and have not been altered since" — a
+    # claim about rows, not about whether the work around them went well. While
+    # this call sat only in the COMPLETED return, the records most likely to be
+    # disputed, the ones from a run that went wrong, were the only ones with no
+    # external witness at all. Same contract as every other close: its own
+    # try/except inside, integrity.anchor=off still honoured, never a block.
+    if new_plan_status != "COMPLETED":
+        anchor_project = _project_for_review(conn, plan_id, registry_path)[0]
+    anchor = _anchor_close(conn, anchor_project, plan_id, review_step_id,
+                           registry_path, new_plan_status)
     out = {
         "ready": True,
         "plan_status": new_plan_status,
         "review_step_id": review_step_id,
         "review_status": new_review_status,
         "reason": reason,
+        "anchor": anchor,
     }
     if review_skipped:
         out["review_skipped"] = review_skipped

@@ -86,7 +86,7 @@ def test_reference_verifiability_and_links(conn):
 
 def test_hash_chain_verifies_and_names_the_tampered_row(conn):
     ids = [_utt(conn, f"utterance {i}") for i in range(3)]
-    assert pv.verify_chain(conn, "utterance") == {"ok": True, "rows": 3, "first_bad_id": None}
+    assert pv.verify_chain(conn, "utterance") == {"ok": True, "rows": 3, "first_bad_id": None, "older_form": 0}
     rows = conn.execute("SELECT id, prev_hash, hash FROM utterance ORDER BY id").fetchall()
     assert rows[0][1] is None and rows[1][1] == rows[0][2] and rows[2][1] == rows[1][2]
     for i in range(3):
@@ -95,7 +95,7 @@ def test_hash_chain_verifies_and_names_the_tampered_row(conn):
     conn.execute("DROP TRIGGER trg_utterance_no_update")           # simulate someone editing the file directly
     conn.execute("UPDATE utterance SET text='rewritten' WHERE id=?", (ids[1],))
     conn.commit()
-    assert pv.verify_chain(conn, "utterance") == {"ok": False, "rows": 2, "first_bad_id": ids[1]}
+    assert pv.verify_chain(conn, "utterance") == {"ok": False, "rows": 2, "first_bad_id": ids[1], "older_form": 0}
     with pytest.raises(ValueError):
         pv.verify_chain(conn, "reference_link")
 

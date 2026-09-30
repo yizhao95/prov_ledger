@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from orchestrator import integrity
 from orchestrator import provenance as pv
 
 REPO = Path(__file__).resolve().parents[2]
@@ -56,7 +57,11 @@ def test_cli_verify_json_is_the_report(conn):
     r = _run(_db_path(conn), "--json")
     assert r.returncode == 0, r.stderr
     rep = json.loads(r.stdout)
-    assert rep["ok"] is True and set(rep["tables"]) == {"utterance", "reference", "change_reason"}
+    # four chains, not three: `reference_check` (migration 030) is walked here too,
+    # so `provledger verify` answers for the check trail as well as the words.
+    assert rep["ok"] is True
+    assert set(rep["tables"]) == {"utterance", "reference", "change_reason", "reference_check"}
+    assert set(rep["tables"]) == set(integrity.CHAINS)
     assert rep["anchored"] is False
 
 

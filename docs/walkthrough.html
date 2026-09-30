@@ -3,20 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="A walkthrough of provLedger: a task reaches the coding agent, the check runs before anything is edited, and the reason it fires — an experiment already tried and rejected — is already on the record.">
+<meta name="description" content="A walkthrough of provLedger: a colleague asks why the data stops on 18 September, nobody knows, and the record answers with the incident behind it — the RCA it rests on, a timeline where every line ends in its record id, and a reply that also points out the cutoff was only ever meant to be temporary. The ledger shown is a worked example.">
 <meta name="color-scheme" content="dark light">
 <link rel="canonical" href="https://yizhao95.github.io/prov_ledger/walkthrough.html">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="provLedger">
-<meta property="og:title" content="provLedger — one change, checked against everything already decided">
-<meta property="og:description" content="A walkthrough of provLedger: a task reaches the coding agent, the check runs before anything is edited, and the reason it fires — an experiment already tried and rejected — is already on the record.">
+<meta property="og:title" content="provLedger — one project, across nodes, across time, across tasks">
+<meta property="og:description" content="A walkthrough of provLedger: a colleague asks why the data stops on 18 September, nobody knows, and the record answers with the incident behind it — the RCA it rests on, a timeline where every line ends in its record id, and a reply that also points out the cutoff was only ever meant to be temporary. The ledger shown is a worked example.">
 <meta property="og:url" content="https://yizhao95.github.io/prov_ledger/walkthrough.html">
 <meta property="og:image" content="https://yizhao95.github.io/prov_ledger/media/walkthrough-cover.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="provLedger — one change, checked against everything already decided">
-<meta name="twitter:description" content="A walkthrough of provLedger: a task reaches the coding agent, the check runs before anything is edited, and the reason it fires — an experiment already tried and rejected — is already on the record.">
+<meta name="twitter:title" content="provLedger — one project, across nodes, across time, across tasks">
+<meta name="twitter:description" content="A walkthrough of provLedger: a colleague asks why the data stops on 18 September, nobody knows, and the record answers with the incident behind it — the RCA it rests on, a timeline where every line ends in its record id, and a reply that also points out the cutoff was only ever meant to be temporary. The ledger shown is a worked example.">
 <meta name="twitter:image" content="https://yizhao95.github.io/prov_ledger/media/walkthrough-cover.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%AC%3C/text%3E%3C/svg%3E">
 <title>provLedger Walkthrough</title>
@@ -107,9 +107,11 @@ body{
 
 /* ---------- terminal ---------- */
 .term{
-  height:100%; background:var(--term-bg); color:var(--term-ink);
-  font-family:var(--mono); font-size:14px; line-height:1.7; padding:26px 30px; overflow:hidden;
+  position:relative; height:100%; background:var(--term-bg); color:var(--term-ink);
+  font-family:var(--mono); font-size:14px; line-height:1.7; overflow:hidden;
 }
+.termscroll{position:absolute; inset:0; overflow:hidden}
+.termpage{padding:24px 30px 48px; transition:transform .75s cubic-bezier(.33,.02,.18,1)}
 .term .path{color:#7fa7d8}
 .term .prompt{color:var(--brand-spark)}
 .term .dim{color:var(--term-dim)}
@@ -182,51 +184,7 @@ body{
 .pill.derived{background:rgba(42,120,214,.1); color:var(--brand-blue)}
 .pill.observed{background:rgba(12,163,12,.1); color:var(--green-ink)}
 .pill.unstated{background:rgba(208,59,59,.1); color:var(--brand-red)}
-.pill.blocking{background:rgba(208,59,59,.1); color:var(--red-ink)}
 .pill.hits{background:var(--blue-wash); color:var(--blue-ink); font-variant-numeric:tabular-nums}
-
-/* findings */
-.findings{border-color:rgba(208,59,59,.35); background:var(--red-wash)}
-.findings .top{display:flex; align-items:center; gap:10px; flex-wrap:wrap}
-.findings .top .h2{color:var(--red-ink)}
-.finding{
-  display:flex; gap:11px; padding:12px 13px; border-radius:10px;
-  background:var(--surface); border:1px solid rgba(208,59,59,.22); margin-top:10px;
-  transition:box-shadow .3s ease, border-color .3s ease, transform .3s ease;
-}
-.finding .ico{color:var(--brand-red); font-size:13px; line-height:1.5; flex:none}
-.finding .body{min-width:0; display:flex; flex-direction:column; gap:5px}
-.finding .t{font:600 13px/1.45 var(--ui); color:#1b1a18}
-.finding .d{font-size:12.5px; color:var(--brand-gray); line-height:1.55}
-.finding .f{display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; font-size:11.5px; color:var(--brand-muted)}
-.finding .open{color:var(--blue-ink); font-weight:600}
-.unanswered{
-  margin-top:10px; font:600 12px/1 var(--ui); color:var(--brand-red);
-  display:flex; align-items:center; gap:7px;
-}
-.unanswered .dot{width:7px; height:7px; border-radius:999px; background:var(--brand-red); display:block}
-
-/* decisions relied on */
-.relied{background:var(--blue-wash); border-color:rgba(42,120,214,.28)}
-.relied .h2{color:var(--blue-ink)}
-.relied ul{list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:8px}
-.relied li{
-  background:var(--surface); border:1px solid rgba(42,120,214,.2); border-radius:9px;
-  padding:9px 11px; font-size:12.5px; color:var(--brand-gray); display:flex; gap:9px; align-items:baseline;
-}
-.relied li .k{font-family:var(--mono); font-size:11.5px; color:var(--blue-ink); flex:none}
-
-/* steps */
-.steps{display:flex; flex-direction:column}
-.step{
-  display:flex; align-items:center; gap:10px; padding:9px 16px;
-  border-bottom:1px solid var(--hairline); font-size:12.5px; color:var(--brand-gray);
-}
-.step:last-child{border-bottom:0}
-.step .s{width:8px; height:8px; border-radius:999px; flex:none}
-.step.done .s{background:var(--brand-green)} .step.run .s{background:var(--brand-spark)}
-.step.wait .s{background:var(--line)}
-.step .n{font-family:var(--mono); font-size:11px; color:var(--brand-muted); flex:none; width:22px}
 
 /* node history */
 .hist{display:flex; flex-direction:column}
@@ -249,7 +207,7 @@ body{
   background:var(--blue-wash); overflow:hidden;
   max-height:0; opacity:0; transition:max-height .5s ease, opacity .35s ease, margin .5s ease;
 }
-.detail.open{max-height:320px; opacity:1}
+.detail.open{max-height:430px; opacity:1}
 .detail .in{padding:13px 15px; display:flex; flex-direction:column; gap:10px}
 .quote{
   font:500 13px/1.6 var(--ui); color:#1b1a18; border-left:3px solid var(--brand-blue);
@@ -278,32 +236,20 @@ body{
   transition:background .35s ease;
 }
 
-/* graph */
-.graphcard{padding:0; overflow:hidden}
-.graphhead{padding:14px 18px 12px; border-bottom:1px solid var(--hairline)}
-.modes{display:flex; gap:7px; margin-top:10px; flex-wrap:wrap}
-.mode{
-  padding:5px 11px; border-radius:var(--r-chip); border:1px solid var(--hairline);
-  font:600 11.5px/1 var(--ui); color:var(--blue-ink); background:var(--surface);
-}
-.mode.sel{background:var(--brand-blue); border-color:var(--brand-blue); color:#fff}
-.gsvg{display:block; width:100%; height:auto; background:var(--surface)}
-.gnode rect{fill:var(--blue-wash); stroke:var(--brand-blue); stroke-width:1.2}
-.gnode text{font-family:var(--ui); font-size:11px; fill:#1b1a18}
-.gnode text.sm{font-size:9.5px; fill:var(--brand-muted); font-family:var(--mono)}
-.gnode.dim rect{fill:#f4f3ef; stroke:var(--line)}
-.gnode.dim text{fill:var(--brand-gray)}
-.gnode.hot rect{fill:var(--spark-wash); stroke:var(--brand-spark); stroke-width:2}
-.gedge{stroke:var(--line); stroke-width:1.6; fill:none; marker-end:url(#arw)}
-.gedge.flow{stroke:var(--brand-spark); stroke-width:2.6; marker-end:url(#arwhot)}
-.gband{font-family:var(--ui); font-size:9.5px; fill:var(--brand-muted); letter-spacing:.08em; text-transform:uppercase}
-
 /* highlight ring used across screens */
 .hl{
   box-shadow:0 0 0 2px var(--brand-spark), 0 0 0 7px rgba(250,178,25,.22) !important;
   border-color:var(--brand-spark) !important;
 }
 .hl-soft{background:var(--spark-wash) !important; box-shadow:inset 0 0 0 1px rgba(250,178,25,.55) !important}
+/* the same emphasis, for the dark terminal: a wash light text survives */
+.spark{
+  background:rgba(250,178,25,.13) !important; color:#f4f2ec !important;
+  box-shadow:0 0 0 1px rgba(250,178,25,.5) !important; border-radius:7px;
+  transition:background .35s ease, box-shadow .35s ease;
+}
+.term .draft p.spark{padding:9px 11px; margin-left:-11px; margin-right:-11px}
+.term .kv2 dd.spark{padding:2px 8px}
 .bump{animation:bump .5s cubic-bezier(.2,1.4,.4,1)}
 @keyframes bump{0%{transform:scale(.7);opacity:0}60%{transform:scale(1.12)}100%{transform:scale(1);opacity:1}}
 
@@ -325,22 +271,39 @@ body{
 
 /* ---------- captions ---------- */
 .caption{
-  position:absolute; left:0; right:0; bottom:0; z-index:30; padding:34px 26px 18px;
-  background:linear-gradient(to top,rgba(10,10,9,.9) 18%,rgba(10,10,9,.55) 58%,rgba(10,10,9,0));
+  position:absolute; left:0; right:0; bottom:0; z-index:30; padding:34px 26px 17px;
+  background:linear-gradient(to top,rgba(10,10,9,.9) 20%,rgba(10,10,9,.55) 60%,rgba(10,10,9,0));
   pointer-events:none;
 }
+/* the caption: one plain sentence, and the smallest thing on the screen */
 .caption .txt{
-  max-width:74ch; margin:0 auto; text-align:center; color:#f4f2ec;
-  font:500 15.5px/1.5 var(--ui); text-wrap:balance;
+  max-width:72ch; margin:0 auto; text-align:center; color:#cfcabf;
+  font:400 13.5px/1.5 var(--ui); text-wrap:balance;
   opacity:0; transform:translateY(6px); transition:opacity .28s ease, transform .28s ease;
-  text-shadow:0 1px 10px rgba(0,0,0,.6);
+  text-shadow:0 1px 10px rgba(0,0,0,.7);
 }
 .caption .txt.on{opacity:1; transform:none}
 .caption .txt b{color:var(--brand-spark); font-weight:600}
 
+/* a title, only where a screen cannot say what it is on its own.
+   It is part of the picture, not a note attached to it. */
+.slate{
+  position:absolute; left:0; right:0; top:0; z-index:34; pointer-events:none;
+  padding:30px 28px 40px; text-align:center;
+  background:linear-gradient(to bottom,rgba(10,10,9,.93) 24%,rgba(10,10,9,.62) 66%,rgba(10,10,9,0));
+  opacity:0; transform:translateY(-9px);
+  transition:opacity .42s ease, transform .42s ease;
+}
+.slate.on{opacity:1; transform:none}
+.slate span{
+  display:block; max-width:32ch; margin:0 auto; color:#f7f5f0;
+  font:600 29px/1.2 var(--ui); letter-spacing:-.022em; text-wrap:balance;
+  text-shadow:0 2px 20px rgba(0,0,0,.85);
+}
+
 /* chapter flag — sits in the caption's gradient, clear of every page's header */
 .flag{
-  position:absolute; left:18px; bottom:84px; z-index:32;
+  position:absolute; left:18px; bottom:96px; z-index:32;
   display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border-radius:999px;
   background:rgba(20,19,17,.9); color:#efece4; font:600 11px/1 var(--ui);
   letter-spacing:.04em; opacity:0; transform:translateY(5px);
@@ -383,7 +346,7 @@ body{
 .foot code{font-family:var(--mono); font-size:11.5px; color:#cfcabf}
 
 @media (prefers-reduced-motion:reduce){
-  .cursor,.page,.screen,.detail,.caption .txt,.flag,.finding,.hrow,.con{transition-duration:.001ms !important}
+  .cursor,.page,.screen,.detail,.caption .txt,.slate,.flag,.finding,.hrow,.con,.spark{transition-duration:.001ms !important}
   .bump,.cursor.tap .ring,.cursor.tap svg,.caret{animation:none !important}
 }
 </style>
@@ -400,15 +363,234 @@ img{max-width:100%}
 .repo:hover{border-color:var(--brand-spark); color:#f4f2ec}
 .repo:focus-visible{outline:2px solid var(--brand-spark); outline-offset:2px}
 </style>
+<style>
+/* ---------- cold open: the chat window ---------- */
+.chatwrap{display:flex; height:100%; background:var(--surface); color:#1b1a18}
+.chatside{
+  width:236px; flex:none; background:var(--brand-bg);
+  border-right:1px solid var(--hairline); padding:14px 12px;
+}
+.chatside .team{font:600 12.5px/1 var(--ui); padding:4px 8px 6px}
+.chatside .grp{
+  font:600 10px/1 var(--ui); letter-spacing:.09em; text-transform:uppercase;
+  color:var(--brand-muted); padding:14px 8px 7px;
+}
+.cch{
+  display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:7px;
+  font-size:12.5px; color:var(--brand-gray);
+}
+.cch .h{color:var(--brand-muted); font-family:var(--mono); font-size:11px}
+.cch.sel{background:var(--blue-wash); color:var(--blue-ink); font-weight:600}
+.cch.sel .h{color:var(--blue-ink)}
+.cch .bell{margin-left:auto; color:var(--brand-blue); font-size:9px}
+
+.chatmain{flex:1; min-width:0; display:flex; flex-direction:column}
+.chathead{
+  height:50px; flex:none; display:flex; align-items:center; gap:11px;
+  padding:0 20px; border-bottom:1px solid var(--hairline);
+}
+.chathead .h{font:600 14px/1 var(--ui)}
+.chathead .m{color:var(--brand-muted); font-size:11.5px}
+.monthpill{
+  margin-left:auto; padding:4px 10px; border-radius:999px; background:var(--brand-bg);
+  border:1px solid var(--hairline); color:var(--brand-gray);
+  font:600 11px/1 var(--ui); font-variant-numeric:tabular-nums;
+}
+.chatbody{position:relative; flex:1; overflow:hidden}
+.chatlist{
+  position:absolute; left:0; right:0; top:0; padding:16px 22px 96px;
+  display:flex; flex-direction:column; gap:9px;
+  transition:transform 2400ms cubic-bezier(.34,0,.22,1);
+}
+.cday{
+  display:flex; align-items:center; gap:12px; margin:9px 0 3px;
+  color:var(--brand-muted); font:600 10.5px/1 var(--ui);
+  letter-spacing:.09em; text-transform:uppercase;
+}
+.cday::before,.cday::after{content:""; height:1px; background:var(--hairline); flex:1}
+.msg{display:flex; gap:9px; align-items:flex-start; max-width:76%}
+.msg.me{margin-left:auto; flex-direction:row-reverse}
+.av{
+  width:26px; height:26px; border-radius:999px; flex:none; color:#fff;
+  font:600 10.5px/26px var(--ui); text-align:center;
+}
+.av.s{background:var(--brand-blue)} .av.d{background:var(--brand-serious)}
+.av.p{background:var(--brand-green)} .av.y{background:var(--brand-gray)}
+.bub{
+  background:var(--brand-bg); border:1px solid var(--hairline); border-radius:12px;
+  padding:7px 11px 8px; min-width:0;
+  transition:box-shadow .3s ease, border-color .3s ease, background .3s ease;
+}
+.msg.me .bub{background:var(--blue-wash); border-color:rgba(42,120,214,.26)}
+.bub .nm{
+  display:flex; gap:8px; margin-bottom:3px;
+  font:600 11.5px/1.2 var(--ui); color:var(--brand-gray);
+}
+.msg.me .bub .nm{justify-content:flex-end}
+.bub .nm i{font-style:normal; color:var(--brand-muted); font-weight:400; font-family:var(--mono); font-size:10.5px}
+.bub .tx{font-size:13px; line-height:1.5; color:#1b1a18}
+.msg.lit .bub{
+  box-shadow:0 0 0 2px var(--brand-spark), 0 0 0 7px rgba(250,178,25,.2);
+  border-color:var(--brand-spark);
+}
+.msg.q .bub{background:var(--spark-wash); border-color:rgba(250,178,25,.5)}
+.msg.hid{visibility:hidden}
+.chatdim{
+  position:absolute; inset:0; background:rgba(252,252,251,.6);
+  opacity:0; transition:opacity .55s ease; pointer-events:none;
+}
+.chatdim.on{opacity:1}
+.typing{
+  position:absolute; left:22px; bottom:8px; display:flex; align-items:center; gap:8px;
+  color:var(--brand-muted); font-size:11.5px; opacity:0; transition:opacity .25s ease;
+}
+.typing.on{opacity:1}
+.typing b{display:flex; gap:3px}
+.typing b i{
+  width:5px; height:5px; border-radius:999px; background:var(--brand-muted); display:block;
+  animation:dot 1.1s infinite ease-in-out;
+}
+.typing b i:nth-child(2){animation-delay:.15s} .typing b i:nth-child(3){animation-delay:.3s}
+@keyframes dot{0%,60%,100%{opacity:.3}30%{opacity:1}}
+.composer{
+  position:relative; z-index:31;
+  height:54px; flex:none; border-top:1px solid var(--hairline); background:var(--surface);
+  display:flex; align-items:center; gap:10px; padding:0 20px;
+}
+/* the chat pins its composer to the bottom edge, so the caption gets out of its way */
+.stage.chat .caption{padding-bottom:74px}
+.stage.chat .flag{bottom:150px}
+.composer .box{
+  flex:1; height:34px; border:1px solid var(--hairline); border-radius:8px;
+  background:var(--brand-bg); display:flex; align-items:center; padding:0 11px;
+  font-size:12.5px; color:var(--brand-muted);
+}
+.composer .box.typing-on{color:#1b1a18; border-color:var(--brand-blue)}
+.composer .send{
+  padding:7px 13px; border-radius:8px; background:var(--brand-blue); color:#fff;
+  font:600 11.5px/1 var(--ui);
+}
+
+/* ---------- the title card ---------- */
+.titlecard{
+  height:100%; background:var(--room); display:flex; flex-direction:column;
+  justify-content:center; gap:14px; padding:0 70px;
+}
+.titlecard .brand{font:700 33px/1.1 var(--ui); letter-spacing:-.022em; color:#f4f2ec}
+.titlecard .lede{font:500 17px/1.5 var(--ui); color:var(--room-ink); max-width:56ch; text-wrap:balance}
+.axes{display:flex; gap:12px; margin-top:8px}
+.axis{
+  flex:1; background:var(--room-2); border:1px solid var(--room-line);
+  border-radius:var(--r-card); padding:13px 15px;
+  opacity:0; transform:translateY(9px); transition:opacity .4s ease, transform .4s ease;
+}
+.axis.on{opacity:1; transform:none}
+.axis b{
+  display:block; color:var(--brand-spark); font:600 11px/1 var(--ui);
+  letter-spacing:.07em; text-transform:uppercase; margin-bottom:8px;
+}
+.axis span{display:block; font-size:12.5px; line-height:1.5; color:var(--room-muted)}
+.titlecard .fine{color:var(--room-muted); font-size:12px; margin-top:6px}
+
+/* ---------- terminal: extra shapes ---------- */
+.term .panel.blue{border-left-color:var(--brand-blue)}
+.term .panel.blue h4{color:#7fa7d8}
+.term .panel.gap{border-left-color:var(--brand-red)}
+.term .kv2{display:grid; grid-template-columns:auto 1fr; gap:4px 16px; margin-top:8px; font-size:12.5px}
+.term .kv2 dt{color:var(--term-dim)}
+.term .kv2 dd{margin:0; color:var(--term-ink); word-break:break-all}
+.term .badge{
+  display:inline-block; padding:2px 7px; border-radius:999px; font-size:11px;
+  background:rgba(12,163,12,.16); color:#7bbd7b; border:1px solid rgba(12,163,12,.35);
+}
+.term .badge.sp{background:rgba(250,178,25,.15); color:var(--brand-spark); border-color:rgba(250,178,25,.38)}
+.term .badge.rd{background:rgba(208,59,59,.15); color:#e8927a; border-color:rgba(208,59,59,.4)}
+.term .cnt{display:grid; grid-template-columns:150px auto 1fr; gap:2px 12px; margin-top:8px}
+.term .cnt b{font-weight:400; color:var(--term-ink)}
+.term .cnt s{text-decoration:none; color:var(--brand-spark); font-variant-numeric:tabular-nums; text-align:right}
+.term .cnt i{font-style:normal; color:var(--term-dim); font-size:12.5px}
+.term .cite{
+  color:#7fa7d8; font-size:12.5px; background:rgba(42,120,214,.12);
+  border:1px solid rgba(42,120,214,.3); border-radius:5px; padding:1px 5px;
+}
+.term .mat{display:grid; grid-template-columns:132px 1fr 132px; gap:3px 10px; margin-top:9px; font-size:12.5px}
+.term .mat .w{color:var(--term-dim); font-variant-numeric:tabular-nums}
+.term .mat .c{text-align:right}
+.term .instr{
+  margin-top:12px; padding:9px 11px; border-radius:7px;
+  background:rgba(250,178,25,.1); border:1px solid rgba(250,178,25,.4);
+  color:var(--brand-spark); font-size:12.5px; line-height:1.55;
+}
+.term .draft{
+  margin-top:14px; border:1px solid #33302a; border-left:3px solid var(--brand-green);
+  border-radius:8px; padding:13px 15px; background:#191712;
+}
+.term .draft p{margin:0 0 9px; font-size:13px; line-height:1.65; color:var(--term-ink)}
+.term .draft p:last-of-type{margin-bottom:0}
+.term .draft .foot2{margin-top:11px; color:var(--term-dim); font-size:12px; line-height:1.6}
+.reveal{opacity:0; transform:translateY(6px); transition:opacity .35s ease, transform .35s ease}
+.reveal.on{opacity:1; transform:none}
+
+/* ---------- node page: the sources under one record ---------- */
+.srcs{display:flex; flex-direction:column; gap:7px}
+.srchead{
+  font:600 10.5px/1 var(--ui); letter-spacing:.09em; text-transform:uppercase;
+  color:var(--brand-muted);
+}
+.src{
+  display:grid; grid-template-columns:auto 1fr auto; gap:9px; align-items:start;
+  background:var(--surface); border:1px solid rgba(42,120,214,.2);
+  border-radius:8px; padding:8px 10px;
+  transition:box-shadow .3s ease, border-color .3s ease;
+}
+.src .cite{
+  font-family:var(--mono); font-size:10.5px; color:var(--blue-ink);
+  background:var(--blue-wash); border:1px solid rgba(42,120,214,.25);
+  border-radius:5px; padding:2px 5px; white-space:nowrap;
+}
+.src .lb{font-size:12px; line-height:1.5; color:#1b1a18; min-width:0}
+.src .lb em{font-style:normal; display:block; color:var(--brand-muted); font-size:11.5px; margin-top:3px}
+.src .lb em a{color:var(--blue-ink); text-decoration:none}
+.src.contra{border-color:rgba(236,131,90,.45); background:rgba(236,131,90,.07)}
+.pill.linked{background:var(--blue-wash); color:var(--blue-ink)}
+.pill.supports{background:rgba(12,163,12,.1); color:var(--green-ink)}
+.pill.contradicts{background:rgba(236,131,90,.16); color:var(--serious-ink)}
+.pill.hook{background:rgba(82,81,78,.1); color:var(--brand-gray); font-family:var(--mono); font-weight:500}
+
+/* ---------- the blank: why this slot is empty ---------- */
+.ladder{display:flex; flex-direction:column; gap:8px; margin-top:11px}
+.rung{
+  display:grid; grid-template-columns:104px 1fr auto; gap:11px; align-items:center;
+  border:1px solid var(--hairline); border-radius:9px; padding:9px 11px;
+  background:var(--surface); font-size:12.5px; color:var(--brand-gray);
+}
+.rung .lbl{font:600 11px/1 var(--ui); letter-spacing:.05em; text-transform:uppercase; color:var(--brand-muted)}
+.rung.empty{background:var(--brand-bg)}
+.rung.empty .lbl{color:var(--brand-red)}
+.reasonrow{
+  display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:10px;
+  padding:11px 13px; border-radius:10px; background:var(--brand-bg);
+  border:1px solid var(--hairline); transition:box-shadow .3s ease, border-color .3s ease;
+}
+.reasonrow .none{font:600 13px/1.4 var(--ui); color:var(--brand-red)}
+.evcmd{
+  margin-top:11px; font-family:var(--mono); font-size:11.5px; color:var(--blue-ink);
+  background:var(--blue-wash); border:1px solid rgba(42,120,214,.2);
+  border-radius:7px; padding:7px 10px;
+}
+@media (prefers-reduced-motion:reduce){
+  .chatlist,.axis,.reveal,.bub,.src,.reasonrow{transition-duration:.001ms !important}
+  .typing b i{animation:none !important}
+}
+</style>
 </head>
 <body>
-
 
 <div class="wrap">
   <div class="head">
     <div>
-      <h1 data-t="title">One change, checked against everything already decided</h1>
-      <p class="sub" data-t="sub">A walkthrough of provLedger: a task goes to the coding agent, the check runs before anything is edited, and the reason it fires is already on the record.</p>
+      <h1 data-t="title">One project — across nodes, across time, across tasks</h1>
+      <p class="sub" data-t="sub">A walkthrough of provLedger: a colleague asks why the data stops on 18 September, nobody on the team knows, and the record answers with the incident behind it — and with the fact that the cutoff was only ever meant to be temporary. The ledger shown is a worked example, not a live database.</p>
     </div>
     <div class="langbtn" role="group" aria-label="Caption language">
       <button id="lang-en" aria-pressed="true">EN</button>
@@ -422,208 +604,146 @@ img{max-width:100%}
 
         <div class="chrome">
           <div class="dots"><i></i><i></i><i></i></div>
-          <div class="urlbar"><span class="lock" id="url-lock">●</span><span class="u" id="url">~/churn-model — claude</span></div>
-          <span class="tag" id="chrome-tag">terminal</span>
+          <div class="urlbar"><span class="lock" id="url-lock">●</span><span class="u" id="url">Teams · q3-rollup</span></div>
+          <span class="tag" id="chrome-tag">chat</span>
         </div>
 
-        <div class="flag" id="flag"><span class="no" id="flag-no">01</span><span id="flag-txt">The task</span></div>
+        <div class="flag" id="flag"><span class="no" id="flag-no">01</span><span id="flag-txt">The question</span></div>
 
         <div class="screens">
 
-          <!-- ============ 1 · terminal ============ -->
-          <section class="screen on" id="sc-term">
-            <div class="term">
-              <div class="line"><span class="path">~/churn-model</span> <span class="dim">on</span> <span class="blue">main</span></div>
-              <div class="line"><span class="prompt">&gt;</span> <span id="typed"></span><span class="caret" id="caret"></span></div>
-
-              <div class="blk" id="t-plan" style="visibility:hidden">
-                <div class="line"><span class="ok">●</span> Planning · 4 steps · <span class="dim">churn-t118</span></div>
-                <div class="line dim">  Read  <span class="blue">pkg/training/split_dataset.py</span> <span class="dim">· 62 lines</span></div>
-                <div class="line dim">  Read  <span class="blue">pkg/training/train_churn.py</span> <span class="dim">· 148 lines</span></div>
-                <div class="line dim">  provledger · declaring 3 targets, checking each against its own history</div>
-                <div class="line dim">  provledger · computing what reads them — 5 consumers, 3 steps deep</div>
+          <!-- ============ cold open · the chat window ============ -->
+          <section class="screen on" id="sc-chat">
+            <div class="chatwrap">
+              <div class="chatside">
+                <div class="team" id="cs-team">Revenue Reporting</div>
+                <div class="grp" id="cs-g1">Channels</div>
+                <div class="cch sel"><span class="h">#</span><span id="cs-c1">q3-rollup</span><span class="bell">●</span></div>
+                <div class="cch"><span class="h">#</span><span id="cs-c2">finance-data</span></div>
+                <div class="cch"><span class="h">#</span><span id="cs-c3">deck-review</span></div>
+                <div class="grp" id="cs-g2">Direct</div>
+                <div class="cch"><span class="av s" style="width:20px;height:20px;line-height:20px;font-size:9px">SN</span><span>Sarah Nolan</span></div>
+                <div class="cch"><span class="av d" style="width:20px;height:20px;line-height:20px;font-size:9px">DW</span><span>Dan Whitaker</span></div>
+                <div class="cch"><span class="av p" style="width:20px;height:20px;line-height:20px;font-size:9px">PR</span><span>Priya Raman</span></div>
               </div>
-
-              <div class="panel" id="t-panel" style="visibility:hidden">
-                <h4>⚠ 2 findings before anything is edited</h4>
-                <div class="fnd"><span class="n">1</span><span class="t">This experiment has been run before
-                  <em>80/20 was tried on 2026-08-14 and rejected · split_dataset</em></span></div>
-                <div class="fnd"><span class="n">2</span><span class="t">weekly_report reads this split, three steps downstream
-                  <em>computed from the graph, not from the diff</em></span></div>
-                <div class="hint">↳ nothing is blocked · recorded, and put in front of you</div>
-              </div>
-
-              <div class="blk" id="t-wait" style="visibility:hidden">
-                <div class="line dim">Answer them, or say go ahead — either way it is on the record.</div>
-                <div class="line"><span class="prompt">&gt;</span> <span class="caret"></span></div>
-              </div>
-            </div>
-          </section>
-
-          <!-- ============ 2 · task ============ -->
-          <section class="screen" id="sc-task">
-            <div class="app">
-              <div class="appnav">
-                <span class="navchip">🏠 Home</span>
-                <span class="navchip">🎯 Outcomes</span>
-                <span class="who">📋 Task · read only</span>
-              </div>
-              <div class="pagescroll">
-                <div class="page" id="page-task">
-                  <div class="col">
-
-                    <div class="card">
-                      <div class="eyebrow">CHURN-MODEL</div>
-                      <h2 class="h1">Retrain the churn model on an 80/20 split</h2>
-                      <div class="rowmeta">
-                        <span class="mono">churn-t118</span>
-                        <span>published 14:22</span>
-                        <span>4 steps</span>
-                        <span>3 things touched</span>
-                      </div>
-                    </div>
-
-                    <div class="card findings" id="findings">
-                      <div class="top">
-                        <h3 class="h2">Findings</h3>
-                        <span class="pill blocking">2 blocking</span>
-                      </div>
-
-                      <div class="finding" id="fnd-1">
-                        <span class="ico">⚠</span>
-                        <div class="body">
-                          <div class="t">This experiment has been run before</div>
-                          <div class="d">80/20 was tried on 2026-08-14 and rejected: the holdout leaked week-52 promotions, so the lift was the promotion and not the model.</div>
-                          <div class="f">
-                            <span class="mono">pkg.training.split_dataset</span>
-                            <span class="pill hits" id="fnd-hits">3 hits</span>
-                            <span class="open">open the record →</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div class="finding" id="fnd-2">
-                        <span class="ico">⚠</span>
-                        <div class="body">
-                          <div class="t">weekly_report depends on this split</div>
-                          <div class="d">Computed downstream: split_dataset → train_churn → weekly_report → the churn figure in the Monday deck.</div>
-                          <div class="f">
-                            <span class="mono">3 steps · 5 consumers</span>
-                            <span class="open">open the graph →</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div class="unanswered"><span class="dot"></span>1 unanswered</div>
-                    </div>
-
-                    <div class="card relied">
-                      <h3 class="h2">Decisions relied on</h3>
-                      <ul>
-                        <li><span class="k">reason:96</span><span>Stratify on churn, not on tenure — the tenure buckets are not balanced after 2026-06.</span></li>
-                        <li><span class="k">reason:104</span><span>Seed is fixed at 20260614 so a rerun is comparable.</span></li>
-                        <li><span class="k">reason:118</span><span>Holdout must not contain a promotion week.</span></li>
-                      </ul>
-                    </div>
-
-                    <div class="card flush">
-                      <div class="steps">
-                        <div class="step done"><span class="n">1</span><span class="s"></span><span>read the current split and its history</span></div>
-                        <div class="step run"><span class="n">2</span><span class="s"></span><span>answer the findings before editing</span></div>
-                        <div class="step wait"><span class="n">3</span><span class="s"></span><span>change the split and retrain</span></div>
-                        <div class="step wait"><span class="n">4</span><span class="s"></span><span>compare against the recorded expectation</span></div>
-                      </div>
-                    </div>
-
-                  </div>
+              <div class="chatmain">
+                <div class="chathead">
+                  <span class="h">#<span id="ch-name">q3-rollup</span></span>
+                  <span class="m" id="ch-members">6 members</span>
+                  <span class="monthpill" id="monthpill">October 2026</span>
+                </div>
+                <div class="chatbody">
+                  <div class="chatlist" id="chatlist"></div>
+                  <div class="chatdim" id="chatdim"></div>
+                  <div class="typing" id="ctyping"><span id="ctyping-txt">Dan Whitaker is typing</span><b><i></i><i></i><i></i></b></div>
+                </div>
+                <div class="composer">
+                  <div class="box" id="cbox"><span id="cbox-txt">Reply</span></div>
+                  <span class="send" id="csend">Send</span>
                 </div>
               </div>
             </div>
           </section>
 
-          <!-- ============ 3 · node ============ -->
+          <!-- ============ act 1 · the node, its history, the record ============ -->
           <section class="screen" id="sc-node">
             <div class="app">
               <div class="appnav">
-                <span class="navchip">🏠 Home</span>
-                <span class="navchip">🎯 Outcomes</span>
-                <span class="who">🧬 Node ledger · read only</span>
+                <span class="navchip">🏠 <span id="nn-home">Home</span></span>
+                <span class="navchip">🎯 <span id="nn-out">Outcomes</span></span>
+                <span class="who" id="nn-who">🧬 Node · read-only</span>
               </div>
               <div class="pagescroll">
                 <div class="page" id="page-node">
                   <div class="col">
 
-                    <div class="card">
-                      <div class="eyebrow">CHURN-MODEL</div>
-                      <h2 class="h1 mono" style="font-size:16px">pkg.training.split_dataset</h2>
+                    <div class="card" id="nd-card">
+                      <div class="eyebrow">Q3-ROLLUP</div>
+                      <h2 class="h1 mono" style="font-size:16px">pkg.rollup.load_orders</h2>
                       <div class="rowmeta">
-                        <span class="pill derived">derived</span>
-                        <span>upstream 2 · downstream 5</span>
-                        <span>14 records · 6 analysis runs</span>
+                        <span class="pill observed">observed</span>
+                        <span id="nd-meta">upstream 2 · downstream 6</span>
+                        <span id="nd-meta2">16 records · 12 runs</span>
+                        <span id="nd-meta3">2 constraints in force</span>
                       </div>
                     </div>
 
                     <div class="card flush">
-                      <div style="padding:14px 16px 4px"><h3 class="h2">Change history</h3></div>
+                      <div style="padding:14px 16px 4px"><h3 class="h2" id="nd-hist">Change history</h3></div>
                       <div class="hist">
 
                         <div class="hrow">
-                          <div class="when">2026-09-17</div>
+                          <div class="when">2026-10-08</div>
                           <div class="what">
-                            <div class="t">Proposed: move the split to 80/20 and retrain.</div>
-                            <div class="sub"><span class="mono">churn-t118</span><span>open</span></div>
+                            <div class="t" id="nd-r1">Recomputed for October. The cutoff is unchanged.</div>
+                            <div class="sub"><span class="mono">run 91</span><span id="nd-r1-s">measured from the source</span></div>
                           </div>
-                          <div class="right"><span class="pill stated">stated</span></div>
+                          <div class="right"><span class="pill observed">observed</span></div>
                         </div>
 
-                        <div class="hrow rejected" id="hrow-hit">
-                          <div class="when">2026-08-14</div>
+                        <div class="hrow rejected">
+                          <div class="when">2026-09-25</div>
                           <div class="what">
-                            <div class="t">Rejected: 80/20 leaked week-52 promotions into the holdout. Keep 70/30 until the promotion calendar is a column.</div>
-                            <div class="sub"><span class="mono">churn-t094</span><span>rejected alternative</span><span>source level verbal</span></div>
+                            <div class="t" id="nd-r3">Rejected: resume from the 19th and patch the gap — upstream has not been confirmed clean.</div>
+                            <div class="sub"><span class="mono">roll-t126</span><span id="nd-r3-s">rejected alternative</span></div>
+                          </div>
+                          <div class="right"><span class="pill hits">Surfaced 2</span><span class="pill stated">stated</span></div>
+                        </div>
+
+                        <div class="hrow" id="hrow-hit">
+                          <div class="when">2026-09-21</div>
+                          <div class="what">
+                            <div class="t" id="nd-r2">Cutoff set to 2026-09-18: nothing after it, for now — upstream has been inconsistent since the incident.</div>
+                            <div class="sub"><span class="mono">roll-t121</span><span id="nd-r2-s">constraint</span><span id="nd-r2-s2">source level linked</span></div>
                           </div>
                           <div class="right">
-                            <span class="pill hits" id="hits">2 hits</span>
+                            <span class="pill hits" id="nd-shown">Surfaced 4</span>
                             <span class="pill stated">stated</span>
                           </div>
                         </div>
 
                         <div class="detail" id="detail">
                           <div class="in">
-                            <div class="quote">“We tried eighty-twenty in August and the holdout had week fifty-two in it — the lift was the promotion, not the model. Leave it at seventy-thirty until the promotion calendar is its own column.”</div>
+                            <div class="quote" id="nd-quote">“nothing after the 18th for now — upstream has been inconsistent since the incident”</div>
                             <dl class="kv">
-                              <dt>tier</dt><dd>stated — the user's own words, with the span</dd>
-                              <dt>source level</dt><dd>verbal · the words themselves</dd>
-                              <dt>recorded in</dt><dd><span class="mono">churn-t094</span>, 2026-08-14 11:07</dd>
-                              <dt>surfaced</dt><dd>3 times · adopted by 1 plan</dd>
+                              <dt id="nd-k1">tier</dt><dd id="nd-v1">stated — the user's own words, with the span <span class="pill hook">captured as you typed it</span></dd>
+                              <dt id="nd-k2">source level</dt><dd id="nd-v2">linked · a reference you can open</dd>
+                              <dt id="nd-k3">recorded in</dt><dd><span class="mono">roll-t121</span>, 2026-09-21 14:22</dd>
+                              <dt id="nd-k4">surfaced</dt><dd id="nd-v4">Surfaced 4 · Adopted 1</dd>
                             </dl>
-                            <div class="cmd">provledger why pkg.training.split_dataset</div>
+                            <div class="srcs">
+                              <div class="srchead" id="nd-srch">Sources · 2</div>
+                              <div class="src" id="src-doc">
+                                <span class="cite">#r12</span>
+                                <span class="lb" id="src-doc-lb">ticket · “INC-4471 · upstream orders inconsistency”
+                                  <em>2026-09-19 14:07 · <a href="#" onclick="return false">jira.example.com/browse/INC-4471</a> · <span>last checked 2026-10-11</span></em></span>
+                                <span><span class="pill linked">linked</span> <span class="pill supports">supports</span></span>
+                              </div>
+                              <div class="src contra" id="src-chat">
+                                <span class="cite">#r14</span>
+                                <span class="lb" id="src-chat-lb">chat · “can we move the cutoff to the 30th? · Dan Whitaker”
+                                  <em>2026-09-29 16:40 · <a href="#" onclick="return false">teams.microsoft.com/…/19:3f2a…</a> · <span>last checked 2026-10-11</span></em></span>
+                                <span><span class="pill linked">linked</span> <span class="pill contradicts">contradicts</span></span>
+                              </div>
+                            </div>
+                            <div class="cmd">provledger why pkg.rollup.load_orders</div>
                           </div>
                         </div>
 
                         <div class="hrow">
-                          <div class="when">2026-06-02</div>
+                          <div class="when">2026-09-19</div>
                           <div class="what">
-                            <div class="t">Stratify on churn, not on tenure — the tenure buckets stopped being balanced.</div>
-                            <div class="sub"><span class="mono">churn-t061</span><span>reason</span></div>
+                            <div class="t" id="nd-r4">RCA: upstream orders after 08:40 are inconsistent — duplicated and missing keys.</div>
+                            <div class="sub"><span class="mono">roll-t118</span><span id="nd-r4-s">reason</span><span id="nd-r4-s2">source level linked</span></div>
                           </div>
-                          <div class="right"><span class="pill hits">5 hits</span><span class="pill stated">stated</span></div>
+                          <div class="right"><span class="pill hits">Surfaced 6</span><span class="pill stated">stated</span></div>
                         </div>
 
                         <div class="hrow">
-                          <div class="when">2026-05-19</div>
+                          <div class="when">2026-06-11</div>
                           <div class="what">
-                            <div class="t">Signature changed: returns (train, test, meta) instead of (train, test).</div>
-                            <div class="sub"><span class="mono">run 71</span><span>measured from the source</span></div>
-                          </div>
-                          <div class="right"><span class="pill derived">derived</span></div>
-                        </div>
-
-                        <div class="hrow">
-                          <div class="when">2026-04-03</div>
-                          <div class="what">
-                            <div class="t">No reason on record for the original 70/30 choice.</div>
-                            <div class="sub"><span class="mono">run 44</span><span>gap, kept as a gap</span></div>
+                            <div class="t" id="nd-r5">No reason recorded for the original run_date cutoff.</div>
+                            <div class="sub"><span class="mono">run 12</span><span id="nd-r5-s">gap, kept as a gap</span></div>
                           </div>
                           <div class="right"><span class="pill unstated">unstated</span></div>
                         </div>
@@ -632,15 +752,15 @@ img{max-width:100%}
                     </div>
 
                     <div class="card">
-                      <h3 class="h2">Constraints in force</h3>
+                      <h3 class="h2" id="nd-cons">Constraints</h3>
                       <div class="cons">
                         <div class="con" id="con-hit">
                           <span class="mark" id="con-mark"></span>
-                          <span class="t">Do not move to 80/20 until the promotion calendar is a column of its own. <span class="meta">— from churn-t094</span></span>
+                          <span class="t" id="nd-c1">Use nothing after 2026-09-18 — for now, until upstream is confirmed clean. <span class="meta">— from roll-t121 · linked · in force 22 days</span></span>
                         </div>
                         <div class="con">
                           <span class="mark"></span>
-                          <span class="t">Seed stays 20260614 so two runs can be compared. <span class="meta">— from churn-t104</span></span>
+                          <span class="t" id="nd-c2">One number per region; countries are rolled up. <span class="meta">— from roll-t066 · verbal</span></span>
                         </div>
                       </div>
                     </div>
@@ -651,91 +771,232 @@ img{max-width:100%}
             </div>
           </section>
 
-          <!-- ============ 4 · graph ============ -->
-          <section class="screen" id="sc-graph">
+          <!-- ============ act 1 · the material, then the reply ============ -->
+          <section class="screen" id="sc-reply">
+            <div class="term">
+              <div class="termscroll"><div class="termpage" id="page-reply">
+                <div class="line"><span class="path">~/q3-rollup</span> <span class="dim">on</span> <span class="blue">main</span></div>
+                <div class="line"><span class="prompt">&gt;</span> <span id="typed-r"></span><span class="caret" id="caret-r"></span></div>
+
+                <div class="blk reveal" id="rp-locate">
+                  <div class="line"><span class="ok">●</span> <span id="rp-l1">provledger · locating records · 14 candidates · 3 nodes chosen</span></div>
+                  <div class="line dim">  pkg.rollup.load_orders · pkg.rollup.upstream_orders · pkg.rollup.weekly_report</div>
+                  <div class="line dim">  <span id="rp-l3">nothing written — a question is not a plan, and their words never enter the ledger</span></div>
+                </div>
+
+                <div class="panel blue reveal" id="rp-mat">
+                  <h4 id="rp-mh">material for this reply</h4>
+                  <div class="line" id="rp-head">The load cutoff is 2026-09-18 — set 2026-09-21, and marked “for now”</div>
+                  <div class="mat">
+                    <span class="w">2026-06-11 10:14</span><span id="rp-m1">before that the cutoff was run_date — data through the day the report ran</span><span class="c"><span class="cite">#12</span></span>
+                    <span class="w">2026-09-19 09:10</span><span id="rp-m2">measured: pkg.rollup.upstream_orders went from 1 284 102 rows to 61</span><span class="c"><span class="cite">#86</span></span>
+                    <span class="w">2026-09-19 14:07</span><span id="rp-m3">ticket · “INC-4471 · upstream orders inconsistency” · linked, last checked 2026-10-11</span><span class="c"><span class="cite">#r12</span></span>
+                    <span class="w">2026-09-19 17:30</span><span id="rp-m4">RCA roll-t118: upstream orders after 08:40 are inconsistent — duplicated and missing keys</span><span class="c"><span class="cite">#90</span></span>
+                    <span class="w">2026-09-21 14:22</span><span id="rp-m5">your words: “nothing after the 18th for now — upstream has been inconsistent since the incident” · captured as you typed it</span><span class="c"><span class="cite">#94</span></span>
+                    <span class="w">2026-09-21 14:25</span><span id="rp-m6">recorded as a constraint on pkg.rollup.load_orders</span><span class="c"><span class="cite">#95</span></span>
+                    <span class="w">2026-09-25 11:12</span><span id="rp-m7">rejected alternative: resume from the 19th and patch the gap — upstream not confirmed clean</span><span class="c"><span class="cite">#101</span></span>
+                    <span class="w">2026-09-29 16:40</span><span id="rp-m8">chat · “can we move the cutoff to the 30th? · Dan Whitaker” · contradicts</span><span class="c"><span class="cite">#r14</span></span>
+                    <span class="w">2026-10-08 09:05</span><span id="rp-m9">run 91 recomputed October; the cutoff is unchanged</span><span class="c"><span class="cite">#i9</span></span>
+                  </div>
+                  <div id="rp-gaps">
+                    <div class="hint" style="color:#e8927a; margin-top:12px" id="rp-gaps-h">gaps — state these as gaps, do not fill them</div>
+                    <div class="mat">
+                      <span class="w">—</span><span id="rp-g1">nothing on record says when the cutoff should be lifted — the constraint still reads “for now”</span><span class="c"><span class="cite">unstated</span></span>
+                      <span class="w">2026-06-11</span><span id="rp-g2">no reason was ever recorded for the original run_date cutoff</span><span class="c"><span class="cite">unstated</span></span>
+                    </div>
+                  </div>
+                  <div class="line dim" style="margin-top:12px" id="rp-scope">Scope: 3 nodes, 2 constraints, 6 influencing records, 7 changes, 2026-06-11 to 2026-10-08; 14 candidates, 3 chosen; nothing truncated. Computed in 0.4 s.</div>
+                  <div class="instr" id="rp-instr">→ Write the reply from the lines above. Every claim must map to one of them. Where a line is marked <b>unstated</b>, say so as a gap. Nothing else may be written.</div>
+                </div>
+
+                <div class="blk reveal" id="rp-hand">
+                  <div class="line"><span class="ok">●</span> <span id="rp-hand-t">handed to this session's model <span class="dim">· the material is the whole input · provLedger writes nothing</span></span></div>
+                </div>
+
+                <div class="draft reveal" id="rp-draft">
+                  <p id="rp-d1">Hi Dan — the cutoff is 18 September, and it was set because of the upstream incident on the 19th.</p>
+                  <p id="rp-d2">Until then the rollup ran to the date it ran on <span class="cite">#12</span>. On the morning of 19 September the upstream orders table went from 1 284 102 rows to 61 <span class="cite">#86</span>, and the RCA that afternoon found that everything after 08:40 was inconsistent — duplicated and missing keys <span class="cite">#r12</span> <span class="cite">#90</span>.</p>
+                  <p id="rp-d3">The call on the 21st settled on using nothing after the 18th, and that went on the record the same afternoon as a constraint on the order load <span class="cite">#94</span> <span class="cite">#95</span>. Resuming from the 19th and patching the gap was raised on the 25th and dropped, because upstream had not been confirmed clean <span class="cite">#101</span>.</p>
+                  <p id="rp-d4">One thing worth saying out loud: it was meant to be temporary. The constraint still reads “for now”, and nothing on record says when it should be lifted — that is a gap, not a decision. Your own question about moving it to the 30th is on the record too <span class="cite">#r14</span>. INC-4471 is linked if you would rather read it yourself; it last opened on 11 October <span class="cite">#r12</span>.</p>
+                  <div class="foot2" id="rp-foot">↳ 9 sentences · 9 map onto the material · 0 dropped · figures checked against the fact table<br>↳ nothing was sent. The draft stops here; the copy-and-paste is yours.</div>
+                </div>
+              </div></div>
+            </div>
+          </section>
+
+          <!-- ============ act 2 · the title card ============ -->
+          <section class="screen" id="sc-title">
+            <div class="titlecard">
+              <div class="brand">provLedger</div>
+              <p class="lede" id="tc-lede">One project, seen three ways — and every piece of knowledge it holds carries the source it came from.</p>
+              <div class="axes">
+                <div class="axis" id="ax-1"><b id="ax-1-h">across nodes</b><span id="ax-1-t">the map and the data flow: what is read, what processes it, what comes out.</span></div>
+                <div class="axis" id="ax-2"><b id="ax-2-h">across time</b><span id="ax-2-t">one thing, everything that happened to it. Append-only — nothing is overwritten.</span></div>
+                <div class="axis" id="ax-3"><b id="ax-3-h">across tasks</b><span id="ax-3-t">what each run read, what it decided, what it rejected, and how it turned out.</span></div>
+              </div>
+              <p class="fine" id="tc-fine">A question nobody on the team can answer, the record answering it, and then how that record gets made. The ledger in this walkthrough is a worked example, not a live database.</p>
+            </div>
+          </section>
+
+          <!-- ============ act 2 · measured ============ -->
+          <section class="screen" id="sc-measured">
+            <div class="term">
+              <div class="termscroll"><div class="termpage" id="page-measured">
+                <div class="line"><span class="path">~/q3-rollup</span> <span class="dim">on</span> <span class="blue">main</span> <span class="dim">· 2026-09-19 09:10</span></div>
+                <div class="line"><span class="prompt">&gt;</span> <span id="typed-m"></span><span class="caret" id="caret-m"></span></div>
+
+                <div class="blk reveal" id="m-run">
+                  <div class="line"><span class="ok">●</span> <span id="m-l1">Rebuilding the graph from source · 41 files</span> · <span class="blue">run 88</span></div>
+                  <div class="line dim">  <span id="m-l2">provledger · comparing run 88 with run 87</span></div>
+                  <div class="line dim">  <span id="m-l3">provledger · 612 nodes · 1 410 edges · 188 with records</span></div>
+                </div>
+
+                <div class="panel blue reveal" id="m-counts">
+                  <h4 id="m-ch">measured from the source — not reported by the agent</h4>
+                  <div class="cnt">
+                    <b>changed</b><s>4</s><i>upstream_orders · order_facts · weekly_report · fx_rate</i>
+                    <b>row count moved</b><s>3</s><i id="m-i2">upstream_orders −99.99% · order_facts −71% · weekly_report −68%</i>
+                    <b>added</b><s>0</s><i id="m-i3">nothing new in the source</i>
+                    <b>removed</b><s>0</s><i id="m-i4">nothing gone from the source</i>
+                    <b>unchanged</b><s>608</s><i id="m-i5">folded, kept as matches</i>
+                    <b>identity asserted</b><s>0</s><i id="m-i6">nothing needed a model's judgement to be identified</i>
+                  </div>
+                </div>
+
+                <div class="blk reveal" id="m-cut">
+                  <div class="line"><span class="warn">↳</span> <span class="mono">pkg.rollup.upstream_orders</span> <span class="dim">·</span> <span id="m-cut-t">rows <b>1 284 102</b> → <b>61</b>, counted against run 87</span></div>
+                </div>
+
+                <div class="blk reveal" id="m-cut2">
+                  <div class="line"><span class="prompt">↳</span> <span class="mono">pkg.rollup.load_orders</span> <span class="dim">·</span> <span id="m-cut2-t">cutoff <b>run_date</b> → <b>&lt;= 2026-09-18</b>, two days later in run 89</span></div>
+                </div>
+
+                <div class="blk reveal" id="m-tail">
+                  <div class="line"><span class="warn">↳</span> <span id="m-tail-t">7 changed data points · <span class="dim">each one now owes a reason, and gets a slot to put it in</span></span></div>
+                </div>
+              </div></div>
+            </div>
+          </section>
+
+          <!-- ============ act 2 · said, then evidenced ============ -->
+          <section class="screen" id="sc-record">
+            <div class="term">
+              <div class="termscroll"><div class="termpage" id="page-record">
+                <div class="line"><span class="path">~/q3-rollup</span> <span class="dim">on</span> <span class="blue">main</span> <span class="dim">· 2026-09-21 14:22</span></div>
+                <div class="line"><span class="prompt">&gt;</span> <span id="typed-s"></span><span class="caret" id="caret-s"></span></div>
+
+                <div class="blk reveal" id="r-hook">
+                  <div class="line"><span class="ok">●</span> UserPromptSubmit → provledger</div>
+                  <div class="line dim">  <span id="r-l2">utterance <span class="cite">#94</span> · recorded verbatim · 2026-09-21 14:22</span></div>
+                </div>
+
+                <div class="panel blue reveal" id="r-origin">
+                  <h4 id="r-oh">the words, and the door they came through</h4>
+                  <dl class="kv2">
+                    <dt id="r-k1">text</dt><dd id="r-text">“nothing after the 18th for now — upstream has been inconsistent since the incident”</dd>
+                    <dt id="r-k2">tier</dt><dd id="r-v2">stated <span class="dim">— the user's own words, with the span</span></dd>
+                    <dt id="r-k3">origin</dt><dd id="r-v3">hook <span class="badge">captured as you typed it</span></dd>
+                    <dt id="r-k4">role</dt><dd id="r-v4">constraint <span class="dim">— the rule the call settled on, kept apart from why this change was made</span></dd>
+                  </dl>
+                  <div class="hint" id="r-origin-note">A note typed in afterwards still records — and still reads <span class="badge sp">entered afterwards</span>. The tier is decided by the entrance, never by what anyone claims.</div>
+                </div>
+
+                <div class="panel reveal quiet" id="r-hint">
+                  <h4 id="r-hh">the hook only ever asks</h4>
+                  <div class="line dim" style="line-height:1.6"><span id="r-hint-t">provledger: that sentence points at an outside event (“the incident”). If you have a tool that can find the record of it, record the pointer:</span> <span class="blue">provledger reference add --utterance 94 --kind email|meeting|chat|ticket|doc|commit --label "&lt;subject · who&gt;" --occurred-at "&lt;when&gt;" --uri &lt;permalink&gt;</span></div>
+                </div>
+
+                <div class="blk reveal" id="r-search">
+                  <div class="line"><span class="ok">●</span> <span id="r-sh1">Searching with the host agent's own ticket and mail tools <span class="dim">· window 2026-09-19 .. 2026-09-21 · hints: incident, upstream orders, RCA, inconsistency</span></span></div>
+                  <div class="line dim">  <span id="r-sh2">1 result · provLedger searched nothing and holds no credentials</span></div>
+                  <div class="line blue">  provledger reference add --utterance 94 --kind ticket \</div>
+                  <div class="line blue">    --label "INC-4471 · upstream orders inconsistency" \</div>
+                  <div class="line blue">    --occurred-at "2026-09-19 14:07" \</div>
+                  <div class="line blue">    --uri https://jira.example.com/browse/INC-4471</div>
+                </div>
+
+                <div class="panel blue reveal" id="r-ref">
+                  <h4><span id="r-refh">reference <span class="cite">#r12</span> · ticket · linked</span></h4>
+                  <dl class="kv2">
+                    <dt id="r-rk1">label</dt><dd>INC-4471 · upstream orders inconsistency</dd>
+                    <dt id="r-rk2">occurred at</dt><dd>2026-09-19 14:07</dd>
+                    <dt id="r-rk3">link</dt><dd>jira.example.com/browse/INC-4471</dd>
+                    <dt id="r-rk4">stance</dt><dd id="r-stance">supports <span class="dim">— a source that disagrees is recorded as disagreeing, never dropped</span></dd>
+                    <dt id="r-rk5">body</dt><dd id="r-body"><span class="badge rd">not stored</span> <span class="dim">— the pointer is the record. You open the original yourself.</span></dd>
+                  </dl>
+                  <div class="hint" id="r-refhint">source level for reason <span class="cite">#95</span>: verbal → <span class="badge">linked</span>. The tier does not move: finding the ticket does not change who said what.</div>
+                </div>
+              </div></div>
+            </div>
+          </section>
+
+          <!-- ============ act 2 · the blank ============ -->
+          <section class="screen" id="sc-blank">
             <div class="app">
               <div class="appnav">
-                <span class="navchip">🏠 Home</span>
-                <span class="navchip">🎯 Outcomes</span>
-                <span class="who">🕸 Project state graph · read only</span>
+                <span class="navchip">🏠 <span id="nb-home">Home</span></span>
+                <span class="navchip">🎯 <span id="nb-out">Outcomes</span></span>
+                <span class="who" id="nb-who">🧬 Node · read-only</span>
               </div>
               <div class="pagescroll">
-                <div class="page" id="page-graph">
+                <div class="page" id="page-blank">
                   <div class="col">
-                    <div class="card graphcard">
-                      <div class="graphhead">
-                        <div class="eyebrow">CHURN-MODEL</div>
-                        <h2 class="h1" style="font-size:16px">run 87 · 2026-09-17 · 612 nodes · 188 with records</h2>
-                        <div class="meta" style="margin-top:6px">Data flow — what is read, what processes it, what comes out. Only what has a story is drawn.</div>
-                        <div class="modes">
-                          <span class="mode">Focus</span><span class="mode">Story</span>
-                          <span class="mode sel">Data flow</span><span class="mode">Full</span>
-                        </div>
-                      </div>
-
-                      <svg class="gsvg" viewBox="0 0 860 330" role="img"
-                           aria-label="Data flow: two data sources feed split_dataset, which feeds train_churn, which feeds weekly_report and the churn_rate metric.">
-                        <defs>
-                          <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                            <path d="M0,1 L9,5 L0,9 z" fill="#c9c8c1"></path>
-                          </marker>
-                          <marker id="arwhot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                            <path d="M0,1 L9,5 L0,9 z" fill="#fab219"></path>
-                          </marker>
-                        </defs>
-
-                        <text class="gband" x="24" y="38">read</text>
-                        <text class="gband" x="24" y="168">processed</text>
-                        <text class="gband" x="24" y="288">produced</text>
-
-                        <path class="gedge" d="M196,74 L262,126"></path>
-                        <path class="gedge" d="M470,74 L330,126"></path>
-                        <path class="gedge flow" id="e1" d="M300,160 L300,196" style="opacity:0"></path>
-                        <path class="gedge" d="M300,160 L300,196"></path>
-                        <path class="gedge flow" id="e2" d="M372,222 L560,262" style="opacity:0"></path>
-                        <path class="gedge" d="M372,222 L560,262"></path>
-                        <path class="gedge flow" id="e3" d="M330,236 L250,262" style="opacity:0"></path>
-                        <path class="gedge" d="M330,236 L250,262"></path>
-                        <path class="gedge" d="M600,74 L640,126"></path>
-
-                        <g class="gnode dim"><rect x="96" y="38" width="200" height="38" rx="7"></rect>
-                          <text x="196" y="56" text-anchor="middle">data/orders.parquet</text>
-                          <text class="sm" x="196" y="69" text-anchor="middle">18 columns</text></g>
-                        <g class="gnode dim"><rect x="372" y="38" width="196" height="38" rx="7"></rect>
-                          <text x="470" y="56" text-anchor="middle">data/customers.parquet</text>
-                          <text class="sm" x="470" y="69" text-anchor="middle">11 columns</text></g>
-                        <g class="gnode dim"><rect x="600" y="38" width="160" height="38" rx="7"></rect>
-                          <text x="680" y="56" text-anchor="middle">feeds/promotions</text>
-                          <text class="sm" x="680" y="69" text-anchor="middle">external</text></g>
-
-                        <g class="gnode" id="gn-split"><rect x="186" y="126" width="228" height="42" rx="7"></rect>
-                          <text x="300" y="145" text-anchor="middle">pkg.training.split_dataset</text>
-                          <text class="sm" x="300" y="159" text-anchor="middle">14 records · 2 constraints</text></g>
-                        <g class="gnode" id="gn-train"><rect x="186" y="196" width="228" height="42" rx="7"></rect>
-                          <text x="300" y="215" text-anchor="middle">pkg.training.train_churn</text>
-                          <text class="sm" x="300" y="229" text-anchor="middle">9 records</text></g>
-                        <g class="gnode dim"><rect x="560" y="126" width="200" height="42" rx="7"></rect>
-                          <text x="660" y="145" text-anchor="middle">pkg.features.promo_flag</text>
-                          <text class="sm" x="660" y="159" text-anchor="middle">declared</text></g>
-
-                        <g class="gnode" id="gn-report"><rect x="470" y="262" width="210" height="42" rx="7"></rect>
-                          <text x="575" y="281" text-anchor="middle">pkg.rollup.weekly_report</text>
-                          <text class="sm" x="575" y="295" text-anchor="middle">Monday deck</text></g>
-                        <g class="gnode" id="gn-metric"><rect x="118" y="262" width="176" height="42" rx="7"></rect>
-                          <text x="206" y="281" text-anchor="middle">metric: churn_rate</text>
-                          <text class="sm" x="206" y="295" text-anchor="middle">tracked since 2026-03</text></g>
-                      </svg>
-                    </div>
 
                     <div class="card">
-                      <h3 class="h2">What this change would reach</h3>
-                      <div class="rowmeta" style="margin-top:9px">
-                        <span><b style="color:var(--spark-ink)">3 steps downstream</b></span>
-                        <span>5 consumers</span>
-                        <span>1 metric on the end of it</span>
+                      <div class="eyebrow">Q3-ROLLUP</div>
+                      <h2 class="h1 mono" style="font-size:16px">pkg.rollup.fx_rate</h2>
+                      <div class="rowmeta">
+                        <span class="pill derived">derived</span>
+                        <span id="bk-meta">upstream 1 · downstream 3</span>
+                        <span id="bk-meta2">6 records · 9 runs</span>
                       </div>
-                      <div class="meta" style="margin-top:9px">Computed from the graph on this run and compared with the run before it — not reported by the agent.</div>
                     </div>
+
+                    <div class="card flush">
+                      <div style="padding:14px 16px 4px"><h3 class="h2" id="bk-hist">Change history</h3></div>
+                      <div class="hist">
+                        <div class="hrow">
+                          <div class="when">2026-09-19</div>
+                          <div class="what">
+                            <div class="t" id="bk-row">Changed: the rate is the spot rate on the close date, not the monthly average.</div>
+                            <div class="sub"><span class="mono">run 88</span><span id="bk-row-sub">measured from the source</span></div>
+                          </div>
+                          <div class="right"><span class="pill observed">observed</span></div>
+                        </div>
+                      </div>
+                      <div style="padding:0 16px 16px">
+                        <div class="reasonrow" id="bk-reason">
+                          <span class="none" id="bk-none">No reason recorded.</span>
+                          <span class="pill unstated">unstated</span>
+                          <span class="meta" id="bk-lvl">source level <b>unstated</b></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="card" id="bk-why">
+                      <h3 class="h2" id="bk-why-h">Why this one is blank</h3>
+                      <div class="meta" style="margin-top:6px" id="bk-why-sub">All three sources were tried for this slot. This is what each one returned.</div>
+                      <div class="ladder">
+                        <div class="rung">
+                          <span class="lbl" id="bk-r1">measured</span>
+                          <span id="bk-r1-t">The change itself is on the record: run 88 counted it against run 87.</span>
+                          <span class="pill observed">observed</span>
+                        </div>
+                        <div class="rung empty">
+                          <span class="lbl" id="bk-r2">said</span>
+                          <span id="bk-r2-t">Nothing in this task's window named this node. Nobody was asked: the change scored below the significance threshold.</span>
+                          <span class="pill unstated">unstated</span>
+                        </div>
+                        <div class="rung empty">
+                          <span class="lbl" id="bk-r3">evidenced</span>
+                          <span id="bk-r3-t">Searched with the host agent's own ticket and mail tools, 4 hints, 1.9 s. The window held nothing.</span>
+                          <span class="pill unstated">found_nothing</span>
+                        </div>
+                      </div>
+                      <div class="evcmd">provledger review evidence-log --plan roll-t118 --node pkg.rollup.fx_rate</div>
+                      <div class="meta" style="margin-top:10px" id="bk-foot">A gap stays a gap. The log says which of the three came up empty, so “why is this blank” has an answer too.</div>
+                    </div>
+
                   </div>
                 </div>
               </div>
@@ -743,6 +1004,9 @@ img{max-width:100%}
           </section>
 
         </div>
+
+        <!-- the one screen that cannot say what it is on its own -->
+        <div class="slate" id="slate"><span id="slate-txt"></span></div>
 
         <div class="cursor" id="cursor">
           <span class="ring"></span>
@@ -762,12 +1026,12 @@ img{max-width:100%}
       <button class="play" id="play">❚❚ <span id="play-label">Pause</span></button>
       <button class="play sec" id="restart">↺ <span data-t="restart">Restart</span></button>
       <div class="track" aria-hidden="true"><div class="fill" id="fill"></div></div>
-      <span class="tnum" id="clock">0:00 / 1:12</span>
+      <span class="tnum" id="clock">0:00 / 1:59</span>
     </div>
     <div class="chapters" id="chapters"></div>
   </div>
 
-  <p class="foot" data-t="foot">Interface wording is the product's own; the ledger shown here is a worked example, not a live database. The dashboard is read-only and opens the database read-only, so it can never block or change what it is showing — the check records and surfaces, it never vetoes. Try it with <code>claude plugin marketplace add yizhao95/prov_ledger</code>.</p>
+  <p class="foot" data-t="foot">Interface wording is the product's own; the ledger shown here is a worked example, not a live database. The dashboard is read-only and opens the database read-only, so it can never block or change what it is showing. The reply is written by the session's own model from the material provLedger assembles — provLedger writes none of it, and nothing is ever sent automatically. The command's name is still provisional. Try it with <code>claude plugin marketplace add yizhao95/prov_ledger</code>.</p>
   <a class="repo" href="https://github.com/yizhao95/prov_ledger">↗ github.com/yizhao95/prov_ledger</a>
 </div>
 
@@ -782,50 +1046,383 @@ img{max-width:100%}
   var LANG = "en";
   var STR = {
     en: {
-      title: "One change, checked against everything already decided",
-      sub: "A walkthrough of provLedger: a task goes to the coding agent, the check runs before anything is edited, and the reason it fires is already on the record.",
+      title: "One project — across nodes, across time, across tasks",
+      sub: "A walkthrough of provLedger: a colleague asks why the data stops on 18 September, nobody on the team knows, and the record answers with the incident behind it — and with the fact that the cutoff was only ever meant to be temporary. The ledger shown is a worked example, not a live database.",
       restart: "Restart", pause: "Pause", play: "Play",
-      foot: "Interface wording is the product's own; the ledger shown here is a worked example, not a live database. The dashboard is read-only and opens the database read-only, so it can never block or change what it is showing — the check records and surfaces, it never vetoes.",
-      chapters: ["The task","The check","A reason that already exists","The whole history","What it would reach"]
+      foot: "Interface wording is the product's own; the ledger shown here is a worked example, not a live database. The dashboard is read-only and opens the database read-only, so it can never block or change what it is showing. The reply is written by the session's own model from the material provLedger assembles — provLedger writes none of it, and nothing is ever sent automatically. The command's name is still provisional.",
+      chapters: ["One project, three axes","The question","The node","The record","The material","The reply","Measured","Said, then evidenced","The blank"],
+      slate: "tracking one data point's changes over time"
     },
     zh: {
-      title: "一次改动，对照此前所有已定的决定",
-      sub: "provLedger 走查：把任务交给编码代理，改动发生之前先做检查，而触发检查的那条理由早已在册。",
+      title: "一个项目——跨节点、跨时间、跨任务",
+      sub: "provLedger 走查：同事问数据为什么截到 9 月 18 日，组里现在没人知道——账本答出了背后那次故障，也答出了这道截止线本来只是临时的。此处账本为示例数据，非实时数据库。",
       restart: "重播", pause: "暂停", play: "播放",
-      foot: "界面用词取自产品本身；此处账本为示例数据，非实时数据库。仪表盘只读，并以只读方式打开数据库，因此永远无法阻断或改变它所展示的内容——检查只记录与呈现，从不否决。",
-      chapters: ["任务","检查","一条早已存在的理由","完整历史","会波及到哪里"]
+      foot: "界面用词取自产品本身；此处账本为示例数据，非实时数据库。仪表盘只读，并以只读方式打开数据库，因此永远无法阻断或改变它所展示的内容。片中那封回复由当前会话自己的模型、依据 provLedger 汇总的材料写成——provLedger 一个字都不写，也永不自动发出。该命令的名字仍未定。",
+      chapters: ["一个项目，三个维度","那个问题","那个节点","那条记录","交过去的材料","那封回复","测出来的","你说的，和外部证据","空白那一格"],
+      slate: "追踪一个数据点的历次变更"
     }
   };
+
+  /* the product's own interface wording, in both columns (vocab.py) */
+  var UIT = {
+    "cs-team": ["Revenue Reporting","收入报表组"],
+    "cs-g1": ["Channels","频道"], "cs-g2": ["Direct","私聊"],
+    "ch-members": ["6 members","6 人"],
+    "nb-home": ["Home","首页"], "nb-out": ["Outcomes","后果"], "nb-who": ["🧬 Node · read-only","🧬 节点履历 · 只读"],
+    "nn-home": ["Home","首页"], "nn-out": ["Outcomes","后果"], "nn-who": ["🧬 Node · read-only","🧬 节点履历 · 只读"],
+    "tc-lede": ["One project, seen three ways — and every piece of knowledge it holds carries the source it came from.",
+                "一个项目的三个视图——它装下的每一条知识，都带着它的来源。"],
+    "ax-1-h": ["across nodes","跨节点"],
+    "ax-1-t": ["the map and the data flow: what is read, what processes it, what comes out.",
+               "项目的地图与数据流：读了什么、谁在处理、产出什么。"],
+    "ax-2-h": ["across time","跨时间"],
+    "ax-2-t": ["one thing, everything that happened to it. Append-only — nothing is overwritten.",
+               "一个东西从头到尾发生过什么。只追加，不覆盖。"],
+    "ax-3-h": ["across tasks","跨任务"],
+    "ax-3-t": ["what each run read, what it decided, what it rejected, and how it turned out.",
+               "每次工作读了什么、决定了什么、放弃了什么，后来应验没有。"],
+    "tc-fine": ["A question nobody on the team can answer, the record answering it, and then how that record gets made. The ledger in this walkthrough is a worked example, not a live database.",
+                "一个组里没人答得上来的问题，账本把它答出来，然后是这份记录到底是怎么做出来的。本片账本为示例数据，非实时数据库。"],
+
+    /* --- act 1 · the node page --- */
+    "nd-meta": ["upstream 2 · downstream 6","上游 2 · 下游 6"],
+    "nd-meta2": ["16 records · 12 runs","16 条记录 · 12 次分析"],
+    "nd-meta3": ["2 constraints in force","2 条生效约束"],
+    "nd-hist": ["Change history","变更历史"],
+    "nd-r1": ["Recomputed for October. The cutoff is unchanged.","按 10 月重算。截止线无变更。"],
+    "nd-r1-s": ["measured from the source","由源码测出"],
+    "nd-r3": ["Rejected: resume from the 19th and patch the gap — upstream has not been confirmed clean.",
+              "已否决：从 19 号起恢复取数、缺口再补——上游还没确认干净。"],
+    "nd-r3-s": ["rejected alternative","已否决方案"],
+    "nd-r2": ["Cutoff set to 2026-09-18: nothing after it, for now — upstream has been inconsistent since the incident.",
+              "截止线定在 2026-09-18：之后的先都不要——故障以来上游一直不一致。"],
+    "nd-r2-s": ["constraint","生效约束"],
+    "nd-r2-s2": ["source level linked","来源等级 可核对链接"],
+    "nd-shown": ["Surfaced 4","呈现 4 次"],
+    "nd-quote": ["“nothing after the 18th for now — upstream has been inconsistent since the incident”",
+                 "「18 号之后的先都不要——故障以来上游一直不一致」"],
+    "nd-k1": ["tier","来源层级"],
+    "nd-v1": ["stated — the user's own words, with the span <span class=\"pill hook\">captured as you typed it</span>",
+              "用户陈述——用户原话，带出处区间 <span class=\"pill hook\">captured as you typed it</span>"],
+    "nd-k2": ["source level","来源等级"],
+    "nd-v2": ["linked · a reference you can open","可核对链接 · 可打开的出处"],
+    "nd-k3": ["recorded in","记录于"],
+    "nd-k4": ["surfaced","呈现"],
+    "nd-v4": ["Surfaced 4 · Adopted 1","呈现 4 次 · 被 1 个计划采纳"],
+    "nd-srch": ["Sources · 2","出处 · 2 条"],
+    "src-doc-lb": ["ticket · “INC-4471 · upstream orders inconsistency”<em>2026-09-19 14:07 · <a href=\"#\" onclick=\"return false\">jira.example.com/browse/INC-4471</a> · <span>last checked 2026-10-11</span></em>",
+                   "工单 · 「INC-4471 · 上游订单数据不一致」<em>2026-09-19 14:07 · <a href=\"#\" onclick=\"return false\">jira.example.com/browse/INC-4471</a> · <span>最后核对 2026-10-11</span></em>"],
+    "src-chat-lb": ["chat · “can we move the cutoff to the 30th? · Dan Whitaker”<em>2026-09-29 16:40 · <a href=\"#\" onclick=\"return false\">teams.microsoft.com/…/19:3f2a…</a> · <span>last checked 2026-10-11</span></em>",
+                    "聊天 · 「截止线能不能挪到 30 号？· Dan Whitaker」<em>2026-09-29 16:40 · <a href=\"#\" onclick=\"return false\">teams.microsoft.com/…/19:3f2a…</a> · <span>最后核对 2026-10-11</span></em>"],
+    "nd-r4": ["RCA: upstream orders after 08:40 are inconsistent — duplicated and missing keys.",
+              "根因分析：08:40 之后的上游订单数据不一致——主键有重复也有缺失。"],
+    "nd-r4-s": ["reason","变更原因"],
+    "nd-r4-s2": ["source level linked","来源等级 可核对链接"],
+    "nd-r5": ["No reason recorded for the original run_date cutoff.","最初那个 run_date 截止线没有记录原因。"],
+    "nd-r5-s": ["gap, kept as a gap","缺口，照缺口留着"],
+    "nd-cons": ["Constraints","生效约束"],
+    "nd-c1": ["Use nothing after 2026-09-18 — for now, until upstream is confirmed clean. <span class=\"meta\">— from roll-t121 · linked · in force 22 days</span>",
+              "2026-09-18 之后的数据都不要用——暂时如此，等上游确认干净。<span class=\"meta\">— 来自 roll-t121 · 可核对链接 · 已生效 22 天</span>"],
+    "nd-c2": ["One number per region; countries are rolled up. <span class=\"meta\">— from roll-t066 · verbal</span>",
+              "每个区域一个数字，国家汇总上去。<span class=\"meta\">— 来自 roll-t066 · 原话记录</span>"],
+
+    /* --- act 1 · the material and the reply --- */
+    "rp-l1": ["provledger · locating records · 14 candidates · 3 nodes chosen",
+              "provledger · 定位记录 · 候选 14 · 选中 3 个节点"],
+    "rp-l3": ["nothing written — a question is not a plan, and their words never enter the ledger",
+              "什么都没写——提问不是一次改动，对方的话也永不入账"],
+    "rp-mh": ["material for this reply","写这封回复要用的材料"],
+    "rp-head": ["The load cutoff is 2026-09-18 — set 2026-09-21, and marked “for now”",
+                "装载截止线为 2026-09-18——2026-09-21 定的，当时写着「暂时」"],
+    "rp-m1": ["before that the cutoff was run_date — data through the day the report ran",
+              "在那之前截止线就是 run_date——数据取到报表运行当天"],
+    "rp-m2": ["measured: pkg.rollup.upstream_orders went from 1 284 102 rows to 61",
+              "量出来的：pkg.rollup.upstream_orders 从 1 284 102 行掉到 61 行"],
+    "rp-m3": ["ticket · “INC-4471 · upstream orders inconsistency” · linked, last checked 2026-10-11",
+              "工单 · 「INC-4471 · 上游订单数据不一致」· 可核对链接，最后核对 2026-10-11"],
+    "rp-m4": ["RCA roll-t118: upstream orders after 08:40 are inconsistent — duplicated and missing keys",
+              "根因分析 roll-t118：08:40 之后的上游订单不一致——主键有重复也有缺失"],
+    "rp-m5": ["your words: “nothing after the 18th for now — upstream has been inconsistent since the incident” · captured as you typed it",
+              "你的原话：「18 号之后的先都不要——故障以来上游一直不一致」· captured as you typed it"],
+    "rp-m6": ["recorded as a constraint on pkg.rollup.load_orders","记为 pkg.rollup.load_orders 上的一条约束"],
+    "rp-m7": ["rejected alternative: resume from the 19th and patch the gap — upstream not confirmed clean",
+              "已否决方案：从 19 号起恢复取数、缺口再补——上游未确认干净"],
+    "rp-m8": ["chat · “can we move the cutoff to the 30th? · Dan Whitaker” · contradicts",
+              "聊天 · 「截止线能不能挪到 30 号？· Dan Whitaker」· 反证"],
+    "rp-m9": ["run 91 recomputed October; the cutoff is unchanged","run 91 重算了 10 月；截止线无变更"],
+    "rp-gaps-h": ["gaps — state these as gaps, do not fill them","空白——照空白说，不得填补"],
+    "rp-g1": ["nothing on record says when the cutoff should be lifted — the constraint still reads “for now”",
+              "没有任何记录说过这道截止线什么时候解除——那条约束上至今写着「暂时」"],
+    "rp-g2": ["no reason was ever recorded for the original run_date cutoff","最初那个 run_date 截止线从来没有记录过原因"],
+    "rp-scope": ["Scope: 3 nodes, 2 constraints, 6 influencing records, 7 changes, 2026-06-11 to 2026-10-08; 14 candidates, 3 chosen; nothing truncated. Computed in 0.4 s.",
+                 "检索范围：节点 3 · 约束 2 · 有影响记录 6 · 变更 7 · 2026-06-11 至 2026-10-08；候选 14，选中 3；无裁剪。计算耗时 0.4 秒。"],
+    "rp-instr": ["→ Write the reply from the lines above. Every claim must map to one of them. Where a line is marked <b>unstated</b>, say so as a gap. Nothing else may be written.",
+                 "→ 依据上面这些行写回复。每一句断言都必须落在其中一行上。标着 <b>unstated</b> 的，照空白说。别的一律不许写。"],
+    "rp-hand-t": ["handed to this session's model <span class=\"dim\">· the material is the whole input · provLedger writes nothing</span>",
+                  "交给当前会话的模型 <span class=\"dim\">· 材料就是全部输入 · provLedger 一个字都不写</span>"],
+    "rp-d1": ["Hi Dan — the cutoff is 18 September, and it was set because of the upstream incident on the 19th.",
+              "Dan：截止线是 9 月 18 日，是因为 19 号上游那次故障才定下来的。"],
+    "rp-d2": ["Until then the rollup ran to the date it ran on <span class=\"cite\">#12</span>. On the morning of 19 September the upstream orders table went from 1 284 102 rows to 61 <span class=\"cite\">#86</span>, and the RCA that afternoon found that everything after 08:40 was inconsistent — duplicated and missing keys <span class=\"cite\">#r12</span> <span class=\"cite\">#90</span>.",
+              "在那之前，汇总取数一直取到当天为止 <span class=\"cite\">#12</span>。9 月 19 日上午，上游订单表从 1 284 102 行掉到 61 行 <span class=\"cite\">#86</span>；当天下午的根因分析发现 08:40 之后的数据全都不一致——主键有重复也有缺失 <span class=\"cite\">#r12</span> <span class=\"cite\">#90</span>。"],
+    "rp-d3": ["The call on the 21st settled on using nothing after the 18th, and that went on the record the same afternoon as a constraint on the order load <span class=\"cite\">#94</span> <span class=\"cite\">#95</span>. Resuming from the 19th and patching the gap was raised on the 25th and dropped, because upstream had not been confirmed clean <span class=\"cite\">#101</span>.",
+              "21 号的会上定的是：18 号之后的都不要用；当天下午这条就记成了订单装载上的一条约束 <span class=\"cite\">#94</span> <span class=\"cite\">#95</span>。25 号有人提过从 19 号起恢复取数、缺口再补，后来放弃了，因为上游还没确认干净 <span class=\"cite\">#101</span>。"],
+    "rp-d4": ["One thing worth saying out loud: it was meant to be temporary. The constraint still reads “for now”, and nothing on record says when it should be lifted — that is a gap, not a decision. Your own question about moving it to the 30th is on the record too <span class=\"cite\">#r14</span>. INC-4471 is linked if you would rather read it yourself; it last opened on 11 October <span class=\"cite\">#r12</span>.",
+              "有一件事值得说清楚：这本来是临时的。那条约束上至今写着「暂时」，而没有任何记录说过它什么时候解除——这是一处空白，不是一个决定。你当时问过能不能挪到 30 号，这条也在册 <span class=\"cite\">#r14</span>。INC-4471 有链接，你可以自己看；它最后一次打得开是 10 月 11 日 <span class=\"cite\">#r12</span>。"],
+    "rp-foot": ["↳ 9 sentences · 9 map onto the material · 0 dropped · figures checked against the fact table<br>↳ nothing was sent. The draft stops here; the copy-and-paste is yours.",
+                "↳ 9 句 · 9 句都落在材料上 · 剔除 0 句 · 数字与事实表核对一致<br>↳ 未发出。草稿停在这里，复制粘贴由你来做。"],
+
+    /* --- act 2 · measured --- */
+    "m-l1": ["Rebuilding the graph from source · 41 files","从源码重建依赖图 · 41 个文件"],
+    "m-l2": ["provledger · comparing run 88 with run 87","provledger · 用 run 88 比对 run 87"],
+    "m-l3": ["provledger · 612 nodes · 1 410 edges · 188 with records","provledger · 612 个节点 · 1 410 条边 · 188 个带记录"],
+    "m-ch": ["measured from the source — not reported by the agent","由源码测出——不是代理自己报的"],
+    "m-i2": ["upstream_orders −99.99% · order_facts −71% · weekly_report −68%","upstream_orders −99.99% · order_facts −71% · weekly_report −68%"],
+    "m-i3": ["nothing new in the source","源码里没有新东西"],
+    "m-i4": ["nothing gone from the source","源码里也没少东西"],
+    "m-i5": ["folded, kept as matches","折叠，按匹配保留"],
+    "m-i6": ["nothing needed a model's judgement to be identified","没有一个节点需要靠模型判断来认定"],
+    "m-cut-t": ["rows <b>1 284 102</b> → <b>61</b>, counted against run 87","行数 <b>1 284 102</b> → <b>61</b>，与 run 87 比对得出"],
+    "m-cut2-t": ["cutoff <b>run_date</b> → <b>&lt;= 2026-09-18</b>, two days later in run 89",
+                 "截止线 <b>run_date</b> → <b>&lt;= 2026-09-18</b>，两天后的 run 89 里"],
+    "m-tail-t": ["7 changed data points · <span class=\"dim\">each one now owes a reason, and gets a slot to put it in</span>",
+                 "7 个数据点变了 · <span class=\"dim\">每一个现在都欠一个理由，也都有一格可以填</span>"],
+
+    /* --- act 2 · said, then evidenced --- */
+    "r-l2": ["utterance <span class=\"cite\">#94</span> · recorded verbatim · 2026-09-21 14:22",
+             "话语 <span class=\"cite\">#94</span> · 逐字入库 · 2026-09-21 14:22"],
+    "r-oh": ["the words, and the door they came through","原话，以及它是从哪扇门进来的"],
+    "r-k1": ["text","原文"],
+    "r-text": ["“nothing after the 18th for now — upstream has been inconsistent since the incident”",
+               "「18 号之后的先都不要——故障以来上游一直不一致」"],
+    "r-k2": ["tier","来源层级"],
+    "r-v2": ["stated <span class=\"dim\">— the user's own words, with the span</span>","用户陈述 <span class=\"dim\">— 用户原话，带出处区间</span>"],
+    "r-k3": ["origin","入口"],
+    "r-v3": ["hook <span class=\"badge\">captured as you typed it</span>","钩子 <span class=\"badge\">captured as you typed it</span>"],
+    "r-k4": ["role","角色"],
+    "r-v4": ["constraint <span class=\"dim\">— the rule the call settled on, kept apart from why this change was made</span>",
+             "生效约束 <span class=\"dim\">— 会上定下的规则，与「本次为什么改」分开记</span>"],
+    "r-origin-note": ["A note typed in afterwards still records — and still reads <span class=\"badge sp\">entered afterwards</span>. The tier is decided by the entrance, never by what anyone claims.",
+                      "事后手工补记照样落账——只是显示 <span class=\"badge sp\">entered afterwards</span>。来源由入口决定，不由自称决定。"],
+    "r-hh": ["the hook only ever asks","钩子只会问，从不自己动手"],
+    "r-hint-t": ["provledger: that sentence points at an outside event (“the incident”). If you have a tool that can find the record of it, record the pointer:",
+                 "provledger：这句话指向了一件外部事件（「那次故障」）。如果你有工具能找到它的记录，把指针记下来："],
+    "r-sh1": ["Searching with the host agent's own ticket and mail tools <span class=\"dim\">· window 2026-09-19 .. 2026-09-21 · hints: incident, upstream orders, RCA, inconsistency</span>",
+              "用宿主代理自己的工单与邮件工具检索 <span class=\"dim\">· 时间窗 2026-09-19 .. 2026-09-21 · 检索词：incident, upstream orders, RCA, inconsistency</span>"],
+    "r-sh2": ["1 result · provLedger searched nothing and holds no credentials","1 条命中 · provLedger 自己没搜，也不持有任何凭证"],
+    "r-refh": ["reference <span class=\"cite\">#r12</span> · ticket · linked","出处 <span class=\"cite\">#r12</span> · 工单 · 可核对链接"],
+    "r-rk1": ["label","标签"], "r-rk2": ["occurred at","发生于"], "r-rk3": ["link","链接"],
+    "r-rk4": ["stance","立场"], "r-rk5": ["body","正文"],
+    "r-stance": ["supports <span class=\"dim\">— a source that disagrees is recorded as disagreeing, never dropped</span>",
+                 "支持 <span class=\"dim\">— 反对的出处就记成反对，绝不丢掉</span>"],
+    "r-body": ["<span class=\"badge rd\">not stored</span> <span class=\"dim\">— the pointer is the record. You open the original yourself.</span>",
+               "<span class=\"badge rd\">not stored</span> <span class=\"dim\">— 指针才是记录。原件你自己打开。</span>"],
+    "r-refhint": ["source level for reason <span class=\"cite\">#95</span>: verbal → <span class=\"badge\">linked</span>. The tier does not move: finding the ticket does not change who said what.",
+                  "原因 <span class=\"cite\">#95</span> 的来源等级：原话记录 → <span class=\"badge\">linked</span>。来源层级不动：找到那张工单并不改变话是谁说的。"],
+
+    /* --- act 2 · the blank --- */
+    "bk-meta": ["upstream 1 · downstream 3","上游 1 · 下游 3"],
+    "bk-meta2": ["6 records · 9 runs","6 条记录 · 9 次分析"],
+    "bk-hist": ["Change history","变更历史"],
+    "bk-row": ["Changed: the rate is the spot rate on the close date, not the monthly average.",
+               "变更：汇率改用结账日即期价，不再用月均价。"],
+    "bk-row-sub": ["measured from the source","由源码测出"],
+    "bk-none": ["No reason recorded.","变更时未记录原因。"],
+    "bk-lvl": ["source level <b>unstated</b>","来源等级 <b>未陈述</b>"],
+    "bk-why-h": ["Why this one is blank","这一格为什么是空白"],
+    "bk-why-sub": ["All three sources were tried for this slot. This is what each one returned.",
+                   "这一格三个来源都试过了。下面是各自的结果。"],
+    "bk-r1": ["measured","测出来的"],
+    "bk-r1-t": ["The change itself is on the record: run 88 counted it against run 87.",
+                "改动本身在册：run 88 与 run 87 比对后量出。"],
+    "bk-r2": ["said","你说的"],
+    "bk-r2-t": ["Nothing in this task's window named this node. Nobody was asked: the change scored below the significance threshold.",
+                "本次任务时间窗内没有一句话点到这个节点。也没有打断用户去问：这次改动的显著性低于阈值。"],
+    "bk-r3": ["evidenced","外部证据"],
+    "bk-r3-t": ["Searched with the host agent's own ticket and mail tools, 4 hints, 1.9 s. The window held nothing.",
+                "用宿主代理自己的工单与邮件工具搜过，4 个检索词，1.9 秒。时间窗里什么都没有。"],
+    "bk-foot": ["A gap stays a gap. The log says which of the three came up empty, so “why is this blank” has an answer too.",
+                "空白就留成空白。日志记着三个来源各自落空在哪一步，所以「为什么是空白」也有答案。"],
+
+    "cbox-txt": ["Reply","回复"], "csend": ["Send","发送"],
+    "ctyping-txt": ["Dan Whitaker is typing","Dan Whitaker 正在输入"]
+  };
+
+  /* ---------- the captions: one plain sentence, describing what is on screen ---------- */
   var CAPS = {
     en: {
-      c1: "An ordinary Monday task: <b>move the split to 80/20</b> and retrain.",
-      c2: "Before a single line is edited, the plan is checked against what it is about to touch.",
-      c3: "Two findings. Nothing is blocked — they are recorded, and put in front of the person.",
-      c4: "The first one is the interesting one: <b>this experiment has been run before</b>.",
-      c5: "August 2026. Someone tried 80/20, and wrote down why it was dropped.",
-      c6: "Open the record and you get the thing's whole history, not just this week's.",
-      c7: "This is the row that fired. A rule that comes up again <b>raises a count — it is never written twice</b>.",
-      c8: "The record itself: the words, who said them, and how far it can be checked.",
-      c9: "Nothing here is the agent's summary. It is what was said, kept verbatim.",
-      c10: "Then the other half of the question: <b>what would this change reach?</b>",
-      c11: "Three steps downstream, the churn figure in Monday's deck.",
-      c12: "The arrows are computed from the source on every run — the part a diff cannot show."
+      /* 01 · the question */
+      q1: "Tuesday morning. Dan is typing.",
+      q2: "“<b>hey, why do we cut the data at the 18th?</b>”",
+      q3: "“<b>someone in finance asked and i had no idea</b>”",
+      q4: "He is not accusing anyone. He does not know either.",
+
+      /* 03 · the node */
+      n1: "One command, and here is the node that sets the cutoff.",
+      n2: "Newest first. The one they rejected is still in the list.",
+      n3: "This is the row the 18th comes from.",
+      n4: "It set a constraint, and the constraint still says “for now”.",
+
+      /* 04 · the record */
+      d1: "Open the row. Exactly as you typed it.",
+      d2: "Under the words, the incident ticket — a label, a time, a link.",
+      d3: "The finding is in INC-4471, not in here. You open it yourself.",
+      d4: "Dan asked to move the cutoff. That is kept too, marked as disagreeing.",
+
+      /* 05 · the material */
+      h1: "Now Dan's question, in his own words, handed to the ledger.",
+      h2: "It finds the records and writes nothing down.",
+      h3: "What comes back is not a reply. It is the material for one.",
+      h4: "Every line ends in the record it came from.",
+      h5: "Nothing on record says when the cutoff should be lifted.",
+      h6: "The range it searched, and one instruction: nothing outside these lines.",
+
+      /* 06 · the reply */
+      r1: "The reply is written by this session's own model.",
+      r2: "It walks the chain back to the morning of 19 September.",
+      r3: "Every claim carries the record it came from. Dan can check it himself.",
+      r4: "It was meant to be temporary. Nobody remembered.",
+      r5: "Nothing is sent. The draft stops in the terminal.",
+
+      /* 01 · one project, three axes */
+      t1: "This is the record of one project.",
+      t2: "Held three ways: <b>across nodes, across time, across tasks</b>.",
+      t3: "In a moment, someone asks a question it can answer.",
+
+      /* 08 · measured */
+      m1: "Every run rebuilds the graph from the source and compares it with the one before.",
+      m2: "Nobody typed these numbers.",
+      m3: "The upstream table on the morning of the incident: 1 284 102 rows, then 61.",
+      m4: "Two days later the same counter caught the cutoff moving.",
+      m5: "Seven changed data points, and each one now owes a reason.",
+
+      /* 09 · said, then evidenced */
+      e1: "The second source is what you said, on the afternoon of the call.",
+      e2: "<b>origin hook</b> is the only door that can say “captured as you typed it”.",
+      e3: "The third source is outside the code. provLedger says what is missing and does not go looking.",
+      e4: "The host agent's own tools find INC-4471, with their own credentials.",
+      e5: "A label, a time and a link. Never the body.",
+
+      /* 10 · the blank */
+      b1: "The same three sources, on a slot where all three came up empty.",
+      b2: "The FX rate changed in that same run. Nobody ever said why.",
+      b3: "So it says nobody ever said why.",
+      b4: "It can also say how far each of the three got.",
+      b5: "That is how the record is made — and when it cannot be made, it says so."
     },
     zh: {
-      c1: "一个普通的周一任务：<b>把切分改成 80/20</b>，重新训练。",
-      c2: "在改动任何一行之前，计划先与它将要触碰的东西做一次比对。",
-      c3: "两条发现。不阻断任何事——只是记录下来，并摆到人面前。",
-      c4: "第一条才是关键：<b>这个实验以前做过</b>。",
-      c5: "2026 年 8 月。有人试过 80/20，并写下了放弃的理由。",
-      c6: "点开这条记录，看到的是这个节点的完整历史，而不只是本周。",
-      c7: "被击中的就是这一行。同一条规则再次出现时<b>只让计数加一，绝不重复成文</b>。",
-      c8: "记录本身：原话、出自谁、以及能核对到哪一步。",
-      c9: "这里没有任何一句是代理的复述，都是当时的原话。",
-      c10: "然后是问题的另一半：<b>这次改动会波及到哪里？</b>",
-      c11: "往下游三步，就是周一那份材料里的流失率数字。",
-      c12: "这些箭头每次运行都从源码重算——这正是 diff 给不了的部分。"
+      q1: "周二上午。Dan 在打字。",
+      q2: "「<b>我们为什么把数据截到 18 号？</b>」",
+      q3: "「<b>财务那边问起来，我也答不上来</b>」",
+      q4: "他不是在质问。他自己也不知道。",
+
+      n1: "一条命令，这就是定截止线的那个节点。",
+      n2: "从新到旧。当初被否掉的那个方案也还在列表里。",
+      n3: "18 号这个日子就是从这一行来的。",
+      n4: "它当时立了一条约束，约束上至今写着「暂时」。",
+
+      d1: "点开这一行。和你当时打的字一模一样。",
+      d2: "原话下面挂着那张故障工单——一个标签、一个时间、一条链接。",
+      d3: "结论在 INC-4471 里，不在这儿。原件你自己打开。",
+      d4: "Dan 当时要求往后挪。这条也留着，标成反对。",
+
+      h1: "现在把 Dan 的问题、用他自己的话，交给账本。",
+      h2: "它只把记录找出来，一个字都不写。",
+      h3: "回来的不是回复。是写这封回复要用的材料。",
+      h4: "每一行末尾都是它出自的那条记录。",
+      h5: "没有任何记录说过这道截止线什么时候解除。",
+      h6: "它检索的范围，以及一句要求：这些行以外的话不许写。",
+
+      r1: "回复由这个会话自己的模型写。",
+      r2: "它顺着这条链一路回到 9 月 19 日上午。",
+      r3: "每句话都带着它出自的记录。Dan 可以自己核。",
+      r4: "这本来是临时的。没人还记得。",
+      r5: "没有发出。草稿停在终端里。",
+
+      t1: "这是一个项目的记录。",
+      t2: "三种拿法：<b>跨节点、跨时间、跨任务</b>。",
+      t3: "接下来，有人问了一个它答得上来的问题。",
+
+      m1: "每一次运行都从源码重建这张图，再跟上一次比。",
+      m2: "这些数字不是谁打进去的。",
+      m3: "故障当天上午的上游表：1 284 102 行，然后 61 行。",
+      m4: "两天后，同一个计数器逮到了截止线被改。",
+      m5: "七个数据点变了，每一个现在都欠一个理由。",
+
+      e1: "第二个来源是你说的话，开完会那天下午说的。",
+      e2: "<b>origin hook</b> 是唯一能说「captured as you typed it」的那扇门。",
+      e3: "第三个来源在代码之外。provLedger 只说清缺什么，自己不去搜。",
+      e4: "去搜的是宿主代理自己的工具，用它自己的凭证，翻到了 INC-4471。",
+      e5: "一个标签、一个时间、一条链接。正文永不入库。",
+
+      b1: "同样三个来源，这一格三个都落空了。",
+      b2: "同一次运行里汇率也改了。没有人说过为什么。",
+      b3: "于是它就写：没有人说过为什么。",
+      b4: "它还能说清三个来源各自走到了哪一步。",
+      b5: "记录就是这么做出来的——做不出来的时候，它就说做不出来。"
     }
   };
+
+  /* ---------- the chat log: four months of threads ---------- */
+  var WHO = { s:["SN","Sarah Nolan","s"], d:["DW","Dan Whitaker","d"], p:["PR","Priya Raman","p"], y:["YOU","You","y"] };
+  var CHAT = [
+    {day:["11 June 2026","2026 年 6 月 11 日"]},
+    {w:"p", at:"10:02", t:["kicking off the Q3 rollup — same shape as Q2 for now","Q3 rollup 开工了，先沿用 Q2 的结构"]},
+    {w:"y", at:"10:14", t:["ok. wiring the order load first","好，我先把订单装载接起来"]},
+    {w:"d", at:"15:40", t:["is the FX rate the monthly average or the spot rate","汇率是用月均还是当天即期"]},
+    {w:"y", at:"15:52", t:["monthly average, same as last quarter","月均，跟上个季度一样"]},
+    {w:"p", at:"16:20", t:["fine for now. flag it if finance asks","暂时可以。财务要是问起来再说"]},
+    {day:["23 July 2026","2026 年 7 月 23 日"]},
+    {w:"d", at:"09:31", t:["who owns the promo calendar feed","促销日历那个数据源谁在管"]},
+    {w:"p", at:"10:26", t:["finance ops. ask their side","财务运营，找他们那边"]},
+    {w:"s", at:"11:15", t:["can we get a first cut by the 20th","20 号前能出第一版吗"]},
+    {w:"y", at:"11:16", t:["yes","可以"]},
+    {w:"p", at:"14:03", t:["deck template is in the shared folder","材料模板放共享盘了"]},
+    {w:"d", at:"17:22", t:["thanks 🙏","谢了 🙏"]},
+    {day:["19 September 2026","2026 年 9 月 19 日"]},
+    {w:"p", at:"08:52", t:["upstream is down. orders table is basically empty","上游挂了。订单表基本是空的"]},
+    {w:"y", at:"09:10", t:["confirmed. 61 rows since 08:40","确认。08:40 之后只有 61 行"]},
+    {w:"d", at:"12:15", t:["is the rollup affected","汇总受影响吗"]},
+    {w:"y", at:"12:20", t:["yes. not running anything until we know what's in there","受。搞清里面是什么之前什么都不跑"]},
+    {w:"y", at:"17:30", t:["rca is up on INC-4471","根因分析写在 INC-4471 上了"]},
+    {day:["21 September 2026","2026 年 9 月 21 日"]},
+    {w:"s", at:"09:15", t:["call at 11 about what we can still use","11 点开个会，说说还有哪些数据能用"]},
+    {w:"y", at:"09:20", t:["works for me","我可以"]},
+    {w:"d", at:"18:02", t:["was the cutoff decided on that call. did anyone write it down","截止线是那个会上定的吗，有人记下来吗"]},
+    {w:"y", at:"18:40", t:["not written up, sorry","没整理，抱歉"]},
+    {day:["25 September 2026","2026 年 9 月 25 日"]},
+    {w:"y", at:"11:12", t:["we could resume from the 19th and patch the gap","可以从 19 号起恢复取数，缺口再补"]},
+    {w:"p", at:"11:30", t:["not until upstream is confirmed clean","上游确认干净之前不行"]},
+    {day:["29 September 2026","2026 年 9 月 29 日"]},
+    {w:"d", at:"16:40", t:["can we move the cutoff to the 30th? we'd get the whole month","截止线能不能挪到 30 号？这样整个月都齐了"]},
+    {w:"y", at:"16:55", t:["let me check why it's the 18th first","我先查一下为什么是 18 号"]},
+    {w:"p", at:"17:30", t:["deck locks tomorrow either way","反正材料明天就锁版了"]},
+    {day:["8 October 2026","2026 年 10 月 8 日"]},
+    {w:"d", at:"11:20", t:["wasn't there a thread about the cutoff, i can't find it","不是有个讲截止线的帖吗，我找不到"]},
+    {w:"p", at:"11:24", t:["pretty sure that was on the call, not here","应该是在会上说的，不在这儿"]},
+    {w:"d", at:"11:25", t:["of course it was 🙃","当然了 🙃"]},
+    {w:"y", at:"14:05", t:["rerunning the rollup for October","按 10 月重跑汇总"]},
+    {w:"s", at:"16:30", t:["numbers match finance, thanks","数字和财务对上了，谢谢"]},
+    {day:["Today","今天"]},
+    {w:"d", at:"09:41", id:"msg-q", q:true, hid:true,
+     t:["hey, why do we cut the data at the 18th?","我们为什么把数据截到 18 号？"]},
+    {w:"d", at:"09:41", id:"msg-q2", q:true, hid:true,
+     t:["someone in finance asked and i had no idea","财务那边有人问起来，我也答不上来"]}
+  ];
+
+  function buildChat(){
+    var i = LANG === "zh" ? 1 : 0;
+    var box = $("chatlist"), html = "";
+    CHAT.forEach(function(m){
+      if(m.day){ html += '<div class="cday">' + m.day[i] + "</div>"; return; }
+      var w = WHO[m.w];
+      html += '<div class="msg' + (m.w === "y" ? " me" : "") + (m.q ? " q" : "") + (m.hid ? " hid" : "") + '"'
+            + (m.id ? ' id="' + m.id + '"' : "") + '>'
+            + '<span class="av ' + w[2] + '">' + w[0] + "</span>"
+            + '<span class="bub"><span class="nm">' + (m.w === "y" ? (i ? "你" : "You") : w[1]) + "<i>" + m.at + "</i></span>"
+            + '<span class="tx">' + m.t[i] + "</span></span></div>";
+    });
+    box.innerHTML = html;
+  }
 
   /* ---------- fit the 1120px stage into the column ---------- */
   function fit(){
@@ -844,79 +1441,124 @@ img{max-width:100%}
     var a = stage.getBoundingClientRect(), b = el.getBoundingClientRect();
     var x = (b.left - a.left) / scale + (b.width / scale) / 2 + (dx || 0);
     var y = (b.top - a.top) / scale + (b.height / scale) / 2 + (dy || 0);
-    x = Math.max(6, Math.min(1108, x));
-    y = Math.max(6, Math.min(688, y));
-    cursor.style.transform = "translate(" + x + "px," + y + "px)";
+    cursor.style.transform = "translate(" + Math.max(6, Math.min(1108, x)) + "px,"
+                                          + Math.max(6, Math.min(688, y)) + "px)";
   }
-  function tap(){
-    cursor.classList.remove("tap");
-    void cursor.offsetWidth;
-    cursor.classList.add("tap");
-  }
+  function tap(){ cursor.classList.remove("tap"); void cursor.offsetWidth; cursor.classList.add("tap"); }
 
   /* ---------- screens ---------- */
-  var SCREENS = { term: $("sc-term"), task: $("sc-task"), node: $("sc-node"), graph: $("sc-graph") };
+  var SCREENS = { chat:$("sc-chat"), title:$("sc-title"), measured:$("sc-measured"),
+                  record:$("sc-record"), blank:$("sc-blank"), node:$("sc-node"), reply:$("sc-reply") };
   var URLS = {
-    term:  ["~/churn-model — claude", "terminal"],
-    task:  ["127.0.0.1:8765/session/churn-t118", "task"],
-    node:  ["127.0.0.1:8765/node/churn/pkg.training.split_dataset?at=reason:118", "node ledger"],
-    graph: ["127.0.0.1:8765/graph/churn?mode=data", "project state graph"]
+    chat:     [["Teams · #q3-rollup","Teams · #q3-rollup"], ["chat","聊天"], "var(--brand-blue)"],
+    title:    [["provLedger — a worked example","provLedger — 示例数据"], ["walkthrough","走查"], "var(--room-muted)"],
+    measured: [["~/q3-rollup — claude","~/q3-rollup — claude"], ["terminal","终端"], "var(--brand-spark)"],
+    record:   [["~/q3-rollup — claude","~/q3-rollup — claude"], ["terminal","终端"], "var(--brand-spark)"],
+    blank:    [["127.0.0.1:8765/node/q3-rollup/pkg.rollup.fx_rate","127.0.0.1:8765/node/q3-rollup/pkg.rollup.fx_rate"], ["node · read-only","节点 · 只读"], "var(--brand-green)"],
+    node:     [["127.0.0.1:8765/node/q3-rollup/pkg.rollup.load_orders?at=reason:95","127.0.0.1:8765/node/q3-rollup/pkg.rollup.load_orders?at=reason:95"], ["node · read-only","节点 · 只读"], "var(--brand-green)"],
+    reply:    [["~/q3-rollup — claude","~/q3-rollup — claude"], ["terminal","终端"], "var(--brand-spark)"]
   };
   function show(name){
+    stage.classList.toggle("chat", name === "chat");
     for(var k in SCREENS){ SCREENS[k].classList.toggle("on", k === name); }
-    $("url").textContent = URLS[name][0];
-    $("chrome-tag").textContent = URLS[name][1];
-    $("url-lock").style.color = name === "term" ? "var(--brand-spark)" : "var(--brand-green)";
+    var i = LANG === "zh" ? 1 : 0, u = URLS[name];
+    $("url").textContent = u[0][i];
+    $("chrome-tag").textContent = u[1][i];
+    $("url-lock").style.color = u[2];
   }
-  function scrollPage(id, y){
-    var p = $(id); if(p) p.style.transform = "translateY(" + (-y) + "px)";
-  }
+  function scrollPage(id, y){ var p = $(id); if(p) p.style.transform = "translateY(" + (-y) + "px)"; }
   function say(html){
     var t = $("cap");
     t.classList.remove("on");
     window.setTimeout(function(){ t.innerHTML = html; t.classList.add("on"); }, reduce ? 0 : 150);
   }
+  /* the one title in the film: the node history does not say what it is on its own */
+  function slate(yes){
+    var s = $("slate");
+    if(yes){ $("slate-txt").innerHTML = STR[LANG].slate; s.classList.add("on"); }
+    else { s.classList.remove("on"); }
+  }
   function flag(no, txt){
-    var f = $("flag");
     $("flag-no").textContent = no;
     $("flag-txt").textContent = txt;
-    f.classList.add("on");
+    $("flag").classList.add("on");
   }
+  function on(id){ var e = $(id); if(e) e.classList.add("on"); }
+  function lit(id, yes){ var e = $(id); if(e) e.classList.toggle("lit", yes !== false); }
+  function hl(id, soft){ var e = $(id); if(e) e.classList.add(soft ? "hl-soft" : "hl"); }
+  function sp(id){ var e = $(id); if(e) e.classList.add("spark"); }
+  function bump(id){ var e = $(id); if(!e) return; e.classList.remove("bump"); void e.offsetWidth; e.classList.add("bump"); }
 
   /* ---------- typing ---------- */
-  var TASK_TEXT = "change the train/test split to 80/20 and retrain the churn model";
+  var TYPE = {
+    m: ["update the project state graph", "更新项目状态图"],
+    s: ["nothing after the 18th for now — upstream has been inconsistent since the incident",
+        "18 号之后的先都不要——故障以来上游一直不一致"],
+    r: ['/receipts "why do we cut the data at the 18th?"',
+        '/receipts "我们为什么把数据截到 18 号？"']
+  };
   var typeTimer = null;
-  function typeTo(n){
-    $("typed").textContent = TASK_TEXT.slice(0, n);
+  function typeTo(key, n){
+    var el = $("typed-" + key);
+    if(el) el.textContent = TYPE[key][LANG === "zh" ? 1 : 0].slice(0, n);
   }
-  function startTyping(){
+  function startTyping(key, ms){
     window.clearInterval(typeTimer);
-    var i = 0;
+    var i = 0, len = TYPE[key][LANG === "zh" ? 1 : 0].length;
     typeTimer = window.setInterval(function(){
-      i += 1; typeTo(i);
-      if(i >= TASK_TEXT.length){ window.clearInterval(typeTimer); }
-    }, 34);
+      i += 1; typeTo(key, i);
+      if(i >= len) window.clearInterval(typeTimer);
+    }, ms || 34);
+  }
+  function endTyping(key){
+    window.clearInterval(typeTimer);
+    typeTo(key, TYPE[key][LANG === "zh" ? 1 : 0].length);
+    var c = $("caret-" + key); if(c) c.style.display = "none";
+  }
+
+  /* ---------- the chat: scrolling back ---------- */
+  var VIEW = 558;
+  function chatTo(y, ms){
+    var l = $("chatlist");
+    l.style.transitionDuration = (reduce ? 0 : (ms || 0)) + "ms";
+    l.style.transform = "translateY(" + (-Math.max(0, y)) + "px)";
+  }
+  function chatBottom(ms){ chatTo(Math.max(0, $("chatlist").scrollHeight - VIEW + 12), ms); }
+  var MONTHS = { oct: ["October 2026","2026 年 10 月"] };
+  function month(k){ $("monthpill").textContent = MONTHS[k][LANG === "zh" ? 1 : 0]; }
+  function draft(txt){
+    var b = $("cbox"), t = $("cbox-txt");
+    if(txt){ t.textContent = txt; b.classList.add("typing-on"); }
+    else { t.textContent = UIT["cbox-txt"][LANG === "zh" ? 1 : 0]; b.classList.remove("typing-on"); }
   }
 
   /* ---------- reset to frame zero ---------- */
+  var REVEALS = ["m-run","m-counts","m-cut","m-cut2","m-tail","r-hook","r-origin","r-hint","r-search","r-ref",
+                 "rp-locate","rp-mat","rp-hand","rp-draft","ax-1","ax-2","ax-3"];
+  var LITS = ["msg-q","msg-q2"];
+  var MARKS = ["hrow-hit","con-hit","src-doc","src-chat","bk-reason","bk-why","r-ref","r-body","r-v3",
+               "nd-card","nd-quote","rp-gaps","rp-instr","rp-d4","m-cut","m-cut2"];
   function reset(){
     window.clearInterval(typeTimer);
-    show("term");
-    typeTo(0);
-    $("caret").style.display = "";
-    $("t-plan").style.visibility = "hidden";
-    $("t-panel").style.visibility = "hidden";
-    $("t-wait").style.visibility = "hidden";
-    ["page-task","page-node","page-graph"].forEach(function(id){ scrollPage(id, 0); });
-    ["findings","fnd-1","fnd-2","hrow-hit","con-hit","gn-split","gn-train","gn-report"].forEach(function(id){
-      var el = $(id); if(el){ el.classList.remove("hl","hl-soft"); }
+    show("chat");
+    slate(false);
+    ["m","s","r"].forEach(function(k){
+      typeTo(k, 0);
+      var c = $("caret-" + k); if(c) c.style.display = "";
     });
-    $("con-mark").style.background = "";
+    REVEALS.forEach(function(id){ var e = $(id); if(e) e.classList.remove("on"); });
+    LITS.forEach(function(id){ var e = $(id); if(e) e.classList.remove("lit"); });
+    MARKS.forEach(function(id){ var e = $(id); if(e) e.classList.remove("hl","hl-soft","bump","spark"); });
+    ["page-measured","page-record","page-blank","page-node","page-reply"].forEach(function(id){ scrollPage(id, 0); });
+    $("msg-q").classList.add("hid");
+    $("msg-q2").classList.add("hid");
+    $("chatdim").classList.remove("on");
+    $("ctyping").classList.remove("on");
+    draft("");
+    month("oct");
+    chatBottom(0);
     $("detail").classList.remove("open");
-    $("hits").textContent = "2 hits";
-    $("hits").classList.remove("bump");
-    $("fnd-hits").textContent = "3 hits";
-    ["e1","e2","e3"].forEach(function(id){ $(id).style.opacity = "0"; });
+    $("con-mark").style.background = "";
     $("flag").classList.remove("on");
     cap.classList.remove("on");
     cursor.style.transform = "translate(560px,340px)";
@@ -924,53 +1566,101 @@ img{max-width:100%}
 
   /* ---------- the score ---------- */
   var C = function(k){ return CAPS[LANG][k]; };
+  var N = function(i){ return STR[LANG].chapters[i]; };
   var beats = [
-    [   0, function(){ reset(); flag("01", STR[LANG].chapters[0]); }],
-    [ 350, function(){ startTyping(); say(C("c1")); }],
-    [2900, function(){ $("caret").style.display = "none"; $("t-plan").style.visibility = "visible"; say(C("c2")); }],
-    [4600, function(){ $("t-panel").style.visibility = "visible"; say(C("c3")); }],
-    [6200, function(){ $("t-wait").style.visibility = "visible"; }],
+    /* 01 · one project, three axes — what a stranger is about to watch */
+    [    0, function(){ reset(); flag("01", N(0)); show("title"); say(C("t1")); }],
+    [ 2000, function(){ on("ax-1"); say(C("t2")); }],
+    [ 2700, function(){ on("ax-2"); }],
+    [ 3400, function(){ on("ax-3"); }],
+    [ 5200, function(){ say(C("t3")); }],
 
-    [7600, function(){ flag("02", STR[LANG].chapters[1]); show("task"); pointAt($("findings"), 0, -40); }],
-    [8600, function(){ scrollPage("page-task", 70); pointAt($("fnd-1")); }],
-    [10200,function(){ $("fnd-1").classList.add("hl"); say(C("c4")); }],
-    [12400,function(){ scrollPage("page-task", 150); pointAt($("fnd-1"), 0, 18); }],
-    [13600,function(){ say(C("c5")); }],
-    [15200,function(){ pointAt($("fnd-1"), 150, 26); }],
-    [16000,function(){ tap(); }],
+    /* 02 · the question */
+    [ 7800, function(){ flag("02", N(1)); show("chat"); chatBottom(0); on("ctyping"); say(C("q1")); }],
+    [ 9500, function(){
+        $("ctyping").classList.remove("on");
+        $("msg-q").classList.remove("hid"); lit("msg-q");
+        chatBottom(0); pointAt($("msg-q")); say(C("q2"));
+      }],
+    [11200, function(){
+        $("msg-q2").classList.remove("hid"); lit("msg-q2");
+        chatBottom(0); pointAt($("msg-q2")); say(C("q3"));
+      }],
+    [12800, function(){ say(C("q4")); }],
+    [13800, function(){ lit("msg-q", false); lit("msg-q2", false); }],
 
-    [16700,function(){ flag("03", STR[LANG].chapters[2]); show("node"); scrollPage("page-node", 0); pointAt($("hrow-hit"), 0, -60); say(C("c6")); }],
-    [18600,function(){ scrollPage("page-node", 60); pointAt($("hrow-hit")); }],
-    [20200,function(){ $("hrow-hit").classList.add("hl-soft"); $("con-hit").classList.add("hl"); $("con-mark").style.background = "var(--brand-spark)"; say(C("c7")); }],
-    [21400,function(){
-      var h = $("hits"); h.textContent = "3 hits";
-      h.classList.remove("bump"); void h.offsetWidth; h.classList.add("bump");
-    }],
-    [23600,function(){ pointAt($("hrow-hit"), -140, 0); }],
-    [24400,function(){ tap(); }],
-    [24900,function(){ flag("04", STR[LANG].chapters[3]); $("detail").classList.add("open"); say(C("c8")); }],
-    [26600,function(){ scrollPage("page-node", 150); pointAt($("detail"), 0, 10); }],
-    [28600,function(){ say(C("c9")); }],
-    [31000,function(){ scrollPage("page-node", 250); pointAt($("detail"), 0, 60); }],
+    /* 03 · the node — the title goes up first, then gets out of the way */
+    [15000, function(){
+        flag("03", N(2)); show("node"); scrollPage("page-node", 0);
+        cap.classList.remove("on"); slate(true);
+        pointAt($("nd-card"), 0, 40);
+      }],
+    [17200, function(){ slate(false); hl("nd-card"); say(C("n1")); }],
+    [19600, function(){ scrollPage("page-node", 30); pointAt($("hrow-hit"), 0, -40); say(C("n2")); }],
+    [22400, function(){ hl("hrow-hit", true); pointAt($("hrow-hit")); say(C("n3")); }],
+    [25200, function(){
+        scrollPage("page-node", 90); hl("con-hit");
+        $("con-mark").style.background = "var(--brand-spark)";
+        pointAt($("con-hit")); say(C("n4"));
+      }],
 
-    [33200,function(){ flag("05", STR[LANG].chapters[4]); show("graph"); scrollPage("page-graph", 0); pointAt($("gn-split")); say(C("c10")); }],
-    [34600,function(){ $("gn-split").classList.add("hl-soft"); $("e1").style.opacity = "1"; }],
-    [35600,function(){ $("gn-train").classList.add("hl-soft"); $("e2").style.opacity = "1"; $("e3").style.opacity = "1"; pointAt($("gn-train")); }],
-    [36800,function(){ $("gn-report").classList.add("hl-soft"); pointAt($("gn-report")); say(C("c11")); }],
-    [39400,function(){ scrollPage("page-graph", 120); pointAt($("gn-report"), 0, -80); say(C("c12")); }],
-    [43000,function(){ /* hold on the last frame */ }]
+    /* 04 · the record */
+    [28600, function(){ flag("04", N(3)); scrollPage("page-node", 40); pointAt($("hrow-hit"), -170, 0); }],
+    [29300, function(){ tap(); }],
+    [29900, function(){ $("detail").classList.add("open"); hl("nd-quote", true); say(C("d1")); }],
+    [32600, function(){ scrollPage("page-node", 130); hl("src-doc"); pointAt($("src-doc")); say(C("d2")); }],
+    [35400, function(){ say(C("d3")); }],
+    [37600, function(){ scrollPage("page-node", 180); hl("src-chat"); pointAt($("src-chat")); say(C("d4")); }],
+
+    /* 05 · the material */
+    [40100, function(){ flag("05", N(4)); show("reply"); startTyping("r", 26); say(C("h1")); }],
+    [43500, function(){ endTyping("r"); on("rp-locate"); say(C("h2")); }],
+    [45700, function(){ on("rp-mat"); say(C("h3")); }],
+    [48100, function(){ scrollPage("page-reply", 90); say(C("h4")); }],
+    [50700, function(){ scrollPage("page-reply", 190); hl("rp-gaps"); say(C("h5")); }],
+    [53300, function(){ scrollPage("page-reply", 265); hl("rp-instr"); say(C("h6")); }],
+
+    /* 06 · the reply */
+    [56100, function(){ flag("06", N(5)); on("rp-hand"); scrollPage("page-reply", 305); say(C("r1")); }],
+    [58700, function(){ on("rp-draft"); scrollPage("page-reply", 345); say(C("r2")); }],
+    [61700, function(){ scrollPage("page-reply", 400); say(C("r3")); }],
+    [64500, function(){ scrollPage("page-reply", 455); sp("rp-d4"); say(C("r4")); }],
+    [67900, function(){ scrollPage("page-reply", 495); say(C("r5")); }],
+
+    /* 07 · measured */
+    [71100, function(){ flag("07", N(6)); show("measured"); startTyping("m"); say(C("m1")); }],
+    [73700, function(){ endTyping("m"); on("m-run"); }],
+    [75500, function(){ on("m-counts"); say(C("m2")); }],
+    [78300, function(){ on("m-cut"); hl("m-cut"); bump("m-cut"); say(C("m3")); }],
+    [81100, function(){ on("m-cut2"); bump("m-cut2"); say(C("m4")); }],
+    [83700, function(){ on("m-tail"); say(C("m5")); }],
+
+    /* 08 · said, then evidenced */
+    [86100, function(){ flag("08", N(7)); show("record"); startTyping("s"); say(C("e1")); }],
+    [89200, function(){ endTyping("s"); on("r-hook"); on("r-origin"); }],
+    [90200, function(){ scrollPage("page-record", 30); sp("r-v3"); say(C("e2")); }],
+    [93000, function(){ on("r-hint"); scrollPage("page-record", 110); say(C("e3")); }],
+    [95800, function(){ on("r-search"); scrollPage("page-record", 200); say(C("e4")); }],
+    [98600, function(){ on("r-ref"); scrollPage("page-record", 300); bump("r-ref"); say(C("e5")); }],
+    [101200,function(){ scrollPage("page-record", 345); hl("r-body"); }],
+
+    /* 09 · the blank */
+    [103100,function(){ flag("09", N(8)); show("blank"); scrollPage("page-blank", 0); pointAt($("bk-reason"), 0, -40); say(C("b1")); }],
+    [105600,function(){ scrollPage("page-blank", 35); pointAt($("bk-reason")); say(C("b2")); }],
+    [108200,function(){ hl("bk-reason"); say(C("b3")); }],
+    [110800,function(){ scrollPage("page-blank", 75); hl("bk-why"); pointAt($("bk-why"), 0, -30); say(C("b4")); }],
+    [114000,function(){ scrollPage("page-blank", 100); pointAt($("bk-why"), 0, 40); say(C("b5")); }],
+    [117100,function(){ /* hold on the last frame */ }]
   ];
-  var DURATION = 45000;
+  var DURATION = 119000;
+  var CH = [{at:0},{at:7800},{at:15000},{at:28600},{at:40100},
+            {at:56100},{at:71100},{at:86100},{at:103100}];
 
   /* ---------- transport ---------- */
   var t0 = 0, elapsed = 0, playing = false, raf = null, cursorIdx = 0;
 
-  function applyUpTo(ms, instant){
-    if(instant){ stage.classList.add("noanim"); }
-    for(; cursorIdx < beats.length && beats[cursorIdx][0] <= ms; cursorIdx++){
-      beats[cursorIdx][1]();
-    }
-    if(instant){ void stage.offsetWidth; stage.classList.remove("noanim"); }
+  function applyUpTo(ms){
+    for(; cursorIdx < beats.length && beats[cursorIdx][0] <= ms; cursorIdx++){ beats[cursorIdx][1](); }
   }
   function seek(ms){
     cursorIdx = 0;
@@ -980,6 +1670,10 @@ img{max-width:100%}
     cursorIdx = i;
     elapsed = ms;
     paint();
+  }
+  function fmt(ms){
+    var s = Math.round(ms / 1000);
+    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
   }
   function paint(){
     var pct = Math.max(0, Math.min(1, elapsed / DURATION));
@@ -991,10 +1685,6 @@ img{max-width:100%}
     for(var j = 0; j < btns.length; j++){
       btns[j].setAttribute("aria-current", j === active ? "true" : "false");
     }
-  }
-  function fmt(ms){
-    var s = Math.round(ms / 1000);
-    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
   }
   function tick(now){
     if(!playing) return;
@@ -1018,7 +1708,6 @@ img{max-width:100%}
   }
 
   /* ---------- chapters ---------- */
-  var CH = [{at:0},{at:7600},{at:16700},{at:24900},{at:33200}];
   function buildChapters(){
     var box = $("chapters");
     box.innerHTML = "";
@@ -1039,12 +1728,17 @@ img{max-width:100%}
   /* ---------- language ---------- */
   function setLang(l){
     LANG = l;
+    var i = l === "zh" ? 1 : 0;
     $("lang-en").setAttribute("aria-pressed", String(l === "en"));
     $("lang-zh").setAttribute("aria-pressed", String(l === "zh"));
     document.querySelectorAll("[data-t]").forEach(function(el){
       var k = el.getAttribute("data-t");
-      if(STR[l][k]) el.innerHTML = STR[l][k] + (k === "foot" ? ' Try it with <code>claude plugin marketplace add yizhao95/prov_ledger</code>.' : "");
+      if(STR[l][k]){
+        el.innerHTML = STR[l][k] + (k === "foot" ? ' Try it with <code>claude plugin marketplace add yizhao95/prov_ledger</code>.' : "");
+      }
     });
+    for(var k in UIT){ var el = $(k); if(el) el.innerHTML = UIT[k][i]; }
+    buildChat();
     $("play").innerHTML = playing ? "❚❚ <span>" + STR[l].pause + "</span>" : "▶ <span>" + STR[l].play + "</span>";
     buildChapters();
     var at = elapsed;
@@ -1058,6 +1752,7 @@ img{max-width:100%}
   $("restart").addEventListener("click", function(){ seek(0); play(); });
 
   /* ---------- go ---------- */
+  buildChat();
   buildChapters();
   seek(0);
   window.setTimeout(function(){ play(); }, 600);
