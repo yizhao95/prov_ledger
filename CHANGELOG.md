@@ -7,6 +7,32 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
+## 0.4.1 — 2026-09-30
+
+A fix release. The dashboard defect in it is the kind this project is supposed to
+catch, and it took clicking the thing to find.
+
+- **The dashboard did nothing when clicked, on Chrome and Edge only.** A handler
+  cancelled htmx's own swap and then called `htmx.swap()` to do the replacement
+  itself — an API that arrived in htmx 2.x, while the page loads 1.9.10. So the
+  default was switched off and nothing took its place. Firefox and Safari were
+  unaffected because they returned earlier, which made it look like an
+  environment problem. Cancelling a default is now guarded on the replacement
+  actually existing. Records and the pre-change check were never affected: the
+  dashboard opens the ledger read-only and the write paths never touch the
+  browser layer.
+- **A ninth test suite existed and had never been run.** The repository root's
+  `tests/` — 16 tests covering bootstrap, the plugin manifest, the marketplace
+  entry, bundled skills and runtime dependencies — was missing from all three
+  places the suite list lives, so every count from 1826 onward was 16 short. It
+  is in the list now, and the one assertion it failed on had pinned a single
+  spelling of the install command while the README had moved to the other.
+- The bilingual source-mention word list is on the language whitelist, where
+  `vocab.py` already sits: a list that only knew English would silently never
+  fire for half of what gets said.
+
+2115 tests across nine suites.
+
 ## 0.4.0 — 2026-09-30
 
 Evidence. A decision now carries two separate things: a **claim**, which comes from

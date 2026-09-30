@@ -34,6 +34,18 @@ CJK_SET = frozenset(chr(c) for c in CJK)
 
 # path -> why this file is allowed to contain Chinese.
 ALLOWED: dict[str, str] = {
+    # ── the bilingual source-mention rule (migration 030 / A3) ───────────────
+    "orchestrator-backend/orchestrator/testing/source_words.py":
+        "The word list the UserPromptSubmit hint matches on. It carries Chinese "
+        "terms because people name their sources in Chinese as readily as in "
+        "English, and a list that only knew English would silently never fire "
+        "for half of what gets said. This IS the feature, the same way vocab.py "
+        "is. (The words themselves are in that module, not quoted here — this "
+        "file is checked by the rule it defines.)",
+    "orchestrator-backend/tests/test_source_hint.py":
+        "Asserts on that list, so it has to contain the words it asserts about, "
+        "including the Chinese sentence that must trigger the hint and the one "
+        "that must not.",
     # ── the published walkthrough ────────────────────────────────────────────
     "docs/walkthrough.html":
         "The walkthrough's captions ship in both languages behind the same "
