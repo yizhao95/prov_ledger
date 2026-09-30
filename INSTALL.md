@@ -83,6 +83,18 @@ python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 ```
 
+On Debian and Ubuntu — which includes WSL — the system Python does not ship
+`ensurepip`, and that first line fails with *"The virtual environment was not
+created successfully because ensurepip is not available."* Install the package
+it names and run it again:
+
+```bash
+sudo apt install python3-venv     # or python3.12-venv, matching your version
+```
+
+Option B needs no such thing, which is a good reason to prefer it if you have
+no `sudo` on the machine.
+
 ### Option B — `uv` (faster)
 
 ```bash
