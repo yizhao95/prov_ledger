@@ -5,7 +5,7 @@ description: "Use IMMEDIATELY after writing-plans, OR whenever a plan exists in 
 
 # Executing Plans
 
-The 9 deterministic write-flows (1 from writing-plans + 8 here) are **the only way** to mutate `~/skill-workspace/orchestrator.db`. Compose a small JSON input file, run the matching script, done. Never invoke the orchestrator CLI directly for writes; never construct ad-hoc SQL.
+The deterministic write-flows (one from writing-plans, the rest here) are **the only way** to mutate `~/skill-workspace/orchestrator.db`. Compose a small JSON input file, run the matching script, done. Never invoke the orchestrator CLI directly for writes; never construct ad-hoc SQL.
 
 ## 🔌 Boundary with `writing-plans`
 
@@ -13,7 +13,7 @@ The 9 deterministic write-flows (1 from writing-plans + 8 here) are **the only w
 
 If you find yourself wanting to "update the plan" — you ARE the update mechanism. You do not go back to writing-plans.
 
-## 🛠️ The 9 deterministic flows (cheat sheet)
+## 🛠️ The deterministic flows (cheat sheet)
 
 | Script | When | Required input | Optional input |
 |---|---|---|---|
@@ -25,6 +25,7 @@ If you find yourself wanting to "update the plan" — you ARE the update mechani
 | `scripts/deviate.sh`       | Realized the plan needs new sub-steps         | `parent_step_id`, `justification`, `sub_steps[]` | — |
 | `scripts/record-skill.sh`  | Activated a NEW skill mid-flight              | `plan_id`, `name`, `source` | `step_id`, `reason` |
 | `scripts/record-metric.sh` | Phase 7: a NUMERIC observation (a rollup's mean, an AUC) for the metric outcome channel — or pass `metrics_from_stdout: true` to `run-step.sh` and print `metric name=<x> value=<v> [unit=<u>]` | `name`, `value` (a number) | `unit`, `project` (defaults to the plan's), `plan_id`, `step_id` |
+| `scripts/raise-budget.sh`  | The loop breaker refused a `deviate` at `revision_count`/`max_revisions` and the extra revisions are genuinely warranted | `plan_id`, `new_max` (an integer **above** the current ceiling), `reason` | — |
 | `scripts/finish-plan.sh`   | **Usually auto** — manual only for back-fill of pre-2026-05-26 plans, or to force-finish a plan with PENDING steps | `plan_id` | — |
 | `scripts/agent-review-close.sh` | **Only after a `needs_agent_review` handoff** — the review sub-agent's sole way to finalize a `NEEDS_REVIEW` plan | `plan_id`, `outcome` (`pass`\|`fail`) | `summary`, `log_context` |
 
@@ -90,6 +91,15 @@ fails because of `D`. A FAILED leaf step (no deviation children) is never
 recovered and still poisons the plan. Recursion depth is bounded by the
 `depth_level<=3` circuit breaker, so this can't pathologically deep-walk.
 
+**Retrying a failed attempt (FL-138):** the rollup asks whether *every* sub-task
+came through, so a **retry is a child of the attempt it retries** —
+`deviate.sh` on `D.1` gives you `D.1.1`, never a second sibling `D.2`. A FAILED
+`D.1` beside a COMPLETED `D.2` outvotes it for ever: `D` stays unrecovered, the
+review never reopens and the plan cannot close. Nested, the recursion above
+applies unchanged. Each retry costs one depth level, and the `depth_level<=3`
+breaker allows two (`D.1.1`, `D.1.1.1`); past that, restructure rather than
+reach for a sibling.
+
 **Implications for the agent:**
 - You almost never need to call `finish-plan.sh` anymore. The last `complete-step`
   on the last regular step closes the plan automatically.
@@ -131,7 +141,7 @@ in-flight plans) and keeps any child in sync. Plans mentioning no registered
 project are unaffected and still auto-close as above.
 
 Schema: [`update-input.schema.json`](update-input.schema.json) (oneOf, one per op).
-Examples: [`update-input.example.json`](update-input.example.json) (9 worked examples).
+Examples: [`update-input.example.json`](update-input.example.json) (one worked example per op).
 
 ### Invocation pattern (identical for every script)
 
@@ -184,7 +194,7 @@ A non-trivial step with `log_context = ""` is a puppy failure — the dashboard'
 | Use ONLY the 7 scripts for writes — never call `orchestrator-cli.py <verb>` directly | Eliminates flag-typo class of bugs (we hit `complete-plan --reason` last week) |
 | `summary` is ONE human-curated sentence; `text` (in append-log) is raw machine output | Telemetry vs. curation are distinct fields |
 | Once a step is COMPLETED, it is IMMUTABLE — `deviate.sh` on it is REJECTED (exit 4, `accepted:false`, breaker `soft`). To redo work, deviate on the **next non-terminal step** (or the plan's review step) and put the retry sub-step there | Audit trail |
-| `revision_count` ≤ `max_revisions` (default 5) — circuit breaker | Prevents thrash |
+| `revision_count` ≤ `max_revisions` (default 5) — circuit breaker. Past it, `deviate` is REFUSED; the only way to lift the ceiling is `scripts/raise-budget.sh` with a `reason` (it is recorded as a deviation on the plan) — never an `UPDATE` | Prevents thrash; and a raised budget is a decision, so it leaves a record |
 | `depth_level` ≤ 3 — circuit breaker | Keeps plans auditable |
 | For `SUB_AGENT` steps: capture both `agent_input` (in start-step) and `agent_output` (in complete-step) | The dashboard renders these in dedicated panels |
 | For COMMAND/CODE steps: capture raw output via `log_context` (inline on complete-step, OR separate append-log call) — NOT optional in practice | The dashboard's log panel goes blank otherwise; post-hoc debugging fails |

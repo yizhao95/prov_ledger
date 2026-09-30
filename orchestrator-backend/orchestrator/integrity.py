@@ -1,11 +1,11 @@
-"""integrity — the three chains, and the git anchors they must agree with
+"""integrity — the four chains, and the git anchors they must agree with
 (DP phase 3, Task 0; spec §7, G1/G2).
 
 `provenance.verify_chain` already answers "has any row moved since it was
 written". That answer is self-referential: a ledger that walks its own chains
 proves only that it is internally consistent with itself *right now*. This
 module adds the second half — an **external witness**. When a plan closes, the
-three chain heads are written into `git notes --ref provledger` on HEAD. The
+chain heads are written into `git notes --ref provledger` on HEAD. The
 note lives in the repository, not in the database, so rewriting the ledger no
 longer rewrites its own evidence.
 
@@ -36,12 +36,26 @@ from datetime import datetime, timezone
 
 from . import provenance
 
-# the three tables spec §7 names. `declared_node` also carries a chain
-# (migration 026); it is verifiable through provenance.verify_chain, but the
-# anchor payload keeps the shape the spec wrote down.
-CHAINS = ("utterance", "reference", "change_reason")
+# The three tables spec §7 names, plus `reference_check` (migration 030). The
+# check trail is the record a doubter doubts — "you say you opened that link" —
+# so it needs the same external witness as the words and the reasons; a chain
+# nobody walks and nobody anchors proves only that the database agrees with
+# itself right now, which is the argument this module's docstring makes about
+# why the notes exist at all.
+#
+# `declared_node` and `occurrence` also carry chains (migrations 026 and 028);
+# they are verifiable through provenance.verify_chain but are derived from rows
+# already anchored here, so the payload does not name them.
+CHAINS = ("utterance", "reference", "change_reason", "reference_check")
 NOTES_REF = "provledger"
-PAYLOAD_VERSION = 1
+
+# v1 payloads name three heads; v2 adds `reference_check`. Both are read: an old
+# note is evidence, and a version bump that made past evidence unreadable would
+# be the opposite of the point. A v1 anchor simply says nothing about the check
+# chain, which `_match` already treats as "the chain was empty when written" —
+# it never silently passes as a witness for rows it never saw.
+PAYLOAD_VERSION = 2
+READABLE_PAYLOAD_VERSIONS = (1, 2)
 
 # What this module claims, and what it does not — quoted by the card and the docs.
 CLAIM = ("These records existed at the anchored commit and have not been altered since. "
@@ -91,13 +105,24 @@ def chain_heads(conn) -> dict:
     return out
 
 
-def anchor_payload(conn, *, plan_id: str | None = None) -> dict:
-    """The JSON that goes into the note: the three heads, when, and which plan
-    closed. Nothing about the rows themselves — a note is a witness, not a copy."""
+def anchor_payload(conn, *, plan_id: str | None = None, plan_status: str | None = None) -> dict:
+    """The JSON that goes into the note: every chain head, when, which plan
+    closed, and how it closed. Nothing about the rows themselves — a note is a
+    witness, not a copy.
+
+    `plan_status` (COMPLETED | FAILED) is recorded because a witness that cannot
+    tell you whether the run succeeded is a worse witness: the ledger exists to
+    say what happened, not only what went well. It is an ADDITION to v2, not a
+    v3 — an older reader ignores a key it does not know, whereas a version bump
+    would make today's notes unreadable to the code that wrote them. It may be
+    None on a payload built outside a close, and it is None on every note
+    written before this field existed; both stay readable.
+    """
     heads = chain_heads(conn)
     payload: dict = {t: {"id": heads[t]["id"], "hash": heads[t]["hash"]} for t in CHAINS}
     payload["at"] = _now()
     payload["plan_id"] = plan_id
+    payload["plan_status"] = plan_status
     payload["v"] = PAYLOAD_VERSION
     return payload
 
@@ -127,7 +152,7 @@ def anchor_heads(repo, payload: dict, *, ref: str = NOTES_REF) -> str:
     if not os.path.isdir(str(repo)):
         raise AnchorError(f"not a directory: {repo}")
     if not pins_something(payload):
-        raise AnchorError("nothing to anchor: the three chains are empty, so a note would pin no row")
+        raise AnchorError("nothing to anchor: every chain is empty, so a note would pin no row")
     # A directory INSIDE a work tree is not that work tree: `git notes` run
     # there writes to the enclosing repository. That is how the phantom-uplift
     # e2e suite, which registers `examples/phantom-uplift`, appended ten empty
@@ -187,7 +212,7 @@ def read_anchors(repo, *, ref: str = NOTES_REF) -> list[dict]:
             except ValueError:
                 out.append({"unreadable": text, "commit": commit, "note_sha": blob})
                 continue
-            if not isinstance(payload, dict) or payload.get("v") != PAYLOAD_VERSION:
+            if not isinstance(payload, dict) or payload.get("v") not in READABLE_PAYLOAD_VERSIONS:
                 out.append({"unreadable": text, "commit": commit, "note_sha": blob})
                 continue
             entry = dict(payload)
@@ -223,7 +248,7 @@ def _match(conn, anchor: dict) -> dict | None:
 
 
 def verify(conn, *, against_notes: bool = False, repo=None, ref: str = NOTES_REF) -> dict:
-    """Walk the three chains; optionally check them against the git anchors.
+    """Walk every chain in CHAINS; optionally check them against the git anchors.
 
     `ok` is the whole verdict: every chain walks AND (when asked) every anchor
     still describes this ledger. `anchored` is a separate word — a ledger with
@@ -236,6 +261,7 @@ def verify(conn, *, against_notes: bool = False, repo=None, ref: str = NOTES_REF
     for table in CHAINS:
         res = provenance.verify_chain(conn, table)
         tables[table] = {"ok": res["ok"], "rows": res["rows"], "first_bad_id": res["first_bad_id"],
+                         "older_form": res.get("older_form", 0),
                          "head_id": heads[table]["id"], "head_hash": heads[table]["hash"]}
         if not res["ok"]:
             ok = False
@@ -277,6 +303,7 @@ def verify(conn, *, against_notes: bool = False, repo=None, ref: str = NOTES_REF
     latest = good[-1]
     anchors["latest"] = {"note_sha": latest.get("note_sha"), "commit": latest.get("commit"),
                          "at": latest.get("at"), "plan_id": latest.get("plan_id"),
+                         "plan_status": latest.get("plan_status"),
                          "heads": {t: latest.get(t) for t in CHAINS}}
     report["anchored"] = matched > 0
     if anchors["first_mismatch"] is not None:
@@ -292,9 +319,13 @@ def anchor_line(report: dict) -> str:
     if a["found"] == 0:
         return f"anchors: 0 anchor(s) — not anchored ({a['reason']})"
     latest = a["latest"] or {}
+    # how the plan closed, when the note says so — an anchor from a failed run is
+    # as good a witness as any other, and reading it should not require guessing
+    # which it was
+    closed = f" {latest['plan_status']}" if latest.get("plan_status") else ""
     tail = (f"anchors: {a['found']} anchor(s), {a['matched']} matched · latest note "
             f"{(latest.get('note_sha') or '')[:12]} @ {(latest.get('commit') or '')[:12]} "
-            f"({latest.get('at') or '-'}, plan {latest.get('plan_id') or '-'})")
+            f"({latest.get('at') or '-'}, plan {latest.get('plan_id') or '-'}{closed})")
     if a["unreadable"]:
         tail += f" · {a['unreadable']} line(s) on the ref were not written by provledger"
     if a.get("empty"):
@@ -314,7 +345,12 @@ def render(report: dict) -> str:
         t = report["tables"][table]
         state = "ok" if t["ok"] else f"chain broken at #{t['first_bad_id']}"
         head = (t["head_hash"] or "")[:12] or "-"
-        lines.append(f"  chain {table}: {state} · {t['rows']} row(s) walked · head #{t['head_id'] or '-'} {head}")
+        # A ledger that straddles a migration which added a chained column is a
+        # fact about that ledger, not a footnote: saying only "ok" would make the
+        # word mean two different things on two different databases.
+        older = t.get("older_form") or 0
+        span = f" · {older} row(s) predate the origin column" if older else ""
+        lines.append(f"  chain {table}: {state} · {t['rows']} row(s) walked · head #{t['head_id'] or '-'} {head}{span}")
     lines.append("  " + anchor_line(report))
     lines.append(f"  {CLAIM}")
     return "\n".join(lines)

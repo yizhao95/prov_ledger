@@ -110,14 +110,25 @@ def _utterance_hits(conn, project: str, tokens: list[str], limit: int) -> list[t
 
 
 def _reference_hits(conn, project: str, tokens: list[str], limit: int) -> list[tuple[int, str, int, str]]:
-    """(reason_id, node_key, reference_id, label) where a linked source's label contains a token."""
+    """(reason_id, node_key, reference_id, label) where a source's label contains a token.
+
+    Both anchors of migration 030. A pointer hung on a reason is the ordinary case;
+    a pointer hung on an UTTERANCE is A3's cheap path — the source was named in the
+    sentence, so it was pinned there, before any plan and therefore any reason
+    existed. Reasons that quote those words reach it through
+    verbatim_utterance_id; without this half, a source captured at the moment of
+    speaking is invisible to every question asked afterwards, which is the opposite
+    of why it was captured early. DISTINCT because a pointer carried across sits
+    under both anchors and is still one source.
+    """
     if not tokens:
         return []
     where = " OR ".join("f.label LIKE ?" for _ in tokens)
     params = [project] + [f"%{t}%" for t in tokens] + [limit]
     return [(r[0], r[1], r[2], r[3]) for r in conn.execute(
-        f"SELECT r.id, r.node_key, f.id, f.label FROM reference_link l JOIN reference f ON f.id = l.reference_id "
-        f"JOIN change_reason r ON r.id = l.reason_id "
+        f"SELECT DISTINCT r.id, r.node_key, f.id, f.label FROM reference_link l "
+        f"JOIN reference f ON f.id = l.reference_id "
+        f"JOIN change_reason r ON r.id = l.reason_id OR r.verbatim_utterance_id = l.utterance_id "
         f"WHERE r.project = ? AND r.node_key IS NOT NULL AND ({where}) ORDER BY r.id DESC LIMIT ?", params)]
 
 

@@ -84,6 +84,11 @@ class WS:
         return self.sh([sys.executable, str(REVIEW_RUN), "--plan-id", plan_id, "--project", PROJECT,
                         "--json", *args], check=False)
 
+    def review_run_plain(self, plan_id: str, *args: str) -> subprocess.CompletedProcess:
+        """The same driver without --json: the lines a human/agent actually reads."""
+        return self.sh([sys.executable, str(REVIEW_RUN), "--plan-id", plan_id, "--project", PROJECT,
+                        *args], check=False)
+
     # ── reads (test assertions only) ─────────────────────────────────────────
     def q(self, sql, *params):
         c = sqlite3.connect(str(self.orch_db))
@@ -349,3 +354,115 @@ def test_accept_stale_cannot_cover_a_signature_break(ws):
     plan_id = ws.needs_review_plan("old_name takes x")
     p = ws.review_run(plan_id, "--reasons", "stub", "--accept-stale", "not applicable")
     assert p.returncode == 1 and ws.plan(plan_id)[0] == "FAILED"
+
+
+# ── FL-134: a dry run states what it did NOT evaluate ────────────────────────
+
+def test_dry_run_names_every_gate_it_did_not_evaluate(ws):
+    """The dry run covers steps 0–3. The dirty-tree, refresh, tests and selfcheck
+    gates sit at 4b and the reason slots at 4c, so a dry-run PASS is a verdict on
+    part of the review only — and it must say which part. This working tree is the
+    case that made it matter: the dry run PASSes it and the real run FAILs it."""
+    ws.change(BODY_CHANGE)
+    plan_id = ws.needs_review_plan()
+    (ws.repo / "pipeline.py").write_text(BODY_CHANGE + "\n# uncommitted edit\n")   # the 4b gate it cannot see
+    p = ws.review_run(plan_id, "--reasons", "stub", "--dry-run")
+    assert p.returncode == 0, p.stdout + p.stderr
+    out = _json_tail(p)
+    assert out["verdict"] is True and out["closed"] is None
+    assert out["dry_run"] is True
+    assert set(out["not_evaluated"]) == {"dirty_working_tree", "graph_refresh", "tests", "selfcheck", "close_reasons"}
+    plain = ws.review_run_plain(plan_id, "--reasons", "stub", "--dry-run")
+    assert plain.returncode == 0, plain.stdout + plain.stderr
+    text = plain.stdout
+    assert "not evaluated" in text.lower()
+    for gate in out["not_evaluated"]:
+        assert gate in text, f"{gate} is skipped but never named on stdout"
+    assert "4b" in text and "4c" in text                  # and where each skipped gate sits in the flow
+    # the same tree, run for real: it fails on one of the gates the dry run named
+    p2 = ws.review_run(plan_id, "--reasons", "stub")
+    assert p2.returncode == 1, p2.stdout + p2.stderr
+    assert ws.plan(plan_id)[0] == "FAILED"
+    assert "uncommitted" in ws.step(f"{plan_id}-REVIEW.1")[1]
+
+
+def test_a_failing_dry_run_also_names_the_skipped_gates(ws):
+    """A FAIL verdict from 0–3 is complete about its own gates and still silent
+    about 4b/4c — the report says so either way."""
+    ws.change(STALE_CHANGE)
+    plan_id = ws.needs_review_plan("drop old_name")
+    p = ws.review_run(plan_id, "--reasons", "stub", "--dry-run")
+    assert p.returncode == 1
+    out = _json_tail(p)
+    assert out["verdict"] is False and out["dry_run"] is True
+    assert "dirty_working_tree" in out["not_evaluated"] and "graph_refresh" in out["not_evaluated"]
+
+
+# ── FL-138: a retry hangs under the attempt it retries, not beside it ───────
+
+def test_retry_nested_under_the_failed_attempt_recovers_the_plan(ws):
+    """A second recovery attempt is a CHILD of the first (REVIEW.1.1.1), so the
+    existing recursive recovery applies: REVIEW.1.1 recovers through it, REVIEW.1
+    recovers through REVIEW.1.1, and the review reopens."""
+    head = ws.change(BODY_CHANGE)
+    plan_id = ws.needs_review_plan()
+    child = f"{plan_id}-REVIEW.1"
+    p = ws.review_run(plan_id, "--reasons", "stub", "--tests", "false")       # attempt 0 fails at 4b
+    assert p.returncode == 1 and ws.plan(plan_id)[0] == "FAILED"
+    ws.op("deviate", {"parent_step_id": child, "justification": "re-run the review",
+                      "sub_steps": [{"description": "ANALYSIS: re-run the review", "type": "ANALYSIS"}]})
+    p = ws.review_run(plan_id, "--reasons", "stub", "--as-recovery", f"{child}.1", "--tests", "false")
+    assert p.returncode == 1, p.stdout + p.stderr                             # attempt 1 fails too
+    assert ws.step(f"{child}.1")[0] == "FAILED" and ws.plan(plan_id)[0] == "FAILED"
+    ws.op("deviate", {"parent_step_id": f"{child}.1", "justification": "the --tests command was wrong",
+                      "sub_steps": [{"description": "ANALYSIS: re-run the review again", "type": "ANALYSIS"}]})
+    p = ws.review_run(plan_id, "--reasons", "stub", "--as-recovery", f"{child}.1.1")
+    assert p.returncode == 0, p.stdout + p.stderr
+    out = _json_tail(p)
+    assert out["closed"] == "COMPLETED" and out["refreshed_sha"] == head
+    assert ws.plan(plan_id) == ("COMPLETED", "reviewed")
+    assert ws.step(f"{child}.1.1")[0] == "COMPLETED"
+    assert ws.step(f"{child}.1")[0] == "FAILED" and ws.step(child)[0] == "FAILED"
+    assert "[REVIEW REOPENED]" in ws.step(f"{plan_id}-REVIEW")[1]
+    assert "[REVIEW LOCK]" in ws.step(f"{child}.1.1")[1]
+
+
+def test_as_recovery_refuses_a_sibling_of_an_unrecovered_attempt(ws):
+    """The shape that deadlocked a real plan: a retry beside the failed attempt.
+    A FAILED REVIEW.1.1 outvotes a COMPLETED REVIEW.1.2 for ever, so the driver
+    refuses to run as a sibling and names the attempt to nest under instead."""
+    ws.change(BODY_CHANGE)
+    plan_id = ws.needs_review_plan()
+    child = f"{plan_id}-REVIEW.1"
+    assert ws.review_run(plan_id, "--reasons", "stub", "--tests", "false").returncode == 1
+    ws.op("deviate", {"parent_step_id": child, "justification": "re-run the review",
+                      "sub_steps": [{"description": "ANALYSIS: re-run the review", "type": "ANALYSIS"}]})
+    assert ws.review_run(plan_id, "--reasons", "stub", "--as-recovery", f"{child}.1",
+                         "--tests", "false").returncode == 1
+    ws.op("deviate", {"parent_step_id": child, "justification": "try once more",
+                      "sub_steps": [{"description": "ANALYSIS: re-run the review", "type": "ANALYSIS"}]})
+    p = ws.review_run(plan_id, "--reasons", "stub", "--as-recovery", f"{child}.2")
+    assert p.returncode == 6, p.stdout + p.stderr
+    err = p.stdout + p.stderr
+    assert f"{child}.1" in err and "sibling" in err.lower()
+    assert ws.step(f"{child}.2")[0] == "PENDING"            # nothing started, nothing written
+    assert ws.plan(plan_id)[0] == "FAILED"
+
+
+def test_exit_code_agrees_with_the_outcome_when_the_plan_does_not_close(ws):
+    """Documented contract: exit 0 means the plan closed COMPLETED. A recovery
+    sub-step that completes while its sibling is still PENDING leaves the plan
+    FAILED — a correct outcome that must not be reported as success."""
+    ws.change(BODY_CHANGE)
+    plan_id = ws.needs_review_plan()
+    child = f"{plan_id}-REVIEW.1"
+    assert ws.review_run(plan_id, "--reasons", "stub", "--tests", "false").returncode == 1
+    ws.op("deviate", {"parent_step_id": child, "justification": "two things to do",
+                      "sub_steps": [{"description": "ANALYSIS: re-run the review", "type": "ANALYSIS"},
+                                    {"description": "CODE: fix the caller", "type": "CODE"}]})
+    p = ws.review_run(plan_id, "--reasons", "stub", "--as-recovery", f"{child}.1")
+    out = _json_tail(p)
+    assert out["closed"] == "FAILED"                        # {child}.2 is still PENDING: nothing closed
+    assert p.returncode != 0, "exit 0 must mean closed COMPLETED"
+    assert ws.step(f"{child}.1")[0] == "COMPLETED" and ws.step(f"{child}.2")[0] == "PENDING"
+    assert ws.plan(plan_id)[0] == "FAILED"

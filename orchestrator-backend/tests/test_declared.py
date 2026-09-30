@@ -123,7 +123,7 @@ def test_the_hash_chain_verifies_across_every_version(conn, declared):
                            known_names=KNOWN)
     active = declared.confirm(conn, row["id"], _utterance(conn))
     declared.revise(conn, active["id"], attrs={"scope": "Q3"})
-    assert provenance.verify_chain(conn, "declared_node") == {"ok": True, "rows": 3, "first_bad_id": None}
+    assert provenance.verify_chain(conn, "declared_node") == {"ok": True, "rows": 3, "first_bad_id": None, "older_form": 0}
 
 
 def test_a_row_inserted_around_the_store_is_named_by_verify_chain(conn, declared):

@@ -75,29 +75,47 @@ def _has_outcome(conn, project: str, qn: str | None, plan_id: str) -> bool:
                         (project, qn, plan_id)).fetchone() is not None
 
 
-def hint(conn, reason: dict, psg_db_path: str | None = None) -> tuple[str, str]:
-    """('major' | 'minor', basis). `reason` is a change_reason(_v) row as a dict."""
+# The six signals, in the order `hint` has always listed them. Named so a caller
+# that wants to RANK rather than threshold (A6's evidence slots) can ask how many
+# of the six fired without growing a second scoring path beside this one.
+SIGNAL_COUNT = 6
+NO_SIGNAL_BASIS = "none of: stated words / struct_sig change / downstream consumers / gate failure / active constraint / outcome"
+
+
+def signals(conn, reason: dict, psg_db_path: str | None = None) -> list[str]:
+    """Which of the six signals fire for this reason, each in words.
+
+    This is the whole computation; `hint` is the threshold over it (any signal →
+    major). `reason` is a change_reason(_v) row as a dict — or, for a slot that
+    has no reason row yet, the same five keys with tier left as it stands.
+    """
     project, plan_id = reason["project"], reason["plan_id"]
     key = reason.get("node_key")
     psg = psg_db_path if psg_db_path is not None else psg_bridge.db_path_for(project)
     qn = psg_bridge.latest_qualified_name(psg, key) if (psg and key) else None
-    signals = []
+    out = []
     if reason.get("tier") == "stated":
-        signals.append("the user's own words")
+        out.append("the user's own words")
     if _struct_changed(psg, key, reason.get("run_id")):
-        signals.append("struct_sig changed")
+        out.append("struct_sig changed")
     n = _consumers(psg, qn)
     if n:
-        signals.append(f"{n} downstream consumer(s)")
+        out.append(f"{n} downstream consumer(s)")
     if _gate_failed(conn, plan_id):
-        signals.append("a gate failed in this plan")
+        out.append("a gate failed in this plan")
     if _active_constraint(conn, project, key, qn):
-        signals.append("an active constraint anchors here")
+        out.append("an active constraint anchors here")
     if _has_outcome(conn, project, qn, plan_id):
-        signals.append("an outcome is recorded")
-    if signals:
-        return "major", "; ".join(signals)
-    return "minor", "none of: stated words / struct_sig change / downstream consumers / gate failure / active constraint / outcome"
+        out.append("an outcome is recorded")
+    return out
+
+
+def hint(conn, reason: dict, psg_db_path: str | None = None) -> tuple[str, str]:
+    """('major' | 'minor', basis). `reason` is a change_reason(_v) row as a dict."""
+    fired = signals(conn, reason, psg_db_path)
+    if fired:
+        return "major", "; ".join(fired)
+    return "minor", NO_SIGNAL_BASIS
 
 
 def log_hint(conn, reason: dict, level: str, basis: str, commit: bool = False) -> int:

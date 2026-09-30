@@ -23,10 +23,15 @@ REPO = Path(__file__).resolve().parents[2]
 README = REPO / "README.md"
 CLI = REPO / "orchestrator-backend" / "orchestrator" / "cli.py"
 
+# The opening is where readers were leaving. What replaced it is a worked
+# answer — a real question, real record ids, a counted search range — placed
+# before any claim about what the tool is. These constants pin the parts of it
+# that carry the argument, not its wording.
 HOOK_LINES = (
     "Lost in a project's decision history? Watching your coding agent walk the same wrong path again?",
-    "provLedger helps you remember what was decided, who said it, and why — and reminds the agent before it changes its mind.",
 )
+OPENING_CLAIM = "Your project, answering for itself"
+SCOPE_MARKERS = ("Searched", "nothing left out")
 
 IMAGES = (
     "docs/media/readme-hook.gif",
@@ -56,15 +61,38 @@ def intro(readme: str) -> str:
     return readme.split(marker, 1)[0]
 
 
-def test_the_two_hook_lines_are_verbatim(readme: str) -> None:
-    for line in HOOK_LINES:
-        assert line in readme, f"hook line missing or reworded: {line!r}"
-
-
-def test_the_hook_comes_before_everything_else(readme: str, intro: str) -> None:
-    first, second = (readme.index(line) for line in HOOK_LINES)
+def test_the_first_screen_answers_before_it_claims(readme: str, intro: str) -> None:
+    """Readers were leaving at the first screen. A rhetorical question is where
+    they leave: it asks them to agree they have a problem before they have been
+    given anything. So the opening runs a real question through the tool and
+    shows the answer, and only then says what the tool is."""
     assert readme.startswith("# provLedger\n"), "the title is the first line"
-    assert first < second < readme.index("\n## 1 · "), "the hook belongs above section 1"
+    first_screen = readme.split("\n## 1 · ", 1)[0]
+
+    fence = first_screen.index("```")
+    assert fence < first_screen.index(OPENING_CLAIM), "the answer comes before the claim about it"
+
+    block = first_screen[fence:first_screen.index("```", fence + 3)]
+    assert "/ledger " in block, "the opening shows the tool being used, not described"
+    assert re.search(r"\[#\d+", block), "every claim in the answer carries a record id"
+    assert re.search(r"\[r\d+", block), "the outside source is cited too, with its own id"
+    for marker in SCOPE_MARKERS:
+        assert marker in block, f"the answer must say how far it looked: {marker!r} missing"
+
+
+def test_the_opening_questions_are_paid_off_immediately(readme: str) -> None:
+    """The two questions are what makes a reader recognise themselves, so they
+    stay. What they cannot do is stand alone: a question with nothing behind it
+    is where the reader leaves. So the worked answer has to follow them on the
+    first screen, before any claim about what the tool is."""
+    first_screen = readme.split("\n## 1 · ", 1)[0]
+    for line in HOOK_LINES:
+        assert line in first_screen, f"opening line missing or reworded: {line!r}"
+
+    last_question = max(first_screen.index(line) for line in HOOK_LINES)
+    fence = first_screen.index("```")
+    assert last_question < fence, "the questions come first, and the answer answers them"
+    assert fence < first_screen.index(OPENING_CLAIM), "the answer comes before the claim about it"
 
 
 @pytest.mark.parametrize("path", IMAGES)

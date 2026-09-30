@@ -111,6 +111,18 @@
       }
     },
     {
+      "title": "raise-budget",
+      "description": "FL-137: raise a plan's max_revisions ceiling after the loop breaker refused a deviate. Only upwards, `reason` REQUIRED, and the raise is appended to the plan's record as a Deviations row (target_step_id NULL) — a new ceiling is a decision about the plan, not a column to edit. revision_count is untouched: the raise does not spend the budget it grants.",
+      "type": "object",
+      "required": ["plan_id", "new_max", "reason"],
+      "additionalProperties": false,
+      "properties": {
+        "plan_id": {"type": "string", "minLength": 1},
+        "new_max": {"type": "integer", "minimum": 1, "description": "The new ceiling. Must be GREATER than the plan's current max_revisions; anything else exits non-zero and writes nothing."},
+        "reason":  {"type": "string", "minLength": 1, "description": "Why these extra revisions are warranted. Required — blank is refused."}
+      }
+    },
+    {
       "title": "finish-plan",
       "description": "IN_PROGRESS → COMPLETED at the plan level. Idempotent: rejects already-COMPLETED plans.",
       "type": "object",

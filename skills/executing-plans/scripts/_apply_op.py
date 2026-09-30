@@ -326,6 +326,26 @@ def _op_deviate(conn, data: dict) -> dict:
     return result
 
 
+def _op_raise_budget(conn, data: dict) -> dict:
+    """Raise a plan's max_revisions ceiling, with a REQUIRED reason (FL-137).
+
+    The loop breaker's "raise max_revisions" used to be an option no script
+    could perform, which left a hand-written UPDATE as the only way past it.
+    This is that way: validated through orchestrator.api, and the raise itself
+    is appended to the plan's record (a Deviations row) rather than silently
+    mutating a column — a new ceiling is a decision about the plan, and the
+    reason for it is the part worth keeping.
+    """
+    _require(data, "plan_id", "new_max", "reason")
+    if not str(data["reason"]).strip():
+        _die("'reason' must be a non-empty sentence: raising a budget is a recorded decision, not a dial")
+    try:
+        result = api.raise_revision_budget(conn, data["plan_id"], data["new_max"], str(data["reason"]))
+    except Exception as e:
+        _die(f"raise_budget failed: {e}")
+    return {"raised": True, **result}
+
+
 def _op_record_skill(conn, data: dict) -> dict:
     _require(data, "plan_id", "name", "source")
     if data["source"] not in VALID_SKILL_SOURCES:
@@ -506,6 +526,7 @@ OPS = {
     "append-log":   _op_append_log,
     "deviate":      _op_deviate,
     "record-skill": _op_record_skill,
+    "raise-budget": _op_raise_budget,
     "finish-plan":  _op_finish_plan,
     "agent-review-close": _op_agent_review_close,
     "reason-slots": _op_reason_slots,

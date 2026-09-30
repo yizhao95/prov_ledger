@@ -586,7 +586,11 @@ def _check_significance_disagreements(conn) -> Dict[str, Any]:
 def _check_unanchored_closes(conn) -> Dict[str, Any]:
     """DP phase 3 (§7): plans that closed without writing their chain heads into
     `git notes --ref provledger`. A notes failure never blocks a close, so the
-    only way it stays visible is here — informational, never flips ok."""
+    only way it stays visible is here — informational, never flips ok.
+
+    Every terminal review step counts, FAILED as well as COMPLETED: failed plans
+    anchor too, and counting only the successful ones would rebuild here the same
+    blindness that once tied the witness to success."""
     import os
     path = os.environ.get("ORCH_DB") or os.path.expanduser("~/skill-workspace/orchestrator.db")
     if not os.path.exists(path):
@@ -594,11 +598,11 @@ def _check_unanchored_closes(conn) -> Dict[str, Any]:
     try:
         oc = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         try:
-            anchored = oc.execute("SELECT COUNT(*) FROM Steps WHERE is_review = '1' AND status = 'COMPLETED' "
+            anchored = oc.execute("SELECT COUNT(*) FROM Steps WHERE is_review = '1' AND status IN ('COMPLETED', 'FAILED') "
                                   "AND log_context LIKE '%[ANCHOR] chain heads anchored%'").fetchone()[0]
-            unanchored = oc.execute("SELECT COUNT(*) FROM Steps WHERE is_review = '1' AND status = 'COMPLETED' "
+            unanchored = oc.execute("SELECT COUNT(*) FROM Steps WHERE is_review = '1' AND status IN ('COMPLETED', 'FAILED') "
                                     "AND log_context LIKE '%[ANCHOR] not anchored%'").fetchone()[0]
-            switched_off = oc.execute("SELECT COUNT(*) FROM Steps WHERE is_review = '1' AND status = 'COMPLETED' "
+            switched_off = oc.execute("SELECT COUNT(*) FROM Steps WHERE is_review = '1' AND status IN ('COMPLETED', 'FAILED') "
                                       "AND log_context LIKE '%[ANCHOR] off%'").fetchone()[0]
         finally:
             oc.close()

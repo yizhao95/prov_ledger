@@ -29,14 +29,29 @@ KINDS = ("technical", "organizational", "mixed")
 ROLES = ("reason", "rejected_path", "constraint")
 RECORDED_BY = ("human", "agent", "system")
 REFERENCE_KINDS = ("email", "meeting", "chat", "ticket", "doc", "commit", "verbal", "other")
+# A2: evidence sits where a test sits, and a test is allowed to fail. An email that
+# contradicts the reason it was found for is recorded as contradicting it; the only
+# other option is dropping it, and silent dropping is what this product exists against.
+STANCES = ("supports", "contradicts", "context")
+# A2: what someone found when they opened the pointer. `no_access` is not `gone` —
+# a document behind a login this checker does not hold is still there, and calling
+# it gone would retire a live reference on the strength of a missing credential.
+CHECK_VERDICTS = ("ok", "gone", "moved", "no_access")
 # the two columns the triggers let change stay outside the chain, so the chain
 # still verifies after supersede() / a last_checked update
 _UNCHAINED = ("id", "hash", "prev_hash", "superseded_by", "last_checked")
 
 
-def canonical(row: dict) -> str:
-    """Sorted-key JSON of the row without id / hash / prev_hash and the two mutable columns."""
-    return json.dumps({k: v for k, v in row.items() if k not in _UNCHAINED}, sort_keys=True, default=str,
+def canonical(row: dict, *, exclude: tuple[str, ...] = ()) -> str:
+    """Sorted-key JSON of the row without id / hash / prev_hash and the two mutable columns.
+
+    `exclude` drops further columns, and exists for exactly one caller:
+    verify_chain replaying the form a chain had before a column was added to it
+    (see _PRE_COLUMN). Nothing else may use it — a writer that excludes a column
+    is a writer whose rows nothing verifies.
+    """
+    drop = _UNCHAINED + tuple(exclude)
+    return json.dumps({k: v for k, v in row.items() if k not in drop}, sort_keys=True, default=str,
                       ensure_ascii=False, separators=(",", ":"))
 
 
@@ -66,11 +81,16 @@ def _insert_chained(conn, table: str, row: dict) -> int:
 # ── utterance ─────────────────────────────────────────────────────────────────
 
 def insert_utterance(conn, *, session_id: str, project: str | None, plan_id: str | None, text: str,
-                     occurred_at: str, visibility: str = "personal", commit: bool = True) -> int:
+                     occurred_at: str, visibility: str = "personal", origin: str = "unknown",
+                     commit: bool = True) -> int:
+    """origin (migration 030) is the entry point the words came in through, and it
+    is written here so the hash chain covers it: a column outside `canonical` is a
+    column nothing verifies. The caller that owns the door names it — the default
+    is 'unknown', the same value the column's DEFAULT gives rows older than 030."""
     if not text:
         raise ValueError("an utterance needs text")
     row = {"session_id": session_id, "project": project, "plan_id": plan_id, "text": text, "occurred_at": occurred_at,
-           "recorded_at": _db_now(conn), "visibility": visibility}
+           "recorded_at": _db_now(conn), "visibility": visibility, "origin": origin}
     rid = _insert_chained(conn, "utterance", row)
     if commit:
         conn.commit()
@@ -103,10 +123,119 @@ def insert_reference(conn, *, project: str, kind: str, label: str, occurred_at: 
     return rid
 
 
-def link_reference(conn, reason_id: int, reference_id: int, commit: bool = True) -> None:
-    conn.execute("INSERT OR IGNORE INTO reference_link (reason_id, reference_id) VALUES (?, ?)", (reason_id, reference_id))
+def link_reference(conn, reason_id: int | None, reference_id: int, *, utterance_id: int | None = None,
+                   stance: str = "supports", commit: bool = True) -> None:
+    """Hang a pointer on exactly one anchor (migration 030).
+
+    A reason, or — when the source was named before any plan existed, so there is
+    no reason yet — the utterance that named it. Never both: the same pointer under
+    two anchors would be counted twice by anything that totals evidence. The table's
+    CHECK says the same thing; these two raise first so the message names the flag.
+    """
+    if (reason_id is None) == (utterance_id is None):
+        raise ValueError("a reference hangs on a reason or on an utterance, exactly one of the two")
+    if stance not in STANCES:
+        raise ValueError(f"stance must be one of {STANCES}, got {stance!r}")
+    conn.execute("INSERT OR IGNORE INTO reference_link (reason_id, utterance_id, reference_id, stance) "
+                 "VALUES (?, ?, ?, ?)", (reason_id, utterance_id, reference_id, stance))
     if commit:
         conn.commit()
+
+
+def carry_utterance_references(conn, *, reason_id: int, utterance_id: int, commit: bool = True) -> int:
+    """Give a reason every pointer the words it quotes already carry (A3).
+
+    The cheap path pins a source the moment the sentence names it, on the
+    utterance, because no plan and therefore no reason exists yet. `evidence_level`
+    only counts pointers anchored to a reason, so until they are carried across the
+    pointer raises nothing and the reason reads `verbal` while a permalink sits one
+    table away.
+
+    A copy, never a move. `reference_link` is append-only, and the utterance row is
+    a fact of its own: somebody produced this pointer while the words were being
+    said, not months later at review. `INSERT OR IGNORE` against the (reason_id,
+    reference_id) index makes a second pass a no-op, and the stance comes across
+    untouched — a source that contradicted the reading still contradicts it.
+
+    Returns how many rows this call added.
+    """
+    if get_reason(conn, reason_id) is None:
+        raise ValueError(f"reason {reason_id} does not exist")
+    n = _carry(conn, int(reason_id), int(utterance_id))
+    if commit:
+        conn.commit()
+    return n
+
+
+def _carry(conn, reason_id: int, utterance_id: int) -> int:
+    """The copy itself, without the existence check — insert_reason has just
+    written the row it is copying onto and does not need to look it up again."""
+    n = 0
+    for reference_id, stance in conn.execute(
+            "SELECT reference_id, stance FROM reference_link WHERE utterance_id = ? ORDER BY reference_id",
+            (utterance_id,)).fetchall():
+        cur = conn.execute("INSERT OR IGNORE INTO reference_link (reason_id, utterance_id, reference_id, stance) "
+                           "VALUES (?, NULL, ?, ?)", (reason_id, reference_id, stance))
+        n += max(cur.rowcount, 0)
+    return n
+
+
+def get_reference(conn, reference_id: int) -> dict | None:
+    r = conn.execute("SELECT * FROM reference WHERE id = ?", (reference_id,)).fetchone()
+    return dict(r) if r else None
+
+
+def insert_reference_check(conn, *, reference_id: int, verdict: str, note: str | None = None,
+                           commit: bool = True) -> int:
+    """Record what someone found when they opened this pointer, and date the
+    reference with it (migration 030).
+
+    Two writes, one meaning. `reference_check` is append-only, so a link that went
+    dead stays dead-on-that-date for ever: a later `ok` is another row beside it,
+    never a correction of it. `reference.last_checked` is the one column the 018
+    whitelist trigger lets change, and it carries only WHEN — the WHAT is in the
+    check row, where nothing can quietly reverse it.
+
+    The clock is the database's, like every other recorded_at in this module, and
+    both writes take the same reading so the two tables cannot disagree about when.
+    """
+    if verdict not in CHECK_VERDICTS:
+        raise ValueError(f"a check verdict is one of {CHECK_VERDICTS}, got {verdict!r}")
+    if get_reference(conn, reference_id) is None:
+        raise ValueError(f"reference {reference_id} does not exist")
+    at = _db_now(conn)
+    rid = _insert_chained(conn, "reference_check",
+                          {"reference_id": int(reference_id), "checked_at": at, "verdict": verdict, "note": note})
+    conn.execute("UPDATE reference SET last_checked = ? WHERE id = ?", (at, int(reference_id)))
+    if commit:
+        conn.commit()
+    return rid
+
+
+def pending_references(conn, *, project: str | None = None, older_than_days: int = 30) -> list[dict]:
+    """The pointers worth opening: `linked` rows never checked, or last checked
+    before the threshold.
+
+    Only `linked`. An `unreachable` row has no link to open and a `verbal` one never
+    had one, so listing either would send the host off to check something that does
+    not exist. A `gone` verdict does not take a row off this list — the row still
+    says `linked`, the finding lives in `reference_check`, and the pointer comes back
+    round for another look rather than being retired by one bad day.
+    """
+    if older_than_days < 0:
+        raise ValueError("older_than_days counts backwards from now and cannot be negative")
+    sql = ("SELECT * FROM reference WHERE verifiability = 'linked' "
+           "AND (last_checked IS NULL OR last_checked < datetime('now', ?))")
+    args: list = [f"-{int(older_than_days)} days"]
+    if project:
+        sql += " AND project = ?"
+        args.append(project)
+    return [dict(r) for r in conn.execute(sql + " ORDER BY id", args)]
+
+
+def checks_for_reference(conn, reference_id: int) -> list[dict]:
+    return [dict(r) for r in conn.execute("SELECT * FROM reference_check WHERE reference_id = ? ORDER BY id",
+                                          (reference_id,))]
 
 
 # ── change_reason ─────────────────────────────────────────────────────────────
@@ -164,6 +293,11 @@ def insert_reason(conn, *, project: str, plan_id: str, node_key: str | None, kin
     rid = _insert_chained(conn, "change_reason", row)
     for ref in refs or ():
         link_reference(conn, rid, int(ref), commit=False)
+    if vid is not None:
+        # A3: the pointers hung on these words come with them. Here rather than in
+        # one caller, because every writer of a `stated` row inherits the same fact
+        # — reasons.fill, rule R0 at close, a declared node's confirmation.
+        _carry(conn, rid, vid)
     if commit:
         conn.commit()
     return rid
@@ -201,18 +335,38 @@ def supersede(conn, old_id: int, new_id: int, commit: bool = True) -> None:
 
 # ── integrity ─────────────────────────────────────────────────────────────────
 
+# A column added to a chained table by a migration: {table: (column, value)}.
+# Rows written before that migration were hashed without the column and read the
+# value below, so verify_chain replays the older canonical form for them — and
+# ONLY for them. The value is deliberately the one that asserts nothing: a forger
+# who hashes in the old form can therefore only claim 'unknown', while claiming
+# any real origin needs the current form and so needs every later row re-hashed.
+# Downgrading a record into worthlessness is possible; upgrading one is not.
+_PRE_COLUMN = {"utterance": ("origin", "unknown")}
+
+
 def verify_chain(conn, table: str) -> dict:
     """Recompute every row's hash from its stored columns and the previous
-    row's hash. {ok, rows, first_bad_id}: the first row whose hash or prev_hash
-    does not match — a tampered row, or a row inserted around the store."""
-    if table not in ("utterance", "reference", "change_reason", "declared_node", "occurrence"):
+    row's hash. {ok, rows, first_bad_id, older_form}: the first row whose hash or
+    prev_hash does not match — a tampered row, or a row inserted around the
+    store — plus how many rows only verified in the pre-migration form, which
+    the report says out loud rather than folding into the total."""
+    if table not in ("utterance", "reference", "change_reason", "declared_node", "occurrence", "reference_check"):
         raise ValueError(f"no hash chain on {table!r}")
+    older = _PRE_COLUMN.get(table)
     prev: str | None = None
-    n = 0
+    n = pre = 0
     for r in conn.execute(f"SELECT * FROM {table} ORDER BY id"):
         n += 1
         row = dict(r)
-        if row["prev_hash"] != prev or chain_hash(prev, row) != row["hash"]:
-            return {"ok": False, "rows": n, "first_bad_id": row["id"]}
-        prev = row["hash"]
-    return {"ok": True, "rows": n, "first_bad_id": None}
+        if row["prev_hash"] == prev and chain_hash(prev, row) == row["hash"]:
+            prev = row["hash"]
+            continue
+        if older is not None and row.get(older[0]) == older[1] and row["prev_hash"] == prev:
+            body = canonical(row, exclude=(older[0],))
+            if hashlib.sha256((body + (prev or "")).encode("utf-8")).hexdigest() == row["hash"]:
+                pre += 1
+                prev = row["hash"]
+                continue
+        return {"ok": False, "rows": n, "first_bad_id": row["id"], "older_form": pre}
+    return {"ok": True, "rows": n, "first_bad_id": None, "older_form": pre}

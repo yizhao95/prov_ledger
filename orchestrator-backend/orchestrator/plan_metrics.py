@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -274,4 +276,81 @@ def overhead_baseline(conn, *, since: str | None = None, last: int | None = None
         "context_overhead_tokens": _summary([float(m["context_overhead_tokens"]) for m in plans]),
         "plans": {m["plan_id"]: {"overhead_ratio": m["overhead_ratio"], "provenance_ratio": m["provenance_ratio"],
                                  "context_overhead_tokens": m["context_overhead_tokens"], "total_calls": m["total_calls"]} for m in plans},
+    }
+
+
+# ── the H1 / H4 reading path (DP 6, A5) ──────────────────────────────────────
+# H1 and H4 read the live ledger, so they are `live` and deselected by default.
+# That left the step from "a ledger" to "a verdict" untested: only the budget
+# constants were checked, on a dict. `overhead_report` IS that step, and it takes
+# the ledger to read — the live tests pass the real one, a fixture passes its own.
+
+
+def recent_completed(conn, last: int = 5) -> list[str]:
+    """The most recently created COMPLETED plan ids, newest first."""
+    return [r[0] for r in conn.execute(
+        "SELECT plan_id FROM Plans WHERE status = 'COMPLETED' ORDER BY created_at DESC LIMIT ?", (int(last),))]
+
+
+def calls_per_step_p90(conn, *, since: str | None = None) -> float | None:
+    """p90 of calls_per_step over the measured COMPLETED plans — the one number the
+    H1 comparison needs, over the same rows and the same summary baseline() reports.
+    None when nothing was measured: "we cannot tell" is not "pass"."""
+    sql = "SELECT plan_id FROM Plans WHERE status = 'COMPLETED'"
+    args: list = []
+    if since:
+        sql += " AND created_at >= ?"
+        args.append(since)
+    rows = [calls_for_plan(conn, r[0]) for r in conn.execute(sql + " ORDER BY created_at", args)]
+    return _p90([m["calls_per_step"] for m in rows if m["measured"] and m["calls_per_step"] is not None])
+
+
+@contextmanager
+def _reading(source):
+    """A connection to read from. An already-open connection is used as given and
+    left open (H4 keeps reading the packs through it); a path — or None, meaning the
+    live ledger — is opened here and closed here."""
+    if isinstance(source, sqlite3.Connection):
+        yield source
+        return
+    from . import db as _db          # local: keeps plan_metrics importable by db's own callers
+    conn = _db.open_db(source or _db.DEFAULT_DB_PATH)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def overhead_report(source=None, *, last: int = 5, budgets: dict | None = None,
+                    factor: float = H1_FACTOR, since: str | None = None) -> dict:
+    """What the ledger `source` says about the last `last` completed plans:
+
+    - `rows` / `measured`: each plan's `overhead()`, newest first
+    - `breaches`: {plan_id: [budget names broken]} — only for measured plans
+    - `gaps`: plans that measured nothing; a gap is NOT a breach, and not a pass
+    - `exceedances`: [(plan_id, calls_per_step)] above `factor` x the ledger's own
+      p90, or None when that p90 cannot be computed
+
+    `source` is an open connection, a path, or None for the live ledger — the only
+    difference between the live H1 / H4 reading and a fixture's."""
+    with _reading(source) as conn:
+        rows = [overhead(conn, p) for p in recent_completed(conn, last)]
+        p90 = calls_per_step_p90(conn, since=since)
+        exceedances = h1_exceedances(conn, {"calls_per_step": {"p90": p90}}, factor=factor, last=last)
+    measured = [r for r in rows if r["measured"]]
+    breaches = {}
+    for r in measured:
+        broken = over_budget(r, budgets)
+        if broken:
+            breaches[r["plan_id"]] = broken
+    return {
+        "source": "<connection>" if isinstance(source, sqlite3.Connection) else str(source or ""),
+        "last": last, "n_plans": len(rows), "n_measured": len(measured),
+        "rows": rows, "measured": measured,
+        "breaches": breaches,
+        "gaps": [r["plan_id"] for r in rows if not r["measured"]],
+        "budgets": dict(budgets or BUDGETS),
+        "factor": factor,
+        "calls_per_step_p90": p90,
+        "exceedances": exceedances,
     }

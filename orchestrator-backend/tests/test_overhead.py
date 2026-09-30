@@ -98,29 +98,22 @@ def test_baseline_carries_the_two_new_columns_and_keeps_superpowers_only(conn, t
     assert back["superpowers_only"] == {"method": "hand", "tool_calls": 11} and "overhead" in back
 
 
-def _recent(conn, n=5):
-    return [r[0] for r in conn.execute("SELECT plan_id FROM Plans WHERE status='COMPLETED' ORDER BY created_at DESC LIMIT ?", (n,))]
-
-
 @pytest.mark.live
 def test_h1_overhead_ratio(capsys):
     """The last 5 completed plans of the real DB: provenance ≤ 10 %, overhead ≤ 35 %.
 
     `live` since DP 2c: the budgets themselves (spec §20) are asserted on
     fixtures in test_live_marker.py, because a budget is a property of the code
-    and this reading is a property of the machine."""
+    and this reading is a property of the machine. DP 6 A5: the reading PATH is
+    plan_metrics.overhead_report, which tests/test_overhead_fixture.py drives on
+    a built-on-purpose ledger in every ordinary run — this test only swaps in the
+    live one."""
     real = require_live_ledger("H1 overhead")
-    conn = db.open_db(real)
-    try:
-        rows = [plan_metrics.overhead(conn, p) for p in _recent(conn)]
-    finally:
-        conn.close()
-    measured = [r for r in rows if r["measured"]]
-    if not measured:
+    report = plan_metrics.overhead_report(real, last=5)
+    if not report["measured"]:
         print("SKIP-NOTE: H1 — none of the last 5 completed plans has a tool_call_log row in its window (the hook loads at session start); nothing to assert yet")
         pytest.skip("no measured plans")
-    for r in measured:
-        assert plan_metrics.over_budget(r) == [], r
+    assert report["breaches"] == {}, report["breaches"]
 
 
 @pytest.mark.live
@@ -128,14 +121,16 @@ def test_h4_context_overhead(capsys):
     """The last 5 completed plans: context_overhead_tokens ≤ 3000 each, with the pack
     REBUILT by the current builder over the plan's stored targets (what the software
     would put in front of the agent today); the stored number is printed next to it
-    as history. `live` since DP 2c — same reason as H1."""
+    as history. `live` since DP 2c — same reason as H1; the reader is shared with
+    the fixture test (DP 6 A5), and the connection stays open here because the
+    rebuild re-reads each plan's stored pack."""
     from orchestrator import context_pack
     real = require_live_ledger("H4")
     conn = db.open_db(real)
     try:
         rows = []
-        for p in _recent(conn):
-            o = plan_metrics.overhead(conn, p)
+        for o in plan_metrics.overhead_report(conn, last=5)["rows"]:
+            p = o["plan_id"]
             ic = conn.execute("SELECT impact_context FROM Plans WHERE plan_id = ?", (p,)).fetchone()[0]
             pack = (json.loads(ic) if ic else {}).get("pack") or {}
             targets = [t["qualified_name"] for t in pack.get("targets", [])]

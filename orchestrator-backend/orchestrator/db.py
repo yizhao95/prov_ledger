@@ -352,6 +352,24 @@ def set_review_state(conn: sqlite3.Connection, plan_id: str, review_state: str |
         conn.commit()
 
 
+def set_plan_max_revisions(conn: sqlite3.Connection, plan_id: str, max_revisions: int,
+                           commit: bool = True) -> None:
+    """Raise a plan's revision ceiling (FL-137). Only ever upwards, and only from
+    api.raise_revision_budget, which requires a reason and records the raise in
+    Deviations — the ceiling is not a dial anyone turns in passing."""
+    cur = conn.execute(
+        "UPDATE Plans SET max_revisions = ?, updated_at = ? WHERE plan_id = ? AND max_revisions < ?",
+        (max_revisions, _now(), plan_id, max_revisions))
+    if cur.rowcount != 1:
+        current = get_plan(conn, plan_id)
+        if current is None:
+            raise ValueError(f"plan_id not found: {plan_id}")
+        raise ValueError(f"plan {plan_id} has max_revisions={current['max_revisions']}; "
+                         f"{max_revisions} would not raise it")
+    if commit:
+        conn.commit()
+
+
 def increment_revision(conn: sqlite3.Connection, plan_id: str, commit: bool = True) -> int:
     conn.execute("UPDATE Plans SET revision_count = revision_count + 1 WHERE plan_id = ?", (plan_id,))
     if commit:

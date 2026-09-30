@@ -203,3 +203,22 @@ def test_symlink_sync_scenario_19c_2f_recovers(conn: sqlite3.Connection) -> None
         f"got status={result['plan_status']}, reason={result['reason']!r}"
     )
     assert result["review_status"] == "COMPLETED"
+
+
+# ── Case 8: a non-terminal child blocks the recovery ─────────────────────────
+
+def test_failed_with_a_non_terminal_child_is_not_recovered(conn: sqlite3.Connection) -> None:
+    """A FAILED step whose deviation child is still PENDING (or IN_PROGRESS) is
+    NOT recovered — the work is in flight, not done. Nothing may read "a child
+    exists" as "the failure was handled"."""
+    for status in ("PENDING", "IN_PROGRESS", "STARTING"):
+        plan_id = f"p-nonterminal-{status.lower()}"
+        _seed_plan(conn, plan_id)
+        _seed_step(conn, f"{plan_id}-A", plan_id, "FAILED", execution_order=0)
+        _seed_step(conn, f"{plan_id}-A.1", plan_id, status, execution_order=1,
+                   parent_step_id=f"{plan_id}-A", depth_level=1)
+        db.insert_review_step(conn, plan_id)
+        assert api._is_step_recovered(conn, f"{plan_id}-A") is False, status
+        result = api.review_and_complete(conn, plan_id)
+        assert result["ready"] is False, (status, result)
+        assert db.get_plan(conn, plan_id)["status"] == "IN_PROGRESS", status

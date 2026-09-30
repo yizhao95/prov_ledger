@@ -2,17 +2,36 @@
 
 Lost in a project's decision history? Watching your coding agent walk the same wrong path again?
 
-provLedger helps you remember what was decided, who said it, and why — and reminds the agent before it changes its mind.
+Someone asks in chat why the churn model splits 70/30 — *wasn't it the other way round?* You scroll back through four months of threads, find three conversations that nearly say it, and give up.
+
+```
+$ /ledger why is our train/test split 70/30?
+
+  70/30 has been in force since 2026-04-03. Moving to 80/20 was tried on
+  2026-08-14 and rejected: the holdout leaked week-52 promotions, so the
+  lift was the promotion and not the model.          [#94 · your own words]
+
+  The email that settled it is on the record.
+  Sarah Chen, "Q3 rollup scope", 2026-08-14 09:12    [r12 ↗ · checked 6d ago]
+
+  Raised again on 2026-09-17 and dropped without an answer.  [#i9]
+
+  Searched 3 nodes · 2026-04-03 to 2026-09-17 · nothing left out
+```
+
+Every line ends in a record id. The ids are real rows, the search range is counted rather than estimated, and when nothing was recorded the answer says so instead of filling the gap.
+
+**Your project, answering for itself** — across every node, every task and every month it has existed.
 
 ![A task page, the decisions it relied on, the rule behind one of them with the email that carried it, and /ledger answering a question with the record it rests on](docs/media/readme-hook.gif)
 
 *Task → "Decisions relied on" → open the node → the rule with the email → `/ledger`: "why did we stop using orders.discount?" → a cited answer.*
 
-**[Watch the whole thing →](https://yizhao95.github.io/prov_ledger/walkthrough.html)** — 45 seconds, five chapters: a task, the check that runs before the edit, a decision that already exists, its whole history, and how far the change would reach.
+**[Watch it happen →](https://yizhao95.github.io/prov_ledger/walkthrough.html)** — two minutes: a colleague asks why the data stops on 18 September, nobody on the team knows, and the record answers with the incident behind it.
 
-A Claude Code plugin that keeps the reasons behind a project's changes — your words, the email, the agent's reading, kept apart — and puts them in front of whoever is about to change the thing again.
+A Claude Code plugin for data work. It keeps what was decided and why — your words, the email, the agent's reading, kept apart and never blended — and puts them in front of whoever is about to change the thing again.
 
-![tests](https://img.shields.io/badge/tests-1831-brightgreen)
+![tests](https://img.shields.io/badge/tests-2099-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -31,7 +50,11 @@ This is its own kind of failure, and the usual tools each miss it by one step. `
 
 ## 2 · What it does
 
-### A project database with a full map and a full history
+It keeps one view of a project across three axes at once: **across nodes** (the whole map and what flows through it), **across time** (what each thing was, and what it became), and **across tasks** (what every piece of work read, decided, and expected). Graph, Node and Task are three angles on that one view, not three pages — they share a single anchor of project, node and point in time, and switching between them keeps it.
+
+What it is for is the road you took: every step, and every turn you ruled out.
+
+### What is in it
 
 ![A data-flow picture of a real repository, switching between two views: 3,568 nodes folded into modules and laid out in three bands — what is read, what processes it, what is produced — with the count of nodes that carry records changing as the view changes](docs/media/readme-graph.gif)
 
@@ -39,9 +62,36 @@ This is its own kind of failure, and the usual tools each miss it by one step. `
 
 Functions are the least of it. A dataset column, a SQL table, an external feed, a metric, and anything you declare in a sentence are all first-class — each with its own page, history and rules.
 
-Nothing is registered by hand or taken on the agent's word: the map is rebuilt from the source every run and compared with the one before, so what changed is **measured**. The arrows are computed too — what reads this column, what it feeds — which is how *what might this break* gets answered before anything is edited. Records are appended, never edited, hash-chained and anchored in git.
+Around each of them the view holds the decisions: why it changed, the rule that still constrains it, and **the paths that were tried and dropped**. That last one is the half that is usually missing everywhere else, and the half people ask about most — a failed experiment leaves no trace in a diff, so the only record that it happened at all is the one somebody wrote down at the time.
 
-### A dashboard a person can audit
+Most of what decides a number was never in the repository to begin with: a steering group excluded a region, a feed comes from someone else's system, a figure was worked out by hand once. One sentence puts those in the same map, and nothing enters it until you say the words yourself.
+
+```console
+$ provledger node declare "EMEA excluded from Q3 rollup, decided in the March review" \
+    --type stakeholder_decision --links-to pkg.rollup.weekly_report --attr decided_on=2026-03-14
+draft 1: declared:emea-excluded-from-q3-rollup-decided-in-the …
+  links declared_constrains -> pkg.rollup.weekly_report (user)
+  nothing is in the graph yet. Confirm it with your own words:
+  provledger node declare --confirm 1 --words "<the sentence you would say>" --at "<when it was decided>"
+```
+
+From then on it is an ordinary thing in the map: the next run computes its changes, it shows up in all three views, and a rule it carries turns up in the next plan that touches what it constrains.
+
+### Where the knowledge comes from
+
+Three sources, kept apart and never blended. What a record counts as is decided by which of them it came from, not by whoever wrote it down.
+
+**Measured.** The map is rebuilt from the source on every run and compared with the run before, so what changed is counted rather than reported: this column is gone, that function returns a different shape, this one only moved. The arrows are computed the same way — what reads this column, what it feeds — which is how *what might this break* gets answered before anything is edited.
+
+**Said.** A hook records your words verbatim as you type them, and the entry point they came through is recorded with them, so a sentence an agent typed into the CLI and a sentence you typed into the session never look alike.
+
+**Evidenced.** An email, a meeting note, a ticket. Your agent finds these with its own tools and its own credentials; the ledger only ever stores a label, a time and a link, never the body.
+
+Evidence sits where a test sits: it does not change what was decided, it changes how far the decision can be checked. And like a test, it is allowed to fail. An email that cuts *against* a decision is recorded as contradicting it rather than quietly left out, because dropping the inconvenient half is how a record stops being worth anything. A link that stops opening does not vanish either — it becomes "this stopped opening on this date", which is a fact about the record and not a hole in it.
+
+When none of the three has anything to say, the record says *unstated* and stops there. A blank is a fact; a fluent guess is a liability.
+
+### What you can ask it
 
 ![A task page with its findings block in red: two blocking findings, one of them an upstream column that stopped arriving, and one finding still unanswered](docs/media/readme-task.png)
 
@@ -57,30 +107,21 @@ Nothing is registered by hand or taken on the agent's word: the map is rebuilt f
 
 *Graph, Node, Task — one anchor, three angles. One record per decision; a hit count, never a repeat.*
 
-The dashboard is read-only and opens the database in read-only mode, so it can never block or change what it is showing. Graph draws the project as it is, or as it was at a chosen run, with a mark on everything that has a story. Node walks one thing's timeline: when it changed, why, who was shown which record, and which plan went on to cite it. Task shows what one piece of work read and what it decided. The three share one anchor — project, node, point in time — and switching views keeps it.
-
-### Ask it
+| the question | what answers it |
+|---|---|
+| Why is it this way? | `/ledger`, and every sentence ends in the id of the record it rests on |
+| Have we tried this before? | the rejected paths on the thing you are about to change, surfaced before you edit it |
+| What would this change reach? | the computed arrows — consumers, and the metric three steps downstream |
+| Someone is asking me to justify this | `provledger receipts "<what they said>"` — the same records as a timeline with their sources, handed to your own model to write the reply from |
+| I just inherited this project | all of the above, without having been in any of the meetings |
 
 ![The /ledger command answering a question in the terminal, every sentence ending in the id of the record it rests on](docs/media/readme-ask.gif)
 
 *Every sentence cites a record. When nothing is recorded, it says so.*
 
-`/ledger why is our train/test split 80/20?` — the answer comes back in the session you are already in, and every sentence ends with the id of the record it rests on. Code finds the candidates, computes the facts and computes the absences; the model may only restate that table; then code reads the answer back and deletes any sentence that cites nothing, cites an id the table does not hold, or carries a number the table does not state — counting every deletion, so a trimmed answer never reads like a complete one. The same thing is a command (`provledger ask`) and a page (`/ledger?q=`).
+`/ledger why is our train/test split 80/20?` — the answer comes back in the session you are already in. Code finds the candidates, computes the facts and computes the absences; the model may only restate that table; then code reads the answer back and deletes any sentence that cites nothing, cites an id the table does not hold, or carries a number the table does not state — counting every deletion, so a trimmed answer never reads like a complete one. The same thing is a command (`provledger ask`) and a page (`/ledger?q=`).
 
-### Things that were never in the code
-
-Most of what decides a number never was in the repository: a steering group excluded a region, a feed comes from someone else's system, a figure was worked out by hand once. One sentence puts those in the same map, and nothing enters it until you say the words yourself.
-
-```console
-$ provledger node declare "EMEA excluded from Q3 rollup, decided in the March review" \
-    --type stakeholder_decision --links-to pkg.rollup.weekly_report --attr decided_on=2026-03-14
-draft 1: declared:emea-excluded-from-q3-rollup-decided-in-the …
-  links declared_constrains -> pkg.rollup.weekly_report (user)
-  nothing is in the graph yet. Confirm it with your own words:
-  provledger node declare --confirm 1 --words "<the sentence you would say>" --at "<when it was decided>"
-```
-
-From then on it is an ordinary thing in the map: the next run computes its changes, it shows up in all three views, and a rule it carries turns up in the next plan that touches what it constrains.
+The dashboard is read-only and opens the database in read-only mode, so it can never block or change what it is showing.
 
 ---
 
@@ -101,6 +142,8 @@ Or as a Python library, if you only want the core to read and write a ledger fro
 pip install provledger
 ```
 
+**PyPI still carries 0.1.0** — the stdlib-only core from before decision provenance existed. None of what this README describes is in it: no hooks, no reasons, no `/ledger`, no dashboard. Those come from the plugin above, and the package will catch up at the next release. Install from PyPI only if the plan and step machinery is genuinely all you want.
+
 Dependencies install themselves on the first session. The full manual install, the per-suite verification and the troubleshooting table are in [`INSTALL.md`](INSTALL.md).
 
 ### Five commands
@@ -112,7 +155,7 @@ Each command below was run for real against a scratch ledger; the lines under it
 ```console
 $ claude plugin list
   ❯ provledger@provledger
-    Version: 0.2.0
+    Version: 0.4.0
     Scope: user
     Status: ✔ enabled
 ```
@@ -363,7 +406,12 @@ Deeper: [`docs/conformance.md`](docs/conformance.md) (providers and the six cont
 | `headline show` / `respond` / `ack` | the plan headline; answer one finding (revise / proceed); a person proceeds past one |
 | `why` | one bounded read of a node: history, constraints, rejected paths, prior claims, blast radius (`--impact`, `--all`, `--pending`, `--never-read`, `--search`, `--json`) |
 | `ask` | ask the ledger a question (`--no-model`, `--json`, `--export`, `--lang`, `--runner`) |
+| `receipts` | someone challenged a decision: the record as a timeline, the gaps, the range searched — the material a reply needs, never the reply itself (`--json`, `--lang`) |
 | `verify` | walk the three hash chains, and with `--against-notes` the git anchors they must agree with (exit 3 on a broken chain) |
+| `reference add` | pin a decision to where it came from — an email, a meeting, a ticket — as a label and a link, never a copy of the body (`--reason` or `--utterance`, `--uri`, `--stance`) |
+| `reference pending` / `mark` | which pointers nobody has opened lately; record that one still opens, or that it stopped (`--ok`, `--gone`, `--moved`, `--no-access`) |
+| `review evidence-slots` | what still has no checkable source: node, what changed, this plan's own time window, the identifiers to search on, significance. provLedger hands the list over and searches nothing itself (`--plan`, `--json`) |
+| `review evidence-log` | what became of each slot — attached, searched and found nothing, timed out, never searched — so a blank can say which kind of blank it is (`--plan`, `--node`, `--outcome`, `--tool-hint`, `--elapsed-ms`) |
 | `export` | a whitelisted bundle for someone who was not there (`--out`, `--zip`, `--include-rationale`, `--md`) |
 | `init --agents-md` | write or refresh the provledger section of `./AGENTS.md` |
 | `reason mark` | a person's word on a reason's significance, logged as judged by a human |
@@ -396,15 +444,15 @@ Eight suites, each with its own pyproject and pythonpath — run them separately
 | suite | tests |
 |---|---|
 | `scripts/tests` | 27 |
-| `orchestrator-backend` | 830 |
+| `orchestrator-backend` | 1074 |
 | `orchestrator-webapp` | 267 |
 | `skills/writing-plans/tests` | 93 |
-| `skills/executing-plans` | 77 |
-| `skills/update-project-state-graph/scripts/tests` | 90 |
+| `skills/executing-plans` | 83 |
+| `skills/update-project-state-graph/scripts/tests` | 107 |
 | `examples` | 18 |
-| `skills/project-state-graph/scripts/tests` | 429 |
+| `skills/project-state-graph/scripts/tests` | 430 |
 
-Total **1831 collected** across the eight suites (`scripts/count_tests.sh`), plus a few deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
+Total **2099 collected** across the eight suites (`scripts/count_tests.sh`), plus a few deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
 
 ### Origin
 
@@ -431,13 +479,13 @@ Issues and pull requests are welcome. Good first contributions: run `make demo` 
 
 The `superpowers` plugin is a recommended companion: the byte-identical `verification-before-completion` skill is not bundled and comes from superpowers when present. Everything works without it.
 
-The PyPI package is the stdlib-only core library — plans, steps, profiling, drift, the ledger — and the published release is 0.1.0; the plugin, the skills, the hooks, the dashboard and the `provledger` command come from this repository at 0.3.0.
+The PyPI package is the stdlib-only core library — plans, steps, profiling, drift, the ledger — and the published release is 0.1.0; the plugin, the skills, the hooks, the dashboard and the `provledger` command come from this repository at 0.4.0.
 
 
 ### See it run
 
 <video src="https://yizhao95.github.io/prov_ledger/media/walkthrough.mp4" controls muted playsinline width="880" poster="https://yizhao95.github.io/prov_ledger/media/walkthrough-cover.png"></video>
 
-*Forty-five seconds, no narration. A task reaches the agent; the check runs before anything is edited; one finding turns out to be an experiment that was already tried and rejected; the record behind it opens with the words that were said at the time; the graph shows how far the change would reach.*
+*Two minutes, no narration. Someone asks in chat why the rollup stops on 18 September and nobody still on the team knows. The record does: an upstream incident, the RCA that found it, the call that decided to cut the data — and that the cutoff was only ever meant to be temporary. Then how a record like that gets made, and what happens when it cannot be.*
 
 The same walkthrough with chapters you can jump to, and captions in English or Chinese: **[yizhao95.github.io/prov_ledger/walkthrough.html](https://yizhao95.github.io/prov_ledger/walkthrough.html)**. The ledger in it is a worked example, not a live database; every piece of interface wording is the product's own.

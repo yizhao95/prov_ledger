@@ -1,6 +1,6 @@
 {
   "name": "provledger",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Keeps the reasons behind a project's changes — your words, the email, the agent's reading, kept apart — and puts them in front of whoever is about to change the thing again.",
   "author": {
     "name": "yzhao",

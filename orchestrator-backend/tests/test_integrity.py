@@ -1,8 +1,14 @@
-"""integrity — the three chains and the git anchors they must agree with
+"""integrity — the four chains and the git anchors they must agree with
 (DP phase 3, Task 0; spec §7, G1/G2).
 
 What these tests pin down:
   - the report names every chain's head, so a card or a note has something to quote;
+  - `reference_check` is one of those chains: the record that says "I opened that
+    pointer on that date" is exactly the one a doubter doubts, so it gets the same
+    external witness as the other three;
+  - a payload written by the previous version stays readable: an old note is
+    evidence, and a version bump that made past evidence unreadable would be the
+    opposite of the point;
   - a tampered row is NAMED, not swallowed (G1, veto);
   - a ledger with no anchor is still `ok` but is NOT `anchored`, and says why —
     the absence of an external witness is a fact, not silence;
@@ -26,9 +32,10 @@ except ImportError:                       # RED: the module does not exist yet
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
-def _seed(conn, n=2):
-    """n utterances, n references and 2n reasons — every chain non-empty."""
-    ids = {"utterance": [], "reference": [], "change_reason": []}
+def _seed(conn, n=2, checks=True):
+    """n utterances, n references, 2n reasons and (unless `checks=False`) n
+    reference_check rows — every chain non-empty."""
+    ids = {"utterance": [], "reference": [], "change_reason": [], "reference_check": []}
     for i in range(n):
         u = pv.insert_utterance(conn, session_id="s1", project="proj", plan_id="P0",
                                 text=f"we keep the weekly grain, number {i}", occurred_at="2026-09-17 10:00:00")
@@ -42,20 +49,25 @@ def _seed(conn, n=2):
         ids["change_reason"].append(pv.insert_reason(
             conn, project="proj", plan_id="P0", node_key="nk_b", kind="technical",
             interpretation=f"weekly grain matches finance ({i})", recorded_by="agent"))
+        if checks:
+            ids["reference_check"].append(pv.insert_reference_check(
+                conn, reference_id=r, verdict="ok", note=f"opened it, it was there ({i})"))
     return ids
 
 
-def _tampered_copy(conn, tmp_path, reason_id):
-    """A copy of the ledger with the triggers dropped and one statement rewritten —
+def _tampered_copy(conn, tmp_path, row_id, *, table="change_reason", column="interpretation",
+                   value="quietly rewritten", name="tampered.db"):
+    """A copy of the ledger with the triggers dropped and one row rewritten —
     exactly what someone editing the file behind the store's back would leave."""
     src = conn.execute("PRAGMA database_list").fetchone()[2]
     conn.commit()
-    dst = tmp_path / "tampered.db"
+    dst = tmp_path / name
     shutil.copy(src, dst)
     c = sqlite3.connect(dst)
-    for (name,) in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='change_reason'").fetchall():
-        c.execute(f"DROP TRIGGER {name}")
-    c.execute("UPDATE change_reason SET interpretation = 'quietly rewritten' WHERE id = ?", (reason_id,))
+    for (trg,) in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?",
+                            (table,)).fetchall():
+        c.execute(f"DROP TRIGGER {trg}")
+    c.execute(f"UPDATE {table} SET {column} = ? WHERE id = ?", (value, row_id))
     c.commit()
     c.close()
     out = sqlite3.connect(dst)
@@ -80,7 +92,7 @@ def repo(tmp_path):
     return d
 
 
-# ── the three chains ──────────────────────────────────────────────────────────
+# ── the chains ────────────────────────────────────────────────────────────────
 
 def test_g1_verify_reports_every_chain_head(conn):
     ids = _seed(conn, n=2)
@@ -132,14 +144,22 @@ def test_chain_heads_on_an_empty_ledger_say_none_not_zero(conn):
 
 # ── anchors ───────────────────────────────────────────────────────────────────
 
-def test_anchor_payload_carries_the_three_heads(conn):
-    _seed(conn, n=1)
+def test_anchor_payload_carries_every_chain_head(conn):
+    """Was `..._the_three_heads`, v == 1. The check trail is a chain like the rest,
+    so the payload names four heads and says v2 — strictly more than before.
+    `plan_status` joined it as an addition to v2, not a v3: an older reader
+    ignores a key it does not know."""
+    ids = _seed(conn, n=1)
     payload = integrity.anchor_payload(conn, plan_id="P0")
-    assert set(payload) == {"utterance", "reference", "change_reason", "at", "plan_id", "v"}
-    assert payload["plan_id"] == "P0" and payload["v"] == 1
+    assert set(payload) == {"utterance", "reference", "change_reason", "reference_check",
+                            "at", "plan_id", "plan_status", "v"}
+    assert payload["plan_id"] == "P0" and payload["v"] == 2 == integrity.PAYLOAD_VERSION
     assert payload["at"].endswith("Z")
     for table in integrity.CHAINS:
         assert set(payload[table]) == {"id", "hash"}
+        assert payload[table]["id"] == ids[table][-1]
+        assert payload[table]["hash"] == conn.execute(
+            f"SELECT hash FROM {table} WHERE id = ?", (ids[table][-1],)).fetchone()[0]
 
 
 def test_anchor_and_read_roundtrip_appends_never_rewrites(conn, repo):
@@ -376,3 +396,293 @@ def test_an_anchor_that_pins_nothing_is_not_counted_as_matched(conn, repo):
     assert rep["anchors"]["empty"] == 1
     assert rep["anchors"]["latest"]["plan_id"] == "P0"                # the empty one is never "latest"
     assert "1 line(s) on the ref pin nothing" in integrity.anchor_line(rep)
+
+
+# ── the check trail gets the same external witness as everything else ─────────
+
+def test_verify_walks_the_check_chain_too(conn):
+    """Migration 030 hash-chains `reference_check`, and provenance.verify_chain
+    accepts it. A chain nobody walks is a chain nobody would notice moving."""
+    assert "reference_check" in integrity.CHAINS
+    assert len(integrity.CHAINS) == 4
+    ids = _seed(conn, n=2)
+    rep = integrity.verify(conn)
+    assert rep["ok"] is True
+    t = rep["tables"]["reference_check"]
+    assert t["ok"] is True and t["first_bad_id"] is None
+    assert t["rows"] == len(ids["reference_check"]) == 2
+    assert t["head_id"] == ids["reference_check"][-1]
+    assert t["head_hash"] == conn.execute(
+        "SELECT hash FROM reference_check WHERE id = ?", (t["head_id"],)).fetchone()[0]
+    assert f"chain reference_check: ok" in integrity.render(rep)
+
+
+@pytest.mark.veto
+def test_g1_a_tampered_reference_check_row_is_named(conn, tmp_path):
+    """The claim under doubt is "you say you opened that link". Rewrite what the
+    checker wrote and verify must say which row, not just that something is off."""
+    ids = _seed(conn, n=2)
+    target = ids["reference_check"][0]
+    bad = _tampered_copy(conn, tmp_path, target, table="reference_check", column="note",
+                         value="it was there, honestly", name="tampered-check.db")
+    try:
+        rep = integrity.verify(bad)
+        assert rep["ok"] is False
+        assert rep["tables"]["reference_check"]["ok"] is False
+        assert rep["tables"]["reference_check"]["first_bad_id"] == target
+        for other in ("utterance", "reference", "change_reason"):
+            assert rep["tables"][other]["ok"] is True
+        assert f"chain reference_check: chain broken at #{target}" in integrity.render(rep)
+    finally:
+        bad.close()
+
+
+def test_an_anchor_pins_the_check_chain_head_and_a_moved_check_is_a_mismatch(conn, repo):
+    _seed(conn, n=1)
+    payload = integrity.anchor_payload(conn, plan_id="P0")
+    assert payload["reference_check"]["id"] is not None
+    payload["reference_check"]["hash"] = "0" * 64      # a note that no longer describes this ledger
+    integrity.anchor_heads(repo, payload)
+    rep = integrity.verify(conn, against_notes=True, repo=repo)
+    mm = rep["anchors"]["first_mismatch"]
+    assert rep["ok"] is False
+    assert mm["table"] == "reference_check" and mm["id"] == payload["reference_check"]["id"]
+    assert mm["anchored_hash"] == "0" * 64 and mm["found_hash"] != mm["anchored_hash"]
+    assert "reference_check" in integrity.anchor_line(rep)
+
+
+def test_an_empty_check_chain_anchors_as_null_not_zero(conn, repo):
+    """A ledger with reasons but no checks yet: the check head is `null`, the same
+    word chain_heads already uses for the other three. `0` would name row zero."""
+    _seed(conn, n=1, checks=False)
+    heads = integrity.chain_heads(conn)
+    assert heads["reference_check"] == {"id": None, "hash": None, "rows": 0}
+    payload = integrity.anchor_payload(conn, plan_id="P0")
+    assert payload["reference_check"] == {"id": None, "hash": None}
+    assert '"reference_check":{"hash":null,"id":null}' in integrity.payload_line(payload)
+    # the other three still pin rows, so this is a real anchor and it still matches
+    integrity.anchor_heads(repo, payload)
+    rep = integrity.verify(conn, against_notes=True, repo=repo)
+    assert rep["ok"] is True and rep["anchored"] is True
+    assert rep["anchors"]["found"] == 1 and rep["anchors"]["matched"] == 1
+    assert rep["anchors"]["latest"]["heads"]["reference_check"] == {"id": None, "hash": None}
+
+
+def test_a_v1_payload_is_still_readable_after_the_version_bump(conn, repo):
+    """An old note is evidence. A version bump that made past evidence unreadable
+    would be the opposite of the point, so v1 lines are anchors, not `unreadable`."""
+    ids = _seed(conn, n=1)
+    v1 = {t: {"id": ids[t][-1],
+              "hash": conn.execute(f"SELECT hash FROM {t} WHERE id = ?", (ids[t][-1],)).fetchone()[0]}
+          for t in ("utterance", "reference", "change_reason")}
+    v1.update({"at": "2026-09-17T06:38:53Z", "plan_id": "P-old", "v": 1})
+    assert "reference_check" not in v1
+    _git(repo, "notes", "--ref", integrity.NOTES_REF, "append", "HEAD", "-m", integrity.payload_line(v1))
+    anchors = integrity.read_anchors(repo)
+    assert len(anchors) == 1
+    assert "unreadable" not in anchors[0] and not anchors[0].get("empty")
+    assert anchors[0]["plan_id"] == "P-old" and anchors[0]["v"] == 1
+    rep = integrity.verify(conn, against_notes=True, repo=repo)
+    assert rep["ok"] is True and rep["anchored"] is True
+    assert rep["anchors"]["found"] == 1 and rep["anchors"]["matched"] == 1
+    assert rep["anchors"]["unreadable"] == 0 and rep["anchors"]["empty"] == 0
+    assert rep["anchors"]["latest"]["heads"]["reference_check"] is None   # v1 pinned no check head
+
+
+def test_a_v1_and_a_v2_anchor_sit_on_the_ref_together(conn, repo):
+    """The realistic state of any repository that was anchored before this change."""
+    ids = _seed(conn, n=1)
+    v1 = {t: {"id": ids[t][-1],
+              "hash": conn.execute(f"SELECT hash FROM {t} WHERE id = ?", (ids[t][-1],)).fetchone()[0]}
+          for t in ("utterance", "reference", "change_reason")}
+    v1.update({"at": "2026-09-17T06:38:53Z", "plan_id": "P-old", "v": 1})
+    _git(repo, "notes", "--ref", integrity.NOTES_REF, "append", "HEAD", "-m", integrity.payload_line(v1))
+    _seed(conn, n=1)
+    integrity.anchor_heads(repo, integrity.anchor_payload(conn, plan_id="P-new"))
+    rep = integrity.verify(conn, against_notes=True, repo=repo)
+    assert rep["ok"] is True
+    assert rep["anchors"]["found"] == 2 and rep["anchors"]["matched"] == 2
+    assert rep["anchors"]["unreadable"] == 0
+    assert rep["anchors"]["latest"]["plan_id"] == "P-new"
+    assert [a["v"] for a in integrity.read_anchors(repo)] == [1, 2]
+
+
+def test_a_future_payload_version_is_unreadable_not_trusted(conn, repo):
+    """Forward compatibility is not a promise this module can keep: a payload from
+    a version it does not know is counted, never guessed at."""
+    _seed(conn, n=1)
+    integrity.anchor_heads(repo, integrity.anchor_payload(conn, plan_id="P0"))
+    ahead = integrity.anchor_payload(conn, plan_id="P-future")
+    ahead["v"] = integrity.PAYLOAD_VERSION + 1
+    _git(repo, "notes", "--ref", integrity.NOTES_REF, "append", "HEAD", "-m", integrity.payload_line(ahead))
+    rep = integrity.verify(conn, against_notes=True, repo=repo)
+    assert rep["anchors"]["found"] == 1 and rep["anchors"]["unreadable"] == 1
+    assert rep["anchors"]["latest"]["plan_id"] == "P0"
+
+
+def test_a_closed_plan_anchors_the_check_chain_head(conn, repo, tmp_path):
+    """End to end: the witness a close writes now covers the check trail."""
+    ids = _seed(conn, n=1)
+    reg = _registry(tmp_path, "demo-app", repo)
+    _close(conn, "p-check", "demo-app", reg)
+    a = integrity.read_anchors(repo)[0]
+    assert a["v"] == integrity.PAYLOAD_VERSION
+    assert a["reference_check"]["id"] == ids["reference_check"][-1]
+    assert a["reference_check"]["hash"] == conn.execute(
+        "SELECT hash FROM reference_check WHERE id = ?", (ids["reference_check"][-1],)).fetchone()[0]
+
+
+# ── the witness is not tied to success ────────────────────────────────────────
+#
+# The witness is not tied to success. A plan can fail because a gate did not pass,
+# or because its
+# own bookkeeping jammed, but the rows it recorded do not become untrue when it
+# fails. What an anchor attests is "these rows existed at this commit and have
+# not been altered since" — a claim about rows, not about how the work went.
+# Anchoring only successes left the records most likely to be disputed, the ones
+# from a run that went wrong, as the only ones with no outside witness.
+
+def _close_failed(conn, plan_id, project, reg):
+    """A plan that closes FAILED through an unrecovered regular step — the
+    commonest failed close, and the one the FAILED path never intercepts."""
+    from orchestrator import api, db as dbm
+    dbm.insert_plan(conn, plan_id, f"Refactor the {project} pipeline")
+    dbm.insert_step(conn, f"{plan_id}-A", plan_id, "CODE: work", 0)
+    review_id = dbm.insert_review_step(conn, plan_id)
+    api.start_step(conn, f"{plan_id}-A")
+    api.fail_step(conn, f"{plan_id}-A", "the gate did not pass")
+    result = api.review_and_complete(conn, plan_id, registry_path=reg)
+    return review_id, result
+
+
+def _close_review_failed(conn, plan_id, project, reg):
+    """A plan whose agent review itself failed — the other FAILED close."""
+    from orchestrator import api, db as dbm
+    dbm.insert_plan(conn, plan_id, f"Refactor the {project} pipeline")
+    dbm.insert_step(conn, f"{plan_id}-A", plan_id, "CODE: work", 0, status="COMPLETED")
+    review_id = dbm.insert_review_step(conn, plan_id)
+    api.review_and_complete(conn, plan_id, registry_path=reg)
+    api.start_step(conn, f"{review_id}.1")
+    api.fail_step(conn, f"{review_id}.1", "the review found the work unsound")
+    result = api.review_and_complete(conn, plan_id, registry_path=reg)
+    return review_id, result
+
+
+def test_a_failed_plan_close_anchors_its_chain_heads(conn, repo, tmp_path):
+    """The defect: `_anchor_close` sat inside the COMPLETED return, so 64
+    change_reason rows sat in the live ledger with no external witness."""
+    from orchestrator import db as dbm
+    ids = _seed(conn, n=2)
+    reg = _registry(tmp_path, "demo-app", repo)
+    review_id, result = _close_failed(conn, "p-failed", "demo-app", reg)
+    assert result["plan_status"] == "FAILED"
+    assert result["anchor"]["anchored"] is True
+    anchors = integrity.read_anchors(repo)
+    assert len(anchors) == 1
+    a = anchors[0]
+    assert a["plan_id"] == "p-failed"
+    for table in integrity.CHAINS:
+        assert a[table]["id"] == ids[table][-1]
+    log = dbm.get_step(conn, review_id)["log_context"]
+    assert "[ANCHOR]" in log and a["note_sha"][:12] in log
+
+
+def test_a_failed_agent_review_close_anchors_too(conn, repo, tmp_path):
+    _seed(conn, n=1)
+    reg = _registry(tmp_path, "demo-app", repo)
+    _review_id, result = _close_review_failed(conn, "p-rev-failed", "demo-app", reg)
+    assert result["plan_status"] == "FAILED"
+    assert result["anchor"]["anchored"] is True
+    anchors = integrity.read_anchors(repo)
+    assert [a["plan_id"] for a in anchors] == ["p-rev-failed"]
+    assert anchors[0]["plan_status"] == "FAILED"
+
+
+def test_the_note_says_which_close_it_witnessed(conn, repo, tmp_path):
+    """A witness that cannot tell you whether the run succeeded is a worse
+    witness. The payload carries the value that was written."""
+    _seed(conn, n=1)
+    reg = _registry(tmp_path, "demo-app", repo)
+    _close_failed(conn, "p-bad", "demo-app", reg)
+    _seed(conn, n=1)
+    _close(conn, "p-good", "demo-app", reg)
+    anchors = integrity.read_anchors(repo)
+    assert {a["plan_id"]: a["plan_status"] for a in anchors} == {
+        "p-bad": "FAILED", "p-good": "COMPLETED"}
+
+
+def test_verify_against_notes_matches_a_failed_plans_anchor_like_any_other(conn, repo, tmp_path):
+    _seed(conn, n=1)
+    reg = _registry(tmp_path, "demo-app", repo)
+    _close_failed(conn, "p-failed-verify", "demo-app", reg)
+    rep = integrity.verify(conn, against_notes=True, repo=repo)
+    assert rep["ok"] is True and rep["anchored"] is True
+    assert rep["anchors"]["found"] == 1 and rep["anchors"]["matched"] == 1
+    assert rep["anchors"]["unreadable"] == 0
+    assert rep["anchors"]["latest"]["plan_id"] == "p-failed-verify"
+
+
+def test_anchor_off_suppresses_a_failed_close_too(conn, repo, tmp_path):
+    from orchestrator import db as dbm
+    _seed(conn, n=1)
+    (repo / "provledger-extensions.json").write_text(
+        json.dumps({"version": 1, "integrity": {"anchor": "off"}}))
+    reg = _registry(tmp_path, "demo-app", repo)
+    review_id, result = _close_failed(conn, "p-off-failed", "demo-app", reg)
+    assert result["plan_status"] == "FAILED"
+    assert result["anchor"]["anchored"] is False and result["anchor"]["mode"] == "off"
+    assert integrity.read_anchors(repo) == []
+    assert "[ANCHOR] off" in dbm.get_step(conn, review_id)["log_context"]
+
+
+def test_an_anchor_failure_never_blocks_a_failed_close(conn, tmp_path):
+    from orchestrator import db as dbm
+    _seed(conn, n=1)
+    not_a_repo = tmp_path / "plain"
+    not_a_repo.mkdir()
+    reg = _registry(tmp_path, "demo-app", not_a_repo)
+    review_id, result = _close_failed(conn, "p-nogit-failed", "demo-app", reg)
+    assert result["plan_status"] == "FAILED"
+    assert dbm.get_plan(conn, "p-nogit-failed")["status"] == "FAILED"
+    assert result["anchor"]["anchored"] is False and result["anchor"]["reason"]
+    assert "[ANCHOR] not anchored" in dbm.get_step(conn, review_id)["log_context"]
+
+
+def test_plan_status_is_an_addition_not_a_new_payload_version(conn, repo):
+    """A new optional field is something older readers ignore. A v3 payload
+    would be counted `unreadable` by the very code that wrote it, so the
+    version stays where it is."""
+    _seed(conn, n=1)
+    payload = integrity.anchor_payload(conn, plan_id="P0", plan_status="FAILED")
+    assert payload["v"] == 2 and integrity.PAYLOAD_VERSION == 2
+    assert payload["plan_status"] == "FAILED"
+    integrity.anchor_heads(repo, payload)
+    rep = integrity.verify(conn, against_notes=True, repo=repo)
+    assert rep["anchors"]["found"] == 1 and rep["anchors"]["matched"] == 1
+    assert rep["anchors"]["unreadable"] == 0
+    assert integrity.read_anchors(repo)[0]["plan_status"] == "FAILED"
+
+
+def test_an_old_note_without_plan_status_is_still_read(conn, repo):
+    """The field is optional both ways: the anchors already on the live ref were
+    written before it existed and stay evidence."""
+    _seed(conn, n=1)
+    payload = integrity.anchor_payload(conn, plan_id="P-old")
+    payload.pop("plan_status", None)
+    integrity.anchor_heads(repo, payload)
+    anchors = integrity.read_anchors(repo)
+    assert len(anchors) == 1 and "unreadable" not in anchors[0]
+    assert anchors[0].get("plan_status") is None
+    rep = integrity.verify(conn, against_notes=True, repo=repo)
+    assert rep["anchors"]["matched"] == 1
+
+
+def test_the_report_says_how_the_latest_anchored_plan_closed(conn, repo, tmp_path):
+    """The field is only useful if a reader can see it: `verify` carries it and
+    the one human-readable line prints it."""
+    _seed(conn, n=1)
+    reg = _registry(tmp_path, "demo-app", repo)
+    _close_failed(conn, "p-shown", "demo-app", reg)
+    rep = integrity.verify(conn, against_notes=True, repo=repo)
+    assert rep["anchors"]["latest"]["plan_status"] == "FAILED"
+    assert "plan p-shown FAILED" in integrity.anchor_line(rep)

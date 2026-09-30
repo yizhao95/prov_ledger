@@ -208,11 +208,19 @@ def test_the_bundle_carries_the_chain_heads_and_says_when_there_is_no_anchor(con
     from orchestrator import integrity
     manifest = export.bundle(conn, "proj", str(tmp_path / "out"), psg_db_path=graph)
     assert set(manifest["chain_heads"]) == set(integrity.CHAINS)
+    assert "reference_check" in manifest["chain_heads"]            # the check trail is a chain too
     for table in integrity.CHAINS:
-        assert manifest["chain_heads"][table]["hash"] == conn.execute(
-            f"SELECT hash FROM {table} ORDER BY id DESC LIMIT 1").fetchone()[0]
+        row = conn.execute(f"SELECT hash FROM {table} ORDER BY id DESC LIMIT 1").fetchone()
+        assert manifest["chain_heads"][table]["hash"] == (row[0] if row else None)
+        assert manifest["chain_heads"][table]["rows"] == conn.execute(
+            f"SELECT COUNT(*) FROM {table}").fetchone()[0]
     assert manifest["anchor"] is None and manifest["anchor_reason"]
-    assert "not anchored" in Path(manifest["dir"], "README.md").read_text(encoding="utf-8")
+    readme = Path(manifest["dir"], "README.md").read_text(encoding="utf-8")
+    assert "not anchored" in readme
+    # An empty chain has no head, and the README says so in words rather than
+    # printing `head #None` — `null` is the same answer chain_heads already gives.
+    assert "#None" not in readme
+    assert "chain `reference_check`: 0 row(s), head #-" in readme
     assert integrity.CLAIM in Path(manifest["dir"], "README.md").read_text(encoding="utf-8")
 
 
@@ -283,3 +291,19 @@ def test_cli_export_md_still_works(conn, ledger, graph, tmp_path):
                        capture_output=True, text=True, env=env, cwd=str(REPO))
     assert r.returncode == 0, r.stderr
     assert (tmp_path / "md").is_dir()
+
+
+def test_a_pointer_anchored_to_the_words_does_not_break_the_bundle(conn, ledger, graph, tmp_path):
+    """Migration 030 lets a pointer hang on an `utterance` — the source was named
+    in the sentence, before any plan and therefore any reason existed. That row's
+    `reason_id` is NULL, and the bundle walks every link of the project's
+    references, so reading it as an integer took the whole export down.
+
+    It belongs to no exported record (an utterance is never a table in the bundle),
+    so it is skipped — the whitelist's own answer to "nobody listed this"."""
+    ref = pv.insert_reference(conn, project="proj", kind="email", label="re: grain, pinned while speaking",
+                              uri="mail:9", occurred_at="2026-09-01 07:00:00")
+    pv.link_reference(conn, None, ref, utterance_id=ledger["shareable_utterance"])
+    manifest = export.bundle(conn, "proj", str(tmp_path / "out"), psg_db_path=graph)
+    assert manifest["counts"]["reference"] >= 1
+    assert "pinned while speaking" not in _all_text(tmp_path / "out")

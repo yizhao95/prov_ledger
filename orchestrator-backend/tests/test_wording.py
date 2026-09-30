@@ -93,7 +93,11 @@ def test_phase2b_docs_and_the_new_views_stay_neutral():
     readme = (REPO / "README.md").read_text(encoding="utf-8")
     # The three views are documented by what the section says, not by one image's alt text:
     # the images in section 2 are replaced from time to time, the claim is not.
-    assert "one anchor, three angles" in readme and "The three share one anchor" in readme
+    # The claim, not one phrasing of it: the three views are one view. Section 2
+    # was rebuilt around exactly this, so the wording moved and the claim did not.
+    assert "one anchor, three angles" in readme
+    assert "share a single anchor" in readme
+    assert "not three pages" in readme, "the README must say the three views are one view, not three"
     assert "`/session/{id}`" in readme
     ki = _known_issues()
     assert "The full graph view is slow" in ki               # the view's one known limit is still published

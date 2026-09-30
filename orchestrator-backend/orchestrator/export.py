@@ -152,6 +152,13 @@ def _references(conn, project: str, reason_ids: set[int], skipped: dict) -> tupl
             "SELECT f.*, l.reason_id FROM reference_link l JOIN reference f ON f.id = l.reference_id "
             "WHERE f.project = ? ORDER BY f.id", (project,)).fetchall():
         d = dict(row)
+        # migration 030: a pointer may hang on an `utterance` instead (the source was
+        # named in the sentence, before any plan and so before any reason). An
+        # utterance is never a table in the bundle, so that row belongs to no
+        # exported record and is skipped — the same answer the whitelist gives
+        # everything nobody listed.
+        if d["reason_id"] is None:
+            continue
         rid = int(d["reason_id"])
         if rid not in reason_ids:
             continue
@@ -299,7 +306,9 @@ def _readme(project: str, manifest: dict) -> str:
               "## Integrity", ""]
     for table in integrity.CHAINS:
         h = manifest["chain_heads"][table]
-        lines.append(f"- chain `{table}`: {h['rows']} row(s), head #{h['id']} `{(h['hash'] or '')[:12]}`")
+        # An empty chain has no head: `-`, the same word `integrity.render` uses.
+        # `head #None` would read as a row id, and there is no row zero.
+        lines.append(f"- chain `{table}`: {h['rows']} row(s), head #{h['id'] or '-'} `{(h['hash'] or '')[:12]}`")
     if anchor:
         lines.append(f"- git anchor: note `{(anchor.get('note_sha') or '')[:12]}` @ commit "
                      f"`{(anchor.get('commit') or '')[:12]}` ({anchor.get('at')}, plan {anchor.get('plan_id')})")

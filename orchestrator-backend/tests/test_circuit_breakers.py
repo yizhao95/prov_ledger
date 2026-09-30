@@ -43,6 +43,18 @@ def test_loop_prevention_raises_hardstop_above_max():
         check_loop_prevention(99, 5)
 
 
+def test_loop_prevention_only_offers_actions_the_product_can_perform():
+    """FL-137: the breaker used to offer "raise max_revisions" when nothing but a
+    hand-written UPDATE could do it. Every option it names must be reachable, and
+    the budget one is reachable through exactly one script."""
+    with pytest.raises(HardStop) as e:
+        check_loop_prevention(5, 5)
+    msg = str(e.value)
+    assert "raise-budget.sh" in msg, msg
+    assert "reason" in msg                       # the raise is a recorded decision, not a dial
+    assert "raise max_revisions," not in msg     # the bare, unactionable phrasing is gone
+
+
 def test_depth_limit_quiet_below_3():
     check_depth_limit(0)
     check_depth_limit(1)

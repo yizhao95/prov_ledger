@@ -48,7 +48,8 @@ gap is acceptable, and what the reasons are.
 
 ```bash
 PY=~/skill-workspace/.venv/bin/python
-# 1. look before writing anything (steps 0–3 only; exit 1 = the gates would fail)
+# 1. look before writing anything (steps 0–3; it PRINTS the 4b/4c gates it did NOT evaluate,
+#    so a PASS here is not a PASS for the real run; exit 1 = the gates it did check would fail)
 $PY skills/update-project-state-graph/scripts/review_run.py --plan-id <plan> --project <name> --dry-run
 # 2. run it: lock -> gates -> refresh (PROVLEDGER_* attribution) -> tests -> selfcheck -> checklist
 $PY .../review_run.py --plan-id <plan> --project <name> --tests "<suite command>" --reasons ask
@@ -62,12 +63,35 @@ $PY .../review_run.py --plan-id <plan> --project <name> --reasons reasons.json  
 | `--reasons stub\|unstated\|ask\|<file.json>` | `stub` = "scenario: <event_types>" per slot (scenario tests only); `unstated` = every slot NULL; `ask` = print the checklist and stop (exit 6, resumable); file = `[{qualified_name\|node_key, text}]`, an unknown key exits 6 and writes nothing |
 | `--tests "<cmd>"` | the 4b re-test, run inside the repo; omitted = logged as *tests skipped*, never silent |
 | `--accept-signature "<reason>"` | may override the `signature` gate **only** (FL-018 additive kwargs); the reason is written into the REVIEW.1 log and summary; any other failing gate still fails |
-| `--dry-run` | steps 0–3, nothing written (no lock line, no start-step, no refresh) |
-| `--json` | machine-readable result as the last stdout line: `{verdict, gates, range, refreshed_sha, slots, filled, unstated, closed}` |
+| `--timeout-tests <seconds>` | ceiling on the `--tests` command; default **600** s |
+| `--timeout-graph <seconds>` | ceiling on the `init_project.sh` refresh; default **4800** s |
+| `--dry-run` | steps 0–3, nothing written (no lock line, no start-step, no refresh). Its report **names every gate it did not evaluate** — `dirty_working_tree`, `graph_refresh`, `tests`, `selfcheck` (4b) and `close_reasons` (4c) — so a dry-run PASS can never be read as a real-run PASS. A dirty working tree passes the dry run and FAILs the real one (FL-134) |
+| `--as-recovery <step>` | an attempt FAILED: run 1–4c **as** that PENDING retry. The retry is a **child of the attempt it retries** (`REVIEW.1.1`, then `REVIEW.1.1.1`) — never a sibling; the driver refuses a sibling of an unrecovered attempt (exit 6) and names the step to nest under (FL-138) |
+| `--json` | machine-readable result as the last stdout line: `{verdict, gates, range, refreshed_sha, slots, filled, unstated, closed}`, plus `{dry_run, not_evaluated}` on a dry run |
 | `--registry <projects.json>` | isolated registry (tests / scenarios); defaults to `PSG_REGISTRY_PATH` or `~/skill-workspace/project-graphs/projects.json` |
 
-Exit codes: `0` closed COMPLETED · `1` closed FAILED (4a gaps, refresh / tests /
-selfcheck failure) · `5` a write script failed · `6` bad input. Every write
+**Time ceilings (every subprocess has one).** The review rebuilds the whole graph
+and runs the project's own suite, so it is minutes long — but minutes must have an
+end: *a tool that gets slower in silence is the thing this project exists to
+prevent.*
+
+| Call site | Ceiling | Overridable |
+|---|---|---|
+| the executing-plans write scripts (`append-log`, `start-step`, `reason-slots`, `reason-fill`, `complete-step` / `fail-step`) | **60** s (fixed — one sqlite write each; past that it is wedged, not slow) | no |
+| the graph refresh (`init_project.sh`) | **4800** s | `--timeout-graph` |
+| the `--tests` command | **600** s | `--timeout-tests` |
+
+A breach takes the **same path as a non-zero exit**: the refresh and the tests
+`fail-step` `<plan>-REVIEW.1` with the ceiling and the elapsed seconds in the
+reason (exit 1); a write script that hangs exits 5. A timeout never leaves the
+plan quietly `IN_PROGRESS`, and it is never reported as a pass.
+
+Exit codes: `0` **the plan closed COMPLETED** — and nothing else · `1` it did not:
+closed FAILED (4a gaps, refresh / tests / selfcheck failure or **timeout**), or
+left short of COMPLETED because something at close time refused (an unfinished
+sibling recovery step, a registry behind HEAD) · `5` a write script failed
+(including its 60 s timeout) · `6` bad input, including an `--as-recovery` step of
+the wrong shape. Every write
 still goes through the executing-plans scripts (`append-log`, `start-step`,
 `reason-slots`, `reason-fill`, `complete-step` / `fail-step`) — the driver adds
 no second write path. If `REVIEW.1` is already `IN_PROGRESS` the driver resumes
@@ -128,6 +152,112 @@ bash skills/executing-plans/scripts/complete-step.sh <in.json>  # the child <pla
 `node_event` accumulate across refreshes and `python3 -m analyzer history <db>
 <qualified_name>` (run from `skills/project-state-graph/scripts`) shows a
 node's event stream with the plan/step that caused each change.
+
+## Evidence (4d — after the reasons are filled, before completing the child step)
+
+A reason says **what kind of statement** it is. Evidence says **how checkable**
+it is. They are two dimensions and they never move each other: attaching an email
+to a reason does not change its tier, it only raises its source level. Evidence
+sits exactly where a test sits — a test does not change what the code does, it
+changes your confidence that it does it.
+
+**provLedger searches nothing.** It hands you a list; you search with *your* own
+communication tools and *your* own credentials, and write back what you found.
+No token, no mailbox and no permalink contents ever enter the ledger — only a
+label, a time and a link.
+
+### Step 1 · fill the reason from what the user said in this task's window
+
+This is 4c above, and it happens **first**. Only what the user said in this
+task's window can become a reason:
+
+| What you have | What you write | Tier |
+|---|---|---|
+| The user's own words name this node | `{"node_key": "nk_…", "utterance_id": 42, "span": [0, 31]}` | `stated` |
+| The user said something related but never named it, or the plan itself says what was being done | `{"node_key": "nk_…", "interpretation": "…"}` | `asserted` |
+| The user said nothing about it | `{"node_key": "nk_…", "unstated": true}` | `unstated` |
+
+Reporting the task faithfully is not a guess: "the plan says to exclude EMEA from
+the rollup" is a restatement and belongs as `asserted`. Your own theory about
+*why* is not in the task and not in the user's words, and there is nowhere to put
+it.
+
+### Step 2 · search your own communication tools and attach what you find
+
+For each slot the command below gives you, search **inside its `window`** for its
+`hints` — email, chat, meeting notes, tickets, whatever you have. No such tool on
+this host? Skip it; nothing breaks, the source level just stays lower.
+
+A pointer hangs on a reason, so step 1 must have left a row for it: the slot's
+`reason_id` is the one to pass, and a slot still showing `"reason_id": null` has
+not been filled yet — go back and fill it, `{"unstated": true}` included.
+
+```bash
+# the to-check list: node, what changed, this plan's own time window, the
+# identifiers to search on, the reason id to hang a pointer on, significance
+provledger review evidence-slots --plan <plan_id> --json
+
+# one pointer per hit, hung on the reason the slot names
+provledger reference add --reason <reason_id> \
+  --kind email|chat|meeting|ticket|doc|commit \
+  --uri <permalink> --label "<subject · who>" --occurred-at "<when>"
+
+# a hit that disagrees with the reason — recorded, never discarded
+provledger reference add --reason <reason_id> --kind email \
+  --uri <permalink> --label "<subject · who>" --occurred-at "<when>" \
+  --stance contradicts
+
+# what became of each slot — write one row per slot, always
+provledger review evidence-log --plan <plan_id> --node <node_key> \
+  --outcome attached|found_nothing|timed_out|not_searched \
+  [--reason-tier stated|asserted|derived|unstated] \
+  [--evidence-level linked|verbal|task_context|unstated] \
+  [--tool-hint "<which tool looked>"] [--elapsed-ms <n>]
+
+# read it back later: "why is this one blank?"
+provledger review evidence-log --plan <plan_id> --json
+```
+
+At most `PROVLEDGER_EVIDENCE_SLOTS` slots (default 5) come back, in descending
+significance — that is the cost gate. The whole evidence pass has its own budget
+(4800 s by default); when it runs out, log `timed_out` for the slots that were in
+flight and `not_searched` for the ones that never started, and leave the reasons
+as they are.
+
+### The four rules
+
+1. **Attaching evidence never changes a tier.** A pointer raises
+   `evidence_level` (`unstated` / `task_context` → `verbal` → `linked`) and
+   nothing else. Never re-fill a reason as `stated` because you found an email:
+   `stated` means *the user's own words*, and a span into their `utterance` is the
+   only way to get it.
+2. **Attach every hit, not the best one.** Three emails and a meeting → four
+   `reference add` calls. Picking the most convincing one is editing the record;
+   the table is many-to-many precisely so you do not have to choose.
+3. **A hit that contradicts the reason is attached with `--stance contradicts`,
+   never discarded.** Evidence is allowed to fail, the same way a test is. A
+   contradicting source does not demote the reason's tier — the user still said
+   what they said — it tells the reader the two disagree.
+4. **When both steps come up empty, write `unstated`, and never guess.** A
+   pointer found in a mailbox is *evidence*, not a reason: you may not read a
+   reason out of an email and fill it in. Write the gap as a row first —
+   `{"node_key": "nk_…", "unstated": true}` through `reason-fill`, which is what
+   gives the slot a `reason_id` — then hang the pointer on that `unstated` row and
+   leave the reason itself blank. A gap deserves to be a row rather than an
+   absence, and the page then says "there is a source that may be related, but
+   nobody said this change was because of it", which is far more honest than a
+   sentence that reads well. Only when the slot's
+   `significance_level` is `major` is it worth interrupting the user once: show
+   them the pointer and the change and ask "is this the reason?". If they answer,
+   that answer is **their words** — record it with `provledger note` (or the hook
+   records it) and fill the slot as `stated` with a span into it. If they do not
+   answer, or say no, it stays blank.
+
+**Every slot gets an `evidence_log` row, including the ones you never searched.**
+That row is the answer to "why is this one blank" — nobody looked, the window
+held nothing, or the look ran out of time. A system that degrades in silence is
+the thing this product exists to prevent, so the silence is the one thing that
+may not go unrecorded.
 
 ## Two close-time graph gates (deterministic, run before finalizing)
 
@@ -196,6 +326,9 @@ philosophy as the rest of the reviewer: **report and FAIL, never auto-fix**.
 | Refresh the deep graph | `project-state-graph/scripts/init_project.sh` |
 | Close the plan (drive the child step) | `executing-plans/scripts/complete-step.sh` / `fail-step.sh` on `<plan>-REVIEW.1` |
 | The whole flow, deterministically | `scripts/review_run.py --plan-id P --project X [--tests ...] [--reasons ...]` |
+| What still needs a source, and where to look | `provledger review evidence-slots --plan <id> --json` |
+| Hang one pointer on a reason | `provledger reference add --reason <id> --kind email --uri … --label … --occurred-at …` |
+| Record what became of a slot | `provledger review evidence-log --plan <id> --node <key> --outcome …` |
 
 Run the helpers with the project-state-graph venv:
 `~/skill-workspace/orchestrator/.venv/bin/python` (stdlib-only module).
@@ -226,6 +359,10 @@ Run the helpers with the project-state-graph venv:
 | Closing COMPLETED without refreshing the graph | A clean review MUST refresh the graph + re-run tests first. |
 | Building the graph from scratch here | Wrong skill — that's `project-state-graph`. |
 | Skipping the close | The plan stays stuck in NEEDS_REVIEW. Always finalize the child step (`complete-step`/`fail-step` on `<plan>-REVIEW.1`). |
+| Reading a reason out of an email you found | That is a guess, and a guess that looks sourced is worse than a blank. Attach the pointer to the `unstated` row and leave the reason empty. |
+| Re-filling a reason as `stated` because evidence turned up | `stated` means the user's own words. Evidence moves `evidence_level`, never the tier. |
+| Dropping a source that contradicts the reason | Attach it with `--stance contradicts`. Evidence is allowed to fail. |
+| Leaving a slot out of `evidence_log` because nothing happened | Nothing happening is the row worth having — `not_searched` is why it is blank. |
 | Walking steps 0–4c by hand | Use `review_run.py`; hand-driving skips the lock line, the attribution env or the checklist sooner or later (phase 2–3.5 dogfood). |
 | Overriding any gate but `signature` | `--accept-signature` covers exactly one gate; a stale reference or data drift is a real gap — fix the code or FAIL. |
 
