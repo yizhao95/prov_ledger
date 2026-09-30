@@ -31,7 +31,7 @@ Every line ends in a record id. The ids are real rows, the search range is count
 
 A Claude Code plugin for data work. It keeps what was decided and why — your words, the email, the agent's reading, kept apart and never blended — and puts them in front of whoever is about to change the thing again.
 
-![tests](https://img.shields.io/badge/tests-2099-brightgreen)
+![tests](https://img.shields.io/badge/tests-2115-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -155,7 +155,7 @@ Each command below was run for real against a scratch ledger; the lines under it
 ```console
 $ claude plugin list
   ❯ provledger@provledger
-    Version: 0.4.0
+    Version: 0.4.1
     Scope: user
     Status: ✔ enabled
 ```
@@ -439,11 +439,12 @@ Read-only, no non-GET route.
 
 ### Tests
 
-Eight suites, each with its own pyproject and pythonpath — run them separately.
+Nine suites, each with its own pyproject and pythonpath — run them separately.
 
 | suite | tests |
 |---|---|
 | `scripts/tests` | 27 |
+| `tests` (packaging, manifests, bundled skills) | 16 |
 | `orchestrator-backend` | 1074 |
 | `orchestrator-webapp` | 267 |
 | `skills/writing-plans/tests` | 93 |
@@ -452,7 +453,7 @@ Eight suites, each with its own pyproject and pythonpath — run them separately
 | `examples` | 18 |
 | `skills/project-state-graph/scripts/tests` | 430 |
 
-Total **2099 collected** across the eight suites (`scripts/count_tests.sh`), plus a few deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
+Total **2115 collected** across the nine suites (`scripts/count_tests.sh`), plus a few deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
 
 ### Origin
 
@@ -479,7 +480,7 @@ Issues and pull requests are welcome. Good first contributions: run `make demo` 
 
 The `superpowers` plugin is a recommended companion: the byte-identical `verification-before-completion` skill is not bundled and comes from superpowers when present. Everything works without it.
 
-The PyPI package is the stdlib-only core library — plans, steps, profiling, drift, the ledger — and the published release is 0.1.0; the plugin, the skills, the hooks, the dashboard and the `provledger` command come from this repository at 0.4.0.
+The PyPI package is the stdlib-only core library — plans, steps, profiling, drift, the ledger — and the published release is 0.1.0; the plugin, the skills, the hooks, the dashboard and the `provledger` command come from this repository at 0.4.1.
 
 
 ### See it run

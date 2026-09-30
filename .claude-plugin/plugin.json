@@ -1,7 +1,7 @@
 {
   "name": "provledger",
-  "version": "0.4.0",
-  "description": "Keeps the reasons behind a project's changes — your words, the email, the agent's reading, kept apart — and puts them in front of whoever is about to change the thing again.",
+  "version": "0.4.1",
+  "description": "One view of a data project across nodes, time and tasks: what changed, why, who said so, and what backs it. Answers \"why is it this way\" and \"have we tried this\" from the record, with every sentence citing the row it rests on — and says so plainly when nothing was recorded.",
   "author": {
     "name": "yzhao",
     "email": "yzhao950213@gmail.com"

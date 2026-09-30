@@ -28,6 +28,7 @@ count "writing-plans"               "$ROOT" skills/writing-plans/tests
 count "executing-plans"             "$ROOT" skills/executing-plans
 count "update-project-state-graph"  "$ROOT" skills/update-project-state-graph/scripts/tests
 count "scripts"                     "$ROOT" scripts/tests
+count "plugin"                      "$ROOT" tests           # packaging, manifests, bundled skills
 count "examples"                    "$ROOT" examples
 count "project-state-graph"         "$ROOT/skills/project-state-graph/scripts" tests
 printf '%-28s %5s\n' "TOTAL" "$total"

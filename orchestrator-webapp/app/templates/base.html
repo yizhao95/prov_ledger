@@ -169,6 +169,13 @@
         if (!e.detail.boosted) return;                      // a poll is not a navigation
         if (!document.startViewTransition) return;          // unsupported → plain swap
         if (e.detail.shouldSwap === false) return;          // already cancelled (304)
+        // htmx.swap() is 2.x only, and this page loads 1.9.10. Without this
+        // guard the handler cancelled htmx's own swap and then called a
+        // function that does not exist — so on every browser that DOES support
+        // view transitions (Chrome, Edge) a boosted link did nothing at all,
+        // while Firefox and Safari were fine because they returned above.
+        // Cancelling the default is only safe once the replacement exists.
+        if (typeof (window.htmx && window.htmx.swap) !== 'function') return;
         const swap = e.detail.swapOverride;
         e.detail.shouldSwap = false;
         const target = e.detail.target || document.body;
