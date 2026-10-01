@@ -85,34 +85,26 @@ info "interpreter: $($PY -V 2>&1) at $PY"
 # The document gives one pip line and one uv line as if they were
 # interchangeable. Read it literally: take the pip line.
 step "INSTALL.md §4 · install the dependency line the document gives"
-# The dependency list is READ OUT OF THE DOCUMENT, not transcribed here. A copy
-# would drift, and then this check would verify the copy while the reader follows
-# the document — which is the one failure mode it exists to prevent. (It did
-# drift: `httpx2` was added to §4 and a hardcoded list here had no way to know.)
-mapfile -t DOC_DEPS < <(
-  awk '/^## 4 · Install dependencies/,/^### 4a/' "$CLONE/INSTALL.md" \
-    | awk '/^(uv )?pip install/,/[^\\]$/' \
-    | sed -e 's/^\(uv \)\?pip install //' -e 's/\\$//' \
-    | tr ' ' '\n' | sed -e 's/^"//' -e 's/"$//' | grep -vE '^$|^#'
-)
-if [ "${#DOC_DEPS[@]}" -eq 0 ]; then
-    record $BLOCKED "§4 — could not read the dependency line out of INSTALL.md"
-    V_ALL=$(worst "$V_ALL" $BLOCKED)
-    DOC_DEPS=(pytest httpx2 fastapi "uvicorn[standard]" jinja2)
-fi
-info "§4 deps, as the document lists them: ${DOC_DEPS[*]}"
-if "$PY" -m pip --version >/dev/null 2>&1; then
-    run_logged "$E2E_LOGS/03-deps.log" "$PY" -m pip install --quiet "${DOC_DEPS[@]}"; rc=$?
+# §4 now gives one command — `pip install -r requirements.txt` — so this runs
+# exactly that. It used to transcribe a hand-written dependency list from the
+# document, which drifted and then verified the copy while the reader followed the
+# document: the list had no `httpx` and never installed the backend, so §5 failed
+# on `No module named 'provledger'` and this check reported it as a product defect.
+# One authoritative file removes the whole class.
+DOC_REQ="$CLONE/requirements.txt"
+if [ ! -f "$DOC_REQ" ]; then
+    record $FAIL "§4 — requirements.txt, which §4 tells the reader to install, is not in the clone"
+    V_ALL=$(worst "$V_ALL" $FAIL); rc=1
+elif "$PY" -m pip --version >/dev/null 2>&1; then
+    run_logged "$E2E_LOGS/03-deps.log" "$PY" -m pip install --quiet -r "$DOC_REQ"; rc=$?
     DEPS_BY=pip
 else
     # A `uv venv` ships no pip, so §4's first line cannot run after §3's Option B.
-    # The document now LABELS both lines by which option you took and says they are
-    # not interchangeable, so taking the second one is following it, not deviating
-    # from it. Noted rather than reported as a finding.
+    # §4 labels both lines by which option you took and says they are not
+    # interchangeable, so taking the second one is following the document.
     info "§3 Option B's venv has no pip; taking §4's \`uv pip install\` line, which the document labels for exactly this case"
-    V_ALL=$(worst "$V_ALL" $FINDING)
-    run_logged "$E2E_LOGS/03-deps.log" env VIRTUAL_ENV="$VENV" uv pip install --quiet "${DOC_DEPS[@]}"; rc=$?
-    DEPS_BY="uv pip"
+    run_logged "$E2E_LOGS/03-deps.log" env VIRTUAL_ENV="$VENV" uv pip install --quiet -r "$DOC_REQ"; rc=$?
+    DEPS_BY=uv
 fi
 if [ $rc -eq 0 ]; then record $OK "§4 — dependencies installed with $DEPS_BY"
 else record $FAIL "§4 — the documented dependency line failed"; V_ALL=$(worst "$V_ALL" $FAIL); fi
@@ -122,18 +114,14 @@ else record $FAIL "§4 — the documented dependency line failed"; V_ALL=$(worst
 # fixture imports `provledger.graph_api`, the third-party provider degrades, and
 # `test_providers` reports the wrong provider list. Nothing in §4 installs the
 # package, which is why §4a exists — and why this check has to follow it.
-step "INSTALL.md §4a · install the package so \`provledger\` exists"
-if [ "$DEPS_BY" = pip ]; then
-    run_logged "$E2E_LOGS/03a-pkg.log" "$PY" -m pip install --quiet "$CLONE/orchestrator-backend"; rc=$?
-else
-    run_logged "$E2E_LOGS/03a-pkg.log" env VIRTUAL_ENV="$VENV" uv pip install --quiet "$CLONE/orchestrator-backend"; rc=$?
-fi
-if [ $rc -ne 0 ]; then
-    record $FAIL "§4a — installing the package failed"; V_ALL=$(worst "$V_ALL" $FAIL)
-elif run_logged "$E2E_LOGS/03b-pkg-help.log" "$VENV/bin/provledger" --help; then
+step "INSTALL.md §4a · \`provledger --help\` must run"
+# requirements.txt ends with `-e ./orchestrator-backend`, so §4 already installed
+# it. §4a only checks — and the check matters: without it the suites fail on an
+# import and the dashboard serves "unavailable" pages instead of an error.
+if run_logged "$E2E_LOGS/03a-pkg-help.log" "$VENV/bin/provledger" --help; then
     record $OK "§4a — \`provledger --help\` runs, as §4a says it must"
 else
-    record $FAIL "§4a — the package installed but \`provledger --help\` does not run"
+    record $FAIL "§4a — \`provledger --help\` does not run after §4; §4's install did not put the backend in"
     V_ALL=$(worst "$V_ALL" $FAIL)
 fi
 

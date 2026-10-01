@@ -121,40 +121,39 @@ Install everything:
 
 ```bash
 # if you took Option A (`python3 -m venv`) — that venv has pip
-pip install pytest httpx2 fastapi "uvicorn[standard]" jinja2 \
-    tree-sitter tree-sitter-css tree-sitter-html \
-    tree-sitter-javascript tree-sitter-python
+pip install -r requirements.txt
 
 # if you took Option B (`uv venv`) — that venv has NO pip, so use uv
-uv pip install pytest httpx2 fastapi "uvicorn[standard]" jinja2 \
-    tree-sitter tree-sitter-css tree-sitter-html \
-    tree-sitter-javascript tree-sitter-python
+uv pip install -r requirements.txt
 ```
+
+`requirements.txt` is the one authoritative list, and its last line installs the
+backend itself (`-e ./orchestrator-backend`), which is what makes `import
+provledger` and the `provledger` command work. The table above says what is in it
+and why; the file says it in a form you can run.
+
+This used to be a dependency list typed out here instead. It drifted, exactly the
+way a second copy does: it omitted `httpx` — which `starlette.testclient` needs to
+drive the dashboard in §5 — and it never installed the backend at all, so the
+suites failed on `No module named 'provledger'` and the dashboard's graph and
+`/ledger` pages rendered "unavailable". None of that was visible on a machine that
+already had those things.
 
 > **The two blocks are not interchangeable.** `uv venv` deliberately creates an
 > environment without `pip`, so `pip install …` there fails with
 > `No module named pip` — a confusing error, because nothing above says the
 > choice in §3 decides the command in §4. Match the block to the option you took.
 
-### 4a · Put `provledger` on your PATH
-
-Installing the dependencies does **not** install provLedger itself, so the
-`provledger …` commands the README prints do not exist yet. Install the backend
-into the same environment:
+### 4a · Check that `provledger` is on your PATH
 
 ```bash
-pip install ./orchestrator-backend      # or: uv pip install ./orchestrator-backend
-provledger --help                       # must print the command list
+provledger --help          # must print the command list
 ```
 
-If `provledger --help` fails here, stop and fix it: the dashboard's graph and
-`/ledger` pages shell out to this command, and without it they render as pages
-that say "unavailable" rather than as an error you can act on.
-
-> `httpx2` is what `starlette.testclient` needs to drive the dashboard in the
-> test suites. On a machine that already has the older `httpx` the suites run
-> with a deprecation warning, so this only shows up on a clean install — which
-> is exactly where it stops §5 dead.
+`requirements.txt` installed it, so this should already work. If it does not, stop
+here rather than carrying on: the dashboard's graph and `/ledger` pages shell out
+to this command, and without it they serve pages that say "unavailable" instead of
+failing in a way you can act on — which reads as a broken dashboard.
 
 > **Minimal install (orchestrator only, no graph, no dashboard):**
 > the backend needs nothing beyond Python + `pytest` for the tests.
