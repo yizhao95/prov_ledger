@@ -1,11 +1,92 @@
 # Changelog
 
-All notable changes to provLedger — the `provledger` package, the four
+All notable changes to provLedger — the `provledger` package, the six
 skills (`writing-plans`, `executing-plans`, `project-state-graph`,
-`update-project-state-graph`) and the read-only dashboard. Dates are the
+`update-project-state-graph`, and the two question surfaces `ledger` and
+`receipts`) and the read-only dashboard. Dates are the
 merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
+
+## 0.4.2 — 2026-09-30
+
+**The ledger held the answer and nothing could read it.** Asked why a review timeout
+is 4800 seconds — a decision this project recorded in full — three separate searches
+reported "not recorded", because the derivation sat in a step's `log_context` and no
+command read that column. This release is the descent path from a record to the task
+behind it, plus the four reads that path needs.
+
+### The reads
+
+- **`provledger plan <id>`** — a task's steps in tree order with their failures and
+  logs (`--step`, `--full`, `--log-chars`). The only read that reaches a failure
+  inside a plan whose status is `COMPLETED` *because the failure was recovered*: the
+  detour is gone from the status and these rows are the only thing that remembers it.
+- **`provledger record '#12'`** — one record whole. Every other read bounds record
+  text at 240 characters, and did so **mid-word with no marker**, so a reader could
+  not tell they had a fifth of a row. Measured: one record is 1358 characters and
+  `why` showed 240. Bounded reads now say what they cut and name the read that has
+  the rest.
+- **`provledger graph [<target>] --depth N`** — the project graph folded to areas with
+  how many nodes carry records, unfolding to neighbour **names** with their edge type.
+  Project node names alone run to ~239k tokens, so the view is paginated; the fold
+  states its size and the command that lifts it, and it is never a judgement about
+  relevance.
+- **`why --all` and `--impact` now work.** Both were no-ops that recommended
+  themselves: `--all` printed "3 more reasons not expanded — pass `--all`" to a
+  caller who had passed `--all`, and `--impact` printed caller counts and no names.
+  A third defect in the same place had the blast-radius line and the footer
+  contradicting each other in one output (`callers 12` / `callers 38`; 50 was true).
+
+### Answering
+
+- **An unsupported number is named, not deleted.** The answer check used to remove any
+  sentence containing a number its fact table did not state. The machine can tell
+  whether a number is in its table, not whether it is true — and a figure read out of
+  a step log is sourced yet absent from the table, so the rule was deleting correct
+  answers. It now reports every such number and keeps the sentence, on the terminal
+  and on the `/ledger` page alike. The language check was changed for this same reason
+  first; numbers were the case it missed.
+- **`/receipts` is a skill**, alongside `/ledger`. It answers a colleague who
+  questioned a decision: the reply first, the evidence under it with a record id per
+  line, and a closing question about tone. It never sends anything and writes nothing.
+- **`receipts` split into two reads.** `receipts candidates "<what they said>"` offers
+  starting points and says outright that the score orders the list and does not choose
+  it; `receipts facts <node>…` is the timeline, the gaps and the range for the nodes
+  you picked. The old one-shot form still works.
+- **Graph bookkeeping is out of the challenge material.** On a real question, 34 of 63
+  timeline lines were `the graph recorded node_changed in run N` — the graph's record
+  of itself, not testimony about a decision. They are counted and named as left out.
+- **The CLI no longer starts a second model.** `--runner`'s default was `claude`, so a
+  bare `provledger ask` shelled out to a headless model with no session, no tools and
+  no context. The session already has a model; the default is now `none`, two tests
+  booby-trap every entry point, and `--runner claude` is unchanged.
+
+### Corrections
+
+- **A deviation is printed `#v94`, not `#94`.** Deviations and ledger records are
+  numbered from separate sequences and both printed as `#N`, so `record '#94'` on a
+  deviation returned an unrelated record from another plan — no error. A silent wrong
+  answer in the one place this tool has to be checkable. `record` now refuses a `#v`
+  cite and names the read that holds it.
+- **Reading the code is encouraged.** The skills said "never answer from the
+  repository", written to stop code being used as *evidence*, which also forbade using
+  it as an *index* — and grepping for the thing you are asking about is how anyone
+  starts. provLedger supplements the code: code shows the winner and never the
+  rejected option, who asked, or what it cost. The one rule is: do not read the code
+  and invent a reason, because the real one is usually recorded.
+- `INSTALL.md`: the clone URL was ssh; §4's `pip install` fails in §3's Option B venv,
+  which has no pip, and neither section said so; nothing installed the `provledger`
+  command the README prints, so the dashboard's graph and `/ledger` pages rendered
+  "unavailable" rather than failing loudly. All four are fixed, and §4a installs it.
+
+### Before every release
+
+`scripts/release-e2e.sh` — a clean sandbox that clones, follows `INSTALL.md` as
+written, builds a dummy project, exercises both question surfaces, drives the
+dashboard in a real browser, and has a model mark the answers against key points
+written in advance. Every place it must deviate from the document is a finding,
+because that is where a new reader gets stuck.
 
 ## 0.4.1 — 2026-09-30
 

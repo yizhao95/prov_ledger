@@ -19,6 +19,10 @@ in the repo, `provledger ...` once installed.
   review evidence-log --plan <id> [...]   what became of each slot: why this one is blank
   reasons reclass-status                  the state of the legacy-reason migration
   why <node|nk_…|file:line> [...]         one bounded read: history, constraints, rejected paths, blast radius
+  graph [<area|path|node>] [--depth N] [--type T]
+                                          the project graph folded to areas, and any branch of it unfolded by name
+  record <#12|#r3> [--json]               one record, or one source, whole and uncut — the read nothing else could do
+  plan <plan_id> [--step S] [--full]      what happened while a plan ran: its steps in tree order, and its deviations
   ask "<question>" [--project] [...]      ask the ledger: fact table, cited summary, scope, evidence card
   ask submit <ask_id> --answer-file F     check a draft written by the session's model and record it
   ask card <ask_id> --out FILE            the evidence card of a logged question
@@ -773,6 +777,66 @@ def _why_cmd(args) -> int:
 
 
 
+# ── the three reads that had no door (spec §10.2; FL-153/154/155) ────────────
+# §10.2: the model gets the project graph and its relations, plus one documented
+# way to take a node's history — and decides everything else itself. `graph` is
+# the first half; `record` is the bottom of the second, where a row opens in
+# full; `plan` is what happened while a plan ran, which nothing read at all.
+# All three write nothing: no row, no counter, no read_hit.
+
+def _graph_cmd(args) -> int:
+    from . import graph_view, psg_bridge
+    project = args.project or psg_bridge.project_for_cwd(os.getcwd())
+    if not project:
+        print("provledger graph: no --project and the cwd is not inside a registered project", file=sys.stderr)
+        return 2
+    psg = psg_bridge.db_path_for(project)
+    conn = _open()
+    try:
+        if args.target:
+            doc = graph_view.unfold(psg, args.target, depth=args.depth, limit=args.limit, node_type=args.type,
+                                    ledger_conn=conn, project=project, include_imports=args.include_imports)
+        else:
+            doc = graph_view.project_graph(psg, ledger_conn=conn, project=project,
+                                           include_imports=args.include_imports)
+        _print(doc, args.json, graph_view.render(doc))
+        return 0
+    finally:
+        conn.close()
+
+
+def _record_cmd(args) -> int:
+    from . import record_read
+    conn = _open()
+    try:
+        try:
+            doc = record_read.record(conn, args.cite)
+        except ValueError as e:
+            print(f"provledger record: {e}", file=sys.stderr)
+            return 2
+        if doc is None:
+            print(record_read.render(None, args.cite))
+            return 1
+        _print(doc, args.json, record_read.render(doc))
+        return 0
+    finally:
+        conn.close()
+
+
+def _plan_cmd(args) -> int:
+    from . import plan_read
+    conn = _open()
+    try:
+        doc = plan_read.plan(conn, args.plan_id, log_chars=(0 if args.full else args.log_chars), step=args.step)
+        if doc is None:
+            print(plan_read.render(None, args.plan_id))
+            return 1
+        _print(doc, args.json, plan_read.render(doc))
+        return 0
+    finally:
+        conn.close()
+
+
 # ── ask: the read-only question entry (DP phase 2e, Task 2) ──────────────────
 
 ASK_RUNNER_ENV = "PROVLEDGER_ASK_RUNNER"
@@ -784,10 +848,22 @@ ASK_TIMEOUT_S = 180.0
 def _ask_runner_default() -> str:
     """`--runner`'s default. The dashboard has read PROVLEDGER_ASK_RUNNER since
     phase 2e and the CLI ignored it, so the same export turned the model on in
-    one place and not the other. An unknown value is not a crash: it falls back
-    to `claude` and the runner name in `ask_log` still says what ran."""
+    one place and not the other.
+
+    The default is `none` (spec §8.8 item 4). It used to be `claude`, which meant
+    a bare `provledger ask "…"` shelled out to `claude -p --max-turns 1
+    --tools ""`: a second model with no context, no tools, its own quota and its
+    own latency, asked to judge something the model already in the room judges
+    better. What a default decides is what happens on SILENCE, and starting a
+    subprocess nobody asked for is not the least surprising thing to do on
+    silence. Asking for one explicitly — `--runner claude`, or
+    PROVLEDGER_ASK_RUNNER=claude — works exactly as it did.
+
+    An unknown value is not a crash, and it falls back to `none` for the same
+    reason: the safe direction for "that name means nothing to me" is not
+    "spawn a process". The runner name in `ask_log` still says what ran."""
     choice = (os.environ.get(ASK_RUNNER_ENV) or "").strip().lower()
-    return choice if choice in ASK_RUNNERS else "claude"
+    return choice if choice in ASK_RUNNERS else "none"
 
 
 def _ask_runner(args):
@@ -910,21 +986,46 @@ def _ask_cmd(args) -> int:
 
 
 def _receipts_cmd(args) -> int:
-    """`receipts "<what they said>"` — the material behind one challenge (spec §8, G).
+    """`receipts` — the material behind one challenge, in two reads (spec §8, G).
 
     A fourth renderer over `ask`'s three stages, and the only read-only one that
-    logs nothing: there is no answer here to log. No model is called — the reply
-    is written by the model already in the room, from the lines this prints."""
+    logs nothing: there is no answer here to log. No model is called at any
+    point — the reply is written by the model already in the room, from the lines
+    this prints.
+
+    Three forms, and the split between the first two is the design (spec §8.8):
+
+      receipts candidates "<what they said>"   the nodes their words touch
+      receipts facts <qn> [<qn> …]             the record behind the ones chosen
+      receipts "<what they said>"              both at once, picked by score
+
+    The model in the session is what stands between the first two. The third is
+    kept because it is documented and people run it, and it prints, in words, the
+    fact that a scoring function did the picking."""
     from . import psg_bridge
     from .ask import receipts as receipts_mod
 
+    verb, rest = args.challenge, [a for a in (args.rest or []) if a]
+    if verb in ("candidates", "facts") and not rest:
+        usage = ('provledger receipts candidates "<what they said>"' if verb == "candidates"
+                 else "provledger receipts facts <qualified name> [<qualified name> …]")
+        print(f"usage: {usage}", file=sys.stderr)
+        return 2
     project = args.project or psg_bridge.project_for_cwd(os.getcwd())
     if not project:
         print("provledger receipts: no --project and the cwd is not inside a registered project", file=sys.stderr)
         return 2
     conn = _open()
     try:
-        doc = receipts_mod.assemble(conn, project=project, challenge=args.challenge, lang=args.lang)
+        if verb == "candidates":
+            doc = receipts_mod.candidates(conn, project=project, challenge=" ".join(rest),
+                                          cap=args.cap, lang=args.lang)
+            _print(receipts_mod.candidates_as_json(doc), args.json, receipts_mod.render_candidates(doc))
+            return 0
+        if verb == "facts":
+            doc = receipts_mod.facts(conn, project=project, chosen=rest, lang=args.lang)
+        else:
+            doc = receipts_mod.assemble(conn, project=project, challenge=verb, lang=args.lang)
         _print(receipts_mod.as_json(doc), args.json, receipts_mod.render_text(doc))
         return 0
     finally:
@@ -1281,6 +1382,29 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--json", action="store_true", help="machine-readable output")
     w.add_argument("--plan", default=None, help=argparse.SUPPRESS)
     w.add_argument("--session", default=None, help=argparse.SUPPRESS)
+    gr = sub.add_parser("graph", help="the project graph and its relations, folded to areas — and any branch of it "
+                                      "unfolded by name, to whatever depth you choose. Folding is pagination, never "
+                                      "selection: nothing here is ranked or pre-picked for you")
+    gr.add_argument("target", nargs="?", default=None, help="an area, a path, or a node's qualified name / nk_… key (default: the root view)")
+    gr.add_argument("--project", default=None, help="registered project (default: the one whose repo contains the cwd)")
+    gr.add_argument("--depth", type=int, default=1, help="how far to unfold: path levels for a path, hops for a node (default 1)")
+    gr.add_argument("--limit", type=int, default=40, help="names printed per group before the rest is folded into a count (default 40)")
+    gr.add_argument("--type", default=None, metavar="NODE_TYPE", help="only nodes of this kind (function, data_var, module, …); each view prints which kinds it holds")
+    gr.add_argument("--include-imports", action="store_true", help="keep the modules this project imports (excluded by default, and the exclusion is always printed)")
+    gr.add_argument("--json", action="store_true", help="machine-readable output")
+    rec = sub.add_parser("record", help="one record, or one source, whole and uncut: its words to the last character, "
+                                       "its tier and source level, the dates, who recorded it, the node it hangs on, "
+                                       "the words it quotes and the sources hanging on it")
+    rec.add_argument("cite", help="`#12` a ledger record, `#r3` a source (a bare 12 or r3 works too)")
+    rec.add_argument("--json", action="store_true", help="machine-readable output")
+    pl = sub.add_parser("plan", help="what happened while a plan ran: its steps in tree order with each failure_reason "
+                                     "whole, and the deviations that changed it. A failed step is shown even when the "
+                                     "plan itself closed COMPLETED, which is the case it exists for")
+    pl.add_argument("plan_id")
+    pl.add_argument("--step", default=None, metavar="STEP_ID", help="just this one step (the counts still describe the whole plan)")
+    pl.add_argument("--full", action="store_true", help="print captured output in full instead of bounded")
+    pl.add_argument("--log-chars", type=int, default=240, dest="log_chars", help="characters of captured output per step; what is cut is always said (default 240)")
+    pl.add_argument("--json", action="store_true", help="machine-readable output")
     a = sub.add_parser("ask", help="ask the ledger a question: the fact table is computed, the model may only restate it, every sentence cites a record")
     a.add_argument("question", help='the question, in words — or the word "feedback" (see `ask feedback <ask_id> <verdict>`)')
     a.add_argument("rest", nargs="*", help=argparse.SUPPRESS)
@@ -1292,8 +1416,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"model for the headless claude runner (default: ${ASK_MODEL_ENV}, else the runner's own); "
                         "when one model declines the answer says so and stops — no model is substituted for another")
     a.add_argument("--runner", default=_ask_runner_default(), choices=list(ASK_RUNNERS),
-                   help=f"which model runs (default: ${ASK_RUNNER_ENV}, else claude); "
-                        "stub is reached and says nothing (tests), none is the no-model path")
+                   help=f"which model runs (default: ${ASK_RUNNER_ENV}, else none — the session already has "
+                        "a model and a tool must not fork one on silence); stub is reached and says nothing "
+                        "(tests), claude starts a headless one on purpose")
     a.add_argument("--timeout", type=float, default=ASK_TIMEOUT_S, metavar="S",
                    help=f"seconds one model call may take before the answer says it timed out (default {ASK_TIMEOUT_S:g})")
     a.add_argument("--lang", default="en", choices=["en", "zh"],
@@ -1304,12 +1429,24 @@ def build_parser() -> argparse.ArgumentParser:
                    help="`ask submit <ask_id> --answer-file F`: a draft written by the session's own model; the same "
                         "checks apply — every sentence cites, no number outside the fact table, drops are counted")
     a.add_argument("--out", default=None, metavar="FILE", help="`ask card <ask_id> --out F`: write the evidence card here")
+    # imported for its one constant, so `--cap`'s help states the real default
+    # rather than a copy of it that can drift; the module itself defers every
+    # heavy import to its function bodies, so this costs nothing at startup.
+    from .ask import receipts as receipts_mod
     rc = sub.add_parser("receipts", help="someone challenged a decision: assemble the material a reply would need — "
-                                         "the record as a timeline, the gaps, the range searched. It writes the reply "
-                                         "for nobody and records nothing")
-    rc.add_argument("challenge", metavar="WHAT-THEY-SAID", help="their words, as they said them")
+                                         "the record as a timeline, the gaps, the range searched. Two reads, so the "
+                                         "model already in your session picks which nodes: `receipts candidates "
+                                         "\"<what they said>\"` then `receipts facts <qualified name> …`. It writes "
+                                         "the reply for nobody, calls no model and records nothing")
+    rc.add_argument("challenge", metavar="candidates|facts|WHAT-THEY-SAID",
+                    help='`candidates "<their words>"`, `facts <qualified name> …`, or their words on their own '
+                         "(which picks by match score and says so)")
+    rc.add_argument("rest", nargs="*", help=argparse.SUPPRESS)
     rc.add_argument("--project", default=None, help="registered project (default: the one whose repo contains the cwd)")
     rc.add_argument("--json", action="store_true", help="machine-readable material, same content as the text")
+    rc.add_argument("--cap", type=int, default=receipts_mod.CANDIDATE_CAP, metavar="N",
+                    help=f"`receipts candidates`: how many candidates to hand over (default {receipts_mod.CANDIDATE_CAP}); "
+                         "the number matched and the number cut are printed either way")
     rc.add_argument("--lang", default="en", choices=["en", "zh"], help="the language of the scope line")
     v = sub.add_parser("verify", help="walk the three hash chains and, with --against-notes, the git anchors they must agree with (exit 3 on a broken chain)")
     v.add_argument("--against-notes", action="store_true", help="also compare the chain heads with the anchors in refs/notes/provledger")
@@ -1403,6 +1540,12 @@ def main(argv=None) -> int:
         return _reasons_cmd(args)
     if args.cmd == "why":
         return _why_cmd(args)
+    if args.cmd == "graph":
+        return _graph_cmd(args)
+    if args.cmd == "record":
+        return _record_cmd(args)
+    if args.cmd == "plan":
+        return _plan_cmd(args)
     if args.cmd == "reference":
         return _reference_cmd(args)
     if args.cmd == "review":

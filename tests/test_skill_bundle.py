@@ -9,7 +9,12 @@ SKILLS = ROOT / "skills"
 ALWAYS_BUNDLED = [
     "writing-plans", "executing-plans",
     "project-state-graph", "update-project-state-graph",
-    "ledger",
+    # the two named question surfaces (spec §8.5): `/ledger` is the user's own
+    # question about the project's history, `/receipts` helps them answer a
+    # colleague. Both read-only, both grounded only in recorded rows. `receipts`
+    # shipped as a CLI subcommand first and had no skill for a release; naming it
+    # here is what keeps the pair from drifting apart again.
+    "ledger", "receipts",
 ]
 
 # The two commands the ledger skill is allowed to run. `/ledger` is a read; a
@@ -50,3 +55,58 @@ def test_the_ledger_skill_declares_itself_and_stays_read_only():
     # the rule that makes it safe has to be legible, not implied
     assert "never edits, creates or deletes" in text
     assert "Never answer from memory" in text
+
+# The reads added in 0.4.2 (spec §10.3). `/ledger` keeps its `ask` + `ask submit`
+# flow, but a skill that does not name these leaves the model unable to reach a
+# record whole, a neighbour by name, or a failure inside a COMPLETED task.
+LEDGER_NAVIGATION_READS = ("provledger graph ", "provledger why ", "provledger record ", "provledger plan ")
+
+
+def test_the_ledger_skill_names_the_reads_added_in_0_4_2():
+    text = (SKILLS / "ledger" / "SKILL.md").read_text(encoding="utf-8")
+    for cmd in LEDGER_NAVIGATION_READS:
+        assert cmd in text, f"/ledger must name the read it can navigate with: {cmd}"
+
+
+def test_the_ledger_skill_says_a_completed_task_can_hide_failures():
+    """Verified on the live ledger: plan `dp6-a-20260927063613` reads COMPLETED and
+    holds three FAILED steps, one of whose logs carries the whole derivation of a
+    constant that was later questioned. A model that reads the status and stops
+    never reaches it."""
+    text = (SKILLS / "ledger" / "SKILL.md").read_text(encoding="utf-8")
+    low = text.lower()
+    assert "completed" in low and "recover" in low, \
+        "/ledger must say that a recovered failure leaves the task's status clean"
+    assert "provledger plan " in text
+
+
+def test_the_ledger_skill_separates_what_was_searched_from_what_exists():
+    """FL-158. In one session this absence was asserted three times, after three
+    honest searches, while the answer sat in an unsearched column."""
+    text = (SKILLS / "ledger" / "SKILL.md").read_text(encoding="utf-8")
+    low = text.lower()
+    assert "does not mean" in low or "not the same" in low, \
+        "/ledger must state outright that finding nothing is not the same as nothing existing"
+
+def test_the_ledger_skill_permits_the_repo_as_an_index():
+    """The rule the user settled: provLedger **supplements** the code, it does not
+    forbid reading it. Reading the repo is the agent's job and the normal way in —
+    grep the constant, hand `file:line` to `why`, read the records, follow one to
+    the task. The single failure to prevent is narrow: reading the code and
+    **inventing a reason** for it, when the real reason is recorded in the task
+    that made the change. An earlier wording banned source files outright and
+    forbade step one."""
+    text = (SKILLS / "ledger" / "SKILL.md").read_text(encoding="utf-8")
+    low = text.lower()
+    assert "no reading source files" not in low, \
+        "a blanket ban on reading source files forbids the normal way in"
+    assert "read the code freely" in low or "read the code" in low, \
+        "the skill must say outright that the code is the agent's to read"
+    assert "invent a reason" in low, \
+        "and must name the one failure to prevent: a reason invented from the code"
+    assert "file:line" in low, "and show how a code location becomes a node"
+
+def test_the_ledger_skills_command_rule_does_not_cap_below_what_it_documents():
+    text = (SKILLS / "ledger" / "SKILL.md").read_text(encoding="utf-8")
+    assert "and no others" not in text, \
+        "the skill documents six reads; a two-command cap contradicts them"

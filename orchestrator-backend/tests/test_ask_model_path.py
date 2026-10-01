@@ -208,16 +208,52 @@ def test_ask_log_keeps_the_raw_and_the_wall_time_of_a_good_summary(conn, graph, 
 
 # ── the CLI: the env var and the budget ──────────────────────────────────────
 
-def test_ask_runner_defaults_to_PROVLEDGER_ASK_RUNNER(monkeypatch):
+def test_ask_runner_defaults_to_none_because_the_session_already_has_a_model(monkeypatch):
+    """The default changed from `claude` to `none` (spec §8.8 item 4).
+
+    What a default decides is **what happens on silence**, and on silence this
+    tool used to shell out to `claude -p --max-turns 1 --tools ""`: a second
+    model with no context, no tools, its own quota and its own latency, asked to
+    judge something the model already in the room judges better. Nobody asked
+    for it. So silence now means no extra model, and a person who wants one says
+    `--runner claude` or exports PROVLEDGER_ASK_RUNNER=claude — both of which
+    still work exactly as they did.
+
+    An unknown name still falls back rather than crashing, but it falls back to
+    `none` for the same reason: the safe direction for "I could not understand
+    what you asked for" is not "start a subprocess"."""
     monkeypatch.delenv("PROVLEDGER_ASK_RUNNER", raising=False)
-    assert cli.build_parser().parse_args(["ask", "q"]).runner == "claude"
+    assert cli.build_parser().parse_args(["ask", "q"]).runner == "none"
+    assert cli._ask_runner_default() == "none"
     monkeypatch.setenv("PROVLEDGER_ASK_RUNNER", "stub")
     assert cli.build_parser().parse_args(["ask", "q"]).runner == "stub"
     assert cli.build_parser().parse_args(["ask", "q", "--runner", "claude"]).runner == "claude"
+    monkeypatch.setenv("PROVLEDGER_ASK_RUNNER", "CLAUDE")
+    assert cli.build_parser().parse_args(["ask", "q"]).runner == "claude", "asking for it explicitly still works"
     monkeypatch.setenv("PROVLEDGER_ASK_RUNNER", "NONE")
     assert cli.build_parser().parse_args(["ask", "q"]).runner == "none"
     monkeypatch.setenv("PROVLEDGER_ASK_RUNNER", "gpt-9")
-    assert cli.build_parser().parse_args(["ask", "q"]).runner == "claude", "an unknown name is not a crash"
+    assert cli.build_parser().parse_args(["ask", "q"]).runner == "none", "an unknown name is not a crash"
+
+
+def test_no_no_model_path_can_reach_the_headless_model(conn, graph, seeded, monkeypatch):
+    """`ask --no-model` and the default `--runner none` must be unable to start a
+    second model, not merely configured not to (spec §8.8 item 4).
+
+    `ask.runner.call` and `claude_arbiter.default_runner` are the only two doors
+    a headless `claude` comes through, so both are booby-trapped and the whole
+    no-model path is run through them."""
+    def boom(*a, **kw):
+        raise AssertionError("the no-model path forked a second model")
+
+    monkeypatch.delenv("PROVLEDGER_ASK_RUNNER", raising=False)
+    monkeypatch.setattr(R, "call", boom)
+    monkeypatch.setattr(ca, "default_runner", boom)
+
+    for argv in (["ask", "q"], ["ask", "q", "--no-model"], ["ask", "q", "--runner", "none"]):
+        assert cli._ask_runner(cli.build_parser().parse_args(argv)) == (None, "none"), argv
+    doc = ask.run(conn, project="proj", question=QUESTION, psg_db_path=graph, runner=None, runner_name="none")
+    assert doc["degraded"] and doc["facts"]["nodes"], doc.get("degraded_reason")
 
 
 def test_ask_has_a_timeout_in_seconds(monkeypatch):

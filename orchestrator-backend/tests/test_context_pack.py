@@ -62,7 +62,9 @@ def test_layers_caps_identity_chain_and_neighbor_counts(conn, graph):
     t = pack.targets[0]
     assert t.node_key == "nk_a" and t.status == "existing" and t.identity_chain[0] == "pkg.m.load_orders" and "pkg.m.load" in t.identity_chain
     assert [c["id"] for c in t.constraints] == sorted(ids["constraints"], reverse=True) and all(c["role"] == "constraint" for c in t.constraints)
-    assert t.counts == {"constraints": 2, "rejected_paths": 7, "reasons": 7, "reasons_minor": 1, "callers": 1}
+    # `unstated` is counted apart from `reasons`: a slot has no words by construction,
+    # so counting it as a reason made the footer's remainder disagree with `--all`
+    assert t.counts == {"constraints": 2, "rejected_paths": 7, "reasons": 7, "reasons_minor": 1, "unstated": 0, "callers": 1}
     assert len(t.rejected_paths) == 5 and len(t.reasons) == 3                  # caps: rejected 5, reasons 3
     assert ids["old_name"] in [r["id"] for r in t.reasons] or ids["old_name"] in [r["id"] for r in cp._records(conn, "proj", ["pkg.m.load"])]
     assert all(r.get("significance") != "minor" for r in t.reasons)
@@ -195,3 +197,66 @@ def test_an_ambiguous_bare_name_stays_unresolved(tmp_path):
     assert cp._node_key(psg, "__init__") is None
     assert cp._node_key(psg, "nothing_like_this") is None
     psg.close()
+
+
+# ── FL-153 / FL-154: a cap must be liftable, and a cut must be visible ───────
+# Both flags of `provledger why` were no-ops against `build`: `--all` and
+# `--impact` changed only what why.py chose to PRINT, while build applied its
+# fixed caps regardless and computed `truncated` / `hints` from them. So the
+# footer recommended the flag that was already passed, and the same read said
+# `callers 12` (what the cap kept) beside `callers 38` (what it dropped).
+# `caps` makes the bound the caller's decision, so `truncated` is a fact about
+# this pack rather than about the defaults.
+
+def test_a_lifted_reasons_cap_leaves_nothing_truncated_and_no_hint_to_lift_it(conn, graph):
+    _seed(conn)
+    pack = cp.build(conn, project="proj", targets=["pkg.m.load_orders"], psg_db_path=graph, budget_tokens=100000,
+                    caps={"reasons": cp.NO_CAP, "rejected_paths": cp.NO_CAP}, record=False)
+    t = pack.targets[0]
+    assert len(t.reasons) == 7 and len(t.rejected_paths) == 7            # 6 major + the minor one, and every rejected path
+    assert pack.truncated.get("reasons", 0) == 0 and pack.truncated.get("rejected_paths", 0) == 0
+    assert pack.truncated.get("reasons_minor", 0) == 0                   # a lifted cap prints the minor ones too
+    assert not [h for h in pack.hints if "--all" in h]
+
+
+def test_a_lifted_callers_cap_keeps_every_name_and_survives_a_tiny_budget(conn, graph):
+    """--impact must name the callers; the budget may not fold away what the
+    reader asked for by name. An uncapped kind is exempt from the fold."""
+    _seed(conn)
+    g = sqlite3.connect(graph)
+    callers = [f"pkg.tests.test_case_{i}.test_load_orders_{i}" for i in range(120)]
+    g.execute("UPDATE consistency_card SET card_json = ? WHERE symbol_id = 7",
+              (json.dumps({"callers": callers, "output_consumers": [], "dtype_map": {}, "lineage_downstream": ["pkg.m.report"], "reads": []}),))
+    g.commit(); g.close()
+    pack = cp.build(conn, project="proj", targets=["pkg.m.load_orders"], psg_db_path=graph, budget_tokens=300,
+                    caps={"callers": cp.NO_CAP, "lineage_downstream": cp.NO_CAP}, record=False)
+    t = pack.targets[0]
+    assert len(t.callers) == 120 and pack.truncated.get("callers", 0) == 0
+    assert t.lineage_downstream == ["pkg.m.report"] and pack.truncated.get("lineage_downstream", 0) == 0
+    assert not [h for h in pack.hints if "callers" in h]
+    assert pack.caps["callers"] >= cp.NO_CAP and pack.caps["reasons"] == cp.CAP_REASONS   # the pack says which bounds it ran under
+
+
+def test_default_caps_are_unchanged_when_no_caps_are_passed(conn, graph):
+    _seed(conn)
+    pack = cp.build(conn, project="proj", targets=["pkg.m.load_orders"], psg_db_path=graph, budget_tokens=100000, record=False)
+    assert pack.truncated == {"rejected_paths": 2, "reasons": 3, "reasons_minor": 1}
+    assert pack.caps["reasons"] == cp.CAP_REASONS and pack.caps["callers"] == cp.CAP_CALLERS
+
+
+def test_a_record_cut_at_the_text_cap_says_how_much_is_missing(conn, graph):
+    """FL-154: _slim cut every record at 240 characters mid-word, with no
+    ellipsis and no marker, and --all lifted the record COUNT, never the
+    length. A model had no way to know it had seen a fifth of a row."""
+    _seed(conn)
+    long_text = "the reason this exists is that " + "w" * 900
+    rid = pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="technical",
+                           interpretation=long_text, recorded_by="agent")
+    conn.commit()
+    rec = next(r for r in cp.build(conn, project="proj", targets=["nk_a"], psg_db_path=graph,
+                                   budget_tokens=100000, record=False).targets[0].reasons if r["id"] == rid)
+    assert len(rec["text"]) == cp.CAP_TEXT
+    assert rec["text_chars"] == len(long_text) and rec["text_cut"] == len(long_text) - cp.CAP_TEXT
+    short = cp.build(conn, project="proj", targets=["nk_a"], psg_db_path=graph,
+                     budget_tokens=100000, record=False).targets[0].constraints[0]
+    assert short["text_cut"] == 0 and short["text_chars"] == len(short["text"])

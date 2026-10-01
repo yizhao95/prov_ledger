@@ -33,7 +33,37 @@ CAP_REJECTED = 5
 CAP_REASONS = 3
 CAP_NEIGHBOR_CONSTRAINTS = 2
 CAP_OUTCOMES = 3
+CAP_TEXT = 240            # characters of one record's text that travel in a pack
 TRIM_ORDER = ("reasons", "rejected_paths", "neighbor_constraints", "constraints")
+
+# FL-153: a bound that the caller cannot lift is a bound the caller cannot be
+# told about honestly. `provledger why --all` and `--impact` used to change only
+# what why.py PRINTED; build kept applying the constants below and computed
+# `truncated` (and therefore the footer) from them. The result was a read that
+# recommended the flag it had just been given, and a `callers 12` sitting next
+# to a `callers 38` in the same output — the first being what the cap kept, the
+# second what it dropped, neither being the 50 that exist.
+#
+# So the caps are now DATA. `build(caps=...)` overrides any of them, a value of
+# NO_CAP means "the caller asked for all of it", and everything downstream —
+# the lists, `truncated`, the hints — follows from the caps this pack actually
+# ran under (`Pack.caps`). An uncapped kind is also exempt from the budget fold:
+# folding away the very thing a reader named would be the same lie in a
+# different place.
+NO_CAP = 10 ** 9
+# `None` is "no cap at build time, but the budget may still fold it"; NO_CAP is
+# "the caller asked for all of it", which the budget must then leave alone. The
+# two are not the same thing and conflating them would silently turn every
+# default read into an unfoldable one.
+DEFAULT_CAPS = {
+    "callers": CAP_CALLERS,
+    "rejected_paths": CAP_REJECTED,
+    "reasons": CAP_REASONS,
+    "constraints": None,                   # every active constraint travels; only the budget may cut them
+    "neighbor_constraints": CAP_NEIGHBOR_CONSTRAINTS,
+    "lineage_downstream": None,            # never capped at build time — only folded when over budget
+    "dtype_map": None,
+}
 
 
 @dataclass
@@ -62,7 +92,8 @@ class Pack:
     budget_tokens: int
     targets: list[TargetPack] = field(default_factory=list)
     neighbors_counts: dict = field(default_factory=dict)      # qualified_name -> {constraints, rejected_paths, statements?}
-    truncated: dict = field(default_factory=dict)              # kind -> records trimmed by the budget
+    truncated: dict = field(default_factory=dict)              # kind -> records this pack does NOT carry (cap + budget)
+    caps: dict = field(default_factory=dict)                   # kind -> the bound this pack ran under (NO_CAP = lifted)
     hints: list[str] = field(default_factory=list)             # "n more … — provledger why <qn> --all"
     approx_tokens: int = 0
     generated_at: str = ""
@@ -194,9 +225,21 @@ def _records(conn, project: str, anchors: list[str]) -> list[dict]:
 
 
 def _slim(r: dict) -> dict:
+    """The record shape that travels in a pack — with the length of the cut said
+    out loud (FL-154).
+
+    The text has always been cut at CAP_TEXT, mid-word, with no ellipsis and no
+    marker; `--all` lifts the record COUNT, never the record LENGTH. Measured on
+    the live ledger, #1988 is 1358 characters and showed 240 of them: a reader
+    saw 17% of a row and had nothing in front of it saying so, which is worse
+    than showing nothing — a severed clause reads like a whole sentence. The
+    bound stays (a pack is a bounded read by construction); the silence does
+    not. `text_chars` is the true length and `text_cut` what is missing, so
+    every renderer can point at `provledger record #<id>` for the rest."""
+    text = r["text"] or ""
     return {"id": r["id"], "role": r["role"], "tier": r["tier"], "evidence_level": r["evidence_level"], "rule_id": r.get("rule_id"),
             "recorded_by": r["recorded_by"], "occurred_at": r["occurred_at"], "plan_id": r["plan_id"],
-            "text": (r["text"] or "")[:240]}
+            "text": text[:CAP_TEXT], "text_chars": len(text), "text_cut": max(0, len(text) - CAP_TEXT)}
 
 
 def _prior_outcomes(conn, project: str, names: list[str]) -> list[dict]:
@@ -225,9 +268,13 @@ def _tokens(obj) -> int:
 
 def build(conn, *, project: str, targets: list[str], psg_db_path: str | None = None, budget_tokens: int = 1500,
           neighbors: str = "counts", moment: str = "plan", plan_id: str | None = None, session_id: str | None = None,
-          step_id: str | None = None, record: bool = True) -> Pack:
+          step_id: str | None = None, record: bool = True, caps: dict | None = None) -> Pack:
     """The pack for `targets` (qualified names or nk_ keys). ONE read-only PSG
-    connection for the whole build (H2). `record=False` writes nothing."""
+    connection for the whole build (H2). `record=False` writes nothing.
+
+    `caps` overrides any of DEFAULT_CAPS for this build; NO_CAP means the caller
+    asked for all of that kind, and then nothing of it is counted as truncated
+    and the budget will not fold it away either."""
     psg_path = psg_db_path if psg_db_path is not None else psg_bridge.db_path_for(project)
     psg = None
     if psg_path:
@@ -235,7 +282,8 @@ def build(conn, *, project: str, targets: list[str], psg_db_path: str | None = N
             psg = psg_bridge.open_ro(psg_path)
         except sqlite3.Error:
             psg = None
-    pack = Pack(project=project, moment=moment, budget_tokens=budget_tokens, generated_at=_now())
+    pack = Pack(project=project, moment=moment, budget_tokens=budget_tokens, generated_at=_now(),
+                caps={**DEFAULT_CAPS, **(caps or {})})
     shown_ids: list[int] = []
     try:
         for t in targets:
@@ -253,20 +301,34 @@ def build(conn, *, project: str, targets: list[str], psg_db_path: str | None = N
             recs = _records(conn, project, anchors)
             cons = [r for r in recs if r["role"] == "constraint" and r["state"] == "active" and r["superseded_by"] is None]
             rej = [r for r in recs if r["role"] == "rejected_path"]
-            rea = [r for r in recs if r["role"] == "reason"]
+            # An `unstated` row is a SLOT, not a reason: it has no words by
+            # construction (the table's CHECK forbids them). Counting it among
+            # `reasons` made one output carry two definitions of the word — the
+            # footer said "3 more reasons not expanded" where `--all` then showed
+            # 5 of 5, the third being the slot already reported as `pending 1`.
+            # It gets its own count, so the remainder the footer states is the
+            # remainder the flag reveals.
+            rea = [r for r in recs if r["role"] == "reason" and r["tier"] != "unstated"]
+            unstated = [r for r in recs if r["role"] == "reason" and r["tier"] == "unstated"]
             minor = [r for r in rea if r.get("significance") == "minor"]
             rea = [r for r in rea if r.get("significance") != "minor"]
-            tp.counts = {"constraints": len(cons), "rejected_paths": len(rej), "reasons": len(rea) + len(minor), "reasons_minor": len(minor)}
-            tp.constraints = [_slim(r) for r in cons]
-            tp.rejected_paths = [_slim(r) for r in rej[:CAP_REJECTED]]
-            tp.reasons = [_slim(r) for r in rea[:CAP_REASONS]]
+            if _uncapped(pack, "reasons"):
+                # "every reason" means every reason: a lifted cap unfolds the ones
+                # an explicit `minor` significance had folded into a count, too.
+                rea = sorted(rea + minor, key=lambda r: r["id"], reverse=True)
+                minor = []
+            tp.counts = {"constraints": len(cons), "rejected_paths": len(rej), "reasons": len(rea) + len(minor),
+                         "reasons_minor": len(minor), "unstated": len(unstated)}
+            tp.constraints = [_slim(r) for r in cons[:pack.caps["constraints"]]]
+            tp.rejected_paths = [_slim(r) for r in rej[:pack.caps["rejected_paths"]]]
+            tp.reasons = [_slim(r) for r in rea[:pack.caps["reasons"]]]
             tp.prior_outcomes = _prior_outcomes(conn, project, tp.identity_chain)
             card = _card(psg, qn)
             all_callers = list(card.get("callers") or [])
-            tp.callers = all_callers[:CAP_CALLERS]
+            tp.callers = all_callers[:pack.caps["callers"]]
             tp.counts["callers"] = len(all_callers)
-            if len(all_callers) > CAP_CALLERS:
-                pack.truncated["callers"] = pack.truncated.get("callers", 0) + len(all_callers) - CAP_CALLERS
+            if len(all_callers) > len(tp.callers):
+                pack.truncated["callers"] = pack.truncated.get("callers", 0) + len(all_callers) - len(tp.callers)
             tp.output_consumers = list(card.get("output_consumers") or [])
             tp.dtype_map = dict(card.get("dtype_map") or {})
             tp.lineage_downstream = list(card.get("lineage_downstream") or [])
@@ -287,15 +349,15 @@ def build(conn, *, project: str, targets: list[str], psg_db_path: str | None = N
                 ncons = [r for r in nrecs if r["role"] == "constraint" and r["state"] == "active" and r["superseded_by"] is None]
                 entry = {"constraints": len(ncons), "rejected_paths": sum(1 for r in nrecs if r["role"] == "rejected_path")}
                 if neighbors == "constraints" and ncons:
-                    entry["statements"] = [_slim(r) for r in ncons[:CAP_NEIGHBOR_CONSTRAINTS]]
-                    if len(ncons) > CAP_NEIGHBOR_CONSTRAINTS:
-                        pack.truncated["neighbor_constraints"] = pack.truncated.get("neighbor_constraints", 0) + len(ncons) - CAP_NEIGHBOR_CONSTRAINTS
+                    entry["statements"] = [_slim(r) for r in ncons[:pack.caps["neighbor_constraints"]]]
+                    if len(ncons) > len(entry["statements"]):
+                        pack.truncated["neighbor_constraints"] = pack.truncated.get("neighbor_constraints", 0) + len(ncons) - len(entry["statements"])
                 pack.neighbors_counts[nb] = entry
             # caps beyond the fixed per-node limits count as truncated too
-            if len(rej) > CAP_REJECTED:
-                pack.truncated["rejected_paths"] = pack.truncated.get("rejected_paths", 0) + len(rej) - CAP_REJECTED
-            if len(rea) > CAP_REASONS:
-                pack.truncated["reasons"] = pack.truncated.get("reasons", 0) + len(rea) - CAP_REASONS
+            if len(rej) > len(tp.rejected_paths):
+                pack.truncated["rejected_paths"] = pack.truncated.get("rejected_paths", 0) + len(rej) - len(tp.rejected_paths)
+            if len(rea) > len(tp.reasons):
+                pack.truncated["reasons"] = pack.truncated.get("reasons", 0) + len(rea) - len(tp.reasons)
             if minor:
                 pack.truncated["reasons_minor"] = pack.truncated.get("reasons_minor", 0) + len(minor)
             pack.targets.append(tp)
@@ -319,24 +381,32 @@ def build(conn, *, project: str, targets: list[str], psg_db_path: str | None = N
 FOLD_CALLERS = 3          # what stays of the callers list once structure has to fold
 
 
+def _uncapped(pack: Pack, kind: str) -> bool:
+    """True when the caller lifted this kind's cap. Neither the record trim nor
+    the structure fold may touch such a kind: the reader named it, and a bound
+    they cannot see is exactly the defect `caps` exists to remove."""
+    cap = pack.caps.get(kind)
+    return cap is not None and cap >= NO_CAP
+
+
 def _fold_structure(pack: Pack) -> bool:
     """When the record trim (which never cuts a kind to zero) cannot reach the
     budget, the structure folds into counts: callers down to FOLD_CALLERS,
     lineage_downstream and dtype_map to their sizes — every fold counted in
-    `truncated` so the hint can say what `--impact` would expand. Returns
-    True when something folded."""
+    `truncated` so the hint can say what `--impact` would expand. A kind whose
+    cap the caller lifted is left alone. Returns True when something folded."""
     folded = False
     for tp in pack.targets:
-        if len(tp.callers) > FOLD_CALLERS:
+        if len(tp.callers) > FOLD_CALLERS and not _uncapped(pack, "callers"):
             pack.truncated["callers"] = pack.truncated.get("callers", 0) + len(tp.callers) - FOLD_CALLERS
             tp.callers = tp.callers[:FOLD_CALLERS]
             folded = True
-        if tp.lineage_downstream:
+        if tp.lineage_downstream and not _uncapped(pack, "lineage_downstream"):
             tp.counts["lineage_downstream"] = len(tp.lineage_downstream)
             pack.truncated["lineage_downstream"] = pack.truncated.get("lineage_downstream", 0) + len(tp.lineage_downstream)
             tp.lineage_downstream = []
             folded = True
-        if tp.dtype_map:
+        if tp.dtype_map and not _uncapped(pack, "dtype_map"):
             tp.counts["dtype_map"] = len(tp.dtype_map)
             pack.truncated["dtype_map"] = pack.truncated.get("dtype_map", 0) + len(tp.dtype_map)
             tp.dtype_map = {}
@@ -351,6 +421,8 @@ def _trim_to_budget(pack: Pack) -> None:
         return _tokens(pack.as_dict()) > pack.budget_tokens
 
     for kind in TRIM_ORDER:
+        if _uncapped(pack, kind):
+            continue
         while over():
             dropped = False
             if kind == "neighbor_constraints":
@@ -396,7 +468,7 @@ def _hints(pack: Pack) -> list[str]:
             out.append(f"{n} more {labels.get(kind, kind)} not expanded — `provledger why {cut_target(kind)} --all`")
     if structure:
         first = pack.targets[0].qualified_name if pack.targets else "<node>"
-        out.append("structure folded into counts: " + " · ".join(f"{k} {n}" for k, n in structure.items()) + f" (`provledger why {first} --impact` expands)")
+        out.append("structure folded into counts: " + " · ".join(f"{k} {n}" for k, n in structure.items()) + f" (`provledger why {first} --impact` names them)")
     return out
 
 

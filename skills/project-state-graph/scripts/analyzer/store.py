@@ -22,7 +22,7 @@ import json
 import sqlite3
 from typing import Optional
 
-TOOL_VERSION = "0.4.1"
+TOOL_VERSION = "0.4.2"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS node_type (

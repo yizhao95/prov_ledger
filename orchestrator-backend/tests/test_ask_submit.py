@@ -54,9 +54,18 @@ def test_j1_j2_apply_to_a_session_draft_exactly_as_to_a_headless_one(conn, graph
              f"It removed 4127 rows last week [#{cid}]. "
              f"The decision is recorded [#999999].")
     out = ask.submit(conn, asked["ask_id"], draft, psg_db_path=graph)
-    assert out["sentences"] == [f"A constraint requires the null-label drop [#{cid}]."]
-    assert "4127" not in out["answer"] and "I think" not in out["answer"]
-    assert out["dropped"] == {**SU.no_drops(), "uncited": 1, "unknown_id": 1, "number": 1}
+    # The point of this test is the EQUIVALENCE: a session draft is read back by
+    # exactly the same checks as a headless one. That still holds. What changed on
+    # 2026-09-30 is one check's outcome — an unsupported number is now named rather
+    # than taken, because deleting on that basis was deleting correct answers (see
+    # test_ask_summarize.test_j2_…). The uncited and unknown-id sentences are still
+    # removed: those are defects the machine CAN see.
+    assert out["sentences"] == [f"A constraint requires the null-label drop [#{cid}].",
+                                f"It removed 4127 rows last week [#{cid}]."]
+    assert "I think" not in out["answer"], "an uncited sentence is still removed"
+    assert "#999999" not in out["answer"], "a cite the table does not hold is still removed"
+    assert out["dropped"] == {**SU.no_drops(), "uncited": 1, "unknown_id": 1}
+    assert out["unsupported_numbers"] == ["4127"] and "4127" in out["note"]
     assert out["cites"] == [f"#{cid}"] and out["version"] == 1 and out["model"] == "session"
 
 

@@ -988,8 +988,16 @@ straddles the migration is a fact about that ledger, not a footnote.
 
 ### 13.4 · `receipts` — the material, not the reply
 
-Someone challenges a decision. `provledger receipts "<what they said>"` assembles
-the material a reply would need, and stops there.
+Someone challenges a decision. `provledger receipts` assembles the material a
+reply would need, and stops there. It is **two reads with the session's own
+model between them**:
+
+```
+provledger receipts candidates "<what they said>"    the nodes their words touch
+provledger receipts facts <qualified name> …         the record behind the ones you chose
+```
+
+and a one-shot `provledger receipts "<what they said>"` that does both at once.
 
 **It does not write the reply.** Writing a courteous workplace reply is a
 language model's native ability — people already paste the background into a
@@ -1017,16 +1025,56 @@ What it prints:
   the record.
 
 It is `/ledger`'s kernel, arranged differently — a fourth renderer over the same
-three stages, not a second pipeline: `ask.locate` picks the nodes, `ask.facts`
-computes the table, `ask.absence` computes the gaps, `ask.scope` states the
-range. Three things differ from `ask`: the input is *their words* rather than a
-question; **no model is called at all** (`locate.choose` runs its code-only
-path, the top matches by score, and says so in its basis); and **nothing is
+stages, not a second pipeline: `ask.locate.candidates` proposes the nodes,
+`ask.facts` computes the table, `ask.absence` computes the gaps, `ask.scope`
+states the range. Three things differ from `ask`: the input is *their words*
+rather than a question; **no model is called at all**; and **nothing is
 written** — not even the `ask_log` row `ask` keeps, because there is no answer to
 log, and not a `read_hit`, because a question is not a plan. The only thing a
 first invocation can leave behind is the FTS5 index over `change_reason` that any
 first search on a ledger builds (migration 019): rows derived from rows already
 there, no record, no chain head.
+
+#### Why two reads and not one
+
+The first version called `locate.choose(…, runner=None)`. That reads like "no
+model is called", and it is true, but it is not what the line *does*: `runner=
+None` is `choose`'s code-only path, which returns the top `FALLBACK_TOP = 5`
+candidates by match score. Nobody was choosing. A scoring function was — and the
+score counts how often the question's words appear, so the most-**mentioned**
+node wins rather than the most relevant one.
+
+Measured on this project's own ledger, "why is the review timeout 4800 seconds?
+that seems arbitrary" produced a pool of 109 candidates, cut to 40 and then to 5
+before anything that could judge relevance saw the list. The node that came out
+first was `ask.summarize.review`: six points for having "review" in its name,
+two for one text hit, and nothing whatever to do with timeouts.
+
+The room already has a model — the one the person is typing to. So the choosing
+step left Python (spec §8.8): `candidates` hands over a wide, labelled list with
+the cap stated, the session's model reads the `why` on each line and picks, and
+`facts` takes those names as given. `provledger why <node>` is what it navigates
+with between the two.
+
+The one-shot form is kept, because it is documented and people run it, but it
+prints, in words a person reads, that a score did the picking and which two
+commands do better. A tool that picks by word frequency is tolerable; a tool
+that picks by word frequency and looks like it exercised judgement is not.
+
+#### What is left out of the material, and said so
+
+The state graph's own change events (`node_added`, `signature_changed`, …) are
+**not** in the timeline. They are the graph's record of itself — that a node's
+signature differed between two analysis runs — not anything anyone said about the
+decision being challenged, and because their dates are early they sorted above
+the reasons: on one real challenge, 34 of 63 lines of material were `the graph
+recorded node_changed in run N`.
+
+They leave the material; they do not leave the output. One line at the foot of
+the timeline says how many were left out and where to see them
+(`provledger why <node>`), because in this project a cut is stated and never
+silent — the same rule as `scope.line` and the candidate cap. `ask` and the
+dashboard still show them: the graph's history is what those two are for.
 
 And it never sends. The material lands in your terminal; the copying and pasting
 is yours, because sending is the one step that cannot be taken back.

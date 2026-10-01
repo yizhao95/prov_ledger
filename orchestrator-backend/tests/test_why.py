@@ -85,7 +85,9 @@ def test_summary_line_is_fixed_and_counts_everything_even_what_is_not_shown(conn
     assert f"#{ids['c1']} · asserted · task context · " in text and "shown 1 · adopted by P9" in text
     assert f"#{ids['r2']} · stated · verbal · " in text and text.count("shown 0 · not adopted") >= 3
     assert "rename load to load_orders" in text                                 # the stated span, verbatim
-    assert "── blast radius: callers 1 · output consumers 1 (`--impact` expands)" in text
+    # FL-153: the folded line states the TOTAL callers, not what the cap kept, and
+    # the command it names is the one that actually prints the names.
+    assert "── blast radius: callers 1 · output consumers 1 · lineage downstream 0 — no names printed" in text
     assert "pkg.m.clean · constraints 0" in why.why(conn, project="proj", target="nk_a", psg_db_path=graph, impact=True, record=False)["text"]
 
 
@@ -178,3 +180,99 @@ def test_cli_why_prints_the_read_and_help_has_no_banned_words(conn, graph, tmp_p
     assert "evidence level" not in _cli(conn, "why", "--help").stdout
     top = " ".join(_cli(conn, "--help").stdout.split())        # argparse wraps; the wording is what matters
     assert "source level" in top and "evidence level" not in top
+
+
+# ── FL-153: both expansion flags recommended themselves ─────────────────────
+# Measured on the live ledger before the fix:
+#   why …review_and_complete --all     → " 3 more reasons not expanded — `… --all`"
+#   why …review_and_complete --impact  → "callers 12 … `--impact` expands", zero names
+# and the two lines of ONE read disagreed: `callers 12` on the blast-radius
+# line, `callers 38` in the footer. 12 was what the cap kept, 38 what it
+# dropped, and 50 was the truth neither line printed.
+
+def _many_callers(graph, n=50):
+    import json as _json
+    g = sqlite3.connect(graph)
+    g.execute("UPDATE consistency_card SET card_json = ? WHERE symbol_id = 7",
+              (_json.dumps({"callers": [f"pkg.t.test_{i}" for i in range(n)], "callees": [], "output_consumers": ["pkg.m.clean"],
+                            "dtype_map": {}, "lineage_downstream": ["pkg.m.report"], "reads": []}),))
+    g.commit(); g.close()
+
+
+def test_all_never_tells_you_to_pass_all_again(conn, graph):
+    _seed(conn)
+    for i in range(6):
+        pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="technical",
+                         interpretation=f"reason number {i} " + "x" * 80, recorded_by="agent")
+        pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="technical", role="rejected_path",
+                         interpretation=f"rejected {i} " + "y" * 80, rule_id="R6", recorded_by="system")
+    out = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, all_records=True, record=False)
+    assert not [h for h in out["doc"]["hints"] if "--all" in h], out["doc"]["hints"]
+    assert not [ln for ln in out["text"].splitlines() if "not expanded" in ln]
+    assert out["doc"]["truncated"].get("reasons", 0) == 0 and out["doc"]["truncated"].get("rejected_paths", 0) == 0
+
+
+def test_impact_prints_the_caller_names_and_never_recommends_impact_again(conn, graph):
+    _seed(conn)
+    _many_callers(graph)
+    out = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, impact=True, record=False)
+    text = out["text"]
+    assert "── blast radius · callers 50 · output consumers 1 · lineage downstream 1" in text
+    assert text.count("caller · pkg.t.test_") == 50                  # names, not a count: a name can be fed back in
+    assert "lineage downstream · pkg.m.report" in text
+    assert "output consumer · pkg.m.clean · constraints 0" in text
+    assert not [h for h in out["doc"]["hints"] if "--impact" in h], out["doc"]["hints"]
+    assert out["doc"]["truncated"].get("callers", 0) == 0
+    assert out["doc"]["blast_radius"]["callers"] == [f"pkg.t.test_{i}" for i in range(50)]
+
+
+def test_the_folded_blast_radius_line_prints_the_total_and_names_nothing_twice(conn, graph):
+    """One read may not carry two different numbers for the same thing. Folded,
+    the line states the total (50) and the one command that names them; the
+    footer no longer repeats a different figure for the same fold."""
+    _seed(conn)
+    _many_callers(graph)
+    out = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, record=False)
+    text = out["text"]
+    assert "── blast radius: callers 50 · output consumers 1 · lineage downstream 1 — no names printed" in text
+    assert "provledger why pkg.m.load_orders --impact" in text
+    assert "callers 12" not in text and "callers 38" not in text
+    assert len([ln for ln in text.splitlines() if "callers" in ln]) == 1
+
+
+def test_a_record_cut_at_240_chars_says_so_and_names_the_read_that_has_the_rest(conn, graph):
+    """FL-154: the cut was silent, so a severed clause read as a whole record."""
+    _seed(conn)
+    long_text = "the whole reason is " + "z" * 900
+    rid = pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="technical",
+                           interpretation=long_text, recorded_by="agent")
+    conn.commit()
+    out = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, record=False)
+    assert f"+{len(long_text) - 240} chars cut" in out["text"]
+    assert f"provledger record #{rid}" in out["text"]
+    rec = next(r for r in out["doc"]["records"] if r["id"] == rid)
+    assert rec["text_cut"] == len(long_text) - 240 and rec["text_chars"] == len(long_text)
+    short = next(r for r in out["doc"]["records"] if r["id"] != rid)
+    assert short["text_cut"] == 0
+    assert out["text"].count("chars cut") == 1                       # an uncut record carries no marker
+
+
+def test_the_remainder_the_footer_states_is_what_all_actually_reveals(conn, graph):
+    """Live, after the first two fixes: `--impact` still footed "3 more reasons
+    not expanded" while `--all` showed 5 of 5. The two lines disagreed because
+    `build` counted the `unstated` slot among `reasons` and the renderer counted
+    it under `pending` — one output, two definitions of the same word. 2 is
+    right: five reasons carry text, three are printed, and the unstated slot is
+    already reported on the summary line."""
+    _seed(conn)                                       # 2 reasons (one stated) + 1 unstated slot on nk_a
+    for i in range(3):
+        pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="technical",
+                         interpretation=f"reason number {i}", recorded_by="agent")
+    conn.commit()
+    folded = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, record=False)
+    assert "pending 1" in folded["text"].splitlines()[0]
+    assert folded["doc"]["truncated"]["reasons"] == 2          # 5 with text, 3 printed — not 3
+    assert any("2 more reasons not expanded" in h for h in folded["doc"]["hints"])
+    every = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, all_records=True, record=False)
+    printed = len([r for r in every["doc"]["records"] if r["layer"] == "reasons"])
+    assert printed == 5 and printed == 3 + folded["doc"]["truncated"]["reasons"]
