@@ -151,7 +151,13 @@ def test_a_metric_can_be_chosen_so_what_was_claimed_about_it_is_reachable(conn, 
     conn.execute("INSERT INTO metrics (project, name, value, unit, observed_at, plan_id, source) "
                  "VALUES ('proj', 'discount_rate_pct', 11.4, 'pct', '2026-03-01 00:00:00', 'P1', 'test')")
     conn.commit()
-    cands = locate.candidates(conn, graph, "how much should I trust discount_rate_pct now?", project="proj")
+    # The question a person actually asks does NOT spell the metric out: a
+    # whole-name match never fires on "the discount rate the weekly mail prints",
+    # which is how the first version of this matcher missed the case it was
+    # written for. Two parts of the name is the bar — enough that a lone common
+    # word cannot drag a metric in, loose enough that people can speak normally.
+    cands = locate.candidates(
+        conn, graph, "How much should I trust the discount rate the weekly mail prints now?", project="proj")
     names = [c["qn"] for c in cands]
     assert "discount_rate_pct" in names, \
         "a metric the question names must be offerable, or nothing recorded about it can be reached"
@@ -166,4 +172,16 @@ def test_a_metric_nobody_asked_about_is_not_offered(conn, graph):
     conn.commit()
     cands = locate.candidates(conn, graph, "why is the etag computed that way?", project="proj")
     assert "unrelated_gauge" not in [c["qn"] for c in cands]
+
+
+def test_one_common_word_from_a_metric_name_does_not_drag_it_in(conn, graph):
+    """The reason the bar is two parts and not one. `discount_rate_pct` must not
+    answer every question that happens to contain the word "rate" — that is the
+    noise the candidate list already has too much of."""
+    conn.execute("INSERT INTO metrics (project, name, value, unit, observed_at, plan_id, source) "
+                 "VALUES ('proj', 'discount_rate_pct', 11.4, 'pct', '2026-03-01 00:00:00', 'P1', 'test')")
+    conn.commit()
+    cands = locate.candidates(conn, graph, "what rate does the etag cache expire at?", project="proj")
+    assert "discount_rate_pct" not in [c["qn"] for c in cands], \
+        "one shared word is a coincidence, not a subject"
 
