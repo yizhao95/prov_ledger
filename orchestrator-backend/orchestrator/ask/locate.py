@@ -227,6 +227,34 @@ def _latest_text(conn, project: str, node_keys: list[str]) -> dict[str, str]:
 
 # ── candidates ───────────────────────────────────────────────────────────────
 
+SCORE_METRIC = 5
+
+
+def _metric_hits(conn, project: str, tokens: list[str], literals: list[str], limit: int) -> list[str]:
+    """Metric names the question names.
+
+    A metric lives in its own namespace: `facts` matches metrics by
+    `name IN (chosen)` and expectations by `target IN (chosen)`, where `chosen`
+    holds what this function's caller returned. Nothing here ever offered a
+    metric, so a metric could not be chosen, so a claim recorded ABOUT one — and
+    later contradicted by an observation — was unreachable by any question.
+
+    Matched on the whole name, never on a fragment: a metric called
+    `discount_rate_pct` answers a question that names it, and does not get
+    dragged into every question containing the word "rate".
+    """
+    wanted = {t.lower() for t in tokens} | {l.lower() for l in literals}
+    if not wanted:
+        return []
+    out = []
+    for (name,) in conn.execute("SELECT DISTINCT name FROM metrics WHERE project = ? ORDER BY name", (project,)):
+        if (name or "").lower() in wanted:
+            out.append(name)
+            if len(out) >= limit:
+                break
+    return out
+
+
 def candidates(conn, psg_db_path: str | None, question: str, *, project: str, limit: int = MAX_CANDIDATES) -> list[dict]:
     """Every node the question literally touches, with the matcher that found it.
 
@@ -236,6 +264,7 @@ def candidates(conn, psg_db_path: str | None, question: str, *, project: str, li
     literals = question_literals(question)
     files = question_files(question)
     pool: dict[str, dict] = {}
+
 
     def add(node_key: str | None, qn: str | None, why: str, score: int, record_id: int | None = None) -> None:
         key = node_key or qn
@@ -260,6 +289,13 @@ def candidates(conn, psg_db_path: str | None, question: str, *, project: str, li
         add(node_key, None, f"text match: utterance #{utt_id} quoted by #{reason_id}", SCORE_TEXT, reason_id)
     for reason_id, node_key, ref_id, label in _reference_hits(conn, project, tokens, TEXT_LIMIT):
         add(node_key, None, f"text match: source #{ref_id} ({label[:60]}) linked from #{reason_id}", SCORE_TEXT, reason_id)
+
+    # 1b · the metrics the question names. Their own namespace: a metric is not a
+    # graph node, and `facts` matches metrics and metric-targeted expectations
+    # against whatever this returns — so a metric that cannot be offered here is a
+    # metric nothing recorded about it can ever reach.
+    for metric_name in _metric_hits(conn, project, tokens, literals, max(limit, MAX_CANDIDATES)):
+        add(None, metric_name, f"metric named in the question: {metric_name}", SCORE_METRIC)
 
     # 2 · the names the graph knows — the node's own name, its dotted path, its file
     graph_nodes = _graph_matches(psg_db_path, tokens, literals, files, max(limit, MAX_CANDIDATES) * 4)

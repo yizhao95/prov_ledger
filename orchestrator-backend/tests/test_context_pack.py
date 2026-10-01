@@ -260,3 +260,35 @@ def test_a_record_cut_at_the_text_cap_says_how_much_is_missing(conn, graph):
     short = cp.build(conn, project="proj", targets=["nk_a"], psg_db_path=graph,
                      budget_tokens=100000, record=False).targets[0].constraints[0]
     assert short["text_cut"] == 0 and short["text_chars"] == len(short["text"])
+
+
+def test_a_stated_record_carries_the_words_it_quotes_not_only_the_paraphrase(conn):
+    """The quoted span was a COALESCE fallback, so a paraphrase hid it:
+
+        COALESCE(r.interpretation, r.statement, substr(u.text, ...)) AS text
+
+    A `stated` record means the user's own words say it — that is the whole
+    difference between `stated` and `asserted`. `node declare --confirm` writes
+    both a statement and the utterance it was confirmed with, so the statement won
+    the COALESCE and the words vanished with nothing saying they had existed.
+
+    Measured in the release sandbox: asked "which decision constrains
+    weekly_report, who made it and when", with the decider and the date living in
+    exactly those confirming words, the judge scored 1 of 3. A paraphrase cannot
+    carry a decider or a date it never contained.
+
+    So the row carries both — `text` keeps its meaning for every existing reader,
+    `quoted` is the words, present only when there are some.
+    """
+    uid = pv.insert_utterance(conn, session_id="s", project="proj", plan_id="p1",
+                              text="the steering group decided on 2026-03-14 to drop EMEA",
+                              occurred_at="2026-03-14 10:00:00")
+    rid = pv.insert_reason(conn, project="proj", plan_id="p1", node_key="nk_decl",
+                           kind="organizational", role="constraint",
+                           statement="EMEA is excluded from the Q3 rollup",
+                           verbatim=(uid, 4, 53), recorded_by="human")
+    conn.commit()
+    r = next(x for x in cp._records(conn, "proj", ["nk_decl"]) if x["id"] == rid)
+    assert r["text"] == "EMEA is excluded from the Q3 rollup", "text keeps its meaning for existing readers"
+    assert "steering group" in (r.get("quoted") or ""), \
+        "and the words it quotes travel beside it, not instead of it"

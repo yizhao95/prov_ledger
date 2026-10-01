@@ -91,7 +91,7 @@ step "INSTALL.md §4 · install the dependency line the document gives"
 # document: the list had no `httpx` and never installed the backend, so §5 failed
 # on `No module named 'provledger'` and this check reported it as a product defect.
 # One authoritative file removes the whole class.
-DOC_REQ="$CLONE/requirements.txt"
+DOC_REQ="$E2E_CLONE/requirements.txt"
 if [ ! -f "$DOC_REQ" ]; then
     record $FAIL "§4 — requirements.txt, which §4 tells the reader to install, is not in the clone"
     V_ALL=$(worst "$V_ALL" $FAIL); rc=1

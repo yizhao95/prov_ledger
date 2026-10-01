@@ -131,3 +131,39 @@ def test_migration_023_creates_both_tables_with_the_feedback_check(conn):
     assert tuple(conn.execute("SELECT verdict, ask_id FROM ask_feedback WHERE id = ?", (fid,)).fetchone()) == ("wrong", ask_id)
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO ask_feedback (ask_id, verdict) VALUES (?, 'maybe')", (ask_id,))
+
+
+def test_a_metric_can_be_chosen_so_what_was_claimed_about_it_is_reachable(conn, graph):
+    """A metric was unselectable, so everything hung on one was unreachable.
+
+    `facts` matches metrics by `name IN (chosen)` and expectations by
+    `target IN (chosen)`, where `chosen` are the node names `locate` returned.
+    But `locate` had matchers over reason text, utterances, references, graph node
+    names, files and literals — and none over `metrics`. A metric name is a
+    different namespace from a node's qualified name, so it could never be in
+    `chosen`, so `facts` could never match it, so a claim recorded ABOUT a metric
+    and later contradicted by an observation was structurally invisible.
+
+    Measured in the release sandbox: asked "how much should I trust the discount
+    rate the weekly mail prints now", with a falsified claim on record saying the
+    estimate drifts 6.6 points, the judge scored 0 of 1.
+    """
+    conn.execute("INSERT INTO metrics (project, name, value, unit, observed_at, plan_id, source) "
+                 "VALUES ('proj', 'discount_rate_pct', 11.4, 'pct', '2026-03-01 00:00:00', 'P1', 'test')")
+    conn.commit()
+    cands = locate.candidates(conn, graph, "how much should I trust discount_rate_pct now?", project="proj")
+    names = [c["qn"] for c in cands]
+    assert "discount_rate_pct" in names, \
+        "a metric the question names must be offerable, or nothing recorded about it can be reached"
+    m = next(c for c in cands if c["qn"] == "discount_rate_pct")
+    assert "metric" in m["why"], "and the candidate must say it is a metric, not look like a node"
+
+
+def test_a_metric_nobody_asked_about_is_not_offered(conn, graph):
+    """The net stays honest: matching, not dumping."""
+    conn.execute("INSERT INTO metrics (project, name, value, unit, observed_at, plan_id, source) "
+                 "VALUES ('proj', 'unrelated_gauge', 1.0, NULL, '2026-03-01 00:00:00', 'P1', 'test')")
+    conn.commit()
+    cands = locate.candidates(conn, graph, "why is the etag computed that way?", project="proj")
+    assert "unrelated_gauge" not in [c["qn"] for c in cands]
+

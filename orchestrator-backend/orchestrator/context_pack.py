@@ -219,7 +219,15 @@ def _records(conn, project: str, anchors: list[str]) -> list[dict]:
     return [dict(r) for r in conn.execute(
         f"SELECT r.id, r.node_key, r.plan_id, r.step_id, r.role, r.tier, r.evidence_level, r.rule_id, r.state, r.superseded_by, "
         f"       r.recorded_by, r.significance_eff AS significance, r.occurred_at, r.statement, "
-        f"       COALESCE(r.interpretation, r.statement, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS text "
+        f"       COALESCE(r.interpretation, r.statement, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS text, "
+        # The quoted span used to be reachable ONLY as this COALESCE's last
+        # resort, so any record that also carried a paraphrase hid the words it
+        # was quoting — and said nothing about having them. That is backwards for
+        # a `stated` record, whose entire claim is that the user's own words say
+        # it. `node declare --confirm` writes both, so the decider and the date a
+        # declaration was confirmed with were invisible to every reader.
+        f"       CASE WHEN r.verbatim_utterance_id IS NOT NULL AND (r.interpretation IS NOT NULL OR r.statement IS NOT NULL) "
+        f"            THEN substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start) END AS quoted "
         f"FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
         f"WHERE r.project = ? AND r.node_key IN ({ph}) ORDER BY r.id DESC", (project, *anchors))]
 
@@ -239,7 +247,13 @@ def _slim(r: dict) -> dict:
     text = r["text"] or ""
     return {"id": r["id"], "role": r["role"], "tier": r["tier"], "evidence_level": r["evidence_level"], "rule_id": r.get("rule_id"),
             "recorded_by": r["recorded_by"], "occurred_at": r["occurred_at"], "plan_id": r["plan_id"],
-            "text": text[:CAP_TEXT], "text_chars": len(text), "text_cut": max(0, len(text) - CAP_TEXT)}
+            "text": text[:CAP_TEXT], "text_chars": len(text), "text_cut": max(0, len(text) - CAP_TEXT),
+            # The words the record quotes, when it has a paraphrase as well. Bounded
+            # like `text` and, like `text`, saying how much was cut — a new field
+            # that truncated in silence would be FL-154 a second time.
+            **({"quoted": (r["quoted"] or "")[:CAP_TEXT],
+                "quoted_chars": len(r["quoted"] or ""),
+                "quoted_cut": max(0, len(r["quoted"] or "") - CAP_TEXT)} if r.get("quoted") else {})}
 
 
 def _prior_outcomes(conn, project: str, names: list[str]) -> list[dict]:
