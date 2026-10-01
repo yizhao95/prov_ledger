@@ -80,6 +80,47 @@ behind it, plus the four reads that path needs.
   command the README prints, so the dashboard's graph and `/ledger` pages rendered
   "unavailable" rather than failing loudly. All four are fixed, and §4a installs it.
 
+### What was recorded and could not be surfaced
+
+The release sandbox builds a project whose whole history it wrote, then asks
+eleven questions and has a model mark the answers against key points fixed in
+advance. Three failed, and each was a record that existed and had no path back.
+None was a retrieval algorithm being insufficiently clever; each was a missing
+length of wire, and two of the three were found twice because the first fix
+stopped one layer short of the material.
+
+- **`ledger-add`'s two most important kinds were unreadable.** A new entry was
+  mirrored into `change_reason`, where the readers moved, but only
+  `if kind == "constraint"`. So every `decision` and every `anti_pattern` added
+  after the one-time backfill landed in a table no answer path reads — and those
+  two are the whole reason that ledger exists. Each is mirrored now as what it
+  is: an anti-pattern is a path tried and failed, which is `rejected_path`; a
+  decision is a `reason`. Mirroring them as constraints would have misreported
+  them.
+- **A record hid the words it quoted.** The quoted span was reachable only as the
+  last resort of a `COALESCE`, so any record carrying a paraphrase showed the
+  paraphrase and said nothing about having the words. That is backwards for a
+  `stated` record, whose entire claim is that the user's own words say it — and
+  `node declare --confirm` writes both, so the decider and date a declaration was
+  confirmed with were invisible. They travel in `quoted` now, beside `text` and
+  marked as a quotation, bounded and saying how much was cut.
+- **A metric could not be chosen, so nothing recorded about one could be
+  reached.** `facts` matches metrics by name and metric-targeted expectations by
+  target against the names `locate` returns, and `locate` had no matcher over
+  metrics at all. Metrics a question names are offered now, matched on two parts
+  of the name — loose enough to ask in your own words, strict enough that
+  `discount_rate_pct` does not answer every question containing "rate".
+- **An outcome's own account of itself was dropped in the renderer**, leaving
+  `{"drift": 6.6}` as the whole story of a claim that turned out false. A reader
+  cannot see from a JSON blob that an estimate missed by 6.6 points, and that
+  sentence is the entire value of having recorded the outcome.
+
+Every layer's tests asked "did this layer do its job", and all 1144 of them
+passed while these four paths were broken. None asked whether a person who asks
+the question gets the sentence. That is what the sandbox asks, and it is why each
+fix here was verified by rendering the real material and grepping for the words,
+not by a green unit test.
+
 ### Before every release
 
 `scripts/release-e2e.sh` — a clean sandbox that clones, follows `INSTALL.md` as
