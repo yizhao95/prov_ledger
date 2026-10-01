@@ -67,7 +67,7 @@ def test_the_output_is_reply_first_then_evidence_then_the_tone_question():
     assert -1 not in (reply, evidence, tone), "the three sections must be headed a / b / c"
     assert reply < evidence < tone, "reply must come before the evidence, and the tone question last"
     # and each section must be the thing it claims to be
-    assert "回复" in text or "reply" in text.lower()
+    assert "reply" in text.lower()
     head = text[reply:evidence]
     assert "paste" in head.lower() or "copy" in head.lower(), \
         "section a is a finished reply the user can send, not a summary of one"

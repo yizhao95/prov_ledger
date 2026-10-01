@@ -121,12 +121,12 @@ Install everything:
 
 ```bash
 # if you took Option A (`python3 -m venv`) — that venv has pip
-pip install pytest fastapi "uvicorn[standard]" jinja2 \
+pip install pytest httpx2 fastapi "uvicorn[standard]" jinja2 \
     tree-sitter tree-sitter-css tree-sitter-html \
     tree-sitter-javascript tree-sitter-python
 
 # if you took Option B (`uv venv`) — that venv has NO pip, so use uv
-uv pip install pytest fastapi "uvicorn[standard]" jinja2 \
+uv pip install pytest httpx2 fastapi "uvicorn[standard]" jinja2 \
     tree-sitter tree-sitter-css tree-sitter-html \
     tree-sitter-javascript tree-sitter-python
 ```
@@ -150,6 +150,11 @@ provledger --help                       # must print the command list
 If `provledger --help` fails here, stop and fix it: the dashboard's graph and
 `/ledger` pages shell out to this command, and without it they render as pages
 that say "unavailable" rather than as an error you can act on.
+
+> `httpx2` is what `starlette.testclient` needs to drive the dashboard in the
+> test suites. On a machine that already has the older `httpx` the suites run
+> with a deprecation warning, so this only shows up on a clean install — which
+> is exactly where it stops §5 dead.
 
 > **Minimal install (orchestrator only, no graph, no dashboard):**
 > the backend needs nothing beyond Python + `pytest` for the tests.
