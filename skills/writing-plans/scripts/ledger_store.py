@@ -64,9 +64,19 @@ def add_entry(conn: sqlite3.Connection, *, project: str, kind: str,
         (project, kind, json.dumps(subjects or []), json.dumps(keywords or []),
          statement, rationale, source, plan_id, why_ref, why_visibility))
     conn.commit()
+    # All three kinds are mirrored into change_reason, because that is where the
+    # readers moved in DP phase 1 and the one-time backfill is long since done.
+    # Only `constraint` was wired, so every `decision` and `anti_pattern` added
+    # afterwards landed where no answer path looks — and those two are the whole
+    # reason this ledger exists. Each is mirrored as what it IS, never as a
+    # constraint: an anti-pattern is a path that was tried and failed, which is
+    # exactly `rejected_path`; a decision is a `reason`.
     if kind == "constraint":
         _mirror_constraint(conn, project=project, subjects=subjects or [], statement=statement, rationale=rationale,
                            plan_id=plan_id, why_ref=why_ref, why_visibility=why_visibility)
+    else:
+        _mirror_as_reason(conn, kind=kind, project=project, subjects=subjects or [], statement=statement,
+                          rationale=rationale, plan_id=plan_id, why_ref=why_ref, why_visibility=why_visibility)
     return int(cur.lastrowid)
 
 
@@ -84,6 +94,50 @@ def _mirror_constraint(conn, *, project, subjects, statement, rationale, plan_id
     except Exception as exc:          # a DB without 018: the ledger row still exists
         import sys
         print(f"warning: constraint not mirrored into change_reason: {exc}", file=sys.stderr)
+
+
+_MIRROR_ROLE = {"anti_pattern": "rejected_path", "decision": "reason"}
+
+
+def _mirror_as_reason(conn, *, kind, project, subjects, statement, rationale, plan_id,
+                      why_ref, why_visibility) -> None:
+    """A `decision` or an `anti_pattern` as change_reason rows — one per subject,
+    under the role that says what it is.
+
+    The role matters more than it looks: a reader deciding whether to repeat
+    something needs "this was tried and it failed" to arrive as a rejected path,
+    not as a constraint it must satisfy nor as a plain reason for the current
+    shape. `tier` is `asserted` and `recorded_by` is `human`, the same as the
+    constraint mirror — a person typed this at a terminal, and it is their reading
+    of what happened rather than a quote of anyone's words."""
+    role = _MIRROR_ROLE.get(kind)
+    if role is None:
+        return
+    subjects = [s for s in (subjects or []) if s]
+    if not subjects:
+        return
+    try:
+        from orchestrator import provenance as _prov
+    except ImportError:
+        return
+    try:
+        refs = []
+        if why_ref:
+            refs.append(_prov.insert_reference(
+                conn, project=project, kind="doc", label=str(why_ref)[:512],
+                occurred_at=conn.execute("SELECT strftime('%Y-%m-%d %H:%M:%S','now')").fetchone()[0],
+                commit=False))
+        for subject in subjects:
+            _prov.insert_reason(
+                conn, project=project, plan_id=plan_id or "ledger", node_key=subject,
+                kind="organizational", role=role, statement=statement,
+                rationale=rationale or None,
+                rationale_visibility="personal" if why_visibility == "restricted" else "shareable",
+                refs=refs, recorded_by="human", state="active", commit=False)
+        conn.commit()
+    except Exception as exc:          # a DB without 018: the ledger row still exists
+        import sys
+        print(f"warning: {kind} not mirrored into change_reason: {exc}", file=sys.stderr)
 
 
 def constraints_for(conn: sqlite3.Connection, project: str,

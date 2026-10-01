@@ -119,7 +119,32 @@ When none of the three has anything to say, the record says *unstated* and stops
 
 *Every sentence cites a record. When nothing is recorded, it says so.*
 
-`/ledger why is our train/test split 80/20?` — the answer comes back in the session you are already in. Code finds the candidates, computes the facts and computes the absences; the model may only restate that table; then code reads the answer back and deletes any sentence that cites nothing, cites an id the table does not hold, or carries a number the table does not state — counting every deletion, so a trimmed answer never reads like a complete one. The same thing is a command (`provledger ask`) and a page (`/ledger?q=`).
+`/ledger why is our train/test split 80/20?` — the answer comes back in the session you are already in. Code finds the candidates, computes the facts and computes the absences; then code reads the answer back and deletes any sentence that cites nothing or cites an id the table does not hold, counting every deletion, so a trimmed answer never reads like a complete one. A number the table does not state is **named rather than deleted** — the machine can tell whether a number is in its own table, not whether it is true, and deleting on that basis was removing correct answers. The same thing is a command (`provledger ask`) and a page (`/ledger?q=`).
+
+#### The usual way in is your own code
+
+provLedger **supplements** the repository; it does not replace reading it. Code shows the winner and nothing else — never the option that was rejected, who asked for it, or what it cost. That remainder is what the ledger holds, so the normal path starts where you already are:
+
+```console
+$ grep -rn "DEFAULT_TIMEOUT_GRAPH_S" --include=*.py .      # the repo is the index
+skills/update-project-state-graph/scripts/review_run.py:79
+
+$ provledger why skills/update-project-state-graph/scripts/review_run.py:79
+…review_run._killpg · history 1 · constraints 0 · rejected 0 · pending 0
+ #3403 · subprocess.run's timeout kills only the process it started, and the refresh spawns the analyzer…
+
+$ provledger record '#3403'                                 # one record, whole
+   plan dp6-a-20260927063613 · step dp6-a-20260927063613-REVIEW.1.2
+   provledger plan dp6-a-20260927063613   the task that produced it: its steps, failures and logs
+
+$ provledger plan dp6-a-20260927063613                      # and the task behind it
+dp6-a-20260927063613 · COMPLETED · steps 29 · 3 failed · deviations 7
+   the plan closed COMPLETED: the failures below were recovered, and nothing but these rows remembers them
+```
+
+`why` takes a `file:line` and resolves it to the node the ledger knows. A record names the task that produced it, and the task's step logs hold what was measured and decided — which is usually where the substance is. **A task whose failure was recovered closes `COMPLETED`**, so the detour is gone from its own status and only those rows remember it.
+
+The one thing to never do is read the code and invent a reason for it. "It's written this way, so presumably because X" is the failure this exists to prevent, because the real reason is usually recorded, and a plausible guess gets believed instead of it.
 
 The dashboard is read-only and opens the database in read-only mode, so it can never block or change what it is showing.
 
@@ -155,7 +180,7 @@ Each command below was run for real against a scratch ledger; the lines under it
 ```console
 $ claude plugin list
   ❯ provledger@provledger
-    Version: 0.4.1
+    Version: 0.4.2
     Scope: user
     Status: ✔ enabled
 ```
@@ -405,8 +430,11 @@ Deeper: [`docs/conformance.md`](docs/conformance.md) (providers and the six cont
 | `anchor candidates` | propose readings — off by default, and even on it only proposes |
 | `headline show` / `respond` / `ack` | the plan headline; answer one finding (revise / proceed); a person proceeds past one |
 | `why` | one bounded read of a node: history, constraints, rejected paths, prior claims, blast radius (`--impact`, `--all`, `--pending`, `--never-read`, `--search`, `--json`) |
+| `graph` | the project graph, folded to areas with how many nodes carry records; a target plus `--depth N` unfolds it and prints neighbour **names** with their edge type (`--limit`, `--type`, `--include-imports`, `--json`). The fold is pagination, never a judgement about relevance |
+| `record` | one record whole and untruncated — `#12` for a ledger record, `#r3` for a source — with its tier, dates, the words it quotes, its sources, and the task that produced it (`--json`) |
+| `plan` | a task's steps in tree order with their failures and logs (`--step`, `--full`, `--log-chars`, `--json`). The only read that reaches a failure inside a plan whose status is `COMPLETED` because the failure was recovered |
 | `ask` | ask the ledger a question (`--no-model`, `--json`, `--export`, `--lang`, `--runner`) |
-| `receipts` | someone challenged a decision: the record as a timeline, the gaps, the range searched — the material a reply needs, never the reply itself (`--json`, `--lang`) |
+| `receipts` | someone challenged a decision. `receipts candidates "<what they said>"` is an entry point — matching nodes with how each matched, and it says outright that the score orders the list and does not choose; `receipts facts <node>…` is the timeline, the gaps and the range for the nodes you picked (`--cap`, `--json`, `--lang`). `/receipts` wraps both and writes the reply |
 | `verify` | walk the three hash chains, and with `--against-notes` the git anchors they must agree with (exit 3 on a broken chain) |
 | `reference add` | pin a decision to where it came from — an email, a meeting, a ticket — as a label and a link, never a copy of the body (`--reason` or `--utterance`, `--uri`, `--stance`) |
 | `reference pending` / `mark` | which pointers nobody has opened lately; record that one still opens, or that it stopped (`--ok`, `--gone`, `--moved`, `--no-access`) |
@@ -455,6 +483,10 @@ Nine suites, each with its own pyproject and pythonpath — run them separately.
 
 Total **2115 collected** across the nine suites (`scripts/count_tests.sh`), plus a few deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
 
+### Before every release
+
+**`bash scripts/release-e2e.sh` must be green from zero, and its output goes into the release PR.** All 2115 of the tests above passed while two defects shipped in one week: `python3 -m venv .venv`, the first command of the install guide, fails on Debian/Ubuntu/WSL — unfindable on a machine where the venv already exists — and the dashboard did nothing when clicked on Chrome and Edge for a week behind 267 green webapp tests, every one of which renders on the server and none of which drives a browser. The release check does only the part the suites structurally cannot reach: a stranger's install in a clean sandbox through `make demo`; a dummy project whose history it writes itself, then `/ledger`, `/receipts` and the dashboard **clicked by a real browser**; and a model marking the answers against key points written down before the questions were asked. It has its own `HOME`, its own ledger and its own `CLAUDE_CONFIG_DIR`, and never touches yours. Details and exit codes: [`INSTALL.md` §5](INSTALL.md).
+
 ### Origin
 
 The two orchestration skills, `writing-plans` and `executing-plans`, are evolved from the [Superpowers](https://github.com/obra/superpowers) skill library by Jesse Vincent (obra), which established the plan-then-execute discipline this repository builds on. What provLedger adds is the persistence and the provenance: a validated SQLite state machine instead of ad-hoc markdown, a project state graph with code and data contract gates, runtime profiling and drift detection, the decision ledger, and the read-only dashboard. provLedger also bundles local variants of six superpowers skills; [`INSTALL.md`](INSTALL.md) says how to choose between them in one project.
@@ -480,7 +512,7 @@ Issues and pull requests are welcome. Good first contributions: run `make demo` 
 
 The `superpowers` plugin is a recommended companion: the byte-identical `verification-before-completion` skill is not bundled and comes from superpowers when present. Everything works without it.
 
-The PyPI package is the stdlib-only core library — plans, steps, profiling, drift, the ledger — and the published release is 0.1.0; the plugin, the skills, the hooks, the dashboard and the `provledger` command come from this repository at 0.4.1.
+The PyPI package is the stdlib-only core library — plans, steps, profiling, drift, the ledger — and the published release is 0.1.0; the plugin, the skills, the hooks, the dashboard and the `provledger` command come from this repository at 0.4.2.
 
 
 ### See it run

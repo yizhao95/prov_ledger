@@ -106,6 +106,9 @@ def _snapshot(conn) -> dict:
 # ── reuse: one pipeline, a fourth renderer over it ───────────────────────────
 
 def test_the_three_stages_are_called_not_reimplemented(conn, graph, seeded, monkeypatch):
+    """`locate.choose` is deliberately NOT in this list any more (spec §8.8): the
+    choosing step left Python, so the stages receipts reuses are the matchers,
+    the fact table, the absences and the scope — not the pick."""
     seen = {}
 
     def spy(mod, name):
@@ -117,14 +120,12 @@ def test_the_three_stages_are_called_not_reimplemented(conn, graph, seeded, monk
             return out
         monkeypatch.setattr(mod, name, wrapper)
 
-    for mod, name in ((L, "candidates"), (L, "choose"), (F, "facts"), (A, "absences"), (S, "scope"), (S, "line")):
+    for mod, name in ((L, "candidates"), (F, "facts"), (A, "absences"), (S, "scope"), (S, "line")):
         spy(mod, name)
 
     doc = _doc(conn, graph)
-    for name in ("candidates", "choose", "facts", "absences", "scope", "line"):
+    for name in ("candidates", "facts", "absences", "scope", "line"):
         assert name in seen, f"receipts reimplemented ask.{name} instead of calling it"
-    # no model is asked: `choose` runs the code-only path (spec §8.1)
-    assert seen["choose"][0][1].get("runner") is None
     assert doc["facts"]["nodes"], "the fact table came back empty for a question that names a node"
 
 
@@ -158,7 +159,8 @@ def test_every_fact_line_ends_in_its_id(conn, graph, seeded):
     assert cites <= set(ids), f"a line cites what the fact table cannot resolve: {cites - set(ids)}"
     # the source, the words, the constraint, the influence rows: all of them carry one
     kinds = {e["kind"] for e in doc["timeline"]}
-    assert {"reference", "constraints", "influence", "change"} <= kinds, kinds
+    assert {"reference", "constraints", "influence"} <= kinds, kinds
+    assert "change" not in kinds, "the graph's own bookkeeping is not evidence about a decision (§8.8 item 3)"
 
 
 def test_an_absence_renders_as_an_absence_not_as_a_blank(conn, graph, seeded):
@@ -289,3 +291,188 @@ def test_the_command_prints_both_forms_and_writes_nothing(conn, graph, seeded, r
     assert out["scope"]["nodes"] == 1 and out["scope_line"] == out["scope_line"].strip()
 
     assert _snapshot(conn) == before, "the command wrote something"
+
+
+# ── §8.8 · two reads, so that a model does the choosing ──────────────────────
+#
+# The one-shot form above was measured against the live ledger and failed: 109
+# candidates were cut to 40 and then to 5 by a scoring function that counts word
+# hits, so for "why is the review timeout 4800 seconds?" the top node was
+# `ask.summarize.review` — six points for having "review" in its name and
+# nothing to do with timeouts. `runner=None` read like "no model is called", but
+# its actual meaning was "`locate.choose` takes the top FALLBACK_TOP by score":
+# nobody chose. Spec §8.8 splits the command in two so the model already in the
+# room does the choosing between them.
+
+
+def test_candidates_is_a_read_of_its_own_and_states_its_cap(conn, graph, seeded):
+    """`receipts candidates` hands over the list to be chosen FROM, and says how
+    wide the list is: the cap is a named constant and the cut is printed, the way
+    the scope line prints its range."""
+    doc = R.candidates(conn, project="proj", challenge=CHALLENGE, psg_db_path=graph)
+    assert R.CANDIDATE_CAP >= 40, "the cap must be wide enough that the model, not the cap, chooses"
+    assert doc["cap"] == R.CANDIDATE_CAP and doc["matched"] >= 1
+    assert doc["candidates"], "the fixture names a node; the matchers must propose it"
+    for c in doc["candidates"]:
+        assert set(c) >= {"qn", "node_key", "why", "score"}, c
+    text = R.render_candidates(doc)
+    assert CHALLENGE in text
+    body = _section(text, R.CANDIDATES_HEADER)
+    assert any("pkg.rollup.weekly_report" in line for line in body), body
+    assert doc["cap_line"] in text and str(doc["cap"]) in doc["cap_line"] and str(doc["matched"]) in doc["cap_line"]
+    assert R.CANDIDATES_CLOSING in text
+
+
+def test_the_candidate_cap_states_what_it_cut_and_never_cuts_to_five(conn, graph, seeded):
+    """A cap that bites says so in the output. And the default cap is not the old
+    FALLBACK_TOP=5: five is what a scoring function can defend, not what a reader
+    can choose from."""
+    wide = R.candidates(conn, project="proj", challenge=CHALLENGE, psg_db_path=graph)
+    assert len(wide["candidates"]) == min(wide["matched"], R.CANDIDATE_CAP)
+    narrow = R.candidates(conn, project="proj", challenge=CHALLENGE, psg_db_path=graph, cap=1)
+    assert len(narrow["candidates"]) == 1 and narrow["cap"] == 1
+    cut = narrow["matched"] - 1
+    assert narrow["truncated"].get("candidates") == cut or cut == 0
+    if cut:
+        assert str(cut) in narrow["cap_line"], narrow["cap_line"]
+
+
+def test_facts_takes_the_names_a_model_picked_and_locates_nothing(conn, graph, seeded, monkeypatch):
+    """The second read is given names. It must not re-run the matchers and it must
+    not re-pick: the pick already happened, outside Python."""
+    def boom(*a, **kw):
+        raise AssertionError("receipts facts located or chose instead of taking the names it was given")
+
+    monkeypatch.setattr(L, "candidates", boom)
+    monkeypatch.setattr(L, "choose", boom)
+    doc = R.facts(conn, project="proj", chosen=["pkg.rollup.weekly_report"], psg_db_path=graph)
+    assert [n["qn"] for n in doc["facts"]["nodes"]] == ["pkg.rollup.weekly_report"]
+    assert doc["timeline"] and doc["absences"] and doc["scope_line"]
+    assert doc["picked_by"] == "caller"
+    text = R.render_text(doc)
+    assert R.NODES_HEADER in text and "pkg.rollup.weekly_report" in text
+    assert R.CLOSING in text and doc["scope_line"] in text
+    assert R.UNCHOSEN not in text, "nobody picked these by score, so do not say they were"
+
+
+def test_a_name_the_graph_does_not_know_is_reported_not_swallowed(conn, graph, seeded):
+    doc = R.facts(conn, project="proj", chosen=["pkg.nope.not_a_node"], psg_db_path=graph)
+    text = R.render_text(doc)
+    body = _section(text, R.NODES_HEADER)
+    assert any("pkg.nope.not_a_node" in line and "not in the graph" in line for line in body), body
+
+
+def test_no_receipts_path_can_reach_a_runner(conn, graph, seeded, monkeypatch):
+    """Spec §8.8: the choosing step left Python. `locate.choose` is the seam a
+    runner arrives through, so no receipts entry point may call it, and none may
+    take a `runner` of its own."""
+    import inspect
+
+    for fn in (R.assemble, R.candidates, R.facts):
+        assert "runner" not in inspect.signature(fn).parameters, f"{fn.__name__} still takes a runner"
+
+    def boom(*a, **kw):
+        raise AssertionError("a receipts path called locate.choose, which is where a runner gets in")
+
+    monkeypatch.setattr(L, "choose", boom)
+    R.assemble(conn, project="proj", challenge=CHALLENGE, psg_db_path=graph)
+    R.candidates(conn, project="proj", challenge=CHALLENGE, psg_db_path=graph)
+    R.facts(conn, project="proj", chosen=["pkg.rollup.weekly_report"], psg_db_path=graph)
+
+
+def test_the_one_shot_form_admits_that_a_score_chose_and_points_at_the_two_steps(conn, graph, seeded):
+    """`receipts "<challenge>"` still works, and still picks by score — but it now
+    says so in words a person reads, and names the form that does better."""
+    doc = _doc(conn, graph)
+    assert doc["picked_by"] == "score"
+    text = R.render_text(doc)
+    assert R.UNCHOSEN in text
+    low = R.UNCHOSEN.lower()
+    assert "score" in low and "receipts candidates" in low and "receipts facts" in low
+
+
+# ── §8.8 item 3 · the graph's bookkeeping is not evidence ────────────────────
+
+def test_graph_bookkeeping_is_out_of_the_material_and_counted_instead(conn, graph, seeded):
+    """34 of the 63 lines of one real challenge were `the graph recorded
+    node_changed in run N`. That is the state graph's record of itself, not
+    anything anyone said about the decision, and it sorted to the top because its
+    dates are early. It leaves the material — but as a stated count, because in
+    this project a cut is never silent."""
+    doc = _doc(conn, graph)
+    assert [e for e in doc["timeline"] if e["kind"] == "change"] == []
+    text = R.render_text(doc)
+    assert "the graph recorded" not in text
+    in_table = sum(len(n["changes"]) for n in doc["facts"]["nodes"])
+    assert in_table >= 1, "this fixture has graph events; otherwise it proves nothing"
+    assert doc["graph_events"] == in_table
+    assert R.graph_events_line(in_table) in text
+    assert str(in_table) in R.graph_events_line(in_table)
+
+
+def test_the_graph_events_line_is_absent_when_there_are_none(conn, graph, seeded):
+    doc = R.facts(conn, project="proj", chosen=["pkg.nope.not_a_node"], psg_db_path=graph)
+    assert doc["graph_events"] == 0
+    assert "graph event" not in R.render_text(doc)
+
+
+# ── the two subcommands ──────────────────────────────────────────────────────
+
+def test_the_two_subcommands_read_and_write_nothing(conn, graph, seeded, registry):
+    why_mod.ensure_fts(conn)
+    warm = _cli(conn, "receipts", "candidates", CHALLENGE, "--project", "proj", env_extra=registry)
+    assert warm.returncode == 0, warm.stderr
+    before = _snapshot(conn)
+
+    c = _cli(conn, "receipts", "candidates", CHALLENGE, "--project", "proj", env_extra=registry)
+    assert c.returncode == 0, c.stderr
+    assert R.CANDIDATES_HEADER in c.stdout and "pkg.rollup.weekly_report" in c.stdout
+    assert R.TIMELINE_HEADER not in c.stdout, "the candidate list is a list, not the material"
+
+    cj = _cli(conn, "receipts", "candidates", CHALLENGE, "--project", "proj", "--json", env_extra=registry)
+    assert cj.returncode == 0, cj.stderr
+    out = json.loads(cj.stdout)
+    assert out["cap"] == R.CANDIDATE_CAP and out["challenge"] == CHALLENGE
+    assert all(set(x) >= {"qn", "node_key", "why", "score"} for x in out["candidates"])
+
+    f = _cli(conn, "receipts", "facts", "pkg.rollup.weekly_report", "--project", "proj", env_extra=registry)
+    assert f.returncode == 0, f.stderr
+    assert R.TIMELINE_HEADER in f.stdout and R.ABSENCE_HEADER in f.stdout and R.SCOPE_HEADER in f.stdout
+    assert R.CLOSING in f.stdout and "the graph recorded" not in f.stdout
+    assert CITE_AT_END.search(_section(f.stdout, R.TIMELINE_HEADER)[0])
+
+    fj = _cli(conn, "receipts", "facts", "pkg.rollup.weekly_report", "--project", "proj", "--json", env_extra=registry)
+    assert fj.returncode == 0, fj.stderr
+    fo = json.loads(fj.stdout)
+    assert fo["picked_by"] == "caller" and fo["scope"]["nodes"] == 1
+    assert [e["cite"] for e in fo["timeline"]] == [
+        e["cite"] for e in R.facts(conn, project="proj", chosen=["pkg.rollup.weekly_report"], psg_db_path=graph)["timeline"]]
+
+    assert _snapshot(conn) == before, "a receipts subcommand wrote something"
+
+
+def test_receipts_facts_with_no_name_is_a_usage_error_not_an_empty_answer(conn, graph, seeded, registry):
+    r = _cli(conn, "receipts", "facts", "--project", "proj", env_extra=registry)
+    assert r.returncode == 2 and "receipts facts" in r.stderr
+
+
+def test_no_receipts_path_can_reach_the_headless_model(conn, graph, seeded, monkeypatch):
+    """§8.8 item 4, pinned as a property rather than as a default value.
+
+    The room already has a model: the session's own. `ask.runner.call` and
+    `claude_arbiter.default_runner` are the only two ways a second one gets
+    started, so both are booby-trapped here and every receipts entry point is
+    run. A default someone can flip back is not a guarantee; a test is."""
+    from orchestrator.ask import runner as RUN
+    from orchestrator.testing import claude_arbiter as ca
+
+    def boom(*a, **kw):
+        raise AssertionError("a receipts path forked a second model")
+
+    monkeypatch.setattr(RUN, "call", boom)
+    monkeypatch.setattr(ca, "default_runner", boom)
+    monkeypatch.setattr(ca, "run_claude", boom, raising=False)
+
+    R.assemble(conn, project="proj", challenge=CHALLENGE, psg_db_path=graph)
+    R.candidates(conn, project="proj", challenge=CHALLENGE, psg_db_path=graph)
+    R.facts(conn, project="proj", chosen=["pkg.rollup.weekly_report"], psg_db_path=graph)

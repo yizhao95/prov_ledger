@@ -19,7 +19,7 @@ Or from a shell:
 ```bash
 claude plugin marketplace add yizhao95/prov_ledger
 claude plugin install provledger@provledger
-claude plugin list          # provledger@provledger · Version: 0.4.1 · Status: ✔ enabled
+claude plugin list          # provledger@provledger · Version: 0.4.2 · Status: ✔ enabled
 ```
 
 Dependencies install themselves on first session: a background `SessionStart`
@@ -68,7 +68,9 @@ The rest of this guide is the **manual / development** install.
 ## 2 · Clone the repository
 
 ```bash
-git clone git@github.com:yizhao95/prov_ledger.git
+git clone https://github.com/yizhao95/prov_ledger.git
+# (ssh works too if you have a key on this account:
+#  git clone git@github.com:yizhao95/prov_ledger.git)
 cd prov_ledger
 ```
 
@@ -118,16 +120,40 @@ provLedger has a deliberately small dependency surface:
 Install everything:
 
 ```bash
-# with pip
-pip install pytest fastapi "uvicorn[standard]" jinja2 \
-    tree-sitter tree-sitter-css tree-sitter-html \
-    tree-sitter-javascript tree-sitter-python
+# if you took Option A (`python3 -m venv`) — that venv has pip
+pip install -r requirements.txt
 
-# or with uv
-uv pip install pytest fastapi "uvicorn[standard]" jinja2 \
-    tree-sitter tree-sitter-css tree-sitter-html \
-    tree-sitter-javascript tree-sitter-python
+# if you took Option B (`uv venv`) — that venv has NO pip, so use uv
+uv pip install -r requirements.txt
 ```
+
+`requirements.txt` is the one authoritative list, and its last line installs the
+backend itself (`-e ./orchestrator-backend`), which is what makes `import
+provledger` and the `provledger` command work. The table above says what is in it
+and why; the file says it in a form you can run.
+
+This used to be a dependency list typed out here instead. It drifted, exactly the
+way a second copy does: it omitted `httpx` — which `starlette.testclient` needs to
+drive the dashboard in §5 — and it never installed the backend at all, so the
+suites failed on `No module named 'provledger'` and the dashboard's graph and
+`/ledger` pages rendered "unavailable". None of that was visible on a machine that
+already had those things.
+
+> **The two blocks are not interchangeable.** `uv venv` deliberately creates an
+> environment without `pip`, so `pip install …` there fails with
+> `No module named pip` — a confusing error, because nothing above says the
+> choice in §3 decides the command in §4. Match the block to the option you took.
+
+### 4a · Check that `provledger` is on your PATH
+
+```bash
+provledger --help          # must print the command list
+```
+
+`requirements.txt` installed it, so this should already work. If it does not, stop
+here rather than carrying on: the dashboard's graph and `/ledger` pages shell out
+to this command, and without it they serve pages that say "unavailable" instead of
+failing in a way you can act on — which reads as a broken dashboard.
 
 > **Minimal install (orchestrator only, no graph, no dashboard):**
 > the backend needs nothing beyond Python + `pytest` for the tests.
@@ -210,6 +236,56 @@ The failure class itself, with numbers, is written up in
 | quickest — end to end | `make demo` | MISMATCH → revise → VERIFIED, `SELF-CHECK OK`, exit 0 |
 | full — every suite | the nine `pytest` commands above, **run separately** | 2115 tests, all passing |
 | packaging — the pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
+| **release — before every release** | `bash scripts/release-e2e.sh` | three stages green from zero in a clean sandbox; exit 0 |
+
+### Before every release — `scripts/release-e2e.sh`
+
+**Run it, and paste its output into the release PR.** A green test run is not
+evidence that the release works: two defects walked past one in a single week
+and each was found only by doing the thing. `python3 -m venv .venv` — the first
+command of §3 — fails on Debian, Ubuntu and WSL, and no test on a development
+machine can catch it because the venv is already there. The dashboard did
+nothing when clicked on Chrome and Edge for a week while 267 webapp tests
+stayed green, because every one of them renders on the server and none drives a
+browser.
+
+```bash
+bash scripts/release-e2e.sh                 # the release setting: all nine suites (~20 min)
+bash scripts/release-e2e.sh --suites collect  # faster: collect the suites instead of running them
+bash scripts/release-e2e.sh --stage 2 --keep  # one stage, and keep the sandbox to look at
+```
+
+Three stages, and each does the part the suites structurally cannot reach:
+
+1. **A stranger's install.** Clone into an empty directory and follow this
+   document as written, through `make demo`. Anywhere the script must deviate
+   from what is printed here to succeed, it reports a **FINDING** — that is a
+   place a new reader is stuck.
+2. **A dummy project, then the three surfaces.** A small project whose whole
+   history the script writes, so the right answer to every question about it is
+   known in advance; then `/ledger`, `/receipts` and the dashboard **clicked by
+   a real Chromium**. It also plants all four kinds of recorded failure and asks
+   questions that deliberately avoid their vocabulary, and checks that no
+   documented flow forks a second model when nobody asked for one.
+3. **A model marks the answers** against key points written down before the
+   questions were asked — whether the answer is *right*, which no existing
+   assertion can tell. The judge is itself a model, so its verdicts are evidence
+   and not proof; a disagreement wants a person's eye.
+
+It is safe to run repeatedly: one temporary directory it creates and removes,
+its own `HOME`, its own ledger, its own graph registry and its own
+`CLAUDE_CONFIG_DIR`. It never touches `~/skill-workspace/orchestrator.db` or
+your registered projects, and it proves that at the end rather than promising it.
+
+Exit code: `0` all green · `2` green but the documents were deviated from ·
+`3` a check could not run at all · `1` a check ran and said no. Only `0` ships.
+Stage 2's browser needs Playwright, which is deliberately not in
+`requirements.txt` — a 150 MB browser has no business in a plugin's runtime
+dependencies:
+
+```bash
+python3 -m pip install playwright && python3 -m playwright install chromium
+```
 
 ---
 
@@ -246,6 +322,10 @@ bash scripts/test_packaging.sh   # needs uv; fails loudly on any packaging gap
 ## 6 · Launch the provLedger Dashboard
 
 The dashboard is a **read-only** view over an orchestrator SQLite database.
+
+> Needs `provledger` on your PATH (§4a). Without it the dashboard still starts
+> and still serves 200s, but its graph and `/ledger` pages say "unavailable"
+> instead of failing loudly — so a missing §4a looks like a broken dashboard.
 
 ```bash
 cd orchestrator-webapp

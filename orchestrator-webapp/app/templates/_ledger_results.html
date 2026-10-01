@@ -77,6 +77,18 @@
     {% endfor %}
   </div>
   {% endif %}
+  {# Same reasoning as the language block below, applied to numbers: the check can
+     tell whether a number sits in its own table, not whether it is true, and a
+     figure read out of a step log is sourced yet absent from that table. So the
+     sentence stays and the number is NAMED — keeping it silently would read as
+     checked. #}
+  {% if d.unsupported_numbers %}
+  <div class="text-xs text-brand-muted mt-1" data-unsupported-numbers="{{ d.unsupported_numbers|length }}">
+    {{ d.unsupported_numbers|length }} number(s) in the answer are not stated in the fact table:
+    {% for n in d.unsupported_numbers %}<span data-unsupported-number="{{ n }}">{{ n }}</span>{% if not loop.last %}, {% endif %}{% endfor %}
+    — the sentences were kept; check them against the record.
+  </div>
+  {% endif %}
   {# Language is not correctness. Deleting a sentence for it deleted a CORRECT
      answer, so a mismatch is said and the sentences stay. #}
   {% if d.language_mismatch %}

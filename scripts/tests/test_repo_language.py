@@ -46,6 +46,13 @@ ALLOWED: dict[str, str] = {
         "Asserts on that list, so it has to contain the words it asserts about, "
         "including the Chinese sentence that must trigger the hint and the one "
         "that must not.",
+    # ── the Chinese rendering of a reader-facing line ────────────────────────
+    "orchestrator-backend/orchestrator/ask/receipts.py":
+        "The `lang == \"zh\"` branch of the candidates scope line — the sentence a "
+        "Chinese-speaking reader sees telling them how many nodes matched, how "
+        "many are shown, and that the score orders the list without choosing "
+        "from it. Product copy behind the same language switch the dashboard "
+        "uses, like vocab.py. Everything else in the module is English.",
     # ── the published walkthrough ────────────────────────────────────────────
     "docs/walkthrough.html":
         "The walkthrough's captions ship in both languages behind the same "

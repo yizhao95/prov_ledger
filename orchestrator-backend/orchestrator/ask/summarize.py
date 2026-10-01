@@ -48,6 +48,13 @@ DEFAULT_TIMEOUT_S = R.DEFAULT_TIMEOUT_S
 # that package is called — a literal name here is a ModuleNotFoundError in
 # every installed copy, and that is exactly what happened.
 TESTING_PACKAGE = __package__.rsplit(".", 1)[0] + ".testing"
+# `number` stays in the shape for compatibility and is always 0: an unsupported
+# number is reported, never deleted. The machine cannot tell a sourced number from
+# an invented one — only whether it appears in its own table — and deleting on that
+# basis removed correct answers. Measured: asked why a timeout was 4800 seconds, a
+# question whose derivation IS recorded (in a step log, which has no id in the cite
+# namespace), the right answer was deleted for containing the number the reader had
+# asked about. The language mismatch below was changed for this same reason first.
 DROP_KINDS = ("uncited", "unknown_id", "number", "over_limit")
 # The answer the model must produce. Anything the host's plugins prepend to
 # `result` sits outside this object and is discarded with it.
@@ -151,9 +158,8 @@ def check(sentence: str, *, ids, numbers, lang: str = "en") -> tuple[bool, str |
         return False, "unknown_id", []
     bare = _CITE_TOKEN.sub(" ", sentence)
     bad = sorted(F.numbers_in(bare) - set(numbers))
-    if bad:
-        return False, "number", bad
-    return True, None, []
+    # kept either way; `bad` is what the note will name (see DROP_KINDS)
+    return True, ("number_unsupported" if bad else None), bad
 
 
 def allowed_numbers(ft: dict, absences=(), scope_line: str = "") -> set[str]:
@@ -176,6 +182,7 @@ def review(draft: str, ft: dict, *, absences=(), scope_line: str = "",
     kept: list[str] = []
     dropped = no_drops()
     detail: list[dict] = []
+    unsupported: list[str] = []      # numbers kept in the answer with nothing in the table behind them
     for s in split_sentences(draft):
         if len(kept) >= max_sentences:
             dropped["over_limit"] += 1
@@ -184,6 +191,12 @@ def review(draft: str, ft: dict, *, absences=(), scope_line: str = "",
         ok, reason, bad = check(s, ids=ft["ids"], numbers=numbers, lang=lang)
         if ok:
             kept.append(s)
+            if bad:
+                # the sentence stands; the numbers it rests nothing on are named
+                for n in bad:
+                    if n not in unsupported:
+                        unsupported.append(n)
+                detail.append({"text": s, "reason": reason, "numbers": bad, "kept": True})
         else:
             dropped[reason] += 1
             detail.append({"text": s, "reason": reason, "numbers": bad})
@@ -200,11 +213,19 @@ def review(draft: str, ft: dict, *, absences=(), scope_line: str = "",
                          ("over the limit", dropped["over_limit"]))
                         if n)
         parts.append(f"{sum(dropped.values())} sentence(s) dropped: {why}")
+    if unsupported:
+        # Named, not deleted. The reader can then decide: a number out of a step
+        # log is sourced but uncitable here, while an invented one is not — and
+        # that is a judgement about the ledger, which only a person or a model
+        # with the record in front of it can make.
+        parts.append(f"{len(unsupported)} number(s) in the answer are not stated in the fact table: "
+                     f"{', '.join(unsupported)} — the sentences were kept; check them against the record")
     mismatch = language_mismatch(kept, lang)
     if mismatch:
         parts.append(language_note(mismatch, lang))
     return {"answer": " ".join(kept), "sentences": kept, "cites": cites, "dropped": dropped,
-            "dropped_detail": detail, "language_mismatch": mismatch, "note": "; ".join(parts) or None}
+            "dropped_detail": detail, "unsupported_numbers": unsupported,
+            "language_mismatch": mismatch, "note": "; ".join(parts) or None}
 
 
 def note_for(outcome: str, detail: dict) -> str:

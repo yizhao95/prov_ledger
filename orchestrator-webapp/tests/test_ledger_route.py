@@ -96,11 +96,21 @@ def test_every_conclusion_links_back_to_the_record_it_rests_on(client, with_mode
 
 
 def test_the_dropped_sentences_are_counted_on_the_page(client, with_model):
+    """Changed 2026-09-30: one sentence is dropped here, not two.
+
+    An unsupported number is now named instead of taken — the check can tell
+    whether a number is in its own table, not whether it is true, and deleting on
+    that basis was removing correct answers (see
+    orchestrator-backend/tests/test_ask_summarize.py::test_j2_…). The uncited
+    sentence is still dropped: that is a defect the machine can actually see.
+    """
     t = client.get(f"/ledger?q={QUESTION}&project=demo").text
-    assert "This sentence has no id" not in t and "4127" not in t
+    assert "This sentence has no id" not in t, "an uncited sentence is still dropped"
+    assert "4127" in t, "the sentence carrying an unsupported number now survives"
     dropped = re.search(r'data-dropped="(\d+)"', t)
-    assert dropped and int(dropped.group(1)) == 2
-    assert "uncited" in t and "number not in the fact table" in t
+    assert dropped and int(dropped.group(1)) == 1
+    assert "uncited" in t
+    assert "not stated in the fact table" in t, "and the page names the number it could not support"
 
 
 def test_an_absence_is_marked_as_an_absence(client, with_model):
@@ -205,7 +215,9 @@ def test_a_plugin_preamble_never_becomes_a_sentence_the_model_is_blamed_for(clie
     counted as an uncited sentence the model had invented. It never was."""
     t = client.get(f"/ledger?q={QUESTION}&project=demo").text
     assert "Memory capture is paused" not in t
-    assert re.search(r'data-dropped="(\d+)"', t).group(1) == "2", "the two bad sentences, not the plugin's"
+    # one, not two: the unsupported number is named now rather than dropped. The
+    # point of this test is unchanged — the plugin's preamble is not among them.
+    assert re.search(r'data-dropped="(\d+)"', t).group(1) == "1", "the one bad sentence, not the plugin's"
 
 
 def test_the_page_logs_why_the_model_said_nothing(client, monkeypatch):

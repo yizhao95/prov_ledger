@@ -195,6 +195,10 @@ def run(conn, *, project: str, question: str, psg_db_path: str | None = None, ru
            "dropped": summary["dropped"], "dropped_detail": summary["dropped_detail"],
            "degraded": summary["degraded"], "degraded_reason": summary.get("degraded_reason"),
            "language_mismatch": summary.get("language_mismatch"),
+           # Sentences that were KEPT but carry a number the table does not state.
+           # Dropped on the way out, such a number reads on a page as one that was
+           # checked — the single impression this product must never give.
+           "unsupported_numbers": summary.get("unsupported_numbers") or [],
            "note": summary["note"], "runner_detail": trace, "model": model,
            "runner": runner_name or ("none" if runner is None else "stub"), "lang": lang}
     doc["records"] = records(ft, summary["cites"])
@@ -242,7 +246,7 @@ def as_json(doc: dict) -> dict:
     """The machine-readable answer — the fact table as text, not as a nested blob."""
     keep = ("ask_id", "project", "question", "answer", "sentences", "cites", "scope", "scope_line",
             "facts_text", "facts_sha", "dropped", "dropped_detail", "degraded", "degraded_reason",
-            "language_mismatch", "note", "runner_detail", "model", "runner", "records", "lang")
+            "language_mismatch", "unsupported_numbers", "note", "runner_detail", "model", "runner", "records", "lang")
     out = {k: doc.get(k) for k in keep}
     out["absences"] = doc.get("absences")
     out["candidates"] = [{k: c[k] for k in ("qn", "node_key", "why", "score")} for c in doc.get("candidates", [])]

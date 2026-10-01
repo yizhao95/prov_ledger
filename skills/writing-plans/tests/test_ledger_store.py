@@ -185,3 +185,61 @@ def test_constraints_for_matches_qualified_names_too(conn):
     assert [c["id"] for c in ledger_store.constraints_for(conn, "proj", ["nk_zzz"], qualified_names=["orders.region"])] == [cid]
     assert ledger_store.constraints_for(conn, "proj", [], qualified_names=["nope"]) == []
     assert ledger_store.constraints_for(conn, "proj", [], qualified_names=[]) == []
+
+
+# ── the two kinds the ledger exists for, and could not be read ───────────────
+# `ledger_store.add_entry` mirrored a new entry into `change_reason` — where the
+# readers moved in DP phase 1 — but only when `kind == "constraint"`. So every
+# `decision` and every `anti_pattern` added after the one-time backfill
+# (`reasons reclass-status` → dp_reclass done, 2026-09-15) landed in a table no
+# answer path reads. Measured in the release sandbox: asked "is there anything
+# recorded about weekly_report that I would regret not knowing", with an
+# anti_pattern on record saying exactly that, the judge scored 0/1.
+#
+# The mapping is not "mirror them as constraints" — an anti-pattern is not a
+# constraint. `anti_pattern` is a path that was tried and failed, which is what
+# `rejected_path` means; a `decision` is a `reason`.
+
+def _mirrored(conn, project, role):
+    return [dict(r) for r in conn.execute(
+        "SELECT node_key, role, statement, rationale FROM change_reason "
+        "WHERE project = ? AND role = ? ORDER BY id", (project, role))]
+
+
+def test_an_anti_pattern_is_readable_as_a_rejected_path(conn):
+    project = "proj"
+    ledger_store.add_entry(conn, project=project, kind="anti_pattern",
+                           statement="a nightly full reload, to avoid incremental bugs",
+                           rationale="it took 9 hours and missed the morning report twice",
+                           subjects=["pkg.rollup.weekly_report"], keywords=["reload", "nightly"])
+    rows = _mirrored(conn, project, "rejected_path")
+    assert rows, "an anti_pattern must reach change_reason: that is where every reader looks"
+    assert rows[0]["node_key"] == "pkg.rollup.weekly_report"
+    assert "nightly full reload" in rows[0]["statement"]
+    assert "9 hours" in (rows[0]["rationale"] or ""), "the reason it failed is the whole value of the row"
+    assert not _mirrored(conn, project, "constraint"), \
+        "an anti-pattern is not a constraint; mirroring it as one would misreport what it is"
+
+
+def test_a_decision_is_readable_as_a_reason(conn):
+    project = "proj"
+    ledger_store.add_entry(conn, project=project, kind="decision",
+                           statement="rolling-window split, not random split",
+                           rationale="a random split leaks temporal information",
+                           subjects=["pkg.model.train_test_split"], keywords=["split"])
+    rows = _mirrored(conn, project, "reason")
+    assert rows, "a decision must reach change_reason"
+    assert "rolling-window" in rows[0]["statement"]
+    assert "leaks temporal" in (rows[0]["rationale"] or "")
+
+
+def test_the_legacy_row_is_still_written_so_plan_time_matching_keeps_working(conn):
+    """The mirror is additive. `constraints_for` and the plan-time
+    `ledger_reminders` read `LedgerEntries`, and removing that write would trade
+    one broken half for the other."""
+    project = "proj"
+    ledger_store.add_entry(conn, project=project, kind="anti_pattern", statement="s", rationale="r",
+                           subjects=["n"], keywords=["k"])
+    legacy = conn.execute("SELECT kind, statement FROM LedgerEntries WHERE project = ?", (project,)).fetchall()
+    assert legacy and legacy[0][0] == "anti_pattern"
+

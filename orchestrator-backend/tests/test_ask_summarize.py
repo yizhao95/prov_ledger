@@ -67,14 +67,35 @@ def test_j1_a_sentence_without_a_record_id_never_reaches_the_reader(conn, ft, se
 
 
 @pytest.mark.veto
-def test_j2_a_number_outside_the_fact_table_takes_the_whole_sentence(conn, ft, seeded):
+def test_j2_a_number_outside_the_fact_table_is_flagged_and_the_sentence_survives(conn, ft, seeded):
+    """Changed 2026-09-30: an unsupported number is SAID, not deleted.
+
+    This rule used to take the whole sentence, and the cost was measured rather
+    than argued. Asked why a timeout constant was 4800 seconds — a question whose
+    full derivation IS recorded, in a step log — a fresh model found the record,
+    wrote the answer, and the answer was deleted for containing "4800", because a
+    step log has no id in the cite namespace and the fact table therefore never
+    states the number. What came back was a deliberately hollowed-out answer with
+    the real one written outside the check.
+
+    The machine cannot tell a sourced number from an invented one; it can only tell
+    whether the number appears in its own table. Deleting on that basis removes
+    correct answers, and this module had already reached that conclusion once — the
+    language mismatch above is "said, never deleted" for exactly the same reason.
+
+    The check still runs and still reports every unsupported number. It no longer
+    decides that the sentence is wrong.
+    """
     cid = seeded["constraint"]
     answer = (f"A constraint requires the null-label drop [#{cid}]. "
               f"It removed 4127 rows in the last run [#{cid}].")
     got = SU.summarize(QUESTION, ft, runner=_runner(answer))
-    assert "4127" not in got["answer"] and len(got["sentences"]) == 1
-    assert got["dropped"]["number"] == 1
-    assert got["dropped_detail"][0]["numbers"] == ["4127"]
+    # kept, because a cited sentence with an unsupported number may still be true
+    assert len(got["sentences"]) == 2 and "4127" in got["answer"]
+    # and the number is named, so a reader knows it rests on nothing in the table
+    assert got["dropped"]["number"] == 0, "an unsupported number is no longer a drop"
+    assert "4127" in got["unsupported_numbers"]
+    assert "4127" in got["note"], "the note must name the number it could not support"
 
 
 def test_a_cite_that_does_not_exist_is_dropped(conn, ft, seeded):

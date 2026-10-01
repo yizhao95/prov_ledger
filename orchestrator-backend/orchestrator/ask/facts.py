@@ -122,6 +122,13 @@ def _record(conn, r: dict, stats: dict) -> dict:
             "evidence_level": r.get("evidence_level"), "state": r.get("state"), "plan_id": r.get("plan_id"),
             "recorded_by": r.get("recorded_by"), "occurred_at": r.get("occurred_at"),
             "text": (r.get("text") or "").replace("\n", " ").strip(),
+            # The words the record quotes, when it carries a paraphrase as well.
+            # A `stated` record's whole claim is that the user's own words say it,
+            # and those words used to be reachable only as a COALESCE fallback —
+            # so a paraphrase hid them. A decider and a date that live in the
+            # confirming sentence cannot be recovered from a paraphrase that never
+            # contained them.
+            **({"quoted": (r.get("quoted") or "").replace("\n", " ").strip()} if r.get("quoted") else {}),
             "shown": shown, "adopted_by": sorted(adopted), "merged": len(merged), "merged_ids": merged,
             "plans": sorted(r.get("plans") or ([r["plan_id"]] if r.get("plan_id") else [])),
             "references": _references(conn, r["id"])}
@@ -303,6 +310,12 @@ def _fmt_record(r: dict, indent: str = "  ") -> list[str]:
     out = [head]
     if r.get("text"):
         out.append(f"{indent}    {r['text']}")
+    if r.get("quoted"):
+        # Said, not paraphrased. Marked as a quotation so a reader can tell which
+        # of the two lines is the record's own wording and which is someone's
+        # reading of it — the difference between `stated` and `asserted`, and the
+        # only place a decider or a date spoken aloud can come from.
+        out.append(f'{indent}    said: "{r["quoted"]}"')
     for ref in r.get("references") or ():
         out.append(f"{indent}    source [{ref['cite']}] {ref['kind']} · {ref['label']}" + (f" · {ref['uri']}" if ref.get("uri") else ""))
     return out
@@ -332,7 +345,13 @@ def render(ft: dict) -> str:
         lines.append(f"expectations ({len(n['expectations'])})")
         for r in n["expectations"]:
             o = r["outcome"]
+            # `reason` is the sentence saying what actually happened, and it was
+            # read from the row and then dropped here — leaving `{"drift": 6.6}`
+            # as the whole account of a claim that turned out false. A reader
+            # cannot tell from a JSON blob that an estimate missed by 6.6 points,
+            # and that sentence is the entire value of recording the outcome.
             tail = (f"outcome [{o['cite']}] {o['kind']} · {o['tier']} · {json.dumps(o['value'], sort_keys=True)}"
+                    + (f" · {o['reason']}" if o.get("reason") else "")
                     if o else "outcome: none recorded")
             lines.append(f"  [{r['cite']}] plan {r['plan_id']} · \"{r['claim']}\" · channel {r['channel']} · {tail}")
         lines.append(f"values ({len(n['values'])})")

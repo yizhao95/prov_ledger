@@ -73,10 +73,19 @@ def stats_for(conn, reason_ids) -> dict[int, dict]:
 
 
 def _line(rec: dict, st: dict) -> str:
+    """One record, and — when the pack cut its text — how much is missing and
+    the read that has the rest (FL-154).
+
+    `context_pack._slim` cuts at 240 characters and used to say nothing about
+    it, so a reader could not tell a whole record from the first fifth of one.
+    The bound is kept (this is a bounded read) and the silence is not: the
+    marker names `provledger record #<id>`, which prints the row entire."""
     adopted = ("adopted by " + ", ".join(st["adopted_by"])) if st.get("adopted_by") else "not adopted"
     text = (rec.get("text") or "").replace("\n", " ")
+    cut = rec.get("text_cut") or 0
+    tail = f"\n    … [+{cut} chars cut of {rec.get('text_chars')} — `provledger record #{rec['id']}` reads it whole]" if cut else ""
     return (f"#{rec['id']} · {rec['tier']} · {LEVEL_LABELS.get(rec.get('evidence_level'), rec.get('evidence_level') or '?')} · "
-            f"{(rec.get('occurred_at') or '')[:16]} · shown {st.get('shown', 0)} · {adopted}\n    {text}")
+            f"{(rec.get('occurred_at') or '')[:16]} · shown {st.get('shown', 0)} · {adopted}\n    {text}{tail}")
 
 
 # ── FTS (lazy) ───────────────────────────────────────────────────────────────
@@ -198,9 +207,20 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
             raise ValueError("why needs a target (qualified name, nk_… or file:line) unless --search / --pending / --never-read")
         res = resolve_target(psg, target)
         doc["resolved"] = res
+        # FL-153: the flags now reach the pack. `--all` lifts the record caps,
+        # `--impact` / `--neighbors` the structure caps — and a lifted cap lifts
+        # the token budget with it, because a budget that folds back exactly what
+        # the reader just asked for by name is the same lie one layer down.
+        caps: dict = {}
+        if all_records:
+            caps.update({"reasons": context_pack.NO_CAP, "rejected_paths": context_pack.NO_CAP,
+                         "constraints": context_pack.NO_CAP, "neighbor_constraints": context_pack.NO_CAP})
+        if impact or neighbors:
+            caps.update({"callers": context_pack.NO_CAP, "lineage_downstream": context_pack.NO_CAP,
+                         "dtype_map": context_pack.NO_CAP})
         pack = context_pack.build(conn, project=project, targets=[res["node_key"] or res["qualified_name"]], psg_db_path=psg,
-                                  budget_tokens=(10 ** 9 if all_records else budget), neighbors="constraints" if neighbors else "counts",
-                                  moment="why", session_id=session_id, plan_id=plan_id, record=False)
+                                  budget_tokens=(10 ** 9 if caps else budget), neighbors="constraints" if neighbors else "counts",
+                                  moment="why", session_id=session_id, plan_id=plan_id, record=False, caps=caps)
         tp = pack.targets[0] if pack.targets else None
         if tp is None:
             lines.append(f"{target}: no such node in the graph, and nothing on record in the ledger")
@@ -246,21 +266,45 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
                 lines.append(f"── prior claims · {len(tp.prior_outcomes)}")
                 for o in tp.prior_outcomes:
                     lines.append(f" {o['plan_id']} · \"{o['claim']}\" · {o['kind']} {o.get('signal') or o.get('delta_pct') or ''}")
+            # The blast radius, in NAMES when it was asked for. `--impact` used to
+            # print `callers {len(tp.callers)}` — the count the cap had kept, never
+            # the names and never the total — beside a footer quoting the count the
+            # cap had DROPPED, so one read carried `callers 12` and `callers 38` for
+            # a node with 50 callers. Every number here is now the total, and every
+            # name is one the reader can hand straight back to another read.
+            n_callers = tp.counts.get("callers", len(tp.callers))
+            n_lineage = tp.counts.get("lineage_downstream", len(tp.lineage_downstream))
+            doc["blast_radius"] = {"callers": list(tp.callers), "output_consumers": list(tp.output_consumers),
+                                   "lineage_downstream": list(tp.lineage_downstream), "dtype_map": dict(tp.dtype_map),
+                                   "counts": {"callers": n_callers, "output_consumers": len(tp.output_consumers),
+                                              "lineage_downstream": n_lineage}}
+            totals = f"callers {n_callers} · output consumers {len(tp.output_consumers)} · lineage downstream {n_lineage}"
             if impact or neighbors:
-                lines.append(f"── blast radius · callers {len(tp.callers)} · output consumers {len(tp.output_consumers)} · lineage downstream {len(tp.lineage_downstream)}")
-                for nb in tp.output_consumers[:8]:
+                lines.append(f"── blast radius · {totals}")
+                for nb in tp.callers:
+                    lines.append(f"   caller · {nb}")
+                for nb in tp.output_consumers:
                     entry = pack.neighbors_counts.get(nb) or {}
-                    lines.append(f"   {nb} · constraints {entry.get('constraints', 0)} · rejected {entry.get('rejected_paths', 0)}")
+                    lines.append(f"   output consumer · {nb} · constraints {entry.get('constraints', 0)} · rejected {entry.get('rejected_paths', 0)}")
                     for s in entry.get("statements") or []:
                         st = stats_for(conn, [s["id"]])
                         lines.append("     " + _line(s, st.get(s["id"], {})))
                         shown.append(s["id"])
                         doc["records"].append({**s, **st.get(s["id"], {}), "layer": f"downstream:{nb}"})
+                for nb in tp.lineage_downstream:
+                    lines.append(f"   lineage downstream · {nb}")
+                for col, dt in sorted(tp.dtype_map.items()):
+                    lines.append(f"   dtype · {col}: {dt}")
             else:
-                lines.append(f"── blast radius: callers {len(tp.callers)} · output consumers {len(tp.output_consumers)} (`--impact` expands)")
-            for h in pack.hints:
+                lines.append(f"── blast radius: {totals} — no names printed "
+                             f"(`provledger why {tp.qualified_name} --impact` names them)")
+            # The structure hint said the same fold a second time, with the other
+            # number. The line above owns the totals and the command; only the
+            # record hints, which point at a different flag, are still worth a line.
+            hints = [h for h in pack.hints if not h.startswith("structure folded into counts")]
+            for h in hints:
                 lines.append(" " + h)
-            doc["hints"] = list(pack.hints)
+            doc["hints"] = hints
             doc["truncated"] = dict(pack.truncated)
     if record and shown:
         context_pack.write_read_hits(conn, project=project, reason_ids=sorted(set(shown)), moment="why", plan_id=plan_id,

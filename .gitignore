@@ -51,3 +51,8 @@ docs/superpowers/
 
 # Internal working log (full deferred-work ledger, includes done items) stays local-only.
 docs/internal/
+
+# Local-only answer-quality eval: it runs a memoryless agent against THIS machine's
+# real ledger, so it cannot run anywhere else. Shipping it would hand a cloned repo
+# a test that cannot pass, which is worse than not having it.
+local-eval/

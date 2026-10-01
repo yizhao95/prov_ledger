@@ -227,6 +227,51 @@ def _latest_text(conn, project: str, node_keys: list[str]) -> dict[str, str]:
 
 # ── candidates ───────────────────────────────────────────────────────────────
 
+SCORE_METRIC = 5
+
+
+def _metric_hits(conn, project: str, tokens: list[str], literals: list[str], limit: int) -> list[tuple[str, str]]:
+    """(metric name, why) for the metrics a question is plausibly about.
+
+    A metric lives in its own namespace: `facts` matches metrics by
+    `name IN (chosen)` and metric-targeted expectations by `target IN (chosen)`,
+    where `chosen` holds what this function's caller returned. Nothing here ever
+    offered a metric, so a metric could not be chosen, so a claim recorded ABOUT
+    one — and later contradicted by an observation — was unreachable by any
+    question.
+
+    Two ways to match, and the second is the one that matters:
+
+      the whole name          `discount_rate_pct` written out
+      two of its parts        "the discount rate the weekly mail prints"
+
+    Two parts, not one, and the reason is the candidate list's existing problem:
+    a metric called `discount_rate_pct` must not answer every question containing
+    the word "rate". Two is loose enough that people can ask in their own words
+    and strict enough that a single shared word stays a coincidence. A one-part
+    name (`throughput`) therefore only ever matches whole.
+    """
+    wanted = {t.lower() for t in tokens} | {l.lower() for l in literals}
+    if not wanted:
+        return []
+    out: list[tuple[str, str]] = []
+    for (name,) in conn.execute("SELECT DISTINCT name FROM metrics WHERE project = ? ORDER BY name", (project,)):
+        low = (name or "").lower()
+        if not low:
+            continue
+        if low in wanted:
+            out.append((name, f"metric named in the question: {name}"))
+        else:
+            parts = [p for p in re.split(r"[._\-]+", low) if len(p) > 2]
+            hit = [p for p in parts if p in wanted]
+            if len(parts) > 1 and len(hit) >= 2:
+                out.append((name, f"metric, {len(hit)} of {len(parts)} name parts in the question "
+                                  f"({', '.join(hit)}): {name}"))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def candidates(conn, psg_db_path: str | None, question: str, *, project: str, limit: int = MAX_CANDIDATES) -> list[dict]:
     """Every node the question literally touches, with the matcher that found it.
 
@@ -236,6 +281,7 @@ def candidates(conn, psg_db_path: str | None, question: str, *, project: str, li
     literals = question_literals(question)
     files = question_files(question)
     pool: dict[str, dict] = {}
+
 
     def add(node_key: str | None, qn: str | None, why: str, score: int, record_id: int | None = None) -> None:
         key = node_key or qn
@@ -260,6 +306,13 @@ def candidates(conn, psg_db_path: str | None, question: str, *, project: str, li
         add(node_key, None, f"text match: utterance #{utt_id} quoted by #{reason_id}", SCORE_TEXT, reason_id)
     for reason_id, node_key, ref_id, label in _reference_hits(conn, project, tokens, TEXT_LIMIT):
         add(node_key, None, f"text match: source #{ref_id} ({label[:60]}) linked from #{reason_id}", SCORE_TEXT, reason_id)
+
+    # 1b · the metrics the question names. Their own namespace: a metric is not a
+    # graph node, and `facts` matches metrics and metric-targeted expectations
+    # against whatever this returns — so a metric that cannot be offered here is a
+    # metric nothing recorded about it can ever reach.
+    for metric_name, metric_why in _metric_hits(conn, project, tokens, literals, max(limit, MAX_CANDIDATES)):
+        add(None, metric_name, metric_why, SCORE_METRIC)
 
     # 2 · the names the graph knows — the node's own name, its dotted path, its file
     graph_nodes = _graph_matches(psg_db_path, tokens, literals, files, max(limit, MAX_CANDIDATES) * 4)
