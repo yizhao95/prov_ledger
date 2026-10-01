@@ -135,7 +135,18 @@ suite() {                                  # suite <label> <rundir> <target>
     local label="$1" from="$2" target="$3" log="$E2E_LOGS/04-suite-$1.log"
     local -a extra=(-q -p no:cacheprovider)
     [ "$E2E_SUITES" = collect ] && extra+=(--collect-only)
-    ( cd "$E2E_CLONE/$from" && "$PY" -m pytest "$target" "${extra[@]}" ) >"$log" 2>&1
+    # The PSG_REGISTRY_* exports protect the developer's real registry from
+    # anything this check runs. They must NOT reach the documented suites: a
+    # suite builds its own registry under its own tmp_path and asserts the file
+    # appeared there, `init_project.sh` honours the environment over the argument,
+    # and the file lands in the sandbox instead — so the suite fails for a reason
+    # that has nothing to do with the code under test. Proven by running the one
+    # test both ways: with these set it fails `registry not written`, with them
+    # unset it passes. Isolation is unaffected, because $HOME already points into
+    # the sandbox and a suite that sets no path of its own lands there anyway.
+    ( cd "$E2E_CLONE/$from" \
+      && env -u PSG_REGISTRY_ROOT -u PSG_REGISTRY_PATH -u PSG_INDEX_PATH \
+             "$PY" -m pytest "$target" "${extra[@]}" ) >"$log" 2>&1
     local rc=$?
     local tail_line
     tail_line="$(grep -oE '[0-9]+(/[0-9]+)? (tests? collected|passed)[^,=]*' "$log" | tail -1)"
