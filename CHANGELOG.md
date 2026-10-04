@@ -39,6 +39,9 @@ scripts that each passed their own tests.
   `PSG_REGISTRY_PATH` set, `init_project.sh` still wrote
   `~/skill-workspace/project-graphs/PROJECT-STATE-GRAPHS.md`, dropping your real
   projects from it. The index and the default out-dir now live beside that registry.
+  The provenance demo no longer takes an `ORCH_DB` or `PSG_*` path from the caller's
+  shell either: `DEMO_HOME` is its only knob, so a shell pointing `ORCH_DB` at your
+  real ledger cannot receive the demo's rows.
 - **`bootstrap.sh` never upgraded the backend, and failed from a project directory.**
   Its marker hashed only `requirements.txt`, so a version bump never re-installed the
   editable backend (no `provledger` command, 0.1.0 metadata); and uv resolved
