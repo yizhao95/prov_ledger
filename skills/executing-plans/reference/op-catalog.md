@@ -1,13 +1,16 @@
 # Op Catalog — Full Reference
 
 Per-op deep-dive: input shape, state transition, output JSON, common mistakes, link to test case.
+`run-step`, `agent-review-close`, `reason-slots`, `reason-fill` and `headline-respond` are covered in
+[`SKILL.md`](../SKILL.md); every op's input shape is in [`update-input.schema.json`](../update-input.schema.json).
 
 All scripts share the same shape:
 ```bash
-bash ~/.code_puppy/skills/executing-plans/scripts/<op>.sh path/to/input.json
+bash ${CLAUDE_PLUGIN_ROOT}/skills/executing-plans/scripts/<op>.sh path/to/input.json
 ```
 Env: `ORCH_DB` overrides the SQLite path (default `~/skill-workspace/orchestrator.db`).
-Output: pretty-printed JSON to stdout. Errors: `❌ apply_op: <msg>` to stderr, non-zero exit.
+Output: pretty-printed JSON to stdout, then a one-line `{"ok":true,"op":…}` marker as the last line.
+Errors: `❌ apply_op: <msg>` to stderr, non-zero exit.
 
 ---
 
@@ -114,7 +117,7 @@ Output: pretty-printed JSON to stdout. Errors: `❌ apply_op: <msg>` to stderr, 
 
 **Common mistakes**:
 - ❌ Deviating to add a step that should have been planned upfront — fine occasionally, but if you're hitting `max_revisions=5` the original plan was wrong
-- ❌ Picking a `COMPLETED` step as `parent_step_id` — only IN_PROGRESS parents make sense
+- ❌ Picking a `COMPLETED` step as `parent_step_id` — rejected (exit 4: a COMPLETED step is immutable). Deviate on an IN_PROGRESS step, or on a FAILED one to recover it — a retry is a child of the attempt it retries (SKILL.md, *Retrying a failed attempt*)
 
 **Test**: `tests/test_execute_ops.py::TestDeviate`
 
@@ -135,7 +138,7 @@ Output: pretty-printed JSON to stdout. Errors: `❌ apply_op: <msg>` to stderr, 
 
 **`source` enum** (4 values, enforced):
 - `iron-law` — mandatory trigger
-- `auto-search` — surfaced by `list_or_search_skills`
+- `auto-search` — matched the task when you checked the available skills
 - `explicit-mention` — user named it
 - `deferred-load` — activated mid-flight (most common case for record-skill)
 
@@ -150,7 +153,7 @@ Output: pretty-printed JSON to stdout. Errors: `❌ apply_op: <msg>` to stderr, 
 
 ---
 
-## 7. `finish-plan.sh` — IN_PROGRESS → COMPLETED at the plan level
+## 7. `finish-plan.sh` — close a plan by hand (rarely needed)
 
 **Input** (required: `plan_id`):
 ```json
@@ -158,11 +161,12 @@ Output: pretty-printed JSON to stdout. Errors: `❌ apply_op: <msg>` to stderr, 
 ```
 
 **Side effects**:
-- `Plans.status` = `COMPLETED`
+- Runs the deterministic review: when every regular step is terminal, the review step and the plan go COMPLETED or FAILED exactly as they would have on their own
+- A legacy plan (no review step) or one with steps still PENDING is force-completed (`Plans.status` = `COMPLETED`)
 
 **Common mistakes**:
-- ❌ Calling on an already-COMPLETED plan (rejected — idempotent failure)
-- ❌ Calling before all steps are completed (no error today, but leaves the plan in a confusing state — finish all steps first)
+- ❌ Calling it after the last step — the last regular step already closed the plan
+- ❌ Calling it on a plan in NEEDS_REVIEW — refused (exit 7); drive the `<plan>-REVIEW.1` child instead
 
 **Test**: `tests/test_execute_ops.py::TestFinishPlan`
 

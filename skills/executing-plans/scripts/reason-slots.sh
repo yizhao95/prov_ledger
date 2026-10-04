@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # reason-slots.sh — deterministic flow for the reason-slots op: the closed-form reason checklist of a plan under review.
 # Composes input as JSON/YAML, this script validates + writes via the orchestrator.
-# See ~/.code_puppy/skills/executing-plans/update-input.example.json for the input shape.
+# See ../update-input.example.json (and ../update-input.schema.json) for the input shape.
 #
 # Env: ORCH_DB overrides the SQLite path (default: ~/skill-workspace/orchestrator.db).
 set -uo pipefail

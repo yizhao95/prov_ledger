@@ -1,6 +1,6 @@
 ---
 name: subagent-driven-development
-description: "Use ANY time work should be delegated to one or more sub-agents instead of done in the main session — covers (a) sequential subagent-driven development executing a plan task-by-task with two-stage review, (b) parallel sub-agent dispatch for 2+ independent problem domains, (c) routing tasks to the RIGHT specialized sub-agent (bigquery-explorer, confluence-search, jira, databricks, qa-kitten, etc.) instead of a generic one, AND (d) creating EPHEMERAL/TEMP sub-agents via agent-creator for very-large-context one-shot jobs (huge log dives, 1M-token doc reads, mega-repo scans). CRITICAL TRIGGER — context size: when ANY single task / step / investigation is estimated to consume more than ~10k tokens of context (long files to read, multi-file refactor, large search/scan, big debugging trace, heavy doc reading), DO NOT do it in the main session — dispatch a sub-agent. When MULTIPLE such heavy tasks are independent of each other, dispatch them in PARALLEL (one sub-agent per domain). Always prefer a SPECIALIZED existing agent over the generic implementer; only spin up a TEMP agent when no existing one fits. Triggers: invoke_agent, sub-agent, subagent, dispatch, parallel agents, delegate, isolated context, fresh context, context too big, large refactor, multi-file change, scan repo, bigquery, confluence, jira, databricks, powerbi, msgraph, playwright, temp agent, throwaway agent, ephemeral agent, agent-creator, long context, 1M context."
+description: "Use ANY time work should be delegated to sub-agents (Agent tool) instead of done in the main session: (a) executing a plan task-by-task, a fresh sub-agent per task with two-stage review; (b) parallel dispatch for 2+ independent problem domains; (c) routing a task to the RIGHT agent type (Explore, Plan, a project or plugin agent) instead of a generic one; (d) one-shot huge reads (giant logs, full API references, monorepo scans) handed to one sub-agent that returns only a summary. CRITICAL TRIGGER — context size: when any task, step or investigation is estimated to need more than ~10k tokens of context (long files, multi-file refactor, large scan, big debugging trace, heavy docs), do NOT do it in the main session — dispatch a sub-agent; dispatch independent ones in PARALLEL. Triggers: sub-agent, subagent, dispatch, parallel agents, delegate, isolated context, fresh context, context too big, large refactor, multi-file change, scan repo, long context."
 ---
 
 # Subagent-Driven Development (Sequential + Parallel + Routing + Temp Agents)
@@ -9,12 +9,12 @@ This skill replaces the former `subagent-driven-development` and `dispatching-pa
 
 - **Part A — Sequential mode** — execute an implementation plan task-by-task with one fresh sub-agent per task plus two-stage review (spec compliance, then code quality).
 - **Part B — Parallel mode** — dispatch multiple independent sub-agents concurrently to investigate / fix / build unrelated problem domains.
-- **Part C — Specialized agent routing** — pick the RIGHT existing specialized sub-agent for the task (BigQuery? Confluence? Jira? Databricks? QA?) instead of defaulting to a generic implementer.
-- **Part D — Temporary sub-agent creation** — when no existing agent fits AND the job needs huge context (1M tokens, mega-doc dives, giant log analysis), spin up a throwaway agent via `agent-creator`, use it once, then clean up.
+- **Part C — Agent routing** — pick the agent type that fits the task (a read-only search agent, a planning agent, a project or plugin agent written for the domain) instead of defaulting to a generic implementer.
+- **Part D — One-shot large-context jobs** — when nothing fits AND the job is a huge one-off read (giant logs, full API references, monorepo scans), hand it to one general-purpose sub-agent that returns only a summary; nothing to create or clean up.
 
 **Why sub-agents at all:** you delegate tasks to specialized agents with isolated context. By precisely crafting their instructions — or by picking one already purpose-built — you ensure they stay focused and succeed. They never inherit your session's context or history — you construct exactly what they need. This also preserves your own context for coordination work.
 
-**Routing principle (read this twice):** Before dispatching any sub-agent, ask "is there already a specialized agent for this domain?" (see Part C catalog). Generic dispatch is the LAST resort, not the first.
+**Routing principle (read this twice):** Before dispatching any sub-agent, ask "is there already an agent type for this domain?" (see Part C). Generic dispatch is the LAST resort, not the first.
 
 ---
 
@@ -215,15 +215,15 @@ Each sub-agent gets:
 
 #### 3. Dispatch in Parallel
 
-In a single tool-call wave, fire all the sub-agents at once:
+In a single message, send one Agent tool call per domain:
 
 ```
-invoke_agent(... "Fix agent-tool-abort.test.ts failures" ...)
-invoke_agent(... "Fix batch-completion-behavior.test.ts failures" ...)
-invoke_agent(... "Fix tool-approval-race-conditions.test.ts failures" ...)
+Agent(description="Fix abort tests",    prompt="Fix agent-tool-abort.test.ts failures …")
+Agent(description="Fix batch tests",    prompt="Fix batch-completion-behavior.test.ts failures …")
+Agent(description="Fix approval races", prompt="Fix tool-approval-race-conditions.test.ts failures …")
 ```
 
-All three run concurrently.
+All three run concurrently. If they edit files, give each a scope that cannot overlap (or its own git worktree).
 
 #### 4. Review and Integrate
 
@@ -300,155 +300,83 @@ From a debugging session:
 
 ---
 
-## Part C — Specialized Agent Routing (Pick the Right Sub-Agent)
+## Part C — Agent Routing (Pick the Right Sub-Agent)
 
-Before you dispatch a generic implementer, **check if the agent platform already has a purpose-built sub-agent for the domain**. Specialized agents come with the right tools, credentials, prompts, and tribal knowledge baked in — a generic agent will waste tokens reinventing them.
+Before you dispatch a general-purpose sub-agent, **check whether an agent type built for the job is available.** The Agent tool lists every type this session can dispatch, each with a description saying when to use it: Claude Code's built-in types, plus any agents defined in the project's `.claude/agents/`, in your `~/.claude/agents/`, or by an installed plugin. A specialized agent comes with the right tools and instructions already in place; a generic one has to rediscover them on your tokens.
 
-### Routing Table — Common Task → Sub-Agent
+### Routing Table — Common Task → Agent Type
 
-| If the task involves… | Invoke this agent | Notes |
+The built-in types vary with the Claude Code version, so read the Agent tool's list rather than assuming; these are the usual ones.
+
+| If the task is… | Dispatch | Why |
 |---|---|---|
-| Querying BigQuery, dataset/table exploration, SQL on GCP | `bigquery-explorer` | Knows your BQ projects & auth |
-| Finding which AD group / table grants BQ access | `bq-ad-group-locator` | Searches Confluence + access-rights tables |
-| Searching Confluence docs / runbooks | `confluence-search` | Use BEFORE guessing internal conventions |
-| Reading internal Developer Portal docs | `dx-docs` | Internal API/SDK reference |
-| Jira tickets — search, create, update, transition | `jira` | |
-| Databricks notebooks, jobs, PySpark, SQL warehouses | `databricks` | |
-| Power BI workspaces, reports, DAX | `powerbi` | |
-| Microsoft 365 — mail, calendar, files, Teams | `msgraph` | |
-| Pete (enterprise DB web service), Instant APIs, CIDs | `pete` | |
-| Multi-source data analytics (BQ + Databricks + Confluence + PowerBI) | `data-analytics` | One-stop shop when crossing data sources |
-| Web UI / E2E testing with Playwright + visual analysis | `qa-kitten` | |
-| Terminal / TUI app testing with visual analysis | `terminal-qa` | |
-| Risk-based QA planning, coverage gaps, release readiness | `qa-expert` | |
-| Holistic code review (any language) | `code-reviewer` | Default reviewer |
-| Python code review | `python-reviewer` | |
-| TypeScript code review | `typescript-reviewer` | |
-| JavaScript code review | `javascript-reviewer` | |
-| Go code review | `golang-reviewer` | |
-| C code review | `c-reviewer` | |
-| C++ code review | `cpp-reviewer` | |
-| iOS / Swift / SwiftUI review | `ios-reviewer` | |
-| Modern Python implementation (async, typed, frameworks) | `python-programmer` | Prefer over generic for Python work |
-| Security audit, threat modeling, remediation | `security-auditor` | |
-| Prompt quality analysis | `prompt-reviewer` | |
-| PRDs, user stories, program tracking | `tpm` | |
-| Breaking a complex task into actionable steps | `planning-agent` | Often the FIRST agent to invoke |
-| Creating a NEW persistent JSON agent config | `agent-creator` | Also used for temp agents — see Part D |
-| Scheduling recurring prompts (daily reports, code reviews) | `scheduler-agent` | |
-| Publishing HTML/reports to a sharing host | `share-puppy` | |
-| Building HTML slidedecks | `slide-creator` | |
-| Retail store KPI anomaly detection | `store-anomaly-detector` | |
+| Finding where something lives across many files; a broad read-only search | `Explore` | Read-only; returns locations and conclusions, not file dumps |
+| Designing an implementation approach before any code is written | `Plan` | Returns steps and the files involved; makes no edits |
+| A domain an agent in `.claude/agents/` or a plugin was written for (a database, a ticket system, a docs search, a reviewer for one language) | that agent | It already carries the domain's tools and conventions |
+| Implementation, debugging, anything that edits — and nothing above fits | `general-purpose` | Brief it with Part A's prompt templates |
 
 ### Routing Decision Flow
 
 ```dot
 digraph routing {
     "New task arrives" [shape=oval];
-    "Match in routing table?" [shape=diamond];
-    "Use specialized agent (Part C)" [shape=box style=filled fillcolor=lightgreen];
-    "Heavy context (>10k) AND no fit?" [shape=diamond];
+    "An available agent type fits?" [shape=diamond];
+    "Dispatch that agent (Part C)" [shape=box style=filled fillcolor=lightgreen];
+    "Heavy (>10k) or tagged SUB_AGENT?" [shape=diamond];
+    "Execute inline" [shape=box];
+    "One-shot read or scan, only the summary matters?" [shape=diamond];
+    "general-purpose, fixed-size summary back (Part D)" [shape=box style=filled fillcolor=lightyellow];
     "Generic dispatch (Part A or B)" [shape=box];
-    "Need >100k context or unique tool combo?" [shape=diamond];
-    "Create TEMP agent via agent-creator (Part D)" [shape=box style=filled fillcolor=lightyellow];
 
-    "New task arrives" -> "Match in routing table?";
-    "Match in routing table?" -> "Use specialized agent (Part C)" [label="yes"];
-    "Match in routing table?" -> "Heavy context (>10k) AND no fit?" [label="no"];
-    "Heavy context (>10k) AND no fit?" -> "Need >100k context or unique tool combo?" [label="yes"];
-    "Heavy context (>10k) AND no fit?" -> "Generic dispatch (Part A or B)" [label="no"];
-    "Need >100k context or unique tool combo?" -> "Create TEMP agent via agent-creator (Part D)" [label="yes"];
-    "Need >100k context or unique tool combo?" -> "Generic dispatch (Part A or B)" [label="no"];
+    "New task arrives" -> "An available agent type fits?";
+    "An available agent type fits?" -> "Dispatch that agent (Part C)" [label="yes"];
+    "An available agent type fits?" -> "Heavy (>10k) or tagged SUB_AGENT?" [label="no"];
+    "Heavy (>10k) or tagged SUB_AGENT?" -> "Execute inline" [label="no"];
+    "Heavy (>10k) or tagged SUB_AGENT?" -> "One-shot read or scan, only the summary matters?" [label="yes"];
+    "One-shot read or scan, only the summary matters?" -> "general-purpose, fixed-size summary back (Part D)" [label="yes"];
+    "One-shot read or scan, only the summary matters?" -> "Generic dispatch (Part A or B)" [label="no"];
 }
 ```
 
 ### Routing Red Flags
 
-- ❌ Asking the generic implementer to write SQL when `bigquery-explorer` exists
-- ❌ Manually grepping Confluence URLs instead of invoking `confluence-search`
-- ❌ Dispatching a generic Python coder when `python-programmer` is available
-- ❌ Reviewing TypeScript with the generic `code-reviewer` when `typescript-reviewer` is sharper
-- ❌ Skipping `planning-agent` on a complex multi-step task and improvising the plan inline
-- ❌ Always defaulting to `data-analytics` when a single-source agent would suffice (it's heavier)
+- ❌ Sending a general-purpose agent to search a codebase when a read-only search type (`Explore`) is available
+- ❌ Hand-rolling access to a system (database, tickets, docs) when a project or plugin agent already wraps it
+- ❌ Reviewing code with a generic agent when a reviewer for that language is defined
+- ❌ Improvising the plan for a complex multi-step task inline when a planning type is available
+- ❌ Picking an agent by its name alone — its description says when to use it; read that
 
-### Discovering New Agents
+### Adding an Agent
 
-The agent roster grows. Before you assume "there's no agent for this," run `list_agents` and read descriptions. If you find a fit not in the table above, **update this skill's routing table in the same PR** so the next caller benefits.
+If you keep writing the same long brief for the same kind of job, make it a permanent agent: a Markdown file at `.claude/agents/<name>.md` (shared with the project) or `~/.claude/agents/<name>.md` (yours alone). Its frontmatter carries `name`, `description` (when to use it — this is what routing reads), and optionally `tools` and `model`; the body is the agent's instructions. The `/agents` command creates one interactively. If a new agent does not appear in the Agent tool's list, start a new session.
 
 ---
 
-## Part D — Temporary Sub-Agents for Large-Context Jobs
+## Part D — One-Shot Large-Context Jobs
 
-Sometimes the job genuinely doesn't fit any existing agent AND blows past normal context budgets — think 1M-token vendor doc dives, multi-hundred-MB log triage, scanning a mega-monorepo, or one-shot tasks needing a unique tool combination. In those cases, **spin up a throwaway agent via `agent-creator`, use it once, then clean it up.**
+Some jobs are one-off and huge: a vendor's full API reference, a multi-hundred-MB log, a scan of a large monorepo. No existing agent fits and none is worth creating. **Dispatch one `general-purpose` sub-agent with a self-contained brief.** Every dispatch starts in a fresh context, does its reading there, and hands back only what you asked for — the bulk never enters your session, and there is nothing to create or clean up afterwards.
 
-### When to Create a Temp Agent
+### How to Brief It
 
-Use the temp-agent path when ALL of these hold:
+- State the question the read must answer, not just "read X".
+- Name the sources (paths, URLs, globs) and what to skip.
+- Fix the return shape and its size — e.g. "Return at most 30 lines: the answer first, then `file:line` evidence for each claim."
+- Say what it must not do (edit files, call the network, …) when that matters.
 
-1. No existing agent in Part C's routing table fits.
-2. Generic Part A/B dispatch would either (a) blow past context limits, or (b) need a custom toolset / model pin you can't get from the general-purpose template.
-3. The need is **one-shot or short-lived** — not a recurring workflow (recurring → make it a permanent agent and add it to the Part C table).
+### Model Choice
 
-### Creation Recipe
+An agent file's `model` field — or a per-call model override, where the Agent tool offers one — picks the model for that sub-agent. A faster model suits a mechanical sweep; the most capable one suits judgement-heavy synthesis. When unsure, leave it unset and the session's default applies.
 
-Dispatch `agent-creator` with the minimum inputs:
+### Promote What Recurs
 
-```
-invoke_agent(
-  agent_name="agent-creator",
-  prompt="""
-  Create a TEMPORARY agent for a one-shot job.
+If the same one-shot brief comes back a second time, turn it into a permanent agent (Part C, "Adding an Agent").
 
-  Name: temp-<purpose-kebab-case>-<unix_timestamp>
-  Description: TEMPORARY — <one-line purpose>. Safe to delete after use.
-  Purpose: <what it should do, in 2-3 sentences>
-  Tools needed: <list, or 'suggest based on purpose'>
-  Model pin: <e.g. gemini-3.1-pro-preview-long for 1M ctx, gpt-5.5 for 272k, or omit>
-  """
-)
-```
+### One-Shot Red Flags
 
-`agent-creator` writes the JSON config to `~/.code_puppy/agents/<name>.json` and returns the agent name.
-
-### Naming Convention (Mandatory for Temp Agents)
-
-- Format: `temp-<purpose>-<unix_timestamp>` (kebab-case)
-- Example: `temp-vendor-api-doc-dive-1715441600`
-- The literal word `"temporary"` MUST appear in the agent's `description` field so cleanup scripts can grep for it.
-
-### Model Pinning for Long Context
-
-| Need | Pin |
-|---|---|
-| ~1M-token reads (giant docs, full repo scan) | `gemini-3.1-pro-preview-long` |
-| ~272k context, strong reasoning | `gpt-5.5` |
-| Default / unsure | leave unpinned (caller's default) |
-
-### Invoke and Then Clean Up
-
-```
-# 1. Use it
-invoke_agent(agent_name="temp-vendor-api-doc-dive-1715441600", prompt="...")
-
-# 2. Read the curated summary it returns
-# 3. Clean up the JSON config
-delete_file("/Users/<you>/.code_puppy/agents/temp-vendor-api-doc-dive-1715441600.json")
-```
-
-Cleanup is the caller's responsibility. Leftover temp agents pollute `list_agents` output and confuse future routing decisions.
-
-### Promoting a Temp Agent
-
-If you find yourself creating the same temp agent twice, that's a signal: **promote it to a permanent agent**. Have `agent-creator` rebuild it with a non-temp name, add a row to the Part C routing table in the same PR, and submit it.
-
-### Temp-Agent Red Flags
-
-- ❌ Creating a temp agent when a Part C specialized agent would have worked
-- ❌ Forgetting to delete the JSON config after use
-- ❌ Naming a temp agent without the `temp-` prefix or the timestamp
-- ❌ Pinning a long-context model "just in case" when the job is small (waste of $$)
-- ❌ Creating temp agents in parallel without unique timestamps (collisions)
-- ❌ Recurring use of the same temp agent without promoting it to permanent
+- ❌ Reading the huge source in the main session "just to skim it" first
+- ❌ A brief with no limit on what comes back — the summary then floods your context instead
+- ❌ A one-shot dispatch when an available agent type already covers the job (Part C)
+- ❌ Splitting one coherent read across parallel agents that each need the whole picture
 
 ---
 
@@ -458,13 +386,13 @@ Most real plans mix the four modes. Typical pattern:
 
 1. `writing-plans` produces a plan; each step is tagged with estimated context size + a parallel-safe flag + (optionally) a suggested specialized agent.
 2. `executing-plans` walks the plan; for each step, route in this order:
-   - **First, check Part C routing table.** If a specialized agent fits the domain (BigQuery, Confluence, Jira, Databricks, code review by language, etc.), use it — regardless of estimated context size.
+   - **First, check the available agent types (Part C).** If one fits the domain (search, planning, a project or plugin agent, a reviewer for the language), use it — regardless of estimated context size.
    - If no specialized agent fits AND estimated context ≤ 10k AND step isn't tagged `SUB_AGENT` → execute inline.
    - If no specialized agent fits AND estimated context > 10k OR step is tagged `SUB_AGENT` → dispatch via Part A (sequential, with two-stage review).
-   - If a contiguous batch of steps is independent AND each is heavy → dispatch via Part B (parallel) — still preferring specialized agents from Part C inside the batch.
-   - If the step needs >100k context, exotic tooling, or a model the standard template can't pin → spin up a temp agent via Part D, use it once, delete it.
+   - If a contiguous batch of steps is independent AND each is heavy → dispatch via Part B (parallel) — still preferring agent types from Part C inside the batch.
+   - If the step is a one-shot huge read or scan where only the conclusion matters → Part D: one general-purpose sub-agent, a fixed-size summary back.
 
-The 10k rule is the universal trigger that routes work into this skill. The Part C catalog is the universal lookup that prevents reinventing wheels.
+The 10k rule is the universal trigger that routes work into this skill. Checking the available agent types first is what prevents reinventing wheels.
 
 ---
 
@@ -477,9 +405,7 @@ The 10k rule is the universal trigger that routes work into this skill. The Part
 - **code-review** — used by spec & quality reviewer sub-agents in Part A
 - **finishing-a-development-branch** — complete development after all tasks
 
-**Specialized & meta agents this skill routes to (Parts C & D):**
-- `bigquery-explorer`, `bq-ad-group-locator`, `confluence-search`, `dx-docs`, `jira`, `databricks`, `powerbi`, `msgraph`, `pete`, `data-analytics`, `qa-kitten`, `terminal-qa`, `qa-expert`, `code-reviewer`, `python-reviewer`, `typescript-reviewer`, `javascript-reviewer`, `golang-reviewer`, `c-reviewer`, `cpp-reviewer`, `ios-reviewer`, `python-programmer`, `security-auditor`, `prompt-reviewer`, `tpm`, `planning-agent`, `scheduler-agent`, `share-puppy`, `slide-creator`, `store-anomaly-detector`
-- `agent-creator` — used by Part D to spin up temporary agents for one-shot large-context jobs
+**Agent types this skill routes to (Parts C & D):** whatever the Agent tool lists — the built-in types (usually `general-purpose`, `Explore`, `Plan`) plus agents defined in `.claude/agents/`, `~/.claude/agents/` and installed plugins.
 
 **Sub-agents should themselves use:**
 - **test-driven-development** — sub-agents follow TDD for each task

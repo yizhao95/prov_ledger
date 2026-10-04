@@ -1,5 +1,5 @@
 {
-  "_comment": "One worked example per op. Each is a valid input file you'd pass to the matching scripts/<op>.sh. Pick the one matching your write op, copy, edit values, save, then: bash ~/.code_puppy/skills/executing-plans/scripts/<op>.sh path/to/input.json",
+  "_comment": "One worked example per op. Each is a valid input file for the script named in its _use_with (keys starting with _ are annotations the scripts ignore). Copy one, edit the values, save, then: bash ${CLAUDE_PLUGIN_ROOT}/skills/executing-plans/scripts/<op>.sh path/to/input.json",
 
   "run_step__shell_command": {
     "_use_with": "scripts/run-step.sh",
@@ -93,6 +93,52 @@
 
   "finish_plan": {
     "_use_with": "scripts/finish-plan.sh",
+    "_why": "Rarely needed: the last regular step closes the plan. For back-filling a legacy plan, or force-finishing one with PENDING steps.",
     "plan_id": "deep-health-20260514153045"
+  },
+
+  "record_metric": {
+    "_use_with": "scripts/record-metric.sh",
+    "step_id": "deep-health-20260514153045-E",
+    "name": "p95_latency_ms",
+    "value": 182.5,
+    "unit": "ms"
+  },
+
+  "agent_review_close__fallback": {
+    "_use_with": "scripts/agent-review-close.sh",
+    "_why": "Fallback only: normally you complete-step / fail-step the <plan>-REVIEW.1 child and the plan closes itself. Use this for a NEEDS_REVIEW plan that has no child step.",
+    "plan_id": "deep-health-20260514153045",
+    "outcome": "pass",
+    "summary": "State graph re-indexed; no stale references to the renamed probe functions."
+  },
+
+  "reason_slots__with_draft": {
+    "_use_with": "scripts/reason-slots.sh",
+    "plan_id": "deep-health-20260514153045",
+    "project": "deep-health-app",
+    "draft": true
+  },
+
+  "reason_fill__one_of_each_shape": {
+    "_use_with": "scripts/reason-fill.sh",
+    "_why": "One answer per slot from reason-slots; run_id comes from the slots. The shape decides the tier: span = stated, interpretation = asserted, unstated = unstated.",
+    "plan_id": "deep-health-20260514153045",
+    "project": "deep-health-app",
+    "run_id": 12,
+    "reasons": [
+      {"node_key": "nk_1a2b", "utterance_id": 42, "span": [0, 41]},
+      {"node_key": "nk_3c4d", "interpretation": "disk threshold follows the ops runbook linked in the ticket", "refs": [7], "because": [31]},
+      {"node_key": "nk_5e6f", "unstated": true}
+    ]
+  },
+
+  "headline_respond__proceed": {
+    "_use_with": "scripts/headline-respond.sh",
+    "plan_id": "deep-health-20260514153045",
+    "finding_id": "active_constraint:app.health.:1",
+    "action": "proceed",
+    "rationale": "the only consumer reads status, which keeps its meaning",
+    "cites": [31]
   }
 }

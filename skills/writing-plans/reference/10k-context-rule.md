@@ -46,4 +46,4 @@ Spending 10k+ tokens of main-session context on one step crowds out the orchestr
 
 ## Downstream
 
-The `executing-plans` skill enforces this rule at runtime — if it discovers a non-`SUB_AGENT` step actually needs >10k context once execution begins, it deviates the plan via `$CLI evaluate --deviation` and re-tags the step `SUB_AGENT`.
+The `executing-plans` skill enforces this rule at runtime — if it discovers a non-`SUB_AGENT` step actually needs >10k context once execution begins, it deviates the plan via `executing-plans/scripts/deviate.sh` and dispatches the work as a sub-agent.

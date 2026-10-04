@@ -86,6 +86,39 @@ def test_complete_step_surfaces_needs_agent_review(tmp_db, tmp_path, run_script_
     assert review["status"] == "NEEDS_REVIEW"
 
 
+def test_run_step_surfaces_needs_agent_review(tmp_db, tmp_path, run_script_fn):
+    """run-step.sh is the preferred path for shell steps, so the handoff signal
+    complete-step puts on its tail line must reach run-step's caller too. It
+    used to be sent to /dev/null with the rest of complete-step's output: the
+    plan parked in NEEDS_REVIEW and nobody was told to drive the review."""
+    reg = _write_registry(tmp_path, "demo-app")
+    plan = _publish(tmp_db, tmp_path, "Refactor the demo-app pipeline")
+    step_id = plan["step_ids"][0]
+
+    proc = run_script_fn("run-step", {"step_id": step_id, "type": "COMMAND", "command": "echo ran"},
+                         tmp_db, env_extra={"PSG_REGISTRY_PATH": str(reg)})
+
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    # the output contract is unchanged: the last line is still run-step's own marker
+    assert payload["ok"] is True and payload["op"] == "run-step" and payload["exit_code"] == 0, proc.stdout
+    assert payload.get("needs_agent_review") is True, proc.stdout
+    assert payload.get("project") == "demo-app", proc.stdout
+    assert payload.get("review_step_id") == f"{plan['plan_id']}-REVIEW", proc.stdout
+    assert payload.get("review_child_step_id") == f"{plan['plan_id']}-REVIEW.1", proc.stdout
+
+
+def test_run_step_without_handoff_adds_no_signal(tmp_db, tmp_path, run_script_fn):
+    reg = _write_registry(tmp_path, "demo-app")
+    plan = _publish(tmp_db, tmp_path, "Build an unrelated standalone widget")
+    proc = run_script_fn("run-step", {"step_id": plan["step_ids"][0], "type": "COMMAND", "command": "echo ran"},
+                         tmp_db, env_extra={"PSG_REGISTRY_PATH": str(reg)})
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert payload["op"] == "run-step"
+    assert "needs_agent_review" not in payload, proc.stdout
+
+
 def test_complete_step_unregistered_closes_as_before(tmp_db, tmp_path, run_script_fn):
     reg = _write_registry(tmp_path, "demo-app")
     plan = _publish(tmp_db, tmp_path, "Build an unrelated standalone widget")

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # raise-budget.sh — deterministic flow for the raise-budget op: raise a plan's max_revisions ceiling, with a required reason (FL-137).
 # Composes input as JSON/YAML, this script validates + writes via the orchestrator.
-# See ~/.code_puppy/skills/executing-plans/update-input.example.json for the input shape.
+# See ../update-input.example.json (and ../update-input.schema.json) for the input shape.
 #
 # Env: ORCH_DB overrides the SQLite path (default: ~/skill-workspace/orchestrator.db).
 set -uo pipefail

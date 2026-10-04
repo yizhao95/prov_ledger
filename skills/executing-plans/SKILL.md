@@ -1,6 +1,6 @@
 ---
 name: executing-plans
-description: "Use IMMEDIATELY after writing-plans, OR whenever a plan exists in ~/skill-workspace/orchestrator.db. Owns ALL post-publish writes to the orchestrator database via the 8 deterministic-flow scripts in scripts/: run-step (preferred for shell work), start-step, complete-step, fail-step, append-log, deviate, record-skill, finish-plan. Never bypass these scripts; never write to the DB ad-hoc. Triggers on every plan execution: code, SQL, schema, build, test, fix, implement, deploy, refactor, run, execute, continue, resume. When a test fails: never patch the test silently — fail-step it, root-cause via systematic-debugging, then deviate via scripts/deviate.sh."
+description: "Use IMMEDIATELY after writing-plans, OR whenever a plan exists in ~/skill-workspace/orchestrator.db. Owns ALL post-publish writes to the orchestrator database via the deterministic-flow scripts in scripts/ (run-step is the preferred path for shell work). Never bypass these scripts; never write to the DB ad-hoc. Triggers on every plan execution: code, SQL, schema, build, test, fix, implement, deploy, refactor, run, execute, continue, resume. When a test fails: never patch the test silently — fail-step it, root-cause via systematic-debugging, then deviate via scripts/deviate.sh."
 ---
 
 # Executing Plans
@@ -9,7 +9,7 @@ The deterministic write-flows (one from writing-plans, the rest here) are **the 
 
 ## 🔌 Boundary with `writing-plans`
 
-`writing-plans` does ONE thing: composes a `plan-input.{json,yaml}` file and runs `${CLAUDE_PLUGIN_ROOT}/skills/writing-plans/scripts/publish-plan.sh` to insert the new plan. After that, **every** subsequent operation on that plan (start, log, complete, fail, deviate, record deferred-load skills, finish) is owned by THIS skill via the 7 scripts in `scripts/`.
+`writing-plans` does ONE thing: composes a `plan-input.{json,yaml}` file and runs `${CLAUDE_PLUGIN_ROOT}/skills/writing-plans/scripts/publish-plan.sh` to insert the new plan. After that, **every** subsequent operation on that plan (start, log, complete, fail, deviate, record deferred-load skills, finish) is owned by THIS skill via the scripts in `scripts/`.
 
 If you find yourself wanting to "update the plan" — you ARE the update mechanism. You do not go back to writing-plans.
 
@@ -54,7 +54,7 @@ bash scripts/run-step.sh /tmp/in.json
 3. Truncates output to ≤16 KiB (head 8 KiB + `--- TRUNCATED N BYTES ---` marker + tail 8 KiB)
 4. Appends a `--- exit_code=N, runtime=Ns ---` footer
 5. If exit 0 → calls `complete-step`; else → calls `fail-step`
-6. Exits with the wrapped command's true exit code (so the calling agent sees pass/fail naturally)
+6. Prints one JSON line last — `{"ok":true,"op":"run-step","exit_code":N,...}` — carrying every other key of the complete-step/fail-step tail line (so `needs_agent_review` reaches you here too), then exits with the wrapped command's true exit code (so the calling agent sees pass/fail naturally)
 7. The auto-review trigger from migration 006 still fires — plans still auto-close
 
 **Decision table for which entry point to use:**
@@ -118,8 +118,8 @@ published before the column existed is matched once from its goal and
 labelled `legacy` — the deterministic procedure does **not** auto-close it. Instead it (1) flips the
 review step to `NEEDS_REVIEW`, (2) bumps the plan revision, and (3) inserts a
 **tracked child step** `<plan>-REVIEW.1` (type `SUB_AGENT`, status `PENDING`)
-under the review step. The plan stays `IN_PROGRESS`, and the
-`complete-step`/`fail-step` tail line carries:
+under the review step. The plan stays `IN_PROGRESS`, and the tail line of
+`complete-step`/`fail-step` — and of `run-step.sh`, which passes it on — carries:
 
 ```json
 {"ok":true,"op":"complete-step",...,"needs_agent_review":true,"project":"<name>","review_step_id":"<plan>-REVIEW","review_child_step_id":"<plan>-REVIEW.1"}
@@ -127,7 +127,7 @@ under the review step. The plan stays `IN_PROGRESS`, and the
 
 **When you see `needs_agent_review: true`, you MUST:**
 1. `start-step` the child step `review_child_step_id` (`<plan>-REVIEW.1`).
-2. Invoke the `code-puppy` sub-agent with the **`update-project-state-graph`**
+2. Dispatch a sub-agent (Agent tool) that loads the **`update-project-state-graph`**
    skill, passing `plan_id`, `project`, and the child step id.
 3. When the sub-agent finishes, finalize **the child step**:
    `complete-step` it on a clean review, or `fail-step` it on a gap. The plan
@@ -185,13 +185,13 @@ For every COMMAND or CODE step, the raw shell/tool/test output **MUST** end up i
 - **(preferred)** inline: pass `log_context: "<raw output>"` to `complete-step.sh` (or `start-step.sh` / `fail-step.sh`); OR
 - **(fallback)** call `append-log.sh` separately before `complete-step.sh`.
 
-A non-trivial step with `log_context = ""` is a puppy failure — the dashboard's log panel goes blank and post-hoc debugging becomes impossible. The two failed plans `tree-readme-pr-20260514170701` (0/13 steps with logs) and `rebase-onto-main-20260514182554` (0/11 steps with logs) are the cautionary examples.
+A non-trivial step with `log_context = ""` is a process failure — the dashboard's log panel goes blank, and a plan whose steps carry no logs leaves nothing to debug from after the fact.
 
 ## 🚨 Mandatory rules
 
 | Rule | Why |
 |---|---|
-| Use ONLY the 7 scripts for writes — never call `orchestrator-cli.py <verb>` directly | Eliminates flag-typo class of bugs (we hit `complete-plan --reason` last week) |
+| Use ONLY the scripts in `scripts/` for writes — never the CLI or ad-hoc SQL | The scripts validate every field and enforce the state machine; a hand-typed write skips both |
 | `summary` is ONE human-curated sentence; `text` (in append-log) is raw machine output | Telemetry vs. curation are distinct fields |
 | Once a step is COMPLETED, it is IMMUTABLE — `deviate.sh` on it is REJECTED (exit 4, `accepted:false`, breaker `soft`). To redo work, deviate on the **next non-terminal step** (or the plan's review step) and put the retry sub-step there | Audit trail |
 | `revision_count` ≤ `max_revisions` (default 5) — circuit breaker. Past it, `deviate` is REFUSED; the only way to lift the ceiling is `scripts/raise-budget.sh` with a `reason` (it is recorded as a deviation on the plan) — never an `UPDATE` | Prevents thrash; and a raised budget is a decision, so it leaves a record |
@@ -202,18 +202,15 @@ A non-trivial step with `log_context = ""` is a puppy failure — the dashboard'
 
 ## 👀 Reads stay direct
 
-These don't mutate, so you can call them however:
+These don't mutate the plan, so you can call them however:
 
 ```bash
-PYBIN=~/skill-workspace/orchestrator/.venv/bin/python
-CLI=~/skill-workspace/orchestrator-cli.py
-$PYBIN $CLI list-plans
-$PYBIN $CLI show-plan <plan_id>
-$PYBIN $CLI list-skills <plan_id>
-sqlite3 ~/skill-workspace/orchestrator.db "SELECT * FROM Plans WHERE status='IN_PROGRESS';"
+provledger plan <plan_id> [--step <step_id>] [--full]   # steps in tree order, their logs, the deviations
+sqlite3 "${ORCH_DB:-$HOME/skill-workspace/orchestrator.db}" \
+  "SELECT plan_id, status FROM Plans WHERE status='IN_PROGRESS';"
 ```
 
-The dashboard at http://localhost:8765 is the visual equivalent.
+Every `provledger` read is listed in [`docs/cli.md`](../../docs/cli.md). The dashboard at http://localhost:8765 is the visual equivalent.
 
 ### 🧭 Close-time reasons: answer WHY, point at the words (DP phase 1)
 
@@ -256,21 +253,21 @@ from the other, and no count anywhere claims that anyone *read* anything.
 ## 📚 Reference index
 
 - [`reference/op-catalog.md`](reference/op-catalog.md) — full per-op reference (state transitions + common mistakes)
-- [`reference/when-to-use.md`](reference/when-to-use.md) — decision tree at every executing-plans event
+- [`reference/when-to-use.md`](reference/when-to-use.md) — the common wrong moves, and the right script for each
 - [`update-input.schema.json`](update-input.schema.json) — formal schema (oneOf per op)
 - [`update-input.example.json`](update-input.example.json) — copy-paste-edit examples
 
 ## 🧪 Tests
 
 ```bash
-~/skill-workspace/orchestrator/.venv/bin/python -m pytest \
-  ${CLAUDE_PLUGIN_ROOT}/skills/executing-plans/tests/ -v
+"${PROVLEDGER_VENV:-$HOME/skill-workspace/.venv}/bin/python" -m pytest \
+  "${CLAUDE_PLUGIN_ROOT}/skills/executing-plans/tests" -q
 ```
 
-17 tests: 16 per-op (happy + validation + state-machine + circuit breakers) + 1 full lifecycle smoke that walks the entire publish→finish cycle through the documented scripts.
+Per-op tests (happy path, validation, state machine, circuit breakers), a full lifecycle smoke through the documented scripts, and `test_update_input_schema.py`, which holds the schema and examples to the code.
 
 ## 🔗 See also
 
-- [`../README.md`](../README.md) — repo-level overview, installation, activation paths, full skill catalog
+- [`../../README.md`](../../README.md) — what provLedger does; [`../../INSTALL.md`](../../INSTALL.md) — installation, and the dashboard (§6)
 - [`../writing-plans/SKILL.md`](../writing-plans/SKILL.md) — the other half of the contract; owns the initial publish flow
-- **Orchestration dashboard** at `~/skill-workspace/orchestrator-webapp/` — tree view + parallel branches. See README → "Recommended companion" for setup.
+- **Dashboard** — the bundled `orchestrator-webapp/` at http://localhost:8765 (tree view + parallel branches); `writing-plans/scripts/ensure-dashboard.sh` or the `provledger-dashboard` slash command starts it.
