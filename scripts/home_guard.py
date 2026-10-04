@@ -132,7 +132,7 @@ def main(argv: list[str]) -> int:
     changes = diff(json.loads(path.read_text()), snapshot())
     if not changes:
         return 0
-    print("home_guard: the suite wrote outside its sandbox:")
+    print("home_guard: written outside the sandbox:")
     for line in changes:
         print(f"  - {line}")
     return 1

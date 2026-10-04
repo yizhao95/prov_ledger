@@ -147,3 +147,13 @@ def test_a_reason_written_outside_a_session_is_a_leak(tmp_path: Path) -> None:
     proc = _guard(ws, "check", str(snap))
     assert proc.returncode == 1
     assert "change_reason" in proc.stdout
+
+
+def test_the_release_check_uses_this_guard_not_file_hashes() -> None:
+    """release-e2e.sh used to fail when the registry's or the index's sha256
+    changed during the run, and the Stop hook of the session that launched it
+    rewrites both on every graph refresh (the prov_ledger row's commit and time).
+    One guard, one definition of a leak."""
+    src = (REPO / "scripts" / "release-e2e.sh").read_text()
+    assert "home_guard.py\" snapshot" in src and "home_guard.py\" check" in src
+    assert "GUARD_REG_BEFORE" not in src and "GUARD_IDX_BEFORE" not in src

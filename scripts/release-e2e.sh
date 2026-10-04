@@ -71,12 +71,8 @@ wants() { case " $STAGES " in *" $1 "*) return 0;; *) return 1;; esac; }
 # ── what must not be touched ─────────────────────────────────────────────────
 REAL_HOME="$HOME"
 GUARDED="$REAL_HOME/skill-workspace/orchestrator.db"
-GUARDED_REGISTRY="$REAL_HOME/skill-workspace/project-graphs/projects.json"
-GUARDED_INDEX="$REAL_HOME/skill-workspace/project-graphs/PROJECT-STATE-GRAPHS.md"
 fingerprint() { [ -f "$1" ] && { printf '%s %s' "$(stat -c %s "$1")" "$(sha256sum "$1" | cut -d' ' -f1)"; } || printf 'absent'; }
 GUARD_BEFORE="$(fingerprint "$GUARDED")"
-GUARD_REG_BEFORE="$(fingerprint "$GUARDED_REGISTRY")"
-GUARD_IDX_BEFORE="$(fingerprint "$GUARDED_INDEX")"
 # Every name this run invents carries this token, so "did we leak into the
 # developer's ledger" is answered by looking rather than by trusting.
 E2E_NONCE="rele2e$(date +%y%m%d%H%M%S)"
@@ -93,6 +89,10 @@ E2E_TALLY="$E2E_ROOT/tally.txt";       : > "$E2E_TALLY"
 export E2E_LOGS E2E_CLONE E2E_HOME E2E_FINDINGS E2E_TALLY
 export E2E_SUITES="$SUITES" E2E_CLONE_FROM="$CLONE_FROM" E2E_MODEL="$MODEL"
 export E2E_REPO="$REPO"
+# The developer's workspace, checked at the end by the suites' own guard
+# (scripts/home_guard.py): one definition of a leak, not a second one here.
+GUARD_SNAP="$E2E_ROOT/home-guard.json"
+PROVLEDGER_GUARD_HOME="$REAL_HOME/skill-workspace" python3 "$HERE/home_guard.py" snapshot "$GUARD_SNAP"
 
 cleanup() {
     local rc=$?
@@ -211,17 +211,17 @@ fi
 #     the sandbox path IS in there — written by the provLedger hooks of the
 #     session that launched the check, which is the session's own words and not
 #     the check's rows.
-# (2) Whether the ledger file changed at all. That is NOT evidence of
-#     contamination, for the same reason. Reported, never failed on.
-#
-# The registry and its index are different: nothing but us should be writing
-# them during a run, and a run that rewrote them would clobber the developer's
-# PROJECT-STATE-GRAPHS.md. Those two are hard checks.
+# (2) Whether the developer's workspace shows what a leak changes and the
+#     session's hooks do not: the projects its registry and index list, the
+#     newest plan / reason / question row, new entries at its top
+#     (scripts/home_guard.py, the same guard run_tests.sh puts around every
+#     suite). Hashing the registry and the index is not that: the Stop hook of
+#     the session that launched this rewrites both on every graph refresh.
+# (3) Whether the ledger file changed at all. Expected, for the same reason.
+#     Reported, never failed on.
 V_GUARD=$OK
 leak="$(python3 "$HERE/release_e2e/leakcheck.py" "$GUARDED" "dummy-rollup-" 2>/dev/null)"
 GUARD_AFTER="$(fingerprint "$GUARDED")"
-GUARD_REG_AFTER="$(fingerprint "$GUARDED_REGISTRY")"
-GUARD_IDX_AFTER="$(fingerprint "$GUARDED_INDEX")"
 echo
 if [ -n "$leak" ]; then
     printf '  %sFAIL%s    this run leaked into the developer'\''s ledger:\n' "$C_RED" "$C_0"
@@ -231,17 +231,14 @@ else
     printf '  %sPASS%s    nothing of this run is in %s\n' "$C_GRN" "$C_0" "$GUARDED"
     info "        (opened read-only; no row of any table belongs to a dummy-rollup-* project)"
 fi
-guard_file() {                            # guard_file <label> <before> <after>
-    if [ "$2" != "$3" ]; then
-        printf '  %sFAIL%s    the developer'\''s %s changed during this run\n' "$C_RED" "$C_0" "$1"
-        info "        before [$2]"; info "        after  [$3]"
-        V_GUARD=$FAIL
-    else
-        printf '  %sPASS%s    the developer'\''s %s is untouched\n' "$C_GRN" "$C_0" "$1"
-    fi
-}
-guard_file "graph registry (projects.json)"     "$GUARD_REG_BEFORE" "$GUARD_REG_AFTER"
-guard_file "graph index (PROJECT-STATE-GRAPHS.md)" "$GUARD_IDX_BEFORE" "$GUARD_IDX_AFTER"
+if guard_out="$(PROVLEDGER_GUARD_HOME="$REAL_HOME/skill-workspace" python3 "$HERE/home_guard.py" check "$GUARD_SNAP")"; then
+    printf '  %sPASS%s    the developer'\''s workspace shows nothing of this run\n' "$C_GRN" "$C_0"
+    info "        (same projects in its registry and index, no plan / reason / question row outside a session, nothing new at its top)"
+else
+    printf '  %sFAIL%s    this run wrote to the developer'\''s workspace:\n' "$C_RED" "$C_0"
+    printf '%s\n' "$guard_out" | sed 's/^/            /'
+    V_GUARD=$FAIL
+fi
 if [ "$GUARD_BEFORE" != "$GUARD_AFTER" ]; then
     printf '  %sNOTE%s    %s changed while this ran, but carries nothing of ours.\n' "$C_YEL" "$C_0" "$(basename "$GUARDED")"
     info "        Expected when the check is launched from inside a Claude Code session:"
