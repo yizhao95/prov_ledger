@@ -1,5 +1,8 @@
 """One version string, everywhere it is read. A release changes this test and
-the six files it names, and nothing else."""
+the seven files it names (CHANGELOG.md gets the new entry), and nothing else:
+orchestrator/__init__.py, orchestrator-backend/pyproject.toml, the analyzer's
+store.py TOOL_VERSION, plugin.json, marketplace.json, scripts/pkg_smoke_test.py
+and CHANGELOG.md."""
 import json
 import re
 from pathlib import Path
@@ -19,5 +22,8 @@ def test_every_version_string_agrees():
     assert plugin["version"] == "0.4.2"
     market = json.loads((REPO / ".claude-plugin" / "marketplace.json").read_text())
     assert [p.get("version") for p in market["plugins"]] == ["0.4.2"]
+    smoke = (REPO / "scripts" / "pkg_smoke_test.py").read_text()
+    assert re.search(r'__version__ == "0\.4\.2"', smoke), "the wheel smoke test asserts another version"
+    assert set(re.findall(r"\b\d+\.\d+\.\d+\b", smoke)) == {"0.4.2"}, "a half-bumped pkg_smoke_test.py"
     changelog = (REPO / "CHANGELOG.md").read_text()
     assert changelog.startswith("# Changelog") and "## 0.3.0" in changelog and "## 0.1.0" in changelog

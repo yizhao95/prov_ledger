@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import provenance, triggers
+from .ask import runner as ask_runner
 
 RULE_ID = "X1"
 PATH = "external"
@@ -218,21 +219,35 @@ def parse_answer(text: str | None) -> dict | None:
 
 # ── the judgement ────────────────────────────────────────────────────────────
 
+def _no_answer(why: str) -> str:
+    return f"{NO_ANSWER} — {why}" if why else f"{NO_ANSWER} — the runner returned nothing (model unreachable, refused or timed out)"
+
+
 def judge(ctx, node: dict, *, runner=None, model: str | None = None) -> Verdict:
-    """Ask once, decide once. Writes nothing: `evaluate_external` records."""
+    """Ask once, decide once. Writes nothing: `evaluate_external` records.
+
+    A runner may return the text or `(text, detail)` — the real one,
+    `claude_arbiter.default_runner`, returns the pair — and it may raise
+    (`RunnerTimeout`, `RunnerError`, or anything else). None of that leaves
+    here as an exception: a runner that did not answer is `silent`, basis
+    `no answer — <why>` (D8: when you cannot tell, do not ask)."""
     key = node.get("node_key") or ""
     if runner is None:
         from .testing.claude_arbiter import default_runner
         runner = default_runner
-    raw = runner(prompt_for(ctx, node), model=model)
+    prompt = prompt_for(ctx, node)               # outside the try: a missing prompt is a broken judge, not a silent model
+    try:
+        raw, detail = ask_runner.normalise(runner(prompt, model=model))
+    except Exception as e:                       # noqa: BLE001 — every death of the runner is one silent verdict
+        return Verdict(key, "silent", False, _no_answer(f"the runner failed ({type(e).__name__}: {e})"), None, None)
     doc = parse_answer(raw)
     if doc is None:
         # "the model said something unusable" and "the model was never reached"
         # both end in silence, and both must end in silence — but they are not
         # the same fact, and a calibration report that cannot tell them apart
         # will call an unreachable model a perfectly consistent judge.
-        basis = ("no answer — the runner returned nothing (model unreachable, refused or timed out)"
-                 if not (raw or "").strip() else "unparseable answer — nothing was asked")
+        basis = (_no_answer(ask_runner.why_empty(detail)) if not raw.strip()
+                 else "unparseable answer — nothing was asked")
         return Verdict(key, "silent", False, basis, None, raw)
     basis = doc["basis"] or "no basis given"
     if not doc["trigger"]:
@@ -290,7 +305,14 @@ def evaluate_external(conn, *, project: str, plan_id: str, psg_db_path: str | No
             out["silent"] += 1
             out["nodes"].append({"node_key": key, "verdict": "silent", "basis": OFF_BASIS})
             continue
-        v = judge(ctx, node, runner=runner, model=model)
+        try:
+            v = judge(ctx, node, runner=runner, model=model)
+        except Exception as e:                   # noqa: BLE001 — this runs inside the close's transaction
+            # `judge` already turns a runner failure into silence; this is for a
+            # judge that is itself broken. An exception here would roll back
+            # the whole plan close, and an unasked question costs one record
+            # while a lost close costs the plan (D8, spec §2.8: nothing blocks a close).
+            v = Verdict(key, "silent", False, f"judge failed — {type(e).__name__}: {e}; nothing was asked")
         reason_id = None
         if v.verdict == "auto":
             reason_id = provenance.insert_reason(conn, project=project, plan_id=plan_id, node_key=key,

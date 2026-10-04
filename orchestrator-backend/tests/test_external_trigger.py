@@ -351,3 +351,153 @@ def test_a_node_a_code_rule_already_answered_is_not_judged_again_by_the_model(le
     out = et.evaluate_external(ledger, project=PROJECT, plan_id=PLAN, psg_db_path=None,
                                runner=_oracle({text: uid}), mode="on", commit=True)
     assert out["judged"] == 0
+
+
+# ── the real runner's shape, and a judge that fails ──────────────────────────
+#
+# Every stub above returns the text alone. The runner a close actually uses —
+# `testing.claude_arbiter.default_runner` — returns `(text, detail)`, raises
+# `RunnerTimeout` when the budget runs out and `RunnerError` when `claude` is
+# not there. The judge used to hand the tuple straight to `parse_answer`, which
+# raised TypeError; with `reasons.external_trigger: on` that raised inside the
+# close's transaction and rolled the whole close back.
+
+def _real_shaped(answer: str, **detail):
+    """A stub shaped exactly like `claude_arbiter.default_runner`: keyword-only
+    `model` and `timeout_s`, and it returns `(result text, detail)` — never the
+    text alone."""
+    def default_runner(prompt, *, model=None, timeout_s=120.0):
+        return answer, {"cmd": "claude -p --output-format json", "model": model, "timeout_s": timeout_s,
+                        "prompt_chars": len(prompt), "elapsed_ms": 5, "rc": 0, **detail}
+    return default_runner
+
+
+def test_the_real_runner_returns_text_and_detail_and_the_judge_reads_the_text(ledger):
+    _said(ledger, "change the conversion rate on slide 4 to 2.8%")
+    answer = _answer(True, "a number moved and nothing in the words says why")
+    v = et.judge(_ctx(ledger), _node("metric:q3_conv"), runner=_real_shaped(answer))
+    assert v.verdict == "ask" and v.trigger is True
+    assert v.raw == answer, "the verdict keeps the text, not the (text, detail) pair"
+
+
+def test_with_no_runner_given_the_judge_uses_the_real_runner_and_survives_its_shape(ledger, monkeypatch):
+    """The close passes no runner at all, so the judge imports the real one."""
+    from orchestrator.testing import claude_arbiter
+    text = "change the conversion rate to 2.8%, Sam says EMEA does not count in Q3"
+    uid = _said(ledger, text)
+    span = _span_of(text, "Sam says EMEA does not count in Q3")
+    monkeypatch.setattr(claude_arbiter, "default_runner",
+                        _real_shaped(_answer(True, "reason in the words", {"utterance_id": uid, "span": span})))
+    v = et.judge(_ctx(ledger), _node("metric:q3_conv"))
+    assert v.verdict == "auto" and v.reason == (uid, *span)
+
+
+def test_a_real_runner_that_came_back_empty_is_silent_and_says_why(ledger):
+    _said(ledger, "change the conversion rate on slide 4 to 2.8%")
+    runner = _real_shaped("", rc=1, reason="non-zero exit", stderr_head="boom: bad credentials")
+    v = et.judge(_ctx(ledger), _node("metric:q3_conv"), runner=runner)
+    assert v.verdict == "silent" and v.trigger is False
+    assert v.basis.startswith(et.NO_ANSWER)
+    assert "non-zero exit" in v.basis and "boom: bad credentials" in v.basis
+
+
+@pytest.mark.parametrize("exc", ["timeout", "missing", "crash"])
+def test_a_runner_that_raises_is_a_silent_verdict_not_an_exception(ledger, exc):
+    from orchestrator.ask import runner as R
+    _said(ledger, "change the conversion rate on slide 4 to 2.8%")
+
+    def raising(prompt, *, model=None, timeout_s=120.0):
+        if exc == "timeout":
+            raise R.RunnerTimeout("claude did not answer within 120.0 s", {"timeout_s": 120.0})
+        if exc == "missing":
+            raise R.RunnerError("could not run claude: [Errno 2] No such file or directory: 'claude'", {})
+        raise RuntimeError("the runner itself is broken")
+
+    v = et.judge(_ctx(ledger), _node("metric:q3_conv"), runner=raising)
+    assert v.verdict == "silent" and v.trigger is False and v.reason is None
+    assert v.basis.startswith(et.NO_ANSWER), "an unreachable model is no answer — calibration counts it as such"
+    assert {"timeout": "did not answer", "missing": "could not run claude", "crash": "RuntimeError"}[exc] in v.basis
+
+
+def test_a_judge_that_fails_is_logged_silent_and_nothing_is_asked(ledger, monkeypatch):
+    _said(ledger, "change the conversion rate on slide 4 to 2.8%")
+
+    def broken(ctx, node, *, runner=None, model=None):
+        raise TypeError("expected string or bytes-like object, got 'tuple'")
+
+    monkeypatch.setattr(et, "judge", broken)
+    out = et.evaluate_external(ledger, project=PROJECT, plan_id=PLAN, psg_db_path=None,
+                               runner=_real_shaped("{}"), mode="on", commit=True)
+    assert out["judged"] == 1 and out["silent"] == 1 and out["ask"] == 0 and out["auto"] == 0
+    verdict, basis = ledger.execute("SELECT verdict, basis FROM trigger_log WHERE plan_id = ? AND path = 'external'",
+                                    (PLAN,)).fetchone()
+    assert verdict == "silent"
+    assert "judge failed" in basis and "TypeError" in basis
+
+
+# ── the close: a judge failure degrades, it never rolls the close back ───────
+
+def _registered_close(conn, tmp_path):
+    """A plan of project 'proj' with a changed code node, an anchored number in a
+    deck and a sentence about that slide, parked with its review child COMPLETED
+    — the next `review_and_complete` is the close."""
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import _psg_schema as ps
+    from orchestrator import api
+    from orchestrator.artifacts import anchor
+
+    graph = tmp_path / "proj-state-graph.db"
+    g = ps.build(graph)
+    ps.add_run(g, 1, plan_id="P1", step_id="P1-REVIEW.1")
+    ps.add_snapshot(g, 1, "nk_code", "pkg.mod.load_orders")
+    ps.add_event(g, 1, 1, "node_added", "nk_code")
+    g.commit()
+    g.close()
+    registry = tmp_path / "projects.json"
+    registry.write_text(json.dumps({"projects": [{"name": "proj", "repo": str(tmp_path / "no-repo"),
+                                                  "db_path": str(graph), "commit_sha": "c"}]}))
+    db.insert_plan(conn, "P1", "improve proj pipeline: P1")
+    db.insert_step(conn, "P1-A", "P1", "CODE: work on proj", 0, status="COMPLETED")
+    review = db.insert_review_step(conn, "P1")
+    out = api.review_and_complete(conn, "P1", registry_path=str(registry))
+    assert out["needs_agent_review"] is True, out
+    file_id = anchor.register_file(conn, "proj", DECK, "sha-deck", "pptx", commit=False)
+    pv._insert_chained(conn, "occurrence", {
+        "project": "proj", "node_key": "metric:q3_conv", "file_id": file_id,
+        "locator_json": json.dumps({"at": "slide 4", "kind": "pptx", "slide": 4, "shape": 2}, sort_keys=True),
+        "value_text": "3.2", "value_num": None, "seen_at": "2026-09-16 12:00:00",
+        "tier": "observed", "by": "human", "recorded_at": "2026-09-16 12:00:00"})
+    conn.commit()
+    pv.insert_utterance(conn, session_id="s1", project="proj", plan_id="P1",
+                        text="change the conversion rate on slide 4 to 2.8%",
+                        occurred_at="2026-09-17 09:10:00", commit=True)
+    db.update_step_status(conn, out["review_child_step_id"], "COMPLETED", set_completed=True)
+    return str(registry), review
+
+
+@pytest.mark.parametrize("how", ["real_runner_shape", "runner_raises", "judge_raises"])
+def test_with_the_switch_on_a_failing_judge_cannot_roll_back_the_close(conn, tmp_path, monkeypatch, how):
+    from orchestrator import api
+    from orchestrator.testing import claude_arbiter
+    registry, review = _registered_close(conn, tmp_path)
+    monkeypatch.setattr(api, "_external_trigger_mode", lambda project, registry_path: "on")
+    if how == "real_runner_shape":
+        monkeypatch.setattr(claude_arbiter, "default_runner",
+                            _real_shaped(_answer(True, "a number moved and nothing says why")))
+    elif how == "runner_raises":
+        def unreachable(prompt, *, model=None, timeout_s=120.0):
+            raise RuntimeError("claude exploded")
+        monkeypatch.setattr(claude_arbiter, "default_runner", unreachable)
+    else:
+        def broken(ctx, node, *, runner=None, model=None):
+            raise TypeError("expected string or bytes-like object, got 'tuple'")
+        monkeypatch.setattr(et, "judge", broken)
+
+    out = api.review_and_complete(conn, "P1", registry_path=registry)
+
+    assert out["plan_status"] == "COMPLETED", out
+    assert db.get_plan(conn, "P1")["status"] == "COMPLETED"
+    assert db.get_step(conn, review)["status"] == "COMPLETED"
+    rows = conn.execute("SELECT verdict FROM trigger_log WHERE plan_id = 'P1' AND path = 'external'").fetchall()
+    assert [r[0] for r in rows] == (["ask"] if how == "real_runner_shape" else ["silent"])

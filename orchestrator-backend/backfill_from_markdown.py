@@ -14,7 +14,9 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "orchestrator"))
+# `orchestrator` is a package in THIS directory; its parent goes on sys.path,
+# never the package directory itself (that would make its modules top-level).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from orchestrator import db  # noqa: E402
 

@@ -18,6 +18,7 @@ in the repo, `provledger ...` once installed.
   review evidence-slots --plan <id>       what is still worth finding a source for, and where to look
   review evidence-log --plan <id> [...]   what became of each slot: why this one is blank
   reasons reclass-status                  the state of the legacy-reason migration
+  reasons ask-basis [--since]             the close-time questions, grouped by plan and node type
   why <node|nk_…|file:line> [...]         one bounded read: history, constraints, rejected paths, blast radius
   graph [<area|path|node>] [--depth N] [--type T]
                                           the project graph folded to areas, and any branch of it unfolded by name
@@ -28,12 +29,15 @@ in the repo, `provledger ...` once installed.
   ask card <ask_id> --out FILE            the evidence card of a logged question
   ask feedback <ask_id> wrong|partial|right   a person's word on one answer
   receipts "<what they said>" [--project]   the material a reply would need: the timeline, the gaps, the range
+  receipts candidates "<what they said>"  the nodes their words may be about, for the session's model to pick
+  receipts facts <qualified name> …       the material for the nodes that were picked
   verify [--against-notes] [--project]    walk the three hash chains, and the git anchors they must agree with
   export <project> --out DIR [--zip]      a whitelisted bundle; personal rows are refused by code
   export <project> --md DIR               one markdown per node (shareable rows only)
   init --agents-md                        drop the two verbs into ./AGENTS.md
   reason mark <id> major|minor            a person's word on a reason's significance
   significance eval|disagreements         the significance ledger (eval is manual, never CI)
+  trigger eval|label                      the external-artifact judge: its calibration (manual, never CI), a mark on one verdict
   headline show|respond|ack <plan> …      the plan headline and its answers
 """
 from __future__ import annotations

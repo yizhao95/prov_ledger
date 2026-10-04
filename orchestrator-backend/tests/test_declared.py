@@ -149,3 +149,29 @@ def test_a_model_answer_that_is_not_the_agreed_json_is_rejected_whole(conn, decl
     with pytest.raises(declared.ModelRejected, match="node_type"):
         declared.declare(conn, "demo", "EMEA is out", known_names=KNOWN,
                          runner=_runner({"node_type": "function", "name": "x", "attrs": {}, "links": []}))
+
+
+def test_the_tidy_up_runs_on_the_shared_runner_with_a_settings_file_of_its_own(tmp_path, monkeypatch, declared):
+    """`claude -p` reads the user's own ~/.claude/settings.json — on the machine
+    this was found on, `"language": "Chinese"`. The shared headless runner
+    (`testing.claude_arbiter`) passes `--settings` pointing at a file of ours;
+    `declared` used to carry its own copy of the runner without it. A fake
+    `claude` on PATH echoes its arguments: no model is reached."""
+    import os
+    import stat
+
+    from orchestrator.testing import claude_arbiter as ca
+
+    fake = tmp_path / "claude"
+    fake.write_text('#!/usr/bin/env bash\ncat > /dev/null\nprintf \'{"type":"result","result":"args: %s"}\' "$*"\n')
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.delenv(ca.CLAUDE_SETTINGS_ENV, raising=False)
+
+    out = declared.default_runner("tidy this sentence", model="haiku", timeout_s=10)
+
+    assert isinstance(out, str), "the tidy-up parses text, not (text, detail)"
+    assert "--model haiku" in out
+    assert f"--settings {ca.settings_path()}" in out, out
+    with open(ca.settings_path(), encoding="utf-8") as f:
+        assert json.load(f) == ca.ISOLATED_SETTINGS == {"language": "en"}

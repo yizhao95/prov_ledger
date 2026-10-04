@@ -1,16 +1,21 @@
 """constraints — close-time check that anchored constraints were READ.
 
-Spec §2.9. A constraint (LedgerEntries.kind='constraint') is anchored to
-data points by node_key. At plan time impact_preflight surfaces every
-constraint anchored to a declared target and records the ids the author
-saw (Plans.impact_context.constraint_ids). At close, every constraint
-anchored to a node the plan actually changed or removed that was NOT among
-those ids is recorded as `constraint_bypassed` — a node_reason of kind
-constraint_ref (source system, tier derived) plus a review-log line. Never
-blocks: the point is that the bypass is visible, not that it is prevented.
+Spec §2.9. A constraint is anchored to data points by node_key. Since DP
+phase 1 it is change_reason rows (role constraint, one per anchored subject;
+the old LedgerEntries.kind='constraint' rows were migrated in, and
+`record_constraint` is how a new one is written). At plan time
+impact_preflight surfaces every constraint anchored to a declared target and
+records what the author saw (Plans.impact_context: constraint_ids and the
+constraints shown per symbol). At close, every constraint anchored to a node
+the plan actually changed or removed that was NOT among them is recorded as
+`constraint_bypassed` — a derived change_reason row (role constraint, rule
+constraint_bypassed, recorded_by system; node_reason_v shows it as kind
+constraint_ref, tier derived) plus a review-log line. Never blocks: the point
+is that the bypass is visible, not that it is prevented.
 
-The backend cannot import skills, so anchored_constraints is the twin of
-ledger_store.constraints_for (same SQL, tested on both sides).
+`anchored_constraints` reads change_reason_v. It is not a twin of the
+writing-plans skill's `ledger_store.constraints_for`, which reads the
+LedgerEntries row: the two share no SQL, and each is tested on its own side.
 """
 from __future__ import annotations
 
