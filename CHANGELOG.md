@@ -8,7 +8,7 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
-## Unreleased
+## 0.4.3 — 2026-10-04
 
 **A clean-up of the development setup, and the defects it turned up.** A fresh read of
 the repository, with the documents checked against the code, found claims that had
