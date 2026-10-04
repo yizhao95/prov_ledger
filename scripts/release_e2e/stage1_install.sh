@@ -158,20 +158,21 @@ suite() {                                  # suite <label> <rundir> <target>
         SUITE_BAD="${SUITE_BAD:-}$label "
     fi
 }
+# The suite list lives in scripts/suites.sh, read from the clone under test.
+run_documented_suites() {
+    local SUITES s label from target
+    . "$E2E_CLONE/scripts/suites.sh"
+    for s in "${SUITES[@]}"; do
+        IFS='|' read -r label from target <<<"$s"
+        suite "$label" "$from" "$target"
+    done
+}
 if [ "$E2E_SUITES" = none ]; then
     record $BLOCKED "§5 — suites not run (E2E_SUITES=none); the install was not verified against them"
     V_ALL=$(worst "$V_ALL" $BLOCKED)
 else
     SUITE_BAD=""
-    suite scripts        .                                         scripts/tests
-    suite plugin         .                                         tests
-    suite backend        .                                         orchestrator-backend
-    suite webapp         .                                         orchestrator-webapp
-    suite writing-plans  .                                         skills/writing-plans/tests
-    suite executing-plans .                                        skills/executing-plans
-    suite update-psg     .                                         skills/update-project-state-graph/scripts/tests
-    suite examples       .                                         examples
-    suite project-state-graph skills/project-state-graph/scripts    tests
+    run_documented_suites
     if [ -z "$SUITE_BAD" ]; then
         case "$E2E_SUITES" in
             collect) record $OK "§5 — all nine documented suites collect cleanly (no test executed)";;
@@ -192,15 +193,7 @@ else
               || run_logged "$E2E_LOGS/03b-deps-requirements.log" env VIRTUAL_ENV="$VENV" uv pip install --quiet -r requirements.txt
             SUITE_BAD=""
             for s in "$E2E_LOGS"/04-suite-*.log; do :; done
-            suite scripts        .                                        scripts/tests
-            suite plugin         .                                        tests
-            suite backend        .                                        orchestrator-backend
-            suite webapp         .                                        orchestrator-webapp
-            suite writing-plans  .                                        skills/writing-plans/tests
-            suite executing-plans .                                       skills/executing-plans
-            suite update-psg     .                                        skills/update-project-state-graph/scripts/tests
-            suite examples       .                                        examples
-            suite project-state-graph skills/project-state-graph/scripts   tests
+            run_documented_suites
             if [ -z "$SUITE_BAD" ]; then record $FINDING "§5 — suites green only after installing requirements.txt"
             else record $FAIL "§5 — still failing after requirements.txt: $SUITE_BAD"; V_ALL=$(worst "$V_ALL" $FAIL); fi
         else

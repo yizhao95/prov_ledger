@@ -106,10 +106,8 @@ trap cleanup EXIT INT TERM
 export ORCH_DB="$E2E_HOME/skill-workspace/orchestrator.db"
 export PROVLEDGER_VENV="$E2E_HOME/skill-workspace/.venv"
 # ORCH_DB alone is not enough. The state-graph registry has its own three
-# paths, and init_project.sh derives the index from PSG_REGISTRY_ROOT rather
-# than from dirname(PSG_REGISTRY_PATH) — set only PSG_REGISTRY_PATH (as
-# examples/phantom-uplift/demo-provenance.sh does) and registry.regenerate_index
-# still overwrites the developer's real PROJECT-STATE-GRAPHS.md.
+# paths. init_project.sh puts the index beside PSG_REGISTRY_PATH when only that
+# is set; all three are still exported here as belt and braces.
 export PSG_REGISTRY_ROOT="$E2E_HOME/skill-workspace/project-graphs"
 export PSG_REGISTRY_PATH="$PSG_REGISTRY_ROOT/projects.json"
 export PSG_INDEX_PATH="$PSG_REGISTRY_ROOT/PROJECT-STATE-GRAPHS.md"
@@ -217,9 +215,8 @@ fi
 #     contamination, for the same reason. Reported, never failed on.
 #
 # The registry and its index are different: nothing but us should be writing
-# them during a run, and init_project.sh derives the index path from
-# PSG_REGISTRY_ROOT rather than from PSG_REGISTRY_PATH — a real way to clobber
-# the developer's PROJECT-STATE-GRAPHS.md. Those two are hard checks.
+# them during a run, and a run that rewrote them would clobber the developer's
+# PROJECT-STATE-GRAPHS.md. Those two are hard checks.
 V_GUARD=$OK
 leak="$(python3 "$HERE/release_e2e/leakcheck.py" "$GUARDED" "dummy-rollup-" 2>/dev/null)"
 GUARD_AFTER="$(fingerprint "$GUARDED")"
