@@ -31,7 +31,6 @@ Every line ends in a record id. The ids are real rows, the search range is count
 
 A Claude Code plugin for data work. It keeps what was decided and why — your words, the email, the agent's reading, kept apart and never blended — and puts them in front of whoever is about to change the thing again.
 
-![tests](https://img.shields.io/badge/tests-2115-brightgreen)
 [![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
 ![python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
@@ -42,111 +41,51 @@ A Claude Code plugin for data work. It keeps what was decided and why — your w
 
 Three months ago someone said, in a meeting, "don't split that dataset randomly — it is a time series." Today a new teammate, or a coding agent, reads the odd-looking rolling-window split, finds no comment and no failing test, and cleans it up. Every test passes. The number on the quarterly deck quietly changes. Nobody knows why.
 
-This is its own kind of failure, and the usual tools each miss it by one step. `git blame` gives you who and when. Lineage gives you where the column came from. An architecture decision record gives you the shape of the system. None of them connects the line you are looking at to the email, the meeting or the sentence that put it there — because the reason was never inside the code or the data in the first place.
-
-*Some decisions only ever happened in one conversation. This gives them a timestamp, a record, and a voice.*
+`git blame` gives you who and when. Lineage gives you where the column came from. An architecture decision record gives you the shape of the system. None of them connects the line you are looking at to the email, the meeting or the sentence that put it there — because the reason was never inside the code or the data in the first place.
 
 ---
 
 ## 2 · What it does
 
-It keeps one view of a project across three axes at once: **across nodes** (the whole map and what flows through it), **across time** (what each thing was, and what it became), and **across tasks** (what every piece of work read, decided, and expected). Graph, Node and Task are three angles on that one view, not three pages — they share a single anchor of project, node and point in time, and switching between them keeps it.
-
-What it is for is the road you took: every step, and every turn you ruled out.
-
-### What is in it
+It keeps one view of a project across nodes (the whole map and what flows through it), across time (what each thing was, and what it became) and across tasks (what every piece of work read, decided and expected). Graph, Node and Task are three angles on that one view, not three pages: they share a single anchor of project, node and point in time, and switching between them keeps it — one anchor, three angles. Around each thing in the map it holds the decisions: why it changed, the rule that still constrains it, and **the paths that were tried and dropped** — the half a diff never shows.
 
 ![A data-flow picture of a real repository, switching between two views: 3,568 nodes folded into modules and laid out in three bands — what is read, what processes it, what is produced — with the count of nodes that carry records changing as the view changes](docs/media/readme-graph.gif)
 
-*Data flow, not a call graph: 3,568 nodes folded into 11 modules and laid out in three bands — what gets read on one side, what processes it in the middle, what comes out on the other. Only what has a story is drawn, and the page says how much it left out.*
+*Data flow, not a call graph: 3,568 nodes folded into 11 modules, laid out as what gets read, what processes it, and what comes out.*
 
-Functions are the least of it. A dataset column, a SQL table, an external feed, a metric, and anything you declare in a sentence are all first-class — each with its own page, history and rules.
+A dataset column, a SQL table, an external feed, a metric, and anything you declare in a sentence ("EMEA excluded from the Q3 rollup, decided in the March review") are all first-class, each with its own page, history and rules.
 
-Around each of them the view holds the decisions: why it changed, the rule that still constrains it, and **the paths that were tried and dropped**. That last one is the half that is usually missing everywhere else, and the half people ask about most — a failed experiment leaves no trace in a diff, so the only record that it happened at all is the one somebody wrote down at the time.
+The knowledge comes from three sources, kept apart:
 
-Most of what decides a number was never in the repository to begin with: a steering group excluded a region, a feed comes from someone else's system, a figure was worked out by hand once. One sentence puts those in the same map, and nothing enters it until you say the words yourself.
+- **Measured** — the map is rebuilt from the source on every run and compared with the run before, so what changed is counted rather than reported.
+- **Said** — your words, recorded verbatim as you type them.
+- **Evidenced** — an email, a meeting note, a ticket: a label, a time and a link, never the body.
 
-```console
-$ provledger node declare "EMEA excluded from Q3 rollup, decided in the March review" \
-    --type stakeholder_decision --links-to pkg.rollup.weekly_report --attr decided_on=2026-03-14
-draft 1: declared:emea-excluded-from-q3-rollup-decided-in-the …
-  links declared_constrains -> pkg.rollup.weekly_report (user)
-  nothing is in the graph yet. Confirm it with your own words:
-  provledger node declare --confirm 1 --words "<the sentence you would say>" --at "<when it was decided>"
-```
-
-From then on it is an ordinary thing in the map: the next run computes its changes, it shows up in all three views, and a rule it carries turns up in the next plan that touches what it constrains.
-
-### Where the knowledge comes from
-
-Three sources, kept apart and never blended. What a record counts as is decided by which of them it came from, not by whoever wrote it down.
-
-**Measured.** The map is rebuilt from the source on every run and compared with the run before, so what changed is counted rather than reported: this column is gone, that function returns a different shape, this one only moved. The arrows are computed the same way — what reads this column, what it feeds — which is how *what might this break* gets answered before anything is edited.
-
-**Said.** A hook records your words verbatim as you type them, and the entry point they came through is recorded with them, so a sentence an agent typed into the CLI and a sentence you typed into the session never look alike.
-
-**Evidenced.** An email, a meeting note, a ticket. Your agent finds these with its own tools and its own credentials; the ledger only ever stores a label, a time and a link, never the body.
-
-Evidence sits where a test sits: it does not change what was decided, it changes how far the decision can be checked. And like a test, it is allowed to fail. An email that cuts *against* a decision is recorded as contradicting it rather than quietly left out, because dropping the inconvenient half is how a record stops being worth anything. A link that stops opening does not vanish either — it becomes "this stopped opening on this date", which is a fact about the record and not a hole in it.
-
-When none of the three has anything to say, the record says *unstated* and stops there. A blank is a fact; a fluent guess is a liability.
-
-### What you can ask it
-
-![A task page with its findings block in red: two blocking findings, one of them an upstream column that stopped arriving, and one finding still unanswered](docs/media/readme-task.png)
-
-*Task — the check runs before the edit, not after it. Here the block is red because an upstream feed has quietly stopped sending a column the work depends on, and a standing rule about the Q3 rollup has not been answered. Underneath sit the decisions this piece of work relied on.*
-
-![A node page: one thing's change history, with the record this change touched marked in place and its hit count raised by one, and the constraints panel highlighted in step](docs/media/readme-node.png)
-
-*Node — one thing's timeline, and which of its past decisions this change touched. A rule that comes up again raises its hit count by one; the text is never written a second time.*
-
-![A data-flow graph of the whole project, modules laid out in three bands with the arrows between them](docs/media/readme-state-graph.png)
-
-*Graph — the same project as a map, so a change can be read against what is upstream and downstream of it. This is the part a diff cannot show, and it is what the warning before an edit is reading.*
-
-*Graph, Node, Task — one anchor, three angles. One record per decision; a hit count, never a repeat.*
+When none of them has anything to say, the record says *unstated* and stops there.
 
 | the question | what answers it |
 |---|---|
 | Why is it this way? | `/ledger`, and every sentence ends in the id of the record it rests on |
 | Have we tried this before? | the rejected paths on the thing you are about to change, surfaced before you edit it |
 | What would this change reach? | the computed arrows — consumers, and the metric three steps downstream |
-| Someone is asking me to justify this | `provledger receipts "<what they said>"` — the same records as a timeline with their sources, handed to your own model to write the reply from |
+| Someone is asking me to justify this | `/receipts` — the same records as a timeline with their sources, for your own model to write the reply from |
 | I just inherited this project | all of the above, without having been in any of the meetings |
+
+![A task page with its findings block in red: two blocking findings, one of them an upstream column that stopped arriving, and one finding still unanswered](docs/media/readme-task.png)
+
+*Task — the check runs before the edit, not after it.*
+
+![A node page: one thing's change history, with the record this change touched marked in place and its hit count raised by one, and the constraints panel highlighted in step](docs/media/readme-node.png)
+
+*Node — one thing's timeline, and which of its past decisions this change touched.*
+
+![A data-flow graph of the whole project, modules laid out in three bands with the arrows between them](docs/media/readme-state-graph.png)
+
+*Graph — the same project as a map, so a change can be read against what is upstream and downstream of it.*
 
 ![The /ledger command answering a question in the terminal, every sentence ending in the id of the record it rests on](docs/media/readme-ask.gif)
 
 *Every sentence cites a record. When nothing is recorded, it says so.*
-
-`/ledger why is our train/test split 80/20?` — the answer comes back in the session you are already in. Code finds the candidates, computes the facts and computes the absences; then code reads the answer back and deletes any sentence that cites nothing or cites an id the table does not hold, counting every deletion, so a trimmed answer never reads like a complete one. A number the table does not state is **named rather than deleted** — the machine can tell whether a number is in its own table, not whether it is true, and deleting on that basis was removing correct answers. The same thing is a command (`provledger ask`) and a page (`/ledger?q=`).
-
-#### The usual way in is your own code
-
-provLedger **supplements** the repository; it does not replace reading it. Code shows the winner and nothing else — never the option that was rejected, who asked for it, or what it cost. That remainder is what the ledger holds, so the normal path starts where you already are:
-
-```console
-$ grep -rn "DEFAULT_TIMEOUT_GRAPH_S" --include=*.py .      # the repo is the index
-skills/update-project-state-graph/scripts/review_run.py:79
-
-$ provledger why skills/update-project-state-graph/scripts/review_run.py:79
-…review_run._killpg · history 1 · constraints 0 · rejected 0 · pending 0
- #3403 · subprocess.run's timeout kills only the process it started, and the refresh spawns the analyzer…
-
-$ provledger record '#3403'                                 # one record, whole
-   plan dp6-a-20260927063613 · step dp6-a-20260927063613-REVIEW.1.2
-   provledger plan dp6-a-20260927063613   the task that produced it: its steps, failures and logs
-
-$ provledger plan dp6-a-20260927063613                      # and the task behind it
-dp6-a-20260927063613 · COMPLETED · steps 29 · 3 failed · deviations 7
-   the plan closed COMPLETED: the failures below were recovered, and nothing but these rows remembers them
-```
-
-`why` takes a `file:line` and resolves it to the node the ledger knows. A record names the task that produced it, and the task's step logs hold what was measured and decided — which is usually where the substance is. **A task whose failure was recovered closes `COMPLETED`**, so the detour is gone from its own status and only those rows remember it.
-
-The one thing to never do is read the code and invent a reason for it. "It's written this way, so presumably because X" is the failure this exists to prevent, because the real reason is usually recorded, and a plausible guess gets believed instead of it.
-
-The dashboard is read-only and opens the database in read-only mode, so it can never block or change what it is showing.
 
 ---
 
@@ -154,26 +93,24 @@ The dashboard is read-only and opens the database in read-only mode, so it can n
 
 ### Install
 
-As a Claude Code plugin — this is the one that brings the hooks, the skills and the dashboard:
+As a Claude Code plugin — this brings the hooks, the skills and the dashboard:
 
 ```bash
 claude plugin marketplace add yizhao95/prov_ledger
 claude plugin install provledger@provledger
 ```
 
-Or as a Python library, if you only want the core to read and write a ledger from your own code:
+Or only the core library, to read and write a ledger from your own code (the PyPI release lags the plugin; see [`INSTALL.md` §5b](INSTALL.md)):
 
 ```bash
 pip install provledger
 ```
 
-**PyPI still carries 0.1.0** — the stdlib-only core from before decision provenance existed. None of what this README describes is in it: no hooks, no reasons, no `/ledger`, no dashboard. Those come from the plugin above, and the package will catch up at the next release. Install from PyPI only if the plan and step machinery is genuinely all you want.
-
-Dependencies install themselves on the first session. The full manual install, the per-suite verification and the troubleshooting table are in [`INSTALL.md`](INSTALL.md).
+Dependencies install themselves on the first session. The manual install and troubleshooting are in [`INSTALL.md`](INSTALL.md).
 
 ### Five commands
 
-Each command below was run for real against a scratch ledger; the lines under it are what it printed.
+Each command below was run for real against a scratch ledger; the lines under it are what it printed (`…` marks lines left out).
 
 **1 · Confirm the plugin is in.**
 
@@ -185,44 +122,55 @@ $ claude plugin list
     Status: ✔ enabled
 ```
 
-**2 · Register a project.** This reads the repository into the map and writes the first run.
+**2 · Register a project.** This reads a git repository into the map and writes the first run. `--repo` must already exist; here it is a scratch repository with one commit.
 
 ```console
 $ bash skills/project-state-graph/scripts/init_project.sh \
     --name myproj --repo /tmp/myproj --out-dir /tmp/myproj-graph
+…
     registered myproj -> /tmp/myproj-graph/myproj-state-graph.db
+==> [4/5] verifying built graph (selfcheck)
 Self-check: PASS (/tmp/myproj-graph/myproj-state-graph.db)
+…
 ```
 
 **3 · Run one plan.** The bundled demo is the whole arc in miniature, on its own scratch project under `/tmp/provledger-demo`: a person removes a column and records why, with the email that carried it; then an agent plans to use that column again.
 
 ```console
 $ bash examples/phantom-uplift/demo-provenance.sh
+…
      2 findings unanswered · 2 records shown · 0 adopted
+…
+  ORCH_DB=/tmp/provledger-demo/orchestrator.db
+  PSG_REGISTRY_PATH=/tmp/provledger-demo/projects.json
 ```
 
-Both findings are the heads-up the second plan was given before it wrote a line — the rule against depending on the removed column, and the steering-group decision anchored on the same report. Neither blocks. The agent answers one of them, cites the record, and that citation is what gets written down.
+Both findings are the heads-up the second plan was given before it wrote a line. The last two lines are the scratch ledger and graph registry the next two commands read.
 
-**4 · Open the dashboard.** Read-only, on your machine, over the ledger you point it at.
+**4 · Open the dashboard** over that ledger (inside a session, `/provledger-dashboard` does the same for your own).
 
 ```console
-$ ORCH_DB=/tmp/provledger-demo/orchestrator.db PROVLEDGER_DASH_PORT=8766 \
-    bash orchestrator-webapp/launch_dashboard.sh
-🚀 Launching dashboard (PID 567189, log → /tmp/webapp-server.log)
+$ ORCH_DB=/tmp/provledger-demo/orchestrator.db PSG_REGISTRY_PATH=/tmp/provledger-demo/projects.json \
+    PROVLEDGER_DASH_PORT=8766 bash orchestrator-webapp/launch_dashboard.sh
+…
 ✅ Dashboard ready at http://127.0.0.1:8766
 ```
 
-The port is 8765 unless `PROVLEDGER_DASH_PORT` says otherwise. Inside a session, `/provledger-dashboard` does the same thing.
-
-**5 · Ask one question.**
+**5 · Ask one question.** `provledger` is installed in the plugin's venv, `~/skill-workspace/.venv/bin/`.
 
 ```console
-$ provledger ask "why did we stop using orders.discount?" --no-model --project phantom-uplift-demo
-`pkg.rollup.load_orders` has never been verified: no outcome is recorded for it in scope. [scope]
-Scope: 3 nodes, 2 constraints, 0 influencing records, 6 changes, 2026-09-17 to 2026-09-17; 3 candidates, 3 chosen; nothing truncated. Computed in 0.0 s.
-```
+$ ORCH_DB=/tmp/provledger-demo/orchestrator.db PSG_REGISTRY_PATH=/tmp/provledger-demo/projects.json \
+    provledger ask "why did we stop using orders.discount?" --no-model --project phantom-uplift-demo
+Q: why did we stop using orders.discount?
 
-`--no-model` prints the computed facts, the computed absences and the scope, and says in one line that there is no summary. With a model it adds one paragraph restating that table, and nothing else.
+summary unavailable: no model configured
+
+Absences
+  `pkg.rollup.load_orders` has never been verified: no outcome is recorded for it in scope. [scope]
+…
+Scope: 3 nodes, 2 constraints, 0 influencing records, 6 changes, 2026-10-04 to 2026-10-04; 3 candidates, 3 chosen; nothing truncated. Computed in 0.1 s.
+…
+```
 
 ![The same question asked and answered in the terminal, with the scope line and the records it cites](docs/media/readme-cli.gif)
 
@@ -230,295 +178,48 @@ Scope: 3 nodes, 2 constraints, 0 influencing records, 6 changes, 2026-09-17 to 2
 
 ---
 
-## 4 · How it works (the honest version)
+## 4 · What it records on your machine
 
-### What is computed and what is said
-
-Everything a node carries is labelled with where it came from. The label is decided by structure, not by whoever wrote the row, and a model cannot award itself one.
-
-| tier | definition | what it requires |
-|---|---|---|
-| `observed` | computed from the analysis run — or read off a page by a person | an analysis run, or somebody who looked |
-| `derived` | inferred by a rule, not measured | the id of the rule that fired, and its basis |
-| `asserted` | the agent's reading, recorded as such | an interpretation or a statement |
-| `stated` | the user's own words, with the span | a recorded utterance and a span inside it |
-| `unstated` | nothing was recorded | no text at all |
-
-Alongside the tier, each reason carries a *source level* computed from its links and never stored: `linked` (a reference with a uri), `verbal` (a quoted span, or a verbal source), `task_context` (only the plan, step, run and time it was recorded in), `unstated`. Every recorded reason is at least `task_context`, because it hangs on the plan that closed.
-
-### Where it is kept
-
-Two SQLite files. The **orchestrator database** (`ORCH_DB`, default `~/skill-workspace/orchestrator.db`) holds plans, steps, tool calls, the utterances, the references, the reasons (`change_reason`), the declared nodes, expectations and outcomes. The **project state graph** (one per registered project) holds the map and its per-run history. All the provenance tables are append-only: `DELETE` is refused, the only `UPDATE`s allowed are a `superseded_by` pointer and a reference's `last_checked`, and each table carries its own sha256 chain.
-
-A ledger that only checks itself has checked nothing, so when a plan closes provLedger appends the chain heads to `git notes --ref provledger` on HEAD — a witness that lives in the repository, not in the database it vouches for.
-
-```console
-$ provledger verify --against-notes
-chain change_reason: ok · 2308 row(s) walked · head #2308 7f1c05ab93d4
-anchors: 2 anchor(s), 2 matched · latest note a91c4e7f0b22 @ 6744c800af13
-These records existed at the anchored commit and have not been altered since.
-That is not a claim that what they say happened.
-```
-
-`ok` and `anchored` stay two different words: a ledger nothing vouches for is still internally sound, and the report says why there is no witness rather than printing a quiet zero. A broken chain names the row and exits 3.
-
-### The hooks
-
-Five hooks, and they only ever add.
+Everything stays local, in SQLite files under `~/skill-workspace/`. Five hooks, and they only ever add:
 
 | hook | what it records |
 |---|---|
 | `SessionStart` | installs dependencies once, in the background |
-| `UserPromptSubmit` | your prompt, verbatim, as one utterance attributed to the repo and the open plan |
-| `PostToolUse` | one row per tool call, for the cost numbers below |
-| `PreToolUse` (Edit / Write / MultiEdit) | injects the active constraints anchored on the lines about to change, and one hop downstream — at most 600 characters, and not one byte when nothing anchors there |
+| `UserPromptSubmit` | your prompt, verbatim, attributed to the repo and the open plan |
+| `PostToolUse` | one row per tool call, for the cost numbers |
+| `PreToolUse` (Edit / Write / MultiEdit) | shows the rules anchored on the lines about to change — at most 600 characters, nothing when nothing anchors there |
 | `Stop` | closes the session record and refreshes the graph |
 
-None of them blocks, executes or decides. The one exception is opt-in: a human constraint declared `"block": true` in your extensions file. The ledger records what it **showed** and what was **adopted** — a record cited by id in a headline response, a reason's `because`, or an acknowledged constraint.
-
-> It cannot record that anyone **read** it, and it will not pretend a display count is a reading.
-
-> The rules are deterministic and their basis is written down; when none applies the system asks, and when nobody answers it records `unstated` rather than inventing.
-
-### What it costs
-
-Measured from `tool_call_log` over completed plans and written to [`docs/perf-baseline.json`](docs/perf-baseline.json) (2026-09-16):
-
-| | median | p90 | n |
-|---|---|---|---|
-| provenance share of a plan's tool calls | 0.0 % | 1.9 % | 8 plans |
-| total orchestration + provenance overhead | 0.0 % | 4.4 % | 8 plans |
-| extra context per plan | 0 tokens | 1,576 tokens | 102 plans |
-| tool calls per step | 4.2 | 8.8 | 8 plans |
-
-The thresholds are tests, not intentions: `test_h1_overhead_ratio` fails above 10 % provenance or 35 % total, `test_h4_context_overhead` fails above 3,000 tokens, `test_h1_threshold` fails when recent plans exceed 1.5 × the baseline's p90 calls per step. Each of them skips **out loud** when there is nothing to measure. The same file carries a hand-measured reference run with the plugin disabled — 5 tool calls, 10 assistant turns, 266,393 tokens on a three-step task — labelled in the file as "a reference number, never an assertion", because three runs of that task ranged 5 to 26 calls on permission friction alone.
-
-A tool that fights silent failure must not fail silently.
+None of them blocks, executes or decides, unless you opt in by declaring a constraint with `"block": true`. The dashboard opens the ledger read-only; the one thing it writes is a log row for each question asked on its `/ledger` page. How records are labelled, chained and anchored in git is in [`docs/decision-provenance.md`](docs/decision-provenance.md).
 
 ---
 
-## 5 · Extending it
-
-### Your own node types
-
-A node-type provider is a class. It gets a read-only view of the repository and returns observations; the host does the matching. This one is shipped as `provledger.testing.example_provider` and turns every Python file into one `module` node:
-
-```python
-from provledger.graph_api import MUTATIONS, NodeObservation, Signature
-
-class ModuleProvider:
-    type_id = "provledger.module_example"      # vendor.name, must match the registration
-    schema_version = 1
-    requires: tuple[str, ...] = ()
-
-    def extract(self, ctx) -> list[NodeObservation]:
-        out = []
-        for rel in sorted(ctx.file_map):
-            if not rel.endswith(".py"):
-                continue
-            name, sig, n_defs = analyse(ctx.repo_root, rel)   # your own parsing
-            out.append(NodeObservation(
-                type_id=self.type_id, node_type="module", qualified_name=name,
-                file_path=rel, line_start=1, line_end=1,
-                signatures=(Signature("qualname", name), Signature("struct", sig),
-                            Signature("dataflow", None, trivial=True)),
-                attrs={"n_defs": n_defs}))
-        return out
-
-    def attributes_schema(self):
-        return {"required": ["n_defs"], "types": {"n_defs": "int"}}
-
-    def declared_stability(self) -> dict[str, str]:
-        return {m: "preserved" for m in MUTATIONS}
-```
-
-### The six contracts
-
-`provledger.testing.conformance.run(YourProvider())` puts a provider through a mutation corpus and prints one line per contract:
-
-| contract | what it demands |
-|---|---|
-| `determinism` | extracting the same repository twice gives byte-identical observations |
-| `purity` | no write SQL, no file under the repository created or changed |
-| `stability_matches_declaration` | for every mutation that reaches your nodes, what the host observes equals what `declared_stability()` claims |
-| `schema` | namespaced `type_id`, valid attributes, known or `x-` layers |
-| `failure_isolation` | an injected exception degrades you and nothing propagates or leaks |
-| `performance_budget` | the slowest extraction stays inside `timeout_s` |
-
-The point is honesty, not stability: a provider whose identity breaks on `rename_variable` passes as long as it says so. What fails is the lie — the package ships a `liar_provider` whose signature mixes the function name in while declaring `rename_function: preserved`, and the suite names the mutation that lied.
-
-```console
-$ python -c "from provledger.testing import conformance, example_provider; \
-    print(conformance.run(example_provider.ModuleProvider()).text())"
-Conformance: PASS
-  [OK  ] determinism: 3 base(s) extracted twice, byte-identical (7 observations)
-  [OK  ] purity: read-only graph, no write SQL, repository untouched
-  [OK  ] stability_matches_declaration: declaration holds for ['change_attr', 'delete_function', 'extract_function', 'move_file', 'rename_function', 'rename_variable', 'swap_two_similar'] over 3 case(s)
-  [OK  ] schema: type_id namespaced, attrs valid, layers known
-  [OK  ] failure_isolation: an injected exception degrades the provider (empty), nothing propagates
-  [OK  ] performance_budget: slowest base extraction 0.00s vs budget 30.0s
-```
-
-### Registering it
-
-Everything third-party is declared in one file. The first of `<repo>/provledger-extensions.json`, `$PROVLEDGER_EXTENSIONS`, `~/skill-workspace/provledger-extensions.json` wins — they are never merged, and a malformed file is an error rather than a silent fallback.
-
-```json
-{
-  "version": 1,
-  "providers": [
-    {"id": "acme.dataset_comments", "module": "acme_provider:DatasetComments", "priority": 5, "timeout_s": 30},
-    {"id": "provledger.owned", "enabled": false}
-  ],
-  "drift_kinds": [
-    {"id": "acme.null_spike_strict", "metric": "null_frac", "op": "delta_gte", "value": 0.1, "priority": 10}
-  ],
-  "namesets": [
-    {"set": "split_funcs", "add": ["my_split", "time_split"]},
-    {"set": "fit_methods", "add": ["fit_transform_all"], "remove": ["train"]}
-  ],
-  "outcome_channels": [
-    {"id": "acme.ab_test", "module": "acme_channels:ABTestChannel", "priority": 5}
-  ],
-  "constraints": [
-    {"project": "prov_ledger",
-     "statement": "orders.region != 'X' must stay excluded",
-     "subjects": ["pkg.pipeline.clean", "orders.region"],
-     "why_ref": "https://wiki/decisions/42",
-     "why_visibility": "restricted"}
-  ]
-}
-```
-
-Nothing here can raise at analysis time. An import that fails, a `type_id` that differs from its declared id, a timeout or a schema violation becomes a degradation record: the run continues without that provider, the analyzer prints `WARNING: provider <id> degraded: <reason>`, and `selfcheck` warns `providers_degraded`. Every run fingerprints the file it loaded, so a graph can be reproduced with the same extensions it was built with.
-
-### Declaring the world outside the code
-
-Five declared types — `external_system`, `business_rule`, `stakeholder_decision`, `external_dataset`, `manual_figure`. `declare()` has no tier parameter: a field you typed is `stated`, a field a model tidied out of your sentence is `asserted`, and a declared node is never `observed`, because nobody observed a meeting. A draft holds nothing until you confirm it in your own words.
-
-```console
-$ provledger node declare "EMEA excluded from Q3 rollup, decided in the March review" \
-    --type stakeholder_decision --links-to pkg.rollup.weekly_report --attr decided_on=2026-03-14
-draft 1: declared:emea-excluded-from-q3-rollup-decided-in-the (stakeholder_decision, tier stated)
-  attrs {'decided_on': '2026-03-14'}
-  links declared_constrains -> pkg.rollup.weekly_report (user)
-  nothing is in the graph yet. Confirm it with your own words:
-  provledger node declare --confirm 1 --words "<the sentence you would say>" --at "<when it was decided>"
-```
-
-A link naming something the graph does not have is refused, with the name that was wrong.
-
-Deeper: [`docs/conformance.md`](docs/conformance.md) (providers and the six contracts), [`docs/extensions.md`](docs/extensions.md) (the whole file, discovery, priorities, reproducibility), [`docs/outcomes.md`](docs/outcomes.md) (expectations, the `profile_drift` and `metric:<name>` channels, third-party channels), [`docs/arbitration.md`](docs/arbitration.md) (the `Arbiter` interface and the numeric gate an arbiter must clear before it writes anything).
-
----
-
-## 6 · Reference
-
-### CLI
-
-`provledger <command>` — generated from `--help`, one row per subcommand.
-
-| command | what it does |
-|---|---|
-| `metrics plan` / `metrics baseline` | tool-call cost of one plan; median / p90 over completed plans |
-| `note` | record something that was said, with the time it happened (`--node`, `--ref`, `--kind`) |
-| `node declare` | turn one sentence into a declared node — a draft, until you confirm it in your own words |
-| `node add` | a figure with no traceable data source (`--manual-figure`, `--value`, `--note`) |
-| `node list` / `node show` / `node retire` | the project's declared nodes; every version of one; retire one (append-only) |
-| `anchor` | pin a number in a deck, workbook or report to the node it is a reading of |
-| `anchor check` | re-read the files; a lost anchor is reported, never re-pointed |
-| `anchor candidates` | propose readings — off by default, and even on it only proposes |
-| `headline show` / `respond` / `ack` | the plan headline; answer one finding (revise / proceed); a person proceeds past one |
-| `why` | one bounded read of a node: history, constraints, rejected paths, prior claims, blast radius (`--impact`, `--all`, `--pending`, `--never-read`, `--search`, `--json`) |
-| `graph` | the project graph, folded to areas with how many nodes carry records; a target plus `--depth N` unfolds it and prints neighbour **names** with their edge type (`--limit`, `--type`, `--include-imports`, `--json`). The fold is pagination, never a judgement about relevance |
-| `record` | one record whole and untruncated — `#12` for a ledger record, `#r3` for a source — with its tier, dates, the words it quotes, its sources, and the task that produced it (`--json`) |
-| `plan` | a task's steps in tree order with their failures and logs (`--step`, `--full`, `--log-chars`, `--json`). The only read that reaches a failure inside a plan whose status is `COMPLETED` because the failure was recovered |
-| `ask` | ask the ledger a question (`--no-model`, `--json`, `--export`, `--lang`, `--runner`) |
-| `receipts` | someone challenged a decision. `receipts candidates "<what they said>"` is an entry point — matching nodes with how each matched, and it says outright that the score orders the list and does not choose; `receipts facts <node>…` is the timeline, the gaps and the range for the nodes you picked (`--cap`, `--json`, `--lang`). `/receipts` wraps both and writes the reply |
-| `verify` | walk the three hash chains, and with `--against-notes` the git anchors they must agree with (exit 3 on a broken chain) |
-| `reference add` | pin a decision to where it came from — an email, a meeting, a ticket — as a label and a link, never a copy of the body (`--reason` or `--utterance`, `--uri`, `--stance`) |
-| `reference pending` / `mark` | which pointers nobody has opened lately; record that one still opens, or that it stopped (`--ok`, `--gone`, `--moved`, `--no-access`) |
-| `review evidence-slots` | what still has no checkable source: node, what changed, this plan's own time window, the identifiers to search on, significance. provLedger hands the list over and searches nothing itself (`--plan`, `--json`) |
-| `review evidence-log` | what became of each slot — attached, searched and found nothing, timed out, never searched — so a blank can say which kind of blank it is (`--plan`, `--node`, `--outcome`, `--tool-hint`, `--elapsed-ms`) |
-| `export` | a whitelisted bundle for someone who was not there (`--out`, `--zip`, `--include-rationale`, `--md`) |
-| `init --agents-md` | write or refresh the provledger section of `./AGENTS.md` |
-| `reason mark` | a person's word on a reason's significance, logged as judged by a human |
-| `significance eval` / `disagreements` | manual: an LLM verdict on reasons that carry only a hint; where hint and verdict disagree |
-| `reasons reclass-status` / `ask-basis` | migration state and tier counts; the close-time questions the rules did not recognise |
-
-`export` never lets verbatim words out: a shareable record that quotes personal words keeps the record, drops the quotation and says which one it withheld; a rationale travels only when you name its id.
-
-### Dashboard routes
-
-Read-only, no non-GET route.
-
-| route | shows |
-|---|---|
-| `/` | the live plan and its steps |
-| `/plan/{id}?node=&at=` | one task: what it read, what it decided, its findings and outcomes |
-| `/graph/{project}?focus=&at=&mode=story` | the project map, now or at a past run, marked where there is a story |
-| `/node/{project}/{qualified_name}?at=` | one node's timeline, reasons, constraints and occurrences |
-| `/session/{id}` | what one session said, cost and changed — with or without a plan |
-| `/history` | past plans |
-| `/search` | across plans, steps and records |
-| `/ledger?q=` · `/ledger/results` · `/ledger/card` | ask a question; the answer; a markdown evidence card |
-| `/outcomes?project=` | every claim with its latest outcome, tier, delta and who backfilled it |
-| `/api/dashboard` · `/api/health` | the polled fragment; liveness |
-
-### Tests
-
-Nine suites, each with its own pyproject and pythonpath — run them separately.
-
-| suite | tests |
-|---|---|
-| `scripts/tests` | 27 |
-| `tests` (packaging, manifests, bundled skills) | 16 |
-| `orchestrator-backend` | 1074 |
-| `orchestrator-webapp` | 267 |
-| `skills/writing-plans/tests` | 93 |
-| `skills/executing-plans` | 83 |
-| `skills/update-project-state-graph/scripts/tests` | 107 |
-| `examples` | 18 |
-| `skills/project-state-graph/scripts/tests` | 430 |
-
-Total **2115 collected** across the nine suites (`scripts/count_tests.sh`), plus a few deselected (`llm_consistency` and the manual arbiter evaluations never run in CI). Commands and expected output: [`INSTALL.md` §5](INSTALL.md).
-
-### Before every release
-
-**`bash scripts/release-e2e.sh` must be green from zero, and its output goes into the release PR.** All 2115 of the tests above passed while two defects shipped in one week: `python3 -m venv .venv`, the first command of the install guide, fails on Debian/Ubuntu/WSL — unfindable on a machine where the venv already exists — and the dashboard did nothing when clicked on Chrome and Edge for a week behind 267 green webapp tests, every one of which renders on the server and none of which drives a browser. The release check does only the part the suites structurally cannot reach: a stranger's install in a clean sandbox through `make demo`; a dummy project whose history it writes itself, then `/ledger`, `/receipts` and the dashboard **clicked by a real browser**; and a model marking the answers against key points written down before the questions were asked. It has its own `HOME`, its own ledger and its own `CLAUDE_CONFIG_DIR`, and never touches yours. Details and exit codes: [`INSTALL.md` §5](INSTALL.md).
-
-### Origin
-
-The two orchestration skills, `writing-plans` and `executing-plans`, are evolved from the [Superpowers](https://github.com/obra/superpowers) skill library by Jesse Vincent (obra), which established the plan-then-execute discipline this repository builds on. What provLedger adds is the persistence and the provenance: a validated SQLite state machine instead of ad-hoc markdown, a project state graph with code and data contract gates, runtime profiling and drift detection, the decision ledger, and the read-only dashboard. provLedger also bundles local variants of six superpowers skills; [`INSTALL.md`](INSTALL.md) says how to choose between them in one project.
-
-### Contributing
-
-Issues and pull requests are welcome. Good first contributions: run `make demo` and report anything that does not reproduce; register a drift kind, a name set or a constraint in `provledger-extensions.json` for your own project; add a second silent-failure scenario to the demo; improve dtype coverage of an analyzer in `skills/project-state-graph/`. Maintainer: yzhao950213@gmail.com.
-
-### More
+## 5 · More
 
 | | |
 |---|---|
-| [`INSTALL.md`](INSTALL.md) | plugin install, manual install, the analyzer's own `uv` environment, per-suite verification, PyPI install, troubleshooting |
+| [`INSTALL.md`](INSTALL.md) | plugin and manual install, verification, PyPI, the dashboard, troubleshooting |
+| [`docs/cli.md`](docs/cli.md) | every `provledger` command, and the usual way in: from a line of your own code |
 | [`docs/NORTH-STAR.md`](docs/NORTH-STAR.md) | the one sentence and the three cores every change is measured against |
-| [`docs/decision-provenance.md`](docs/decision-provenance.md) | the tables, the tiers, the rules R0–R6, the headline, `/ledger`, verify and export, anchors, and the honest boundaries |
-| [`docs/conformance.md`](docs/conformance.md) · [`docs/extensions.md`](docs/extensions.md) · [`docs/outcomes.md`](docs/outcomes.md) · [`docs/arbitration.md`](docs/arbitration.md) | writing providers, registering everything, outcome channels, identity arbitration |
-| [`docs/design.md`](docs/design.md) | the dashboard's design system: one `tokens.json`, the component library, the wording table (English default, `?lang=zh`) |
-| [`docs/benchmark-silent-class-drop.md`](docs/benchmark-silent-class-drop.md) | the mini-benchmark for the failure class: a silently dropped column, segment purity 0.31 against 0.91 on the same green pipeline |
-| [`examples/phantom-uplift/`](examples/phantom-uplift/) | `make demo` — a revenue number that goes up for the wrong reason, caught offline and deterministically; plus the provenance demo used in section 3 and the anchor walkthrough |
-| [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md) | the confirmed defects and the standing limits, grouped by where you will hit them, with the workaround when there is one |
-| [`CHANGELOG.md`](CHANGELOG.md) | what each phase and release added, 0.1.0 → 0.3.0 |
+| [`docs/decision-provenance.md`](docs/decision-provenance.md) | the tables, the tiers, the rules, the headline, `/ledger`, verify and export, anchors, cost, and the honest boundaries |
+| [`docs/conformance.md`](docs/conformance.md) · [`docs/extensions.md`](docs/extensions.md) · [`docs/outcomes.md`](docs/outcomes.md) · [`docs/arbitration.md`](docs/arbitration.md) | writing your own node types, registering everything, outcome channels, identity arbitration |
+| [`orchestrator-webapp/`](orchestrator-webapp/README.md) · [`docs/design.md`](docs/design.md) | the dashboard's pages; its design system |
+| [`docs/benchmark-silent-class-drop.md`](docs/benchmark-silent-class-drop.md) | the failure class in numbers: a silently dropped column, segment purity 0.31 against 0.91 on the same green pipeline |
+| [`examples/phantom-uplift/`](examples/phantom-uplift/) | `make demo` — a revenue number that goes up for the wrong reason, caught offline and deterministically |
+| [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md) | confirmed defects and standing limits, with workarounds |
+| [`CHANGELOG.md`](CHANGELOG.md) | what each release added |
 | [`LICENSE`](LICENSE) | MIT |
 
-The `superpowers` plugin is a recommended companion: the byte-identical `verification-before-completion` skill is not bundled and comes from superpowers when present. Everything works without it.
+### Origin
 
-The PyPI package is the stdlib-only core library — plans, steps, profiling, drift, the ledger — and the published release is 0.1.0; the plugin, the skills, the hooks, the dashboard and the `provledger` command come from this repository at 0.4.2.
+The two orchestration skills, `writing-plans` and `executing-plans`, are evolved from the [Superpowers](https://github.com/obra/superpowers) skill library by Jesse Vincent (obra), which established the plan-then-execute discipline this repository builds on. What provLedger adds is the persistence and the provenance: a validated SQLite state machine instead of ad-hoc markdown, a project state graph with code and data contract gates, the decision ledger, and the read-only dashboard.
 
+### Contributing
+
+Issues and pull requests are welcome. Good first contributions: run `make demo` and report anything that does not reproduce; add a second silent-failure scenario to the demo; improve dtype coverage of an analyzer in `skills/project-state-graph/`. The tests run with `bash scripts/run_tests.sh`; conventions are in [`CLAUDE.md`](CLAUDE.md). Maintainer: yzhao950213@gmail.com.
 
 ### See it run
 
 <video src="https://yizhao95.github.io/prov_ledger/media/walkthrough.mp4" controls muted playsinline width="880" poster="https://yizhao95.github.io/prov_ledger/media/walkthrough-cover.png"></video>
 
-*Two minutes, no narration. Someone asks in chat why the rollup stops on 18 September and nobody still on the team knows. The record does: an upstream incident, the RCA that found it, the call that decided to cut the data — and that the cutoff was only ever meant to be temporary. Then how a record like that gets made, and what happens when it cannot be.*
-
-The same walkthrough with chapters you can jump to, and captions in English or Chinese: **[yizhao95.github.io/prov_ledger/walkthrough.html](https://yizhao95.github.io/prov_ledger/walkthrough.html)**. The ledger in it is a worked example, not a live database; every piece of interface wording is the product's own.
+*Two minutes, no narration. Someone asks in chat why the rollup stops on 18 September and nobody still on the team knows. The record does: an upstream incident, the RCA that found it, the call that decided to cut the data — and that the cutoff was only ever meant to be temporary.* Chapters and captions in English or Chinese: **[the walkthrough page](https://yizhao95.github.io/prov_ledger/walkthrough.html)**.

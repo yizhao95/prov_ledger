@@ -114,9 +114,10 @@ show it repeatedly. `why` and the PreToolUse injection de-duplicate by
 statement when they display it, but `read_hit` still records one row per
 stored copy, so the "shown" counts are inflated for such constraints.
 
-**Commas truncate `--ref` labels.** `provledger note --ref` splits `key=value`
-pairs on commas, so a label containing a comma is silently cut short at the
-first one. Avoid commas in reference labels.
+**A `--ref` label cannot contain a comma.** `provledger note --ref` splits
+`key=value` pairs on commas, so a label with a comma is refused
+(`--ref needs key=value pairs …`) and nothing is written. Leave commas out of
+reference labels.
 
 **Questions asked in `/ledger` do not count as "shown".** Reading a constraint
 through the ledger's question box deliberately records no `read_hit` — a
@@ -158,29 +159,24 @@ over.
 
 ## Packaging and environment
 
-**Run the test suites one at a time.** Passing several suite directories to
-pytest in one command produces spurious failures: each suite relies on its own
-`conftest.py` to set the import path, and a combined run moves the rootdir to
-the common ancestor, which changes when conftest loads and in what order
-`sys.path` is extended. Two test file names also collide across suites. A
-combined run of five suites gives 34 failures; run separately they are all
-green. `INSTALL.md` lists the suites in the order to run them.
+**Run the test suites one at a time** — `bash scripts/run_tests.sh` does.
+Passing several suite directories to pytest in one command produces spurious
+failures: each suite relies on its own `conftest.py` to set the import path,
+and a combined run moves the rootdir to the common ancestor, which changes when
+conftest loads and in what order `sys.path` is extended. Two test file names
+also collide across suites.
 
-**Webapp test imports depend on collection order.** `orchestrator-webapp/tests`
-can import the `app` package only because one test file inserts the parent
-directory into `sys.path` at collection time. A new test file that sorts before
-it will make the whole suite fail to import. Until there is a
-`conftest.py`, new files in that directory may need the same insert.
+**After a plugin install, `provledger` is not on your PATH.** The plugin installs
+the command into its own venv, `~/skill-workspace/.venv/bin/`, and nothing adds
+that directory to the shell a session runs commands in — while the `/ledger` and
+`/receipts` skills call `provledger` by name. Until that is fixed, add the
+directory to your PATH (`export PATH="$HOME/skill-workspace/.venv/bin:$PATH"`).
 
-**`PSG_REGISTRY_PATH` does not fully isolate a project.** `init_project.sh`
-honours it for the registry, but the human-readable index is still written to
-`~/skill-workspace/project-graphs/PROJECT-STATE-GRAPHS.md`, so isolated tests
-and demos still touch the host index.
-
-**The PreToolUse hook logs a `NameError`.** `hook-errors.log` (surfaced by
-`selfcheck`'s `hook_failures`) shows `NameError: name '_retract_injected_once'
-is not defined`. The hook is non-blocking by design, so this degrades the
-injection rather than stopping a tool call.
+**A hook can lose its row under heavy concurrent writing.** When several sessions
+or a release run write to the same ledger at once, a hook waits two seconds for
+the write lock, then logs `OperationalError: database is locked` to
+`hook-errors.log` and exits 0. The tool call goes ahead; that one row (a tool
+call, or a prompt) is missing from the ledger.
 
 **The session that installs the plugin does not count itself.** Hooks load when
 a session starts, so the session in which you install provLedger records no

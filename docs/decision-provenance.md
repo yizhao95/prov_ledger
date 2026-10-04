@@ -29,8 +29,12 @@ neutral on purpose — source, context, traceable — never blame.
 
 All of them are append-only: no DELETE, and the only UPDATEs the triggers
 allow are `change_reason.superseded_by` (a correction is a new row that the
-old one points at) and `reference.last_checked`. Each table carries a hash
-chain (`provenance.verify_chain`).
+old one points at) and `reference.last_checked`. Four of them carry a sha256
+hash chain that `provledger verify` walks and a plan close anchors in git
+notes (§12): `utterance`, `reference`, `change_reason`, `reference_check`.
+The log tables (`trigger_log`, `evidence_log`, `tool_call_log`) are
+append-only but not chained. `declared_node` (§11) and `occurrence` (§13)
+carry chains of their own, each with its own short list of updatable columns.
 
 ## 3 · The four tiers and the four source levels
 

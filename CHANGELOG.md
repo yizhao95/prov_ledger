@@ -8,6 +8,68 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
+## Unreleased
+
+**A clean-up of the development setup, and the defects it turned up.** A fresh read of
+the repository, with the documents checked against the code, found claims that had
+drifted, paths only a new user takes that had never run, and seams between two
+scripts that each passed their own tests.
+
+### Fixed
+
+- **`run-step.sh` swallowed the review hand-off.** It sent complete-step's output to
+  `/dev/null`, so `needs_agent_review` — the signal that a plan on a registered
+  project must stop for a review sub-agent — never reached the caller. Its last line
+  now carries complete-step's and fail-step's signals.
+- **The external-artifact judge broke on the real runner.** It handed the runner's
+  `(text, detail)` pair to the parser and raised `TypeError`; with the switch on,
+  that rolled back the whole plan close. The judge now reads the text, and a judge or
+  runner that fails records a `silent` verdict instead of rolling anything back.
+- **The declaration runner inherited your language setting.** It was a second copy
+  of the model runner without `--settings`; it now uses the shared one.
+- **Tests and the demo could rewrite your real graph index.** With only
+  `PSG_REGISTRY_PATH` set, `init_project.sh` still wrote
+  `~/skill-workspace/project-graphs/PROJECT-STATE-GRAPHS.md`, dropping your real
+  projects from it. The index and the default out-dir now live beside that registry.
+- **`bootstrap.sh` never upgraded the backend, and failed from a project directory.**
+  Its marker hashed only `requirements.txt`, so a version bump never re-installed the
+  editable backend (no `provledger` command, 0.1.0 metadata); and uv resolved
+  `-e ./orchestrator-backend` against the session's working directory. It now
+  re-installs when the backend's pyproject changes, and installs from the plugin root.
+- **The dashboard:** `?lang=zh` survives the 2 s poll and the view bar (the poll's
+  ETag now varies by language); `launch_dashboard.sh` reports a dashboard with no
+  ledger yet as running instead of failing and then reporting "port in use", and
+  `ensure-dashboard.sh` agrees; the empty state names `publish-plan.sh` instead of
+  the broken `orchestrator-cli.py`; the design bundle is rebuilt and no longer carries
+  the old Chinese labels; the webapp's pyproject declares `httpx`.
+- `orchestrator-cli.py` runs again; the analyzer no longer walks `.venv-*` directories.
+
+### Development
+
+- **`scripts/run_tests.sh`** runs, counts (`--count`) or lists the suites, each in its
+  own pytest process, from the one list in `scripts/suites.sh` (the release check
+  reads it too). It replaces `count_tests.sh`, and fails any suite that writes to the
+  real `~/skill-workspace` (`scripts/home_guard.py`).
+- Copies are held to their originals by tests: the plan and update-input schemas to
+  the code that validates them, SKILL.md descriptions to the 1024-character limit, the
+  analyzer's `graph_viz.py` to its copy, the selfcheck table to `selfcheck.py`, and the
+  version string to `scripts/pkg_smoke_test.py`.
+- `CLAUDE.md` files at the root and in each component hold the development
+  conventions.
+
+### Documents
+
+- The README is a front page again. The command reference moved to
+  [`docs/cli.md`](docs/cli.md), the dashboard's routes to
+  [`orchestrator-webapp/README.md`](orchestrator-webapp/README.md), and the five
+  quick-start commands were re-run: two of them did not print what the page said.
+- Shipped documents no longer carry a worked case from the local answer-quality
+  evaluation (a walkthrough in the README, anecdotes in skills and docstrings).
+- INSTALL, KNOWN-ISSUES, the skills' SKILL.md files and `docs/decision-provenance.md`
+  were corrected where they disagreed with the code: stale paths and counts, tools
+  that exist only in another agent harness, the hash chains `verify` walks, and the
+  dashboard's one write.
+
 ## 0.4.2 — 2026-09-30
 
 **The ledger held the answer and nothing could read it.** Asked why a review timeout

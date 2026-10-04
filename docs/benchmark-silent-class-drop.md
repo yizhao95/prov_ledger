@@ -24,7 +24,7 @@ sees the green exit code and marks the step COMPLETED. False success is now
 
 ## The benchmark
 
-[`examples/silent-class-drop/`](../examples/silent-class-drop/) is a minimal,
+`examples/silent-class-drop/` was a minimal,
 offline, deterministic reproduction of that failure — and of the mechanical
 catch. Synthetic data, real mechanism (the data is **illustrative**; the
 failure mode and the detection path are exactly what runs in production use).
@@ -81,7 +81,12 @@ Deterministic (seed 42, pinned deps): you get **exactly** 0.31 → 0.91, plus a
 self-check that fails the run if the arc doesn't reproduce. Then watch the
 whole story replay in the read-only dashboard:
 
+The reproduction was later rewritten as [`examples/phantom-uplift/`](../examples/phantom-uplift/)
+(`make demo`: the same failure class on a revenue number). The original is in git
+history; to run it, restore it first:
+
 ```bash
+git checkout a7a7fd4^ -- examples/silent-class-drop
 ORCH_DB=$PWD/examples/silent-class-drop/demo-orchestrator.db \
   bash orchestrator-webapp/launch_dashboard.sh
 ```

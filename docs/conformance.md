@@ -88,6 +88,19 @@ report = conformance.run(DatasetComments())        # the shipped mutation corpus
 print(report.text()); assert report.ok
 ```
 
+A complete provider to start from ships with the package:
+`provledger.testing.example_provider.ModuleProvider` turns every Python file
+into one `module` node, and passes all six contracts:
+
+```console
+$ python -c "from provledger.testing import conformance, example_provider; \
+    print(conformance.run(example_provider.ModuleProvider()).text())"
+Conformance: PASS
+  [OK  ] determinism: 3 base(s) extracted twice, byte-identical (7 observations)
+  [OK  ] purity: read-only graph, no write SQL, repository untouched
+  …
+```
+
 The shipped corpus contains plain Python functions and classes. If your
 provider extracts something the corpus does not contain (say `# @dataset:`
 comments), `stability_matches_declaration` has nothing to check: the report

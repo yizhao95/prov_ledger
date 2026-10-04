@@ -8,9 +8,8 @@ are asserted here rather than left to review:
   * sections 0-3 (everything a first-time reader sees) carry no internal
     vocabulary — the framework's rule is that those words appear from
     section 4 on, each with a one-line definition on first use;
-  * every subcommand printed in the section 6 CLI table really is registered
-    in `orchestrator/cli.py`, so the reference table cannot drift away from
-    the tool it documents.
+  * the README stays a front page: install, a first run and pointers — the
+    command reference lives in docs/cli.md (tested by test_cli_doc.py).
 """
 from __future__ import annotations
 
@@ -21,7 +20,6 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 README = REPO / "README.md"
-CLI = REPO / "orchestrator-backend" / "orchestrator" / "cli.py"
 
 # The opening is where readers were leaving. What replaced it is a worked
 # answer — a real question, real record ids, a counted search range — placed
@@ -43,7 +41,7 @@ IMAGES = (
     "docs/media/readme-cli.gif",
 )
 
-# Internal vocabulary: precise where it belongs (sections 4-6), noise on the
+# Internal vocabulary: precise where it belongs (the docs), noise on the
 # first screen.
 INTERNAL_WORDS = ("nk_", "asserted", "change_reason", "node_key", "plan_id")
 
@@ -110,48 +108,6 @@ def test_sections_0_to_3_carry_no_internal_vocabulary(intro: str, word: str) -> 
     assert not hits, f"{word!r} appears before section 4:\n  " + "\n  ".join(hits)
 
 
-def cli_table_commands(readme: str) -> list[str]:
-    """The backticked first cell of every row in the section 6 CLI table."""
-    section = readme.split("\n### CLI\n", 1)[1].split("\n### ", 1)[0]
-    rows = [ln for ln in section.splitlines() if ln.startswith("| `")]
-    assert rows, "no CLI table rows found in section 6"
-    out = []
-    for row in rows:
-        cell = row.split("|")[1]
-        for name in re.findall(r"`([^`]+)`", cell):
-            # `node declare` / `metrics plan` / `init --agents-md`
-            words = [w for w in name.split() if not w.startswith("-")]
-            if words:
-                out.append(" ".join(words))
-    return out
-
-
-def registered_subcommands() -> set[str]:
-    """Every word the CLI dispatches on.
-
-    Most are argparse subparsers. `anchor check` / `anchor candidates` are a
-    positional the parser compares by value (`args.target == "check"`), so
-    those literals count too.
-    """
-    src = CLI.read_text(encoding="utf-8")
-    names = set(re.findall(r'add_parser\(\s*"([^"]+)"', src))
-    names |= set(re.findall(r'args\.target\s*==\s*"([^"]+)"', src))
-    return names
-
-
-def test_the_cli_table_is_not_empty(readme: str) -> None:
-    assert len(cli_table_commands(readme)) >= 15
-
-
-def test_every_command_in_the_cli_table_exists(readme: str) -> None:
-    registered = registered_subcommands()
-    missing = sorted(
-        {cmd for cmd in cli_table_commands(readme)
-         if not all(word in registered for word in cmd.split())}
-    )
-    assert not missing, f"README documents commands cli.py does not register: {missing}"
-
-
 def test_the_five_minute_section_shows_both_install_paths(readme: str) -> None:
     section = readme.split("\n## 3 · ", 1)[1].split("\n## 4 · ", 1)[0]
     assert "claude plugin marketplace add yizhao95/prov_ledger" in section
@@ -161,3 +117,11 @@ def test_the_five_minute_section_shows_both_install_paths(readme: str) -> None:
 def test_the_reference_section_links_the_standing_documents(readme: str) -> None:
     for target in ("docs/KNOWN-ISSUES.md", "CHANGELOG.md", "LICENSE"):
         assert f"({target})" in readme, f"README does not link {target}"
+
+
+def test_the_readme_is_a_front_page(readme: str) -> None:
+    """Reference material has one home each, and it is not the README."""
+    assert "\n### CLI\n" not in readme, "the command table lives in docs/cli.md"
+    assert "(docs/cli.md)" in readme
+    assert not re.search(r"\btests?-\d+", readme), "no hardcoded test count (run_tests.sh --count is the source)"
+    assert len(readme.splitlines()) <= 260, "the README grew back into a manual"
