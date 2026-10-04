@@ -125,10 +125,18 @@ WORDS: dict[str, dict[str, dict[str, str]]] = {
     },
 }
 
+# The command that publishes a plan, shown after `no_plans_yet`. Not a phrase:
+# the same in every language. (The `provledger` CLI reads the ledger; plans are
+# published by the writing-plans skill.)
+PUBLISH_PLAN_CMD = "bash skills/writing-plans/scripts/publish-plan.sh plan-input.json"
+
 # The page's own strings. They live here rather than in the templates so a phrase
 # cannot be added in one language and silently left untranslated in the other —
 # the suite walks this table and fails on a missing column.
 UI: dict[str, dict[str, str]] = {
+    "no_plans_yet": {"en": "No plans yet. The writing-plans skill records one when you give Claude Code a "
+                           "multi-step task. To publish one by hand:",
+                     "zh": "还没有计划。在 Claude Code 中交给它一个多步骤任务时，writing-plans 技能会记录计划。手动发布："},
     "prior_decisions": {"en": "Decisions relied on", "zh": "依据的历史记录"},
     "prior_decisions_empty": {"en": "No prior decisions relied on.", "zh": "本计划未采纳任何历史记录。"},
     "active_constraints": {"en": "Constraints", "zh": "生效约束"},

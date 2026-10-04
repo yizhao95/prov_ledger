@@ -8,12 +8,12 @@
          Show BOTH "Back to Home" (primary) and "Back to History" (secondary)
          so they can navigate either direction without using browser back. #}
       <div class="flex items-center gap-2">
-        <a href="/"
+        <a href="{{ '/'|keep_lang(lang) }}"
            class="inline-flex items-center gap-2 px-4 py-2 bg-brand-blue text-white rounded-lg
                   shadow-sm hover:bg-[#256abf] active:bg-[#1c5cab] text-sm font-semibold transition">
           🏠 {{ ui('home', lang) }}
         </a>
-        <a href="/history"
+        <a href="{{ '/history'|keep_lang(lang) }}"
            class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue
                   rounded-lg shadow-sm hover:bg-brand-bg active:bg-hairline text-sm font-semibold transition">
           ← {{ ui('history', lang) }}
@@ -24,12 +24,12 @@
       {# Default: latest plan — show Show History button #}
       <span class="text-sm font-semibold text-brand-gray">📍 {{ ui('latest_plan', lang) }}</span>
       <div class="flex items-center gap-2">
-        <a href="/outcomes"
+        <a href="{{ '/outcomes'|keep_lang(lang) }}"
            class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue
                   rounded-lg shadow-sm hover:bg-brand-bg active:bg-hairline text-sm font-semibold transition">
           🎯 Outcomes
         </a>
-        <a href="/history"
+        <a href="{{ '/history'|keep_lang(lang) }}"
            class="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-hairline text-brand-blue
                   rounded-lg shadow-sm hover:bg-brand-bg active:bg-hairline text-sm font-semibold transition">
           📚 {{ ui('show_history', lang) }} →
@@ -54,9 +54,9 @@
   </section>
   {% endif %}
 
-  <!-- Polling div: query param threads through so historical view stays on its plan -->
+  <!-- Polling div: plan, node, at and lang thread through so the poll swaps in the same view -->
   <div id="dashboard-content"
-       hx-get="/api/dashboard?{% if viewing_plan_id %}plan={{ viewing_plan_id }}&{% endif %}{% if focus_node %}node={{ focus_node }}&{% endif %}{% if focus_at %}at={{ focus_at }}{% endif %}"
+       hx-get="{{ poll_url(viewing_plan_id, focus_node, focus_at, lang) }}"
        hx-trigger="load, every 2s"
        hx-swap="innerHTML">
     {% include "_dashboard_partial.html" %}

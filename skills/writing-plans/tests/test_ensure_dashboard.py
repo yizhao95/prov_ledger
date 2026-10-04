@@ -111,3 +111,64 @@ def test_plugin_root_env_overrides_launcher_location(scripts_dir: Path, tmp_path
     result = _run_ensure(scripts_dir, {"ENSURE_DASHBOARD_PRINT_ONLY": "1",
                                        "CLAUDE_PLUGIN_ROOT": str(root)})
     assert f"LAUNCH_CMD=bash {root}/orchestrator-webapp/launch_dashboard.sh" in result.stdout
+
+
+class _Health:
+    """A one-route server answering /api/health with a fixed status and body."""
+
+    def __init__(self, status: int, body: str):
+        import http.server
+        import threading
+
+        status_, body_ = status, body.encode()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                self.send_response(status_)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body_)
+
+            def log_message(self, *_):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/api/health"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def test_a_dashboard_with_no_ledger_yet_counts_as_up(scripts_dir: Path):
+    """Before the first plan creates the ledger, the dashboard answers 503 with its
+    own JSON. That is a running dashboard: launching a second one would only
+    collide on the port."""
+    health = _Health(503, '{"ok": false, "error": "orchestrator.db not found"}')
+    try:
+        result = _run_ensure(scripts_dir, {"HEALTH_URL": health.url, "LAUNCH_CMD": "/usr/bin/false",
+                                           "WAIT_SECS": "1"})
+    finally:
+        health.close()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "launching" not in result.stdout
+
+
+def test_a_503_that_is_not_the_dashboard_still_counts_as_down(scripts_dir: Path):
+    health = _Health(503, "Service Unavailable")
+    try:
+        result = _run_ensure(scripts_dir, {"HEALTH_URL": health.url, "LAUNCH_CMD": "/usr/bin/true",
+                                           "WAIT_SECS": "1"})
+    finally:
+        health.close()
+    assert result.returncode != 0
+    assert "launching" in result.stdout
+
+
+def test_the_failure_names_the_launchers_log(scripts_dir: Path):
+    result = _run_ensure(scripts_dir, {"HEALTH_URL": f"http://127.0.0.1:{_free_port()}/api/health",
+                                       "LAUNCH_CMD": "/usr/bin/true", "WAIT_SECS": "1",
+                                       "PROVLEDGER_DASH_LOG": "/tmp/some-dash.log"})
+    assert result.returncode != 0
+    assert "/tmp/some-dash.log" in result.stderr

@@ -174,6 +174,19 @@ def test_the_committed_bundle_names_all_nine_components():
     assert "ProvLedgerDS" in text
 
 
+def test_the_committed_bundle_carries_no_chinese_even_escaped():
+    """esbuild writes non-ASCII as `\\uXXXX`, so a bundle built before the
+    English-only rule (c2c7247) passed the repository language test while still
+    shipping the old Chinese labels. That only happens to a stale dist/: rebuild
+    it (`npm ci && npm run build` in design/). Same ranges as test_repo_language."""
+    def cjk(cp: int) -> bool:
+        return 0x3400 <= cp < 0x4DC0 or 0x4E00 <= cp < 0xA000
+    text = (DIST / "_ds_bundle.js").read_text(encoding="utf-8")
+    escaped = sorted({m for m in re.findall(r"\\u([0-9a-fA-F]{4})", text) if cjk(int(m, 16))})
+    raw = sorted({c for c in text if cjk(ord(c))})
+    assert not escaped and not raw, f"stale bundle: {len(escaped)} escaped and {len(raw)} raw CJK characters"
+
+
 def test_the_stylesheet_closure_reaches_the_bundle_css():
     assert (DIST / "_ds_bundle.css").exists()
     assert "_ds_bundle.css" in (DIST / "styles.css").read_text(encoding="utf-8")

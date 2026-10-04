@@ -17,6 +17,7 @@ Read-only access to ~/skill-workspace/orchestrator.db. Never mutates.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import sqlite3
 from pathlib import Path
@@ -51,6 +52,9 @@ TEMPLATES.env.filters["say"] = lambda token, kind="term", lang="zh": vocab.say(t
 TEMPLATES.env.filters["cite_parts"] = queries.cite_parts
 TEMPLATES.env.globals["vocab"] = vocab
 TEMPLATES.env.globals["ui"] = vocab.ui
+# `?lang=zh` survives the view bar and the 2 s poll: links go through `|keep_lang`.
+TEMPLATES.env.filters["keep_lang"] = queries.keep_lang
+TEMPLATES.env.globals["poll_url"] = queries.poll_url
 
 app = FastAPI(title="provLedger Dashboard", version="0.1.0")
 # DP phase 2d (Task 1): the generated tokens.js the chrome reads. StaticFiles
@@ -219,6 +223,7 @@ def history(request: Request):
             "request": request,
             "error": f"orchestrator.db not found: {e}",
             "plans": [],
+            "lang": _lang(request),
         })
     plans = queries.list_all_plans(conn)
     conn.close()
@@ -226,6 +231,7 @@ def history(request: Request):
         "request": request,
         "error": None,
         "plans": plans,
+        "lang": _lang(request),
         "bar": queries.view_bar("history", queries.triple(None, None, None)),
     })
 
@@ -254,9 +260,13 @@ def dashboard_partial(request: Request, plan: str | None = None, node: str | Non
     except (FileNotFoundError, sqlite3.Error):
         etag = '"no-db"'
 
-    # ETag varies by which plan we're showing — prefix with plan_id (or 'latest')
+    # ETag varies by what the fragment shows: the plan (or 'latest'), the node,
+    # the `at`, and the language. The client keeps one last-seen ETag across
+    # boosted navigation, so an ETag that ignored `lang` could 304 a Chinese
+    # poll with the English fragment still on screen.
+    view_key = hashlib.sha256(f"{node or ''}\x00{at or ''}".encode()).hexdigest()[:8] if (node or at) else "-"
     plan_key = plan if plan else "latest"
-    etag = f'"{plan_key}:{etag.strip(chr(34))}"'
+    etag = f'"{plan_key}:{view_key}:{_lang(request)}:{etag.strip(chr(34))}"'
 
     if request.headers.get("if-none-match") == etag:
         return Response(
@@ -472,7 +482,8 @@ def session_card(request: Request, session_id: str):
     """DP phase 2b (Task 5, FL-062): one session — what was said, what it cost,
     what changed, its headline, the plans it published; a session without a
     plan is marked degraded. Read-only; an older DB renders empty parts."""
-    ctx = {"request": request, "error": None, "session": None, "bar": queries.view_bar("session", queries.triple(None, None, None))}
+    ctx = {"request": request, "error": None, "session": None, "lang": _lang(request),
+           "bar": queries.view_bar("session", queries.triple(None, None, None))}
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:

@@ -20,7 +20,7 @@
     </div>
   {% elif not plans %}
     <div class="bg-[#fab219]/10 border border-[#fab219]/40 text-[#7a5200] p-4 rounded-xl">
-      No plans yet. Run <code class="font-mono bg-white px-1 rounded">orchestrator-cli.py init-plan ...</code> to create one.
+      {{ ui('no_plans_yet', lang) }} <code class="font-mono bg-white px-1 rounded">{{ vocab.PUBLISH_PLAN_CMD }}</code>
     </div>
   {% else %}
     <ul class="space-y-2">

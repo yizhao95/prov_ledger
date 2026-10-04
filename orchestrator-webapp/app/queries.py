@@ -1,7 +1,8 @@
 """Read-only SQLite queries for the orchestrator dashboard.
 
-Opens the orchestrator DB in WAL mode so we can read concurrently while the
-orchestrator-cli writes. Never mutates the database.
+Opens the orchestrator DB read-only (`mode=ro`, WAL) so we can read while hooks
+and skill scripts write. The one write is `log_ask`: one `ask_log` row per
+`/ledger` question, on its own connection.
 """
 from __future__ import annotations
 
@@ -1424,6 +1425,30 @@ def url_for_view(view: str, t: dict, plan_id: str | None = None) -> str | None:
             q["at"] = at
         return f"/plan/{quote(pid, safe='')}" + (f"?{urlencode(q)}" if q else "")
     return None
+
+
+def keep_lang(url: str | None, lang: str | None) -> str | None:
+    """An internal link that keeps the reader's `?lang=`. The default language
+    adds nothing, so English URLs (and every test that pins them) stay as they were;
+    a URL that already names a language is left alone."""
+    from urllib.parse import parse_qs, urlsplit, urlunsplit
+    from app import vocab
+    if not url or vocab.lang_of(lang) == vocab.DEFAULT_LANG:
+        return url
+    parts = urlsplit(url)
+    if "lang" in parse_qs(parts.query):
+        return url
+    query = f"{parts.query}&lang={vocab.lang_of(lang)}" if parts.query else f"lang={vocab.lang_of(lang)}"
+    return urlunsplit(parts._replace(query=query))
+
+
+def poll_url(plan_id: str | None, node: str | None, at: str | None, lang: str | None) -> str:
+    """The `/api/dashboard` URL a page polls every 2 s: the same plan, node, `at`
+    and language as the page itself, or the first poll swaps in a different fragment."""
+    from urllib.parse import urlencode
+    q = {k: v for k, v in (("plan", plan_id), ("node", node), ("at", at)) if v}
+    url = "/api/dashboard" + (f"?{urlencode(q)}" if q else "")
+    return keep_lang(url, lang)
 
 
 def view_bar(view: str, t: dict, plan_id: str | None = None) -> dict:

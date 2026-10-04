@@ -4,7 +4,7 @@
   </div>
 {% elif not plan %}
   <div class="bg-[#fab219]/10 border border-[#fab219]/40 text-[#7a5200] p-4 rounded-xl">
-    No plans in the database yet. Run <code class="font-mono bg-white px-1 rounded">orchestrator-cli.py init-plan ...</code> to create one.
+    {{ ui('no_plans_yet', lang) }} <code class="font-mono bg-white px-1 rounded">{{ vocab.PUBLISH_PLAN_CMD }}</code>
   </div>
 {% else %}
   {% set badge = status_badge(plan.status) %}

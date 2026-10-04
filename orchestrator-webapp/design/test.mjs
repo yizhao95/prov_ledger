@@ -8,6 +8,8 @@
 import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
+import {build} from "esbuild";
+import {BUNDLE_OPTIONS} from "./build.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = join(here, "dist");
@@ -32,6 +34,19 @@ for (const name of COMPONENTS) {
 }
 ok("is an IIFE on window.ProvLedgerDS", /var ProvLedgerDS\s*=/.test(bundle) || /ProvLedgerDS\s*=/.test(bundle));
 ok("bundles React (no bare import left)", !/^\s*import\s+.*from\s+["']react["']/m.test(bundle));
+
+/* dist/ is committed, so a src/ change without a rebuild ships the old bundle.
+ * esbuild writes non-ASCII as \uXXXX, which is how a bundle built before the
+ * English-only rule kept its Chinese labels past the repository language test.
+ * Same CJK ranges as scripts/tests/test_repo_language.py. */
+const cjk = (cp) => (cp >= 0x3400 && cp < 0x4dc0) || (cp >= 0x4e00 && cp < 0xa000);
+const escaped = [...bundle.matchAll(/\\u([0-9a-fA-F]{4})/g)].filter((m) => cjk(parseInt(m[1], 16)));
+const raw = [...bundle].filter((c) => cjk(c.codePointAt(0)));
+ok("carries no CJK, raw or \\u-escaped", escaped.length === 0 && raw.length === 0,
+   `${escaped.length} escaped, ${raw.length} raw — rebuild: npm run build`);
+const fresh = await build({...BUNDLE_OPTIONS, write: false, logLevel: "silent"});
+ok("is what src/ builds to today", fresh.outputFiles[0].text === bundle,
+   "dist/_ds_bundle.js is stale — run npm run build and commit dist/");
 
 console.log("styles");
 const cssPath = join(dist, "_ds_bundle.css");

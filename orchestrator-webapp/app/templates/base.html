@@ -208,7 +208,7 @@
     <div class="max-w-6xl mx-auto flex items-center justify-between gap-3 flex-wrap text-xs">
       <div class="flex items-center gap-1" hx-boost="true">
         {% for v, label in [('graph', '🕸 Graph'), ('node', '🧬 Node'), ('task', '📋 Task'), ('ledger', '🧾 ' ~ ui('ask_button', lang|default('en'))) ] %}
-          {% set href = bar.links[v] %}
+          {% set href = bar.links[v]|keep_lang(lang) %}
           {% if href %}
           <a href="{{ href }}" data-view-link="{{ v }}" class="px-3 py-1 rounded-lg border {{ 'bg-brand-blue text-white border-brand-blue' if bar.current == v else 'bg-surface text-brand-blue border-hairline hover:bg-brand-bg' }}">{{ label }}</a>
           {% else %}
@@ -220,6 +220,7 @@
         {# DP phase 2d (Task 3c): find the words again, from anywhere. GET only. #}
         <form method="get" action="/search" class="flex items-center gap-1">
           {% if bar.triple.project %}<input type="hidden" name="project" value="{{ bar.triple.project }}">{% endif %}
+          {% if vocab.lang_of(lang) != vocab.DEFAULT_LANG %}<input type="hidden" name="lang" value="{{ vocab.lang_of(lang) }}">{% endif %}
           <input name="q" data-search placeholder="{{ ui('search_placeholder', lang) }}"
                  class="border border-hairline rounded-lg px-2 py-0.5 bg-brand-bg text-xs w-44">
         </form>

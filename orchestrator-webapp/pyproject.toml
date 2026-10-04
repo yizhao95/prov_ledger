@@ -9,3 +9,7 @@ dependencies = [
     "jinja2>=3.1",
 ]
 
+[dependency-groups]
+# what `$PY -m pytest orchestrator-webapp` needs beyond the runtime: FastAPI's
+# TestClient is built on httpx (root requirements.txt carries the same floors)
+dev = ["pytest>=7", "httpx>=0.27"]
