@@ -8,6 +8,7 @@ itself as the user (north star: "never go silent" cuts both ways; the ledger mus
 invent a speaker). Utterance #28/#29 of the 2d session were exactly that.
 """
 import io
+import os
 import json
 import sqlite3
 
@@ -100,3 +101,60 @@ def test_the_already_misrecorded_rows_are_kept_and_a_retraction_is_appended(tmp_
     assert len(rows) == 1 and rows[0][0] == "retract" and str(bad) in rows[0][1]
     assert pm.retract_injected_utterances(conn) == 0         # idempotent
     conn.close()
+
+
+# FL-182: a subagent's report reaches the parent session through UserPromptSubmit
+# as an `<agent-message …>` block. On 2026-10-03 eleven of them were recorded as
+# the user's words in one session, and R0 then filed 75 `stated` reasons on them.
+AGENT_MESSAGE = ('<agent-message from="ac44f387dd59e9a92">\n[Subagent hand-back] The text below is the '
+                 'final report of a subagent this session delegated to.\n  ## Report\n  the subagent '
+                 'emailed nobody; it read the code and rewrote the README\n</agent-message>\n')
+
+
+def test_a_subagent_report_is_not_an_utterance(hook_env, monkeypatch, capsys):
+    dbp, errlog = hook_env
+    _feed(monkeypatch, {"session_id": "s", "cwd": "/home/x/repo", "hook_event_name": "UserPromptSubmit",
+                        "prompt": AGENT_MESSAGE})
+    assert hooks.main(["UserPromptSubmit"]) == 0
+    assert capsys.readouterr().out == "", "no source hint for words the user never said"
+    assert _utterances(dbp) == [] and not errlog.exists()
+
+
+def test_a_user_who_writes_about_agent_messages_is_still_recorded(hook_env, monkeypatch, capsys):
+    dbp, _ = hook_env
+    text = "why did the <agent-message> blocks end up in the ledger as my words?"
+    _feed(monkeypatch, {"session_id": "s", "cwd": "/home/x/repo", "hook_event_name": "UserPromptSubmit", "prompt": text})
+    assert hooks.main(["UserPromptSubmit"]) == 0
+    assert _utterances(dbp) == [(text,)]
+
+
+# FL-182, the other half: provLedger's own headless `claude -p` calls (the judge,
+# the arbiter, ask's summary) run with the user's plugins on, so this very hook
+# recorded provLedger's prompts as the user's words. The runner marks its child
+# with PROVLEDGER_HEADLESS=1, and every hook stands down under it.
+def test_a_headless_provledger_call_records_nothing(hook_env, monkeypatch, capsys):
+    dbp, errlog = hook_env
+    monkeypatch.setenv("PROVLEDGER_HEADLESS", "1")
+    _feed(monkeypatch, {"session_id": "s", "cwd": "/home/x/repo", "hook_event_name": "UserPromptSubmit",
+                        "prompt": "You judge whether ONE record answers the question. Sarah emailed it."})
+    assert hooks.main(["UserPromptSubmit"]) == 0 and capsys.readouterr().out == ""
+    _feed(monkeypatch, {"session_id": "s", "cwd": "/home/x/repo", "hook_event_name": "PostToolUse",
+                        "tool_name": "Bash", "tool_input": {"command": "true"}})
+    assert hooks.main(["PostToolUse"]) == 0
+    conn = sqlite3.connect(str(dbp))
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert "utterance" not in tables or _utterances(dbp) == []
+    if "tool_call_log" in tables:
+        assert conn.execute("SELECT count(*) FROM tool_call_log").fetchone()[0] == 0
+    assert not errlog.exists()
+
+
+def test_the_headless_runner_marks_its_child(tmp_path, monkeypatch):
+    from orchestrator.testing import claude_arbiter
+    fake = tmp_path / "claude"
+    fake.write_text('#!/bin/sh\ncat >/dev/null\nprintf \'{"result": "headless=%s"}\' "$PROVLEDGER_HEADLESS"\n')
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    monkeypatch.delenv("PROVLEDGER_HEADLESS", raising=False)
+    text, _detail = claude_arbiter.default_runner("hello", timeout_s=20)
+    assert text == "headless=1"

@@ -17,6 +17,14 @@ scripts that each passed their own tests.
 
 ### Fixed
 
+- **Words the user never said were recorded as theirs.** Two kinds of text reached
+  the prompt hook and became `utterance` rows — the source of the `stated` tier: a
+  subagent's report handed back to the session (`<agent-message …>`), and the
+  prompts provLedger itself sends to a headless `claude -p` (the judge, the arbiter,
+  `ask`'s summary), because the user's plugins run in that child too. The hook now
+  skips the first, and the runner marks its child with `PROVLEDGER_HEADLESS=1`,
+  under which every provLedger hook stands down. Rows already written stay: the
+  tables are append-only.
 - **`run-step.sh` swallowed the review hand-off.** It sent complete-step's output to
   `/dev/null`, so `needs_agent_review` — the signal that a plan on a registered
   project must stop for a review sub-agent — never reached the caller. Its last line
