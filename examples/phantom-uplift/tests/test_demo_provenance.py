@@ -164,6 +164,12 @@ def test_the_demo_never_touches_the_real_workspace(demo):
     body = SCRIPT.read_text(encoding="utf-8")
     assert "skill-workspace" not in body or "DEMO_HOME" in body
     assert "ORCH_DB" in body and "PSG_REGISTRY_PATH" in body
+    # Only PSG_REGISTRY_PATH is set (here and in the script): init_project.sh must
+    # put the graph index beside that registry, not in the real
+    # ~/skill-workspace/project-graphs/PROJECT-STATE-GRAPHS.md.
+    index = demo["ws"] / "PROJECT-STATE-GRAPHS.md"
+    assert index.exists(), sorted(p.name for p in demo["ws"].iterdir())
+    assert "phantom-uplift-demo" in index.read_text(encoding="utf-8")
 
 
 def test_the_walkthrough_script_exists_and_is_not_wired_into_ci():

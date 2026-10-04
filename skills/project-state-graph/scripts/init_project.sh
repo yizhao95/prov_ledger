@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
 # init_project.sh — one-command project state-graph initializer.
 #
-# Builds BOTH layers for a repo and registers it:
-#   1. deep layer : <out-dir>/<name>-state-graph.db   (via analyzer)
-#   2. shallow    : <out-dir>/ARCHITECTURE.md         (via architecture_md.py)
-#   3. registry   : projects.json + PROJECT-STATE-GRAPHS.md index
-#   4. verify     : selfcheck invariants on the built DB
+# Builds BOTH layers for a repo and registers it, in five stages:
+#   [1/5] deep layer : <out-dir>/<name>-state-graph.db   (via analyzer)
+#   [2/5] shallow    : <out-dir>/ARCHITECTURE.md         (via architecture_md.py)
+#   [3/5] registry   : projects.json + PROJECT-STATE-GRAPHS.md index
+#   [4/5] verify     : selfcheck invariants on the built DB (fatal on error severity)
+#   [5/5] slices     : <out-dir>/<name>-slices.html      (via viz_slices.py; non-fatal)
 #
 # Usage:
 #   init_project.sh --name NAME --repo REPO_PATH [--out-dir DIR]
 #                   [--trigger session --session-id SID --notify-orch-db ORCH_DB]   (Stop hook, DP phase 2)
 #
-# Defaults:
-#   --out-dir  ~/skill-workspace/project-graphs/<name>
+# Defaults (environment):
+#   PSG_REGISTRY_ROOT  the directory of PSG_REGISTRY_PATH when only that is set,
+#                      else ~/skill-workspace/project-graphs
+#   PSG_REGISTRY_PATH  <root>/projects.json
+#   PSG_INDEX_PATH     <root>/PROJECT-STATE-GRAPHS.md
+#   --out-dir          <root>/<name>
 #
 # Deterministic: no prompts, exits non-zero on any failure.
 set -euo pipefail
@@ -58,9 +63,20 @@ fi
 # Resolve absolute repo path.
 REPO="$(cd "$REPO" && pwd)"
 
+# Registry + index locations (env-overridable for isolated runs). A run isolated
+# by PSG_REGISTRY_PATH alone keeps the index and the default out dir beside that
+# file: deriving them from the home default instead let regenerate_index overwrite
+# the developer's real PROJECT-STATE-GRAPHS.md.
+if [[ -z "${PSG_REGISTRY_ROOT:-}" && -n "${PSG_REGISTRY_PATH:-}" ]]; then
+    PSG_REGISTRY_ROOT="$(dirname "$PSG_REGISTRY_PATH")"
+fi
+PSG_REGISTRY_ROOT="${PSG_REGISTRY_ROOT:-${HOME}/skill-workspace/project-graphs}"
+REGISTRY_PATH="${PSG_REGISTRY_PATH:-${PSG_REGISTRY_ROOT}/projects.json}"
+INDEX_PATH="${PSG_INDEX_PATH:-${PSG_REGISTRY_ROOT}/PROJECT-STATE-GRAPHS.md}"
+
 # Default out dir.
 if [[ -z "$OUT_DIR" ]]; then
-    OUT_DIR="${PSG_REGISTRY_ROOT:-${HOME}/skill-workspace/project-graphs}/${NAME}"
+    OUT_DIR="${PSG_REGISTRY_ROOT}/${NAME}"
 fi
 
 DB_PATH="${OUT_DIR}/${NAME}-state-graph.db"
@@ -88,22 +104,18 @@ _notify() {
     fi
 }
 trap _notify EXIT
-# Registry + index locations (env-overridable for isolated testing).
-PSG_REGISTRY_ROOT="${PSG_REGISTRY_ROOT:-${HOME}/skill-workspace/project-graphs}"
-REGISTRY_PATH="${PSG_REGISTRY_PATH:-${PSG_REGISTRY_ROOT}/projects.json}"
-INDEX_PATH="${PSG_INDEX_PATH:-${PSG_REGISTRY_ROOT}/PROJECT-STATE-GRAPHS.md}"
 
 echo "==> project-state-graph init: ${NAME}"
 echo "    repo:    ${REPO}"
 echo "    out-dir: ${OUT_DIR}"
 
-# 1. Ensure out dir.
+# Ensure out dir.
 mkdir -p "$OUT_DIR"
 
 # Run everything inside the skill's uv env so deps resolve.
 cd "$SCRIPT_DIR"
 
-# 2. Deep layer — build the state-graph DB.
+# [1/5] Deep layer — build the state-graph DB.
 # store.reset_graph (PSG-C1) makes the rebuild idempotent; the history tables
 # (node_snapshot / node_event) must survive — NEVER delete the DB file here.
 # (Phase-1 dogfood: an `rm -f "$DB_PATH"` used to wipe the history on every refresh.)
@@ -127,11 +139,11 @@ uv run python -m analyzer "$REPO" --project "$NAME" --db-path "$DB_PATH" \
 # Capture the commit sha that was analyzed (best-effort).
 COMMIT_SHA="$(git -C "$REPO" rev-parse HEAD 2>/dev/null || echo "")"
 
-# 3. Shallow layer — ARCHITECTURE.md.
+# [2/5] Shallow layer — ARCHITECTURE.md.
 echo "==> [2/5] building shallow layer (ARCHITECTURE.md) -> ${ARCH_PATH}"
 uv run python architecture_md.py "$DB_PATH" "$NAME" "$ARCH_PATH"
 
-# 4. Registry + index.
+# [3/5] Registry + index.
 echo "==> [3/5] updating registry -> ${REGISTRY_PATH}"
 uv run python - "$REGISTRY_PATH" "$INDEX_PATH" "$NAME" "$REPO" "$DB_PATH" "$COMMIT_SHA" <<'PY'
 import sys
@@ -143,11 +155,11 @@ registry.regenerate_index(reg_path, index_path)
 print(f"    registered {name} -> {db_path}")
 PY
 
-# 5. Verify — selfcheck invariants.
+# [4/5] Verify — selfcheck invariants.
 echo "==> [4/5] verifying built graph (selfcheck)"
 uv run python selfcheck.py "$DB_PATH"
 
-# 6. DataFrame-aware slices (provLedger Phase B) — additive, non-fatal.
+# [5/5] DataFrame-aware slices (provLedger Phase B) — additive, non-fatal.
 SLICES_PATH="${OUT_DIR}/${NAME}-slices.html"
 echo "==> [5/5] rendering DataFrame-aware slices -> ${SLICES_PATH}"
 if uv run python viz_slices.py "$DB_PATH" "$SLICES_PATH" --title "$NAME"; then

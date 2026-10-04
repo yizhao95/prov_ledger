@@ -65,6 +65,30 @@ def test_skips_ignored_dirs(tmp_path, conn):
     assert not any("htmlcov" in p for p in paths)
 
 
+def test_skips_named_venv_dirs(tmp_path, conn):
+    """`.venv-*` is git-ignored like `.venv` (the repo keeps per-tool envs as
+    `.venv-<name>/`), and the walker reads the working tree, untracked files
+    included — so a named venv must be pruned too, or its site-packages become
+    thousands of file nodes."""
+    repo = _make_repo(tmp_path)
+    for name in (".venv-docs", ".venv-3.13"):
+        (repo / name / "lib").mkdir(parents=True)
+        (repo / name / "lib" / "dep.py").write_text("nope\n")
+    walker.walk(conn, str(repo))
+    paths = {r[0] for r in _file_nodes(conn)}
+    assert not any(p.startswith(".venv-") for p in paths), sorted(paths)
+    assert len(paths) == 5
+
+
+def test_a_dir_merely_named_like_venv_is_still_walked(tmp_path, conn):
+    """Only the `.venv-` prefix is pruned: `venv_tools/` is ordinary source."""
+    repo = _make_repo(tmp_path)
+    (repo / "venv_tools").mkdir()
+    (repo / "venv_tools" / "keep.py").write_text("x = 1\n")
+    walker.walk(conn, str(repo))
+    assert "venv_tools/keep.py" in {r[0] for r in _file_nodes(conn)}
+
+
 def test_one_node_per_file(tmp_path, conn):
     repo = _make_repo(tmp_path)
     walker.walk(conn, str(repo))

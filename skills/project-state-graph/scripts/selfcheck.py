@@ -1,24 +1,16 @@
 """Graph self-checks: deterministic invariants on a built state-graph DB.
 
 These are NOT unit tests of the analyzer code; they validate that a *produced*
-graph is internally sound before we trust it. Run after every build.
+graph is internally sound before we trust it. Run after every build
+(init_project.sh stage [4/5]); review_run.py runs it again after --tests.
 
 Each check carries a severity:
-  - error   : a failure flips the overall result to FAIL (build/review must stop)
+  - error   : a failure flips the overall result to FAIL (exit 1; build/review must stop)
   - warning : a failure is surfaced ([WARN]) but NEVER blocks (exit stays 0)
 
-Invariants (error):
-  - node_types_nonempty    : at least one node type exists with nodes
-  - no_dangling_edges      : every edge src/dst references an existing node
-  - cards_match_callables  : consistency_card & symbol_card counts each equal
-                             the number of function+method nodes (full coverage)
-  - commit_sha_set         : the latest analysis_run recorded a commit_sha
-  - no_undefined_symbols   : no unresolved_call nodes (a bare-name call that
-                             resolves to nothing — likely a rename/typo). HARD.
-
-Invariants (warning):
-  - no_isolated_nodes      : function/method nodes with no behavioral edge
-                             (dead code). Yellow warning, non-blocking.
+`_CHECKS` (above `run`) is the list of checks, in report order; each check
+states its severity in its return value. SKILL.md names the error-severity
+ones, pinned to this module by tests/test_selfcheck.py.
 """
 from __future__ import annotations
 

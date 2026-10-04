@@ -10,7 +10,7 @@ description: Use when setting up a new project, creating a new app, kicking off 
 Initialize a complete, two-layer **state graph** for ANY repo with one command, so future work has an accurate map of the codebase before touching it.
 
 - **Shallow layer** — `ARCHITECTURE.md`: human-readable overview, file list, subsystem grouping, pointers into the deep layer.
-- **Deep layer** — `<name>-state-graph.db`: a SQLite graph (nodes, edges, `data_var`, `consistency_card`, `symbol_card`) for precise impact analysis.
+- **Deep layer** — `<name>-state-graph.db`: a SQLite graph for precise impact analysis — `node` / `edge` rows typed by `node_type` / `edge_type` (`function`, `class`, `data_var`, `column`, …), a `consistency_card` + `symbol_card` per callable, the `analysis_run` log, and the append-only `node_snapshot` / `node_event` history.
 
 A global **registry** (`projects.json` + `PROJECT-STATE-GRAPHS.md` index) tracks every project graph on record.
 
@@ -43,22 +43,25 @@ integrity (error).
 
 **When NOT to use:** day-to-day querying of an already-built graph — just `SELECT` from the deep DB. Building skills themselves → `writing-skills`.
 
-## The 5-Part Flow (do all five, in order)
+## The 5-Stage Flow
 
-1. **Record the project** — decide a unique `--name` and the `--repo` path.
-2. **Build the deep layer** — the analyzer produces `<name>-state-graph.db`.
-3. **Build the shallow layer** — `ARCHITECTURE.md` is generated from the DB.
-4. **Verify** — `selfcheck` invariants must PASS (non-empty node types, no dangling edges, cards match callables, commit_sha set).
-5. **Finalize** — registry (`projects.json`) and global index (`PROJECT-STATE-GRAPHS.md`) updated.
+Decide a unique `--name` and the `--repo` path; `init_project.sh` then runs five
+stages, in this order, deterministically:
 
-`init_project.sh` performs all five deterministically:
+1. **Deep layer** — the analyzer produces `<name>-state-graph.db`.
+2. **Shallow layer** — `ARCHITECTURE.md` is generated from the DB.
+3. **Registry** — `projects.json` and the global index `PROJECT-STATE-GRAPHS.md` are updated.
+4. **Verify** — every error-severity `selfcheck` invariant must PASS (see *Self-check severity model*); a failure exits non-zero, though stage 3 has already registered the graph.
+5. **Slices** — the DataFrame-aware slices HTML (non-fatal; see Phase B below).
 
 ```bash
 bash ${CLAUDE_PLUGIN_ROOT}/skills/project-state-graph/scripts/init_project.sh \
   --name <project-name> --repo <repo-path> [--out-dir <dir>]
 ```
 
-Default `--out-dir` is `~/skill-workspace/project-graphs/<name>/`.
+Default `--out-dir` is `~/skill-workspace/project-graphs/<name>/`; the header of
+`init_project.sh` lists the environment overrides (`PSG_REGISTRY_ROOT`,
+`PSG_REGISTRY_PATH`, `PSG_INDEX_PATH`).
 On success you get the deep DB + `ARCHITECTURE.md` in the out dir, a registry entry,
 the regenerated index, and a `Self-check: PASS` line. Non-zero exit on any failure.
 
@@ -91,24 +94,27 @@ agent enrich coverage where it matters.
 
 ## Self-check severity model
 
-`selfcheck.py` runs deterministic invariants in two tiers; the build exits
-non-zero (and `init_project.sh`, under `set -e`, aborts) only on an **error**:
+`selfcheck.py` runs deterministic invariants in two tiers. A failing **error**
+check makes it exit 1, which aborts `init_project.sh` (under `set -e`) and fails a
+review; a failing **warning** prints `[WARN]` and never changes the exit code.
+The error-severity checks — the ones that can block a build:
 
-| Invariant | Severity | Meaning |
-|---|---|---|
-| `node_types_nonempty` | error | graph isn't empty |
-| `no_dangling_edges` | error | every edge endpoint references a real node |
-| `cards_match_callables` | error | one consistency+symbol card per function/method |
-| `commit_sha_set` | error | the run recorded a git SHA |
-| `no_undefined_symbols` | **error (HARD)** | no `unresolved_call` nodes — a bare-name call (`foo()`, never `obj.foo()`) that resolves to nothing (not a project callable, import, builtin, or local). Conservative: a rename/typo trips it; legit imports/builtins/methods never do. **Blocks the build.** |
-| `no_isolated_nodes` | **warning (yellow)** | function/method nodes with no behavioral edge (dead code). Printed as `[WARN]`, **never blocks**. |
-| `dtype_present` | **warning (yellow)** | a `column`/`data_var` left `dtype=unknown` and not `runtime-probe`d. Surfaced, **never blocks** (keeps always-green on messy repos). |
-| `dtype_consistency_e2e` | **error (HARD)** | walks `produces`/`consumes`; a produced dtype that disagrees with a consumer's expected dtype is an end-to-end data break. **Blocks the build.** |
-| `lineage_no_dangling` | **error** | every `derives`/`transforms`/`feeds`/`lineage` edge endpoint resolves to a real node. |
-| `profile_assigned` | **warning (yellow)** | application callables with no `tagged_profile` sub-flow tag. Non-blocking. |
+| Invariant (error) | Fails when |
+|---|---|
+| `node_types_nonempty` | the graph is empty |
+| `no_dangling_edges` | an edge endpoint references no node |
+| `cards_match_callables` | function/method nodes and their consistency + symbol cards do not match one to one |
+| `commit_sha_set` | the latest `analysis_run` recorded no git SHA |
+| `no_undefined_symbols` | an `unresolved_call` node exists: a bare-name call (`foo()`, never `obj.foo()`) that resolves to no project callable, import, builtin or local. Conservative — a rename or typo trips it; legitimate imports, builtins and methods never do |
+| `dtype_consistency_e2e` | a produced dtype disagrees with the dtype a consumer declares (high-confidence `produces`/`consumes` edges only) — an end-to-end data break |
+| `lineage_no_dangling` | a `derives`/`transforms`/`feeds`/`lineage` edge endpoint references no node |
+| `no_data_leakage` | a model fits and evaluates on same-source data without a split (a `leakage` node) |
+| `history_append_only` | an append-only trigger on `node_snapshot` / `node_event` is missing |
+| `history_key_coverage` | an identity-bearing node of the latest run has no `node_key` |
 
-`run()` sets `ok = all(c.ok for c in checks if c.severity == 'error')`, so warnings
-are surfaced but never change the exit code.
+Every other check is a warning. The full list, with each check's severity, is
+`_CHECKS` in `scripts/selfcheck.py`; `uv run python selfcheck.py <db>` prints
+every check's result.
 
 ## DataFrame-aware slices (Phase B)
 
@@ -133,8 +139,9 @@ feeds the Phase C-2 dtype-coverage metric (gate strength == dtype coverage).
 
 Two low-cost protections run automatically during `init_project.sh`:
 
-- **C-1 · Cold snapshot.** Before the deep-layer rebuild wipes the old DB,
-  `archive_db.sh` copies it to `provledger.<old_sha>.db` (sha from the prior
+- **C-1 · Cold snapshot.** Before the deep-layer rebuild resets the graph rows
+  (nodes, edges and cards; the `analysis_run` log and the node history persist),
+  `archive_db.sh` copies the DB to `provledger.<old_sha>.db` (sha from the prior
   `analysis_run`, timestamp fallback). It is a **cold archive — not in any query
   path** — the raw material for future version-over-version provenance ("how did
   this symbol change across versions?") and the ledger's fuzzy search. The delta
@@ -160,13 +167,14 @@ Two low-cost protections run automatically during `init_project.sh`:
 | History of one node (events + run attribution) | `uv run python -m analyzer history <db> <qualified_name\|node_key>` |
 | Replay past commits into a FRESH graph (phase 7) | `uv run python -m analyzer backfill <repo> --project N --db-path P --since SHA [--until HEAD] [--every N] [--subdir DIR] [--fresh-db]` |
 | Export identity ambiguities for calibration (phase 7) | `uv run python -m analyzer ambiguities <db> --export calib.json --repo R` |
+| Build a calibration set by construction, or print its distribution (phase 8) | `uv run python -m analyzer calibration generate --out calib.json [--corpus DIR] [--include-live DB [--repo R]] [--merge F ...]` · `uv run python -m analyzer calibration stats calib.json` |
 | Evaluate an arbiter against a calibration file (phase 7) | `uv run python -m analyzer arbiter-eval calib.json --arbiter pkg.mod:Class` — see `docs/arbitration.md` |
 | List projects on record | read `~/skill-workspace/project-graphs/projects.json` |
 
-All Pythony points run inside the skill's `uv` env (`cd scripts && uv run ...`).
+All Python entry points run inside the skill's `uv` env (`cd scripts && uv run ...`).
 
 ## Common Mistakes
 
 - **Skipping verification.** Always confirm `Self-check: PASS` — a graph that fails invariants is not trustworthy.
 - **Committing generated graphs.** `*.db` and `*-state-graph.*` are git-ignored in the skill dir; keep graphs under `~/skill-workspace/project-graphs/`, never in the skill or the target repo.
-- **Re-running on a dirty tree.** The analyzer warns when the repo has uncommitted changes — the graph may not match committed code.
+- **Re-running on a dirty tree.** The analyzer warns when the repo has uncommitted changes — the graph may not match committed code. It reads the working tree, untracked files included; directories are skipped by name (`.venv`, `.venv-*`, `node_modules`, `build`, … — see `analyzer/walker.py`), not by `.gitignore`.

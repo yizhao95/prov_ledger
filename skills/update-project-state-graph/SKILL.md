@@ -43,8 +43,9 @@ not something inferred from the goal text (FL-014, phase 3.5).
 ## Run it: `scripts/review_run.py` (phase 4)
 
 The flow below is **executed by a script**, not walked by hand. The agent's job
-shrinks to three decisions: which test command to re-run, whether a `signature`
-gap is acceptable, and what the reasons are.
+shrinks to three decisions: which test command to re-run, whether a failing
+`signature` or `stale_references` gate (or a dirty working tree) is acceptable on
+the record, and what the reasons are.
 
 ```bash
 PY=~/skill-workspace/.venv/bin/python
@@ -63,6 +64,8 @@ $PY .../review_run.py --plan-id <plan> --project <name> --reasons reasons.json  
 | `--reasons stub\|unstated\|ask\|<file.json>` | `stub` = "scenario: <event_types>" per slot (scenario tests only); `unstated` = every slot NULL; `ask` = print the checklist and stop (exit 6, resumable); file = `[{qualified_name\|node_key, text}]`, an unknown key exits 6 and writes nothing |
 | `--tests "<cmd>"` | the 4b re-test, run inside the repo; omitted = logged as *tests skipped*, never silent |
 | `--accept-signature "<reason>"` | may override the `signature` gate **only** (FL-018 additive kwargs); the reason is written into the REVIEW.1 log and summary; any other failing gate still fails |
+| `--accept-stale "<reason>"` | may override the `stale_references` gate **only** — a definition that moved and is re-exported (the graph does not follow imports); logged the same way. It combines with `--accept-signature`; a failing gate that neither covers still fails |
+| `--allow-dirty` | refresh even though tracked files have uncommitted changes (the refresh analyses the working tree; untracked files do not count); logged as a `[MANUAL VERDICT]`. Without it a dirty tree FAILs the review at 4b |
 | `--timeout-tests <seconds>` | ceiling on the `--tests` command; default **600** s |
 | `--timeout-graph <seconds>` | ceiling on the `init_project.sh` refresh; default **4800** s |
 | `--dry-run` | steps 0–3, nothing written (no lock line, no start-step, no refresh). Its report **names every gate it did not evaluate** — `dirty_working_tree`, `graph_refresh`, `tests`, `selfcheck` (4b) and `close_reasons` (4c) — so a dry-run PASS can never be read as a real-run PASS. A dirty working tree passes the dry run and FAILs the real one (FL-134) |
@@ -259,20 +262,23 @@ held nothing, or the look ran out of time. A system that degrades in silence is
 the thing this product exists to prevent, so the silence is the one thing that
 may not go unrecorded.
 
-## Two close-time graph gates (deterministic, run before finalizing)
+## Close-time graph gates (deterministic, run before finalizing)
 
-The refresh in 4b calls `init_project.sh`, whose step [4/4] runs `selfcheck.py`
-on the rebuilt graph. Two of those invariants govern the review outcome:
+The refresh in 4b calls `init_project.sh`, whose stage [4/5] runs `selfcheck.py`
+on the rebuilt graph, and the driver runs `selfcheck.run` once more after
+`--tests`. Every **error**-severity invariant FAILs the review and no warning
+ever does; the list lives in `project-state-graph/scripts/selfcheck.py`. The two
+that come up most often in a review:
 
 | Check | Severity | On failure |
 |---|---|---|
 | `no_undefined_symbols` | **error (HARD)** | A bare-name call resolving to nothing (rename/typo). **FAIL the review** — `fail-step.sh` the child `<plan>-REVIEW.1` with the offending `name() @ file:line` list. A human decides. |
 | `no_isolated_nodes` | **warning (yellow)** | Dead-code callables with no behavioral edges. **Non-blocking** — surface the `[WARN]` line(s) in the review summary, but still `complete-step.sh` the child if everything else is clean. |
 
-Because `init_project.sh` runs with `set -e`, a `no_undefined_symbols` failure
-makes the refresh itself exit non-zero — treat that as an automatic review FAIL.
-The existing `stale_references` gate (below) is unchanged and runs in addition to
-these.
+Because `init_project.sh` runs with `set -e`, an error-severity failure (such as
+`no_undefined_symbols`) makes the refresh itself exit non-zero — an automatic
+review FAIL. These run in addition to the diff gates of step 3 (`stale_references`
+and the contract gates below).
 
 ## Data drift gates (v2 — report, don't auto-fix)
 
@@ -322,7 +328,7 @@ philosophy as the rest of the reviewer: **report and FAIL, never auto-fix**.
 | Find stale callers in the graph | `review_diff.stale_references(db_path, names)` |
 | Full verdict | `review_diff.report(db_path, changed)` |
 | Combined contract verdict (AND of all gates) | `review_diff.full_verdict(db_path, repo, base, head, changed=...)` |
-| Run graph gates (undefined=HARD, isolated=warn) | `selfcheck.run(db_path)` (also run by `init_project.sh` [4/4]) |
+| Run graph gates (error severity = HARD, warnings never block) | `selfcheck.run(db_path)` (also run by `init_project.sh` [4/5]) |
 | Refresh the deep graph | `project-state-graph/scripts/init_project.sh` |
 | Close the plan (drive the child step) | `executing-plans/scripts/complete-step.sh` / `fail-step.sh` on `<plan>-REVIEW.1` |
 | The whole flow, deterministically | `scripts/review_run.py --plan-id P --project X [--tests ...] [--reasons ...]` |
@@ -330,8 +336,8 @@ philosophy as the rest of the reviewer: **report and FAIL, never auto-fix**.
 | Hang one pointer on a reason | `provledger reference add --reason <id> --kind email --uri … --label … --occurred-at …` |
 | Record what became of a slot | `provledger review evidence-log --plan <id> --node <key> --outcome …` |
 
-Run the helpers with the project-state-graph venv:
-`~/skill-workspace/orchestrator/.venv/bin/python` (stdlib-only module).
+Run the helpers with the same `PY` as `review_run.py` above; they are stdlib
+only.
 
 ## Close Contract (non-negotiable)
 
@@ -364,7 +370,7 @@ Run the helpers with the project-state-graph venv:
 | Dropping a source that contradicts the reason | Attach it with `--stance contradicts`. Evidence is allowed to fail. |
 | Leaving a slot out of `evidence_log` because nothing happened | Nothing happening is the row worth having — `not_searched` is why it is blank. |
 | Walking steps 0–4c by hand | Use `review_run.py`; hand-driving skips the lock line, the attribution env or the checklist sooner or later (phase 2–3.5 dogfood). |
-| Overriding any gate but `signature` | `--accept-signature` covers exactly one gate; a stale reference or data drift is a real gap — fix the code or FAIL. |
+| Overriding any gate but `signature` / `stale_references` | `--accept-signature` and `--accept-stale` each cover exactly one gate, with the reason on the record. `--accept-stale` is for a moved, re-exported definition, never for a caller that really is stale; data drift, a SQL contract break or an empty range is a real gap — fix the code or FAIL. |
 
 ## When the project has no deep graph yet
 

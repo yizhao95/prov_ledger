@@ -11,9 +11,10 @@
 #
 # Everything is built with the plugin's own scripts — project-state-graph's
 # init_project.sh, provledger note, publish-plan.sh, headline-respond.sh — on a
-# scratch ORCH_DB and a scratch registry. No hand-written SQL, and nothing
-# touches ~/skill-workspace: a demo that corrupts the ledger it demonstrates is
-# not a demo.
+# scratch ORCH_DB and a scratch registry (init_project.sh writes the graph index
+# beside it). No hand-written SQL, and nothing is written under ~/skill-workspace
+# (by default its venv's python runs the scripts, nothing more): a demo that
+# corrupts the ledger it demonstrates is not a demo.
 #
 #   DEMO_HOME=/tmp/x bash examples/phantom-uplift/demo-provenance.sh
 #

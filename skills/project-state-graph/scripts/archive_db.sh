@@ -2,7 +2,9 @@
 # archive_db.sh — provLedger Phase C-1 cold snapshot.
 #
 # Copies an existing state-graph DB to provledger.<commit_sha>.db in the same
-# directory BEFORE init_project.sh wipes it. This is a COLD ARCHIVE — not in any
+# directory BEFORE init_project.sh rebuilds it. The rebuild resets the graph rows
+# (node, edge, cards); analysis_run and the node_snapshot / node_event history are
+# kept; this copy is what preserves the old graph rows. It is a COLD ARCHIVE — not in any
 # query path — preserving the raw material for future version-over-version
 # provenance ("how did this symbol change across versions?") and the ledger's
 # fuzzy search ("has a change like this failed before?"). Building the delta
