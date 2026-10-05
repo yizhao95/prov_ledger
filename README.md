@@ -117,7 +117,7 @@ Each command below was run for real against a scratch ledger; the lines under it
 ```console
 $ claude plugin list
   ❯ provledger@provledger
-    Version: 0.4.3
+    Version: 0.4.4
     Scope: user
     Status: ✔ enabled
 ```
