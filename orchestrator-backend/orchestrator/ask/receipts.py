@@ -29,9 +29,9 @@ meant something else entirely: `choose`'s code-only path, which returns the top
 `locate.FALLBACK_TOP` candidates by match score. Nobody was choosing — a scoring
 function was, and the score counts how often the question's words appear, so the
 most-*mentioned* node won rather than the most relevant one. Measured against
-this project's own ledger, "why is the review timeout 4800 seconds?" put
-`ask.summarize.review` first: six points for having "review" in its name, two
-for one text hit, nothing whatever to do with timeouts.
+a real ledger, a question naming one setting put first a node that merely
+shared a common word with it in its name: the score rewards mentions, not
+relevance.
 
 The choosing step therefore left Python. There are now two reads with the
 session's own model in between:

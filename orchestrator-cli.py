@@ -24,8 +24,11 @@ import sqlite3
 import sys
 from pathlib import Path
 
-# Allow running as `python orchestrator-cli.py ...` without install
-sys.path.insert(0, str(Path(__file__).resolve().parent / "orchestrator"))
+# Allow running as `python orchestrator-cli.py ...` without install: the
+# `orchestrator` package lives in orchestrator-backend/ (the venv installs it
+# as `provledger`, so `import orchestrator` needs its parent directory here).
+BACKEND = Path(__file__).resolve().parent / "orchestrator-backend"
+sys.path.insert(0, str(BACKEND))
 
 from orchestrator import api, db  # noqa: E402
 from orchestrator.circuit_breakers import CircuitBreakerError, HardStop  # noqa: E402

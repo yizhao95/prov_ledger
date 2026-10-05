@@ -20,7 +20,9 @@
 #   4. append "--- exit_code=<n>, runtime=<s>s ---" footer
 #   5. if exit==0: complete-step (with log_context + summary)
 #      else:       fail-step    (with log_context + reason)
-#   6. exit with the wrapped command's exit code (so caller sees pass/fail)
+#   6. print one JSON line {"ok":true,"op":"run-step",...} last, carrying every
+#      other key of that op's tail line (e.g. needs_agent_review), then exit
+#      with the wrapped command's exit code (so caller sees pass/fail)
 #
 # Env: ORCH_DB overrides SQLite path (default: ~/skill-workspace/orchestrator.db).
 set -uo pipefail
@@ -187,24 +189,38 @@ if exit_code == "0":
 else:
     print(json.dumps({"step_id": step_id, "reason": f"exit_code={exit_code}", "log_context": log}))
 PYEOF
-if [[ $EXIT_CODE -eq 0 ]]; then
-    "${SCRIPT_DIR}/complete-step.sh" "${COMPLETE_TMP}" >/dev/null
-else
-    "${SCRIPT_DIR}/fail-step.sh" "${COMPLETE_TMP}" >/dev/null
+if [[ $EXIT_CODE -eq 0 ]]; then FIN_OP=complete-step; else FIN_OP=fail-step; fi
+# Keep the op's tail line: it carries the signals the caller must act on
+# (needs_agent_review + the review step ids). Its pretty JSON stays quiet.
+FIN_RC=0
+FIN_OUT="$("${SCRIPT_DIR}/${FIN_OP}.sh" "${COMPLETE_TMP}")" || FIN_RC=$?
+if [[ $FIN_RC -ne 0 ]]; then
+    echo "run-step: ${FIN_OP} failed for ${STEP_ID} (exit ${FIN_RC})" >&2
+    exit $FIN_RC
 fi
+FIN_TAIL="$(printf '%s\n' "${FIN_OUT}" | tail -n 1)"
 
 # ---- 6. one-line JSON summary on stdout + exit with wrapped command's code ----
+# run-step's own keys win; every other key on the op's tail line is passed on.
 "${PYBIN}" -c "
 import json, sys
-print(json.dumps({
+out = {
     'ok': True,
     'op': 'run-step',
     'step_id': sys.argv[1],
     'exit_code': int(sys.argv[2]),
     'log_chars': int(sys.argv[3]),
     'truncated': sys.argv[4] == 'true',
-}))
+}
+try:
+    tail = json.loads(sys.argv[5])
+except ValueError:
+    tail = {}
+if isinstance(tail, dict):
+    for k, v in tail.items():
+        out.setdefault(k, v)
+print(json.dumps(out))
 " "${STEP_ID}" "${EXIT_CODE}" "${FINAL_LEN}" \
-    "$([[ ${FINAL_LEN} -gt 16500 ]] && echo true || echo false)"
+    "$([[ ${FINAL_LEN} -gt 16500 ]] && echo true || echo false)" "${FIN_TAIL}"
 
 exit $EXIT_CODE

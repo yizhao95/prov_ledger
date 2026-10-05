@@ -1,6 +1,6 @@
 ---
 name: writing-plans
-description: "ALWAYS loaded FIRST when starting any new task — non-negotiable, before any tool use, regardless of whether the task seems trivial. Triggers on EVERY user turn: questions, requests, code, debugging, design, build, create, make, write, fix, add, change, set up, plan, implement, refactor, install, deploy, schema, SQL, database, YAML, JSON, config, API, function, class, test, document, hello, help me. Workflow: (1) If other skills are needed for this task (domain, language, framework, integration), load those FIRST via list_or_search_skills + activate_skill — do NOT proceed until all required skills are loaded. (2) Once all needed skills are active, evaluate the task scope: count anticipated steps and check whether invoke_agent will be called. (3) GATING RULE: trigger the full writing-plans body (compose plan-input.json + run scripts/publish-plan.sh) IF AND ONLY IF estimated_steps >= 3 OR invoke_agent will be called. Otherwise note 'trivial — no plan needed' and proceed directly. (4) Whenever a plan IS published, IMMEDIATELY trigger the executing-plans skill — never defer it, never skip it. The chain writing-plans → executing-plans is atomic."
+description: "ALWAYS loaded FIRST when starting any new task — non-negotiable, before any tool use, regardless of whether the task seems trivial. Triggers on EVERY user turn: questions, requests, code, debugging, design, build, create, make, write, fix, add, change, set up, plan, implement, refactor, install, deploy, schema, SQL, database, YAML, JSON, config, API, function, class, test, document, hello, help me. Workflow: (1) If other skills apply (domain, language, framework, integration), load them FIRST with the Skill tool. (2) Then size the task: count the anticipated steps and check whether a sub-agent will be dispatched (Agent tool). (3) GATING RULE: run the full writing-plans body (compose plan-input.json + run scripts/publish-plan.sh) IF AND ONLY IF estimated_steps >= 3 OR a sub-agent will be dispatched; otherwise note 'trivial — no plan needed' and proceed. (4) Whenever a plan IS published, IMMEDIATELY trigger executing-plans — never defer it, never skip it. The chain writing-plans → executing-plans is atomic."
 ---
 
 # Writing Plans
@@ -11,13 +11,13 @@ SQLite-backed plan creation. The agent **composes** a plan-input file (JSON or Y
 
 Trigger the full workflow when:
 - `estimated_steps >= 3`, **OR**
-- `invoke_agent` will be called
+- a sub-agent will be dispatched (Agent tool)
 
 Otherwise: announce "trivial — no plan needed" and proceed directly. (Trivial 1-step tasks may still publish for audit trail.)
 
-## 🔄 The 5-step workflow
+## 🔄 The workflow
 
-1. **Load other skills first.** Call `list_or_search_skills` for the task domain + run the standing-skill checklist. Activate every skill that even might apply. Do NOT proceed until they're all loaded.
+1. **Load other skills first.** Check the available skills for the task domain + run the standing-skill checklist ([`reference/skill-source-enum.md`](reference/skill-source-enum.md)). Load every skill that even might apply with the Skill tool. Do NOT proceed until they're all loaded.
 
 2. **Ensure the dashboard is up.** Run the idempotent script — never read the underlying webapp launcher:
    ```bash
@@ -173,7 +173,7 @@ downstream constraints) — as findings with a severity and a **tier label**
 This skill **only** writes the plan to SQLite. It does NOT:
 - modify a plan after publish
 - record `record-skill` (deferred-load activations) — that's executing-plans
-- run `start-step` / `complete-step` / `evaluate --deviation` — that's executing-plans
+- run `start-step` / `complete-step` / `deviate` — that's executing-plans
 - enforce circuit breakers (immutability, max_revisions, depth_limit) at runtime — that's executing-plans
 
 If you find yourself wanting to "update the plan I just wrote", stop. The next call belongs to executing-plans.
@@ -181,14 +181,14 @@ If you find yourself wanting to "update the plan I just wrote", stop. The next c
 ## 🛠️ Tests
 
 ```bash
-~/skill-workspace/orchestrator/.venv/bin/python -m pytest \
-  ${CLAUDE_PLUGIN_ROOT}/skills/writing-plans/tests/ -v
+"${PROVLEDGER_VENV:-$HOME/skill-workspace/.venv}/bin/python" -m pytest \
+  "${CLAUDE_PLUGIN_ROOT}/skills/writing-plans/tests" -q
 ```
 
-10 tests cover both scripts (publish-plan: 7, ensure-dashboard: 3).
+They cover the scripts (publish, pre-flight, ledger, dashboard) and `test_plan_input_schema.py`, which holds the schema and example to the code.
 
 ## 🔗 See also
 
-- [`../README.md`](../README.md) — repo-level overview, installation, activation paths, full skill catalog
+- [`../../README.md`](../../README.md) — what provLedger does; [`../../INSTALL.md`](../../INSTALL.md) — installation, and the dashboard (§6)
 - [`../executing-plans/SKILL.md`](../executing-plans/SKILL.md) — the other half of the contract; owns ALL post-publish writes
-- **Orchestration dashboard** at `~/skill-workspace/orchestrator-webapp/` — visualizes plans (tree view + parallel branches). `publish-plan.sh` auto-launches it. See README → "Recommended companion" for setup.
+- **Dashboard** — the bundled `orchestrator-webapp/` at http://localhost:8765 visualizes plans (tree view + parallel branches); workflow step 2 (`ensure-dashboard.sh`) starts it.

@@ -6,10 +6,10 @@ Every step in a plan has a `step_type` that powers the dashboard's per-row icon 
 |-----------------|------|----------------------------------------------------------------------------------------------|
 | `THINKING`      | 🧠   | Pure reasoning / planning / design. No tool use yet.                                         |
 | `ANALYSIS`      | 🔍   | Reading files / grepping / inspecting state to understand current reality.                   |
-| `CODE`          | 💻   | Writing or modifying code/templates/config (`create_file`, `replace_in_file`, `delete_file`).|
-| `COMMAND`       | ⚡   | Running shell commands (`agent_run_shell_command`): tests, migrations, git, sync.            |
+| `CODE`          | 💻   | Writing or modifying code/templates/config (Write / Edit, or deleting files).                |
+| `COMMAND`       | ⚡   | Running shell commands (Bash): tests, migrations, git, sync. Executed through `run-step.sh`.  |
 | `DOCUMENTATION` | 📝   | Writing/updating README / SKILL.md / spec / comment-heavy files.                             |
-| `SUB_AGENT`     | 🤖   | Calling `invoke_agent` to delegate to another agent (input + output captured).               |
+| `SUB_AGENT`     | 🤖   | Dispatching a sub-agent (Agent tool) to delegate the work (input + output captured).         |
 
 ## How the type is set
 

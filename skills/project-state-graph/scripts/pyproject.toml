@@ -1,7 +1,7 @@
 [project]
 name = "project-graph"
 version = "0.1.0"
-description = "Add your description here"
+description = "project-state-graph analyzer: builds a code/data state graph (SQLite) and ARCHITECTURE.md for a repo, and registers it"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

@@ -1,6 +1,6 @@
 ---
 name: ledger
-description: "Ask the ledger why / whether we tried — read-only. Use when the user types `/ledger <question>` or asks why something in this project is the way it is, why a value was chosen, who decided it, whether an alternative was ever tried, or whether a change was ever verified. Answers ONLY from recorded rows: every sentence cites the record id it rests on, absences are computed by code, and the searched range is stated. Never changes anything."
+description: "Ask the ledger why / whether we tried — read-only. Use when the user types `/ledger <question>` or asks why something in this project is the way it is, why a value was chosen, who decided it, whether an alternative was ever tried, or whether a change was ever verified. Answers ONLY from recorded rows: every sentence cites the record id it rests on, absences are computed by code, and the searched range is stated. Changes nothing the project depends on."
 ---
 
 # Ledger — ask why, and whether we tried
@@ -18,8 +18,8 @@ paragraph back to the code so it can delete anything you could not support.
 1. **The `provledger` reads this skill documents, and nothing outside them.**
    `ask` and `ask submit` carry the answer; `graph`, `why`, `record` and `plan`
    (§b2) are there for when the fact table does not settle it. Forbidden is
-   everything else: no edits, no writes, no querying the database by hand. If
-   the ledger does not say it, the answer does not say it.
+   everything else: no edits, no writes of your own, no querying the database
+   by hand. If the ledger does not say it, the answer does not say it.
 2. **Read the code freely. This tool supplements it; it does not replace it.**
    Grep it, open it, follow it — that is your job and nothing here restricts it.
    What the code physically cannot contain is the part this ledger holds: why a
@@ -55,7 +55,10 @@ provledger ask "<the user's question, verbatim>" --json --no-model \
 
 `--no-model` is deliberate: **you** are the model, so no second one is spawned.
 The JSON gives you `ask_id`, `facts_text` (the fact table), `absences`, `scope`,
-`scope_line`, `candidates` and `chosen`.
+`scope_line`, `candidates` and `chosen`. With no model, `chosen` holds the top
+few `candidates` by word-overlap score (its `basis` reads `fallback: no model`),
+not a judgement: if a chosen node has nothing to do with the question, the table
+is thin for that reason — go to b2.
 
 If it returns `"degraded": true` with no nodes, or the fact table is empty, say
 so and stop — an empty table is an answer.
@@ -183,8 +186,15 @@ is wrong, the record of that is `provledger ask feedback <ask_id> wrong`.
 
 ## What this skill never does
 
-- It never edits, creates or deletes anything in the repository.
-- It never runs tests, builds, or any command other than the two above.
+- It never edits, creates or deletes anything in the repository. The one file
+  this flow can produce is the evidence card, and only when the user asks for
+  `[Export]`, at the path they choose.
+- It changes nothing the project depends on: no decision, reason, constraint or
+  plan. The commands keep their own access log — `ask` logs the question,
+  `ask submit` the checked answer, `why` a `read_hit` per record shown,
+  `ask feedback` the user's verdict — and that is all they write.
+- It never runs tests, builds, or any command other than the `provledger`
+  commands above.
 - It never fills a gap in the ledger with a plausible explanation. "There is no
   record of that" is a complete and useful answer, and it is the one answer a
   model is worst at giving unprompted — which is why the absence sentences are

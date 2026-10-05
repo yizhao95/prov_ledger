@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # deviate.sh — deterministic flow for deviate write op.
 # Composes input as JSON/YAML, this script validates + writes via the orchestrator.
-# See ~/.code_puppy/skills/executing-plans/update-input.example.json for the input shape.
+# See ../update-input.example.json (and ../update-input.schema.json) for the input shape.
 #
 # Env: ORCH_DB overrides the SQLite path (default: ~/skill-workspace/orchestrator.db).
 set -uo pipefail

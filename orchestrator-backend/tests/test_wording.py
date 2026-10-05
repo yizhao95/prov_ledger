@@ -70,8 +70,8 @@ def test_phase2_docs_and_snippets_are_present_and_stay_neutral():
     assert "headline_notes" in wp and "never blocks" in wp and "provledger why" in wp
     ep = (REPO / "skills" / "executing-plans" / "SKILL.md").read_text(encoding="utf-8")
     assert "headline-respond.sh" in ep and '"because"' in ep and "Shown is not read" in ep
-    readme = (REPO / "README.md").read_text(encoding="utf-8")
-    assert "| `why` |" in readme and "`headline show` / `respond` / `ack`" in readme
+    cli_doc = (REPO / "docs" / "cli.md").read_text(encoding="utf-8")    # the command table's one home
+    assert "| `why` |" in cli_doc and "`headline show` / `respond` / `ack`" in cli_doc
     ki = _known_issues()
     assert "read_hit" in ki and "--never-read" in ki          # phase 2's surfaces still have their limits on record
     surfaces = [*(REPO / "hooks").glob("*.sh"), REPO / "orchestrator-backend" / "orchestrator" / "session.py"]
@@ -98,7 +98,8 @@ def test_phase2b_docs_and_the_new_views_stay_neutral():
     assert "one anchor, three angles" in readme
     assert "share a single anchor" in readme
     assert "not three pages" in readme, "the README must say the three views are one view, not three"
-    assert "`/session/{id}`" in readme
+    routes = (REPO / "orchestrator-webapp" / "README.md").read_text(encoding="utf-8")  # the routes table's one home
+    assert "`/session/{id}`" in routes
     ki = _known_issues()
     assert "The full graph view is slow" in ki               # the view's one known limit is still published
     surfaces = [REPO / "orchestrator-webapp" / "app" / "templates" / "graph.html", REPO / "orchestrator-webapp" / "app" / "templates" / "session.html",

@@ -108,8 +108,11 @@ def default_runner(prompt: str, *, model: str | None = None,
         return {**detail, "elapsed_ms": int((time.perf_counter() - started) * 1000)}
 
     try:
+        # PROVLEDGER_HEADLESS=1 makes provLedger's own hooks stand down in the child
+        # (FL-182): the user's plugins run there too, and this prompt is not the user's.
         p = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
-                           timeout=timeout_s, cwd=os.environ.get("TMPDIR") or "/tmp")
+                           timeout=timeout_s, cwd=os.environ.get("TMPDIR") or "/tmp",
+                           env={**os.environ, "PROVLEDGER_HEADLESS": "1"})
     except subprocess.TimeoutExpired as e:
         raise R.RunnerTimeout(f"claude did not answer within {timeout_s} s",
                               {**timed(), "stderr_head": R.head(getattr(e, "stderr", None))}) from e

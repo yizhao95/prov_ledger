@@ -33,10 +33,15 @@ def test_only_host_mentions_the_bundled_backend_path():
         if "orchestrator-backend" in p.read_text(encoding="utf-8", errors="replace"):
             offenders.append(str(p.relative_to(SCRIPTS)))
     assert offenders == [], offenders
-    # repo-wide: no single line splices orchestrator-backend into sys.path except the shim
+    # repo-wide: no single line splices orchestrator-backend into sys.path except the shim.
+    # Only files git would ship or show: a gitignored local tool is not the repo's.
+    listed = subprocess.run(["git", "ls-files", "-co", "--exclude-standard", "--", "*.py"],
+                            cwd=str(REPO), capture_output=True, text=True, check=True).stdout.split()
     lines = []
-    for p in REPO.rglob("*.py"):
+    for p in (REPO / rel for rel in listed):
         if ".venv" in p.parts or "node_modules" in p.parts or p.name in ("_host.py", "test_host_import.py"):
+            continue
+        if not p.is_file():
             continue
         for n, ln in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
             if "sys.path.insert" in ln and "orchestrator-backend" in ln:

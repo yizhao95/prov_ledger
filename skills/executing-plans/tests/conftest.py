@@ -29,9 +29,7 @@ from orchestrator import db as orch_db  # noqa: E402
 
 SKILL_DIR = Path(__file__).parent.parent
 SCRIPTS_DIR = SKILL_DIR / "scripts"
-# Resolve writing-plans relative to executing-plans so we work in BOTH layouts:
-#   install layout: ~/.code_puppy/skills/executing-plans/  -> sibling writing-plans/
-#   source-repo:    ~/.code_puppy/skills/skills/executing-plans/  -> sibling writing-plans/
+# writing-plans is executing-plans' sibling in the repo and in the installed plugin alike.
 WRITING_PLANS_PUBLISH = SKILL_DIR.parent / "writing-plans" / "scripts" / "publish-plan.sh"
 
 

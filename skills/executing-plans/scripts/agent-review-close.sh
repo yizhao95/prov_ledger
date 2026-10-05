@@ -6,7 +6,7 @@
 # Input JSON: {plan_id, outcome: "pass"|"fail", summary?, log_context?}
 #   pass -> review step NEEDS_REVIEW -> COMPLETED, plan COMPLETED
 #   fail -> review step NEEDS_REVIEW -> FAILED,    plan FAILED (details logged)
-# See ~/.code_puppy/skills/executing-plans/update-input.example.json.
+# See ../update-input.example.json (and ../update-input.schema.json).
 #
 # Env: ORCH_DB overrides the SQLite path (default: ~/skill-workspace/orchestrator.db).
 set -uo pipefail

@@ -113,3 +113,14 @@ def test_write_html_self_contained(tmp_path, db_path, level):
     graph_viz.write_html(db_path, str(out), level=level, title="demo-up")
     html = out.read_text()
     assert "vis-network" in html and "demo-up" in html and len(html) > 1000
+
+
+def test_copy_is_byte_identical_to_the_analyzer_original():
+    """This module is a byte copy of project-state-graph's analyzer/graph_viz.py
+    (stdlib only, so this skill needs no analyzer package to render a graph).
+    Nothing else keeps the two in step: edit the original, then copy it here."""
+    from pathlib import Path
+    here = Path(graph_viz.__file__).resolve()
+    original = here.parents[2] / "project-state-graph" / "scripts" / "analyzer" / "graph_viz.py"
+    assert here.read_bytes() == original.read_bytes(), (
+        f"{here} has drifted from {original}; copy the analyzer's version over it")

@@ -61,4 +61,4 @@ This is non-negotiable because:
 
 ## What the executing-plans skill enforces
 
-When executing-plans encounters a `CODE` step without a preceding `TEST` step, it deviates the plan via `$CLI evaluate --deviation` and inserts a TEST sub-step before continuing. This is mid-flight enforcement of the planning-time rule.
+When executing-plans encounters a `CODE` step without a preceding `TEST` step, it deviates the plan via `executing-plans/scripts/deviate.sh` and inserts a TEST sub-step before continuing. This is mid-flight enforcement of the planning-time rule.

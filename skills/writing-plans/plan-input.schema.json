@@ -2,10 +2,11 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/yizhao95/prov_ledger/main/skills/writing-plans/plan-input.schema.json",
   "title": "plan-input",
-  "description": "Input file consumed by writing-plans/scripts/publish-plan.sh. The agent composes one of these (JSON or YAML) per task; the script validates, then writes the plan to ~/skill-workspace/orchestrator.db. After this hand-off, ALL revisions/updates/deviations are owned by the executing-plans skill.",
+  "description": "Input file consumed by writing-plans/scripts/publish-plan.sh. The agent composes one of these (JSON or YAML) per task; the script validates, then writes the plan to ~/skill-workspace/orchestrator.db. After this hand-off, ALL revisions/updates/deviations are owned by the executing-plans skill. Documentation only: real validation is scripts/publish_plan.py::_validate, which ignores keys it does not read, so keys starting with '_' are free annotations. tests/test_plan_input_schema.py holds this file to the code.",
   "type": "object",
   "required": ["goal", "prefix", "steps"],
   "additionalProperties": false,
+  "patternProperties": {"^_": {}},
   "properties": {
     "goal": {
       "type": "string",
@@ -48,12 +49,12 @@
           "name": {
             "type": "string",
             "minLength": 1,
-            "description": "Skill name as it appears in ~/.code_puppy/skills/<name>/SKILL.md"
+            "description": "Skill name as the Skill tool lists it, e.g. 'test-driven-development'"
           },
           "source": {
             "type": "string",
             "enum": ["iron-law", "auto-search", "explicit-mention", "deferred-load"],
-            "description": "Why this skill was activated. iron-law = mandatory trigger; auto-search = surfaced by list_or_search_skills; explicit-mention = user named it; deferred-load = activated mid-flight (use record-skill instead in that case)."
+            "description": "Why this skill was activated. iron-law = mandatory trigger; auto-search = matched the task when you checked the available skills; explicit-mention = user named it; deferred-load = activated mid-flight (use executing-plans/scripts/record-skill.sh instead in that case)."
           }
         }
       }
@@ -92,6 +93,40 @@
             }
           }
         ]
+      }
+    },
+    "expectations": {
+      "type": "array",
+      "description": "What you claim a target will do after the change, and the channel through which that could be observed. Recorded verbatim, judged later against what is observed. Needs a tracked project (declared, or published from a registered repo).",
+      "items": {
+        "type": "object",
+        "required": ["target", "target_kind", "claim", "channel"],
+        "properties": {
+          "target":      {"type": "string", "minLength": 1, "description": "The node, column, dataset or metric the claim is about."},
+          "target_kind": {"type": "string", "enum": ["node", "column", "dataset", "metric"]},
+          "claim":       {"type": "string", "minLength": 1, "description": "One sentence: what will be true after the change."},
+          "channel": {
+            "description": "How the claim can be checked: graph, profile_drift, none, or metric:<name> (judged against record-metric rows).",
+            "anyOf": [
+              {"type": "string", "enum": ["graph", "profile_drift", "none"]},
+              {"type": "string", "pattern": "^metric:.+$"}
+            ]
+          },
+          "step": {"type": "integer", "minimum": 0, "description": "Optional 0-based index into steps[]; anchors the expectation to that step."}
+        }
+      }
+    },
+    "headline_notes": {
+      "type": "array",
+      "description": "Your own findings for the plan headline (project-scoped plans). Each is tiered 'asserted' and must cite records that exist, or publish exits non-zero.",
+      "items": {
+        "type": "object",
+        "required": ["finding_kind", "cites"],
+        "properties": {
+          "finding_kind": {"type": "string", "enum": ["similar_intent"]},
+          "cites":        {"type": "array", "minItems": 1, "items": {"type": "integer"}, "description": "reason ids the finding rests on."},
+          "text":         {"type": "string", "description": "One sentence; cut at 240 characters."}
+        }
       }
     }
   }

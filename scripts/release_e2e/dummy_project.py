@@ -217,9 +217,9 @@ class Build:
 
     def build_graph(self, plan_id: str | None = None, step_id: str | None = None) -> None:
         """The project state graph. init_project.sh registers the project too,
-        into the sandbox's own registry (PSG_REGISTRY_ROOT is set by the entry
-        script — setting only PSG_REGISTRY_PATH would still rewrite the
-        developer's PROJECT-STATE-GRAPHS.md)."""
+        into the sandbox's own registry (the entry script sets PSG_REGISTRY_ROOT
+        and PSG_REGISTRY_PATH; init_project.sh keeps the index beside the
+        registry either way)."""
         script = self.under_test / "skills" / "project-state-graph" / "scripts" / "init_project.sh"
         extra = {"PROVLEDGER_TRIGGER": "review" if plan_id else "manual"}
         if plan_id:

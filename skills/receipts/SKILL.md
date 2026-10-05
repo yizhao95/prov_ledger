@@ -1,6 +1,6 @@
 ---
 name: receipts
-description: "Help the user reply to a colleague who questioned a decision — read-only. Use when the user types `/receipts <what they said>`, or asks how to answer someone who challenged a number, a change or a choice in this project (\"why did you change this\", \"didn't we agree the other way\", \"where did this number come from\"). Writes a courteous reply grounded ONLY in recorded rows, lists the evidence under it with a record id per line, and asks whether the tone needs adjusting. Never sends anything. Never changes anything."
+description: "Help the user reply to a colleague who questioned a decision — read-only. Use when the user types `/receipts <what they said>`, or asks how to answer someone who challenged a number, a change or a choice in this project (\"why did you change this\", \"didn't we agree the other way\", \"where did this number come from\"). Writes a courteous reply grounded ONLY in recorded rows, lists the evidence under it with a record id per line, and asks whether the tone needs adjusting. Never sends anything. Changes nothing the project depends on."
 ---
 
 # Receipts — answer the colleague, on the record
@@ -15,19 +15,20 @@ need it said to somebody else, in a tone that holds up, resting on rows.
 
 **You are the model.** No second one is spawned: the code searches the ledger
 and computes what is missing, and *you* decide which records the challenge is
-actually about and write the reply. There used to be a scoring function doing
-the deciding; it picked the node whose name contained the most words from the
-question, which is how a question about a timeout came back with material about
-an unrelated review function. That is why the flow below has two reads with your
-judgement in between.
+actually about and write the reply. The code's ranking is word overlap, and word
+overlap can put first a node whose name shares words with the question but has
+nothing to do with it. So here the score only orders the candidates, and the
+flow below has two reads with your judgement in between. (`provledger ask`,
+behind `/ledger`, still takes its top-scored nodes when no model is called;
+`/receipts` does not.)
 
 ## The hard rules
 
 1. **The `provledger` reads below, and nothing else.** Every read this skill
    documents is permitted, and several are required — `receipts candidates`,
    `receipts facts`, `graph`, `why`, `record`, `plan`. Forbidden is everything
-   that is not one of those: no edits, no writes, no querying the database by
-   hand. If the ledger does not say it, the reply does not say it.
+   that is not one of those: no edits, no writes of your own, no querying the
+   database by hand. If the ledger does not say it, the reply does not say it.
 2. **Read the code freely. This tool supplements it; it does not replace it.**
    Grep it, open it, follow it — that is your job and nothing here restricts it.
    What the code physically cannot contain is the part this ledger holds: why a
@@ -296,9 +297,13 @@ Then stop. Do not send it, do not offer to send it, do not draft a follow-up.
 ## What this skill never does
 
 - It **never sends** the reply, or any message, anywhere.
-- It never edits, creates or deletes anything in the repository, and it writes
-  nothing to the ledger — not a row, not even a record of having been asked.
-- It never runs tests, builds, or any command other than the two above.
+- It never edits, creates or deletes anything in the repository, and it changes
+  nothing the project depends on. `receipts candidates`, `receipts facts`,
+  `graph`, `record` and `plan` write nothing at all, not even a record of having
+  been asked; `why` appends a `read_hit` row for each record it shows, an access
+  log and nothing more.
+- It never runs tests, builds, or any command other than the `provledger` reads
+  above.
 - It never fills a gap in the ledger with a plausible explanation. "There is no
   record of that" is a complete and useful answer, and it is the one answer a
   model is worst at giving unprompted — which is why the absence sentences are

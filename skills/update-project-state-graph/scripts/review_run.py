@@ -9,7 +9,7 @@ chooses the test command, decides a signature override and supplies reasons.
                                                 # ask: print the checklist, exit 6, resume later;
                                                 # json: [{node_key|qualified_name, text}, ...]
         [--tests "<command>"]                   # 4b re-test, run in the repo; absent -> logged as skipped
-        [--timeout-tests 600] [--timeout-graph 300]  # seconds; a breach FAILS the step (write scripts: 60s)
+        [--timeout-tests 600] [--timeout-graph 4800] # seconds; a breach FAILS the step (write scripts: 60s)
         [--accept-signature "<reason>"]         # may override ONLY the signature gate; reason is logged
         [--accept-stale "<reason>"]             # may override ONLY the stale_references gate (moved + re-exported defs)
         [--allow-dirty]                         # refresh despite uncommitted tracked changes (traced); default: FAIL

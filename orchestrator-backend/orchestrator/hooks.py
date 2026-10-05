@@ -32,6 +32,7 @@ from . import db
 DEFAULT_ERROR_LOG = Path.home() / "skill-workspace" / "hook-errors.log"
 BUSY_TIMEOUT_MS = 2000
 EVENTS = ("PostToolUse", "UserPromptSubmit", "PreToolUse", "Stop")
+HEADLESS_ENV = "PROVLEDGER_HEADLESS"   # set by testing.claude_arbiter on its claude child
 
 
 def error_log_path() -> Path:
@@ -87,8 +88,10 @@ def record_tool_call(conn, data: dict) -> int:
 # user speaking, so none of it may become a `stated` reason's verbatim span.
 # The match is on the PREFIX of the stripped prompt: a person who writes ABOUT
 # `<system-reminder>` is still a person, and their words are still recorded.
+# `<agent-message` (FL-182) is a subagent's report handed back to the parent
+# session; it carries attributes, so it is matched without the closing bracket.
 INJECTED_PROMPT_PREFIXES = ("<task-notification>", "<system-reminder>",
-                            "<local-command-caveat>", "<command-name>")
+                            "<local-command-caveat>", "<command-name>", "<agent-message")
 
 
 def is_injected_prompt(prompt: str | None) -> bool:
@@ -162,7 +165,13 @@ def source_hint(utterance_id: int | None, prompt: str | None) -> str | None:
 def handle(event: str, data: dict) -> dict | str | None:
     """Dispatch one hook payload. Unknown events are ignored on purpose. Two events
     may return something for main() to print: PreToolUse its hook JSON, and
-    UserPromptSubmit the one-line source hint (A3)."""
+    UserPromptSubmit the one-line source hint (A3).
+
+    Nothing at all inside provLedger's own headless `claude -p` calls (FL-182):
+    the runner marks its child with PROVLEDGER_HEADLESS=1, and a prompt
+    provLedger wrote to a model is not something the user said."""
+    if os.environ.get(HEADLESS_ENV) == "1":
+        return None
     if event == "PostToolUse":
         conn = _open()
         try:

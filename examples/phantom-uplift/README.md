@@ -104,7 +104,7 @@ demo reports whatever the generated data actually computes to.
 
 ## Regenerating the media
 
-`docs/media/phantom-uplift-dashboard.gif` — the README hero: the demo as
+`docs/media/phantom-uplift-dashboard.gif` — the demo as
 the **live dashboard** sees it (opens on the freshly-published PENDING plan →
 steps execute live → verify FAILS red with the MISMATCH reason + log →
 drift → decision trail → recovered, failure kept visible).
@@ -114,8 +114,9 @@ Needs playwright (`python3 -m playwright install chromium`) + ffmpeg:
 python3 examples/phantom-uplift/record_dashboard.py   # from the repo root
 ```
 
-`docs/media/phantom-uplift.gif` — the same arc as a terminal recording
-(needs [vhs](https://github.com/charmbracelet/vhs), ttyd and ffmpeg on PATH):
+The same arc as a terminal recording is optional and not committed: the tape
+writes it to `docs/media/phantom-uplift.gif` (needs
+[vhs](https://github.com/charmbracelet/vhs), ttyd and ffmpeg on PATH):
 
 ```bash
 vhs examples/phantom-uplift/demo.tape        # from the repo root

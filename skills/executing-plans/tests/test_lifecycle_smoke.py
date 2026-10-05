@@ -41,9 +41,8 @@ ORCH_ROOT = Path.home() / "skill-workspace" / "orchestrator"
 sys.path.insert(0, str(ORCH_ROOT))
 from orchestrator import db as orch_db  # noqa: E402
 
-# Resolve script paths relative to this test file so we work in BOTH layouts:
-#   install layout: ~/.code_puppy/skills/executing-plans/tests/  -> sibling writing-plans/
-#   source-repo:    ~/.code_puppy/skills/skills/executing-plans/tests/  -> sibling writing-plans/
+# Resolve script paths relative to this test file: writing-plans is executing-plans'
+# sibling in the repo and in the installed plugin alike.
 _SKILL_DIR = Path(__file__).parent.parent
 WRITING_PLANS = _SKILL_DIR.parent / "writing-plans" / "scripts"
 EXEC = _SKILL_DIR / "scripts"

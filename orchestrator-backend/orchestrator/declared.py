@@ -22,9 +22,7 @@ The runner is injected, so tests never call a model.
 from __future__ import annotations
 
 import json
-import os
 import re
-import subprocess
 from pathlib import Path
 
 from . import provenance
@@ -79,23 +77,13 @@ def prompt_for(description: str, known_names) -> str:
 
 
 def default_runner(prompt: str, *, model: str | None = None, timeout_s: float = DEFAULT_TIMEOUT_S) -> str:
-    """Headless `claude`, no tools, no session — the same shape as the arbiter's
-    runner (phase 8). Returns '' on timeout / non-zero exit / non-JSON output."""
-    cmd = ["claude", "-p", "--output-format", "json", "--max-turns", "1", "--tools", "", "--no-session-persistence"]
-    if model:
-        cmd += ["--model", model]
-    try:
-        p = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout_s,
-                           cwd=os.environ.get("TMPDIR") or "/tmp")
-    except (subprocess.TimeoutExpired, OSError):
-        return ""
-    if p.returncode != 0:
-        return ""
-    try:
-        doc = json.loads(p.stdout)
-    except ValueError:
-        return ""
-    return (doc.get("result") or "") if isinstance(doc, dict) else ""
+    """Headless `claude` through the ONE shared runner (`testing.claude_arbiter`):
+    no tools, no session, and a `--settings` file of its own, so the user's
+    `~/.claude/settings.json` (its `language` above all) does not leak into the
+    tidy-up. Returns the text; '' on timeout / non-zero exit / refusal / non-JSON
+    output, which `parse_model_answer` rejects as "the model returned nothing"."""
+    from .testing.claude_arbiter import text_runner
+    return text_runner(prompt, model=model, timeout_s=timeout_s)
 
 
 def parse_model_answer(raw: str | None, known_names) -> dict:

@@ -135,10 +135,10 @@ def test_it_names_the_reads_the_model_navigates_with():
 def test_it_says_a_task_can_hide_its_own_failures():
     """The sharpest thing in the ledger and the easiest to miss: a plan whose
     failure was recovered closes COMPLETED, so the detour is gone from its own
-    status and only the step rows remember. Verified on the live ledger — plan
-    `dp6-a-20260927063613` is COMPLETED and contains three FAILED steps, one of
-    which carries the entire rationale for a constant someone later questioned.
-    If the skill does not say this, a model reads the status and stops."""
+    status and only the step rows remember. Seen on a real ledger: a COMPLETED
+    plan holding FAILED steps, one of which carried the entire rationale for a
+    constant someone later questioned. If the skill does not say this, a model
+    reads the status and stops."""
     text = SKILL.read_text(encoding="utf-8")
     low = text.lower()
     assert "completed" in low, "the skill must name the status that hides failures"
@@ -218,10 +218,10 @@ def test_the_repo_is_permitted_as_an_index_and_forbidden_as_evidence():
     assert "file:line" in low, "and show how a code location becomes a node"
 
 def test_it_shows_how_to_get_from_a_record_to_the_task_that_made_it():
-    """Verified live: `provledger record '#3403'` prints
-    `plan dp6-a-… · step dp6-a-…-REVIEW.1.2`. That is the hop from a citable
-    record to the task whose steps and logs hold the substance, and it is the
-    step a model will not take unless told the chain exists."""
+    """`provledger record '#<id>'` prints `plan <plan-id> · step <step-id>`. That
+    is the hop from a citable record to the task whose steps and logs hold the
+    substance, and it is the step a model will not take unless told the chain
+    exists."""
     text = SKILL.read_text(encoding="utf-8")
     low = text.lower()
     assert "provledger plan " in text

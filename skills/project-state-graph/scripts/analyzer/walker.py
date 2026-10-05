@@ -11,6 +11,9 @@ IGNORE_DIRS = {".venv", "venv", "node_modules", "__pycache__", ".git",
                ".pytest_cache", ".mypy_cache", "dist", "build",
                # generated coverage / report artifacts (can be thousands of files)
                "htmlcov", ".tox", ".nox", ".eggs", "site-packages"}
+# Named virtualenvs (`.venv-docs/`, `.venv-3.13/`): git-ignored as `.venv-*/`, but
+# the walk reads the working tree, untracked files included.
+IGNORE_DIR_PREFIXES = (".venv-",)
 
 EXT_LANG = {
     ".py": "python",
@@ -39,7 +42,8 @@ def walk(conn: sqlite3.Connection, repo_root: str) -> Dict[str, int]:
 
     for dirpath, dirnames, filenames in os.walk(repo_root):
         # prune ignored directories in-place
-        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
+        dirnames[:] = [d for d in dirnames
+                       if d not in IGNORE_DIRS and not d.startswith(IGNORE_DIR_PREFIXES)]
         for fname in filenames:
             lang = language_for(fname)
             if lang is None:

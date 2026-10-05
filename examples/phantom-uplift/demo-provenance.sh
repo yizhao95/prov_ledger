@@ -11,19 +11,26 @@
 #
 # Everything is built with the plugin's own scripts — project-state-graph's
 # init_project.sh, provledger note, publish-plan.sh, headline-respond.sh — on a
-# scratch ORCH_DB and a scratch registry. No hand-written SQL, and nothing
-# touches ~/skill-workspace: a demo that corrupts the ledger it demonstrates is
-# not a demo.
+# scratch ORCH_DB and a scratch registry (init_project.sh writes the graph index
+# beside it). No hand-written SQL, and nothing is written under ~/skill-workspace
+# (by default its venv's python runs the scripts, nothing more): a demo that
+# corrupts the ledger it demonstrates is not a demo.
 #
 #   DEMO_HOME=/tmp/x bash examples/phantom-uplift/demo-provenance.sh
+#
+# DEMO_HOME is the only knob. An ORCH_DB or PSG_* path already exported in the
+# caller's shell is overridden on purpose: it may name the caller's real ledger,
+# and the next commands in the README read the ledger under DEMO_HOME.
 #
 # Idempotent: re-running finds the work already done and changes no counts.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEMO_HOME="${DEMO_HOME:-${TMPDIR:-/tmp}/provledger-demo}"
-export ORCH_DB="${ORCH_DB:-$DEMO_HOME/orchestrator.db}"
-export PSG_REGISTRY_PATH="${PSG_REGISTRY_PATH:-$DEMO_HOME/projects.json}"
+export ORCH_DB="$DEMO_HOME/orchestrator.db"
+export PSG_REGISTRY_ROOT="$DEMO_HOME"
+export PSG_REGISTRY_PATH="$DEMO_HOME/projects.json"
+export PSG_INDEX_PATH="$DEMO_HOME/PROJECT-STATE-GRAPHS.md"
 PROJECT="${DEMO_PROJECT:-phantom-uplift-demo}"
 SRC="$DEMO_HOME/repo"
 OUT="$DEMO_HOME/graph"

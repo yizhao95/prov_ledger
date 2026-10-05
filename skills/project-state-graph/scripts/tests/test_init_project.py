@@ -97,3 +97,49 @@ def test_init_project_keeps_history_across_refresh(tmp_path):
     # the cold archive of the first build is still taken, named by the real sha
     sha = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
     assert (out_dir / f"provledger.{sha}.db").exists(), sorted(p.name for p in out_dir.iterdir())
+
+
+def test_registry_path_alone_keeps_every_write_beside_it(tmp_path):
+    """PSG_REGISTRY_PATH is the variable the demo, the examples suite and the plan
+    scripts set to isolate a run. With only it set, init_project.sh used to derive
+    the index (and the default --out-dir) from PSG_REGISTRY_ROOT's default — the
+    real ~/skill-workspace/project-graphs — so regenerate_index overwrote the
+    developer's PROJECT-STATE-GRAPHS.md. HOME is a temp dir here, so a regression
+    shows up as a file under it instead of damage to the real one."""
+    repo = _make_repo(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    reg_dir = tmp_path / "reg"
+    env = dict(os.environ, HOME=str(home), PSG_REGISTRY_PATH=str(reg_dir / "projects.json"),
+               ORCH_DB=str(tmp_path / "orchestrator.db"),
+               PROVLEDGER_HOOK_ERRORS=str(tmp_path / "hook-errors.log"))
+    for k in ("PSG_REGISTRY_ROOT", "PSG_INDEX_PATH",
+              "PROVLEDGER_PLAN_ID", "PROVLEDGER_STEP_ID", "PROVLEDGER_TRIGGER"):
+        env.pop(k, None)
+    result = subprocess.run(["bash", str(INIT_SH), "--name", "demo", "--repo", str(repo)],
+                            capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    leaked = home / "skill-workspace"
+    assert not leaked.exists(), sorted(str(p.relative_to(home)) for p in leaked.rglob("*"))
+    assert "demo" in {p["name"] for p in json.loads((reg_dir / "projects.json").read_text())["projects"]}
+    assert "demo" in (reg_dir / "PROJECT-STATE-GRAPHS.md").read_text()
+    assert (reg_dir / "demo" / "demo-state-graph.db").exists()
+
+
+def test_registry_root_still_wins_for_the_index_when_both_are_set(tmp_path):
+    """PSG_REGISTRY_ROOT keeps its meaning when it is given: the index and the
+    default out-dir live under it, wherever the registry file is."""
+    repo = _make_repo(tmp_path)
+    root = tmp_path / "root"
+    env = dict(os.environ, PSG_REGISTRY_ROOT=str(root),
+               PSG_REGISTRY_PATH=str(tmp_path / "elsewhere" / "projects.json"),
+               ORCH_DB=str(tmp_path / "orchestrator.db"))
+    for k in ("PSG_INDEX_PATH", "PROVLEDGER_PLAN_ID", "PROVLEDGER_STEP_ID", "PROVLEDGER_TRIGGER"):
+        env.pop(k, None)
+    result = subprocess.run(["bash", str(INIT_SH), "--name", "demo", "--repo", str(repo)],
+                            capture_output=True, text=True, env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "elsewhere" / "projects.json").exists()
+    assert (root / "PROJECT-STATE-GRAPHS.md").exists()
+    assert (root / "demo" / "demo-state-graph.db").exists()

@@ -12,16 +12,19 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 BOOTSTRAP = REPO / "scripts" / "bootstrap.sh"
 REQS = REPO / "requirements.txt"
+PYPROJECT = REPO / "orchestrator-backend" / "pyproject.toml"
 
 
 def _run_bootstrap(tmp: Path, *, venv_exists: bool, marker_ok: bool = False,
-                   project: Path | None = None):
+                   project: Path | None = None, bootstrap: Path = BOOTSTRAP):
     """Run bootstrap.sh with a fake uv on PATH; return (proc, uv_calls).
 
     The script runs with `project` (default: an empty dir under tmp) as its
@@ -31,17 +34,18 @@ def _run_bootstrap(tmp: Path, *, venv_exists: bool, marker_ok: bool = False,
     fake_bin.mkdir(parents=True, exist_ok=True)
     call_log = tmp / "uv-calls.log"
     (fake_bin / "uv").write_text(
-        f'#!/usr/bin/env bash\necho "$@" >> "{call_log}"\nexit 0\n')
+        f'#!/usr/bin/env bash\necho "$@" >> "{call_log}"\necho "$PWD" >> "{tmp / "uv-cwd.log"}"\nexit 0\n')
     (fake_bin / "uv").chmod(0o755)
 
     venv = tmp / "venv"
     if venv_exists:
-        (venv / "bin").mkdir(parents=True)
+        (venv / "bin").mkdir(parents=True, exist_ok=True)
         py = venv / "bin" / "python"
         py.write_text("#!/usr/bin/env bash\nexit 0\n")
         py.chmod(0o755)
     if marker_ok:
-        want = hashlib.sha256(REQS.read_bytes()).hexdigest()
+        # what bootstrap.sh writes: SHA-256 over requirements.txt then the backend's pyproject.toml
+        want = hashlib.sha256(REQS.read_bytes() + PYPROJECT.read_bytes()).hexdigest()
         venv.mkdir(parents=True, exist_ok=True)
         (venv / ".provledger-reqs.sha256").write_text(want)
 
@@ -55,7 +59,7 @@ def _run_bootstrap(tmp: Path, *, venv_exists: bool, marker_ok: bool = False,
     if project is None:
         project = tmp / "project"
     project.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(["bash", str(BOOTSTRAP)], cwd=str(project),
+    proc = subprocess.run(["bash", str(bootstrap)], cwd=str(project),
                           capture_output=True, text=True, env=env)
     calls = call_log.read_text().splitlines() if call_log.exists() else []
     return proc, calls
@@ -118,3 +122,61 @@ def test_bootstrap_silent_when_project_disables_superpowers(tmp_path, monkeypatc
     proc, _ = _run_bootstrap(tmp_path, venv_exists=True, marker_ok=True, project=project)
     assert proc.returncode == 0, proc.stderr
     assert "same-named skills" not in proc.stdout, proc.stdout
+
+
+def _plugin_copy(tmp: Path) -> Path:
+    """A copy of the plugin root holding only what bootstrap.sh reads, so a
+    test can change one of those files without touching the repo."""
+    root = tmp / "plugin"
+    (root / "scripts").mkdir(parents=True)
+    (root / "orchestrator-backend").mkdir()
+    shutil.copy2(BOOTSTRAP, root / "scripts" / "bootstrap.sh")
+    shutil.copy2(REQS, root / "requirements.txt")
+    shutil.copy2(PYPROJECT, root / "orchestrator-backend" / "pyproject.toml")
+    return root
+
+
+def test_a_backend_pyproject_change_is_not_a_warm_noop(tmp_path):
+    """requirements.txt installs the backend editable (`-e ./orchestrator-backend`),
+    so the backend's pyproject.toml is an install input too. A version bump or a
+    new console script with requirements.txt untouched used to be a warm no-op:
+    the venv this was found in still carried 0.1.0 metadata and had no
+    `provledger` script long after the release that added it."""
+    root = _plugin_copy(tmp_path)
+    boot = root / "scripts" / "bootstrap.sh"
+    calls_log = tmp_path / "uv-calls.log"
+
+    proc, calls = _run_bootstrap(tmp_path, venv_exists=True, bootstrap=boot)
+    assert proc.returncode == 0, proc.stderr
+    assert any("pip install" in c for c in calls), calls
+
+    calls_log.unlink()
+    proc, calls = _run_bootstrap(tmp_path, venv_exists=True, bootstrap=boot)
+    assert proc.returncode == 0 and calls == [] and "up to date" in proc.stdout, (proc.stdout, calls)
+
+    pyproject = root / "orchestrator-backend" / "pyproject.toml"
+    bumped = re.sub(r'^version = ".*"$', 'version = "99.0.0"', pyproject.read_text(), count=1, flags=re.M)
+    assert bumped != pyproject.read_text()
+    pyproject.write_text(bumped)
+    proc, calls = _run_bootstrap(tmp_path, venv_exists=True, bootstrap=boot)
+    assert proc.returncode == 0, proc.stderr
+    assert any("pip install" in c for c in calls), "a backend version bump must re-install the editable backend"
+    assert "venv ready" in proc.stdout
+
+    calls_log.unlink()
+    proc, calls = _run_bootstrap(tmp_path, venv_exists=True, bootstrap=boot)
+    assert calls == [] and "up to date" in proc.stdout, "and the run after it is warm again"
+
+
+def test_the_install_runs_from_the_plugin_root_not_the_session_cwd(tmp_path):
+    """SessionStart runs bootstrap.sh with the user's project as its cwd, and
+    uv (like pip) resolves `-e ./orchestrator-backend` in requirements.txt
+    against the cwd, not against the requirements file — from any project but
+    the plugin itself the install failed with "Distribution not found at
+    file://<project>/orchestrator-backend". The same-named-skill notice still
+    reads the PROJECT's .claude/settings.local.json, so only the install moves."""
+    proc, calls = _run_bootstrap(tmp_path, venv_exists=True)
+    assert proc.returncode == 0, proc.stderr
+    assert any("pip install" in c for c in calls), calls
+    cwds = set((tmp_path / "uv-cwd.log").read_text().split())
+    assert cwds == {str(REPO)}, cwds

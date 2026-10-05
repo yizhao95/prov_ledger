@@ -51,7 +51,7 @@ TESTING_PACKAGE = __package__.rsplit(".", 1)[0] + ".testing"
 # `number` stays in the shape for compatibility and is always 0: an unsupported
 # number is reported, never deleted. The machine cannot tell a sourced number from
 # an invented one — only whether it appears in its own table — and deleting on that
-# basis removed correct answers. Measured: asked why a timeout was 4800 seconds, a
+# basis removed correct answers. Measured: asked why a setting had its value, a
 # question whose derivation IS recorded (in a step log, which has no id in the cite
 # namespace), the right answer was deleted for containing the number the reader had
 # asked about. The language mismatch below was changed for this same reason first.

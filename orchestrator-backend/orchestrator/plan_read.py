@@ -6,26 +6,19 @@ evidence slot; the dashboard's `/plan/{id}` is HTML over HTTP and so is no use
 to a model in a terminal. The rows that say what actually happened while the
 plan ran had no reader at all, and the only way to them was hand-written SQL.
 
-The case that made this a release blocker, in full, because it is the argument:
+The case that made this a release blocker, because it is the argument: a person
+asked why a timeout had the value it had. The honest answer was two halves, and
+both come out of these tables. The first half was recorded precisely, with the
+number: a recovery step under the review FAILED with "timed out: exceeded the
+ceiling", and the deviation that answered it names the ceiling it raised to.
 
-    > why is the review timeout 4800 seconds?
-
-The honest answer is two halves, and both come out of these tables. The first
-half is recorded precisely, with the number:
-
-    dp6-a-20260927063613-REVIEW.1.1  [FAILED]
-      graph refresh (init_project.sh) timed out: exceeded the 300s ceiling
-      (elapsed 300.1s). A timeout is a failure, not a pass; …
-
-and the deviation that answered it names the ceiling it raised to.
-
-The second half is recorded too, and finding that out is why this read exists. An
-earlier version of this docstring asserted that "why 4800 specifically is not
-recorded anywhere" — written after searching `change_reason`, `utterance` and
-`Steps.failure_reason`, all of which hold no `4800`. It is in `Steps.log_context`,
-on the step that recorded the re-run: ten refreshes between 795 and 3085 seconds,
-median 869, on a 6710-node graph, the ceiling read off that table, and a test that
-asserts the margin over the slowest recorded run rather than the literal.
+The second half was recorded too, and finding that out is why this read exists. An
+earlier version of this docstring asserted that the chosen value "is not recorded
+anywhere" — written after searching `change_reason`, `utterance` and
+`Steps.failure_reason`, none of which held it. It was in `Steps.log_context`, on
+the step that recorded the re-run: the measured duration of every earlier refresh,
+the ceiling read off them, and a test that asserts the margin over the slowest
+recorded run rather than the literal.
 
 That mistake is the argument for this read, better than any example could be: three
 separate searches concluded "not recorded" from their own coverage, and the record

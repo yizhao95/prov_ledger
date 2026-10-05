@@ -19,13 +19,14 @@ Or from a shell:
 ```bash
 claude plugin marketplace add yizhao95/prov_ledger
 claude plugin install provledger@provledger
-claude plugin list          # provledger@provledger · Version: 0.4.2 · Status: ✔ enabled
+claude plugin list          # provledger@provledger · Version: 0.4.3 · Status: ✔ enabled
 ```
 
 Dependencies install themselves on first session: a background `SessionStart`
 bootstrap builds **one** venv at `~/skill-workspace/.venv` (override with
 `PROVLEDGER_VENV`) and installs `requirements.txt`. It is idempotent — warm
-sessions are a no-op. Launch the dashboard with `/provledger-dashboard`, or
+sessions are a no-op — and re-installs when `requirements.txt` or
+`orchestrator-backend/pyproject.toml` changes, so a plugin update reaches the venv. Launch the dashboard with `/provledger-dashboard`, or
 `bash orchestrator-webapp/launch_dashboard.sh` (port 8765 by default,
 `PROVLEDGER_DASH_PORT` to change it, `PROVLEDGER_WEBAPP_DIR` to point at a
 checkout other than the script's own).
@@ -115,9 +116,10 @@ provLedger has a deliberately small dependency surface:
 | `orchestrator-backend` | **none** (Python standard library only) |
 | `orchestrator-webapp` (dashboard) | `fastapi`, `uvicorn[standard]`, `jinja2` |
 | `project-state-graph` analyzers | `tree-sitter` + language grammars |
-| Test suites | `pytest` |
+| Test suites | `pytest`, `httpx` (the dashboard tests' client) |
 
-Install everything:
+Install everything, from the repository root (the `-e ./orchestrator-backend` line
+is resolved against the current directory):
 
 ```bash
 # if you took Option A (`python3 -m venv`) — that venv has pip
@@ -151,9 +153,10 @@ provledger --help          # must print the command list
 ```
 
 `requirements.txt` installed it, so this should already work. If it does not, stop
-here rather than carrying on: the dashboard's graph and `/ledger` pages shell out
-to this command, and without it they serve pages that say "unavailable" instead of
-failing in a way you can act on — which reads as a broken dashboard.
+here rather than carrying on: the command comes with the `provledger` package, which
+the dashboard's graph and `/ledger` pages import. Without it they serve pages that
+say "unavailable" instead of failing in a way you can act on — which reads as a
+broken dashboard.
 
 > **Minimal install (orchestrator only, no graph, no dashboard):**
 > the backend needs nothing beyond Python + `pytest` for the tests.
@@ -192,30 +195,21 @@ on timeout instead of abandoned in a thread (the default `--isolate thread`).
 
 ## 5 · Verify the install
 
-Run each test suite **separately** (each has its own pyproject/pythonpath —
-one combined invocation breaks). A healthy install passes all of them:
+Run the test suites. Each runs in its own pytest process — a combined
+invocation breaks (see [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md)) — and the
+script does that for you. A healthy install passes all of them:
 
 ```bash
-python3 -m pytest scripts/tests                         -q   #   27
-python3 -m pytest tests                                 -q   #   16   # packaging + manifests
-python3 -m pytest orchestrator-backend                  -q   #  1074, 4 deselected
-python3 -m pytest orchestrator-webapp                   -q   #  267
-python3 -m pytest skills/writing-plans/tests            -q   #   93
-python3 -m pytest skills/executing-plans                -q   #   83
-python3 -m pytest skills/update-project-state-graph/scripts/tests -q   #   107
-python3 -m pytest examples                              -q   #   18
-(cd skills/project-state-graph/scripts && python3 -m pytest tests -q)   #  430, 1 deselected
+bash scripts/run_tests.sh              # every suite, one at a time
+bash scripts/run_tests.sh --list       # the suite names
+bash scripts/run_tests.sh backend psg  # only some of them
+bash scripts/run_tests.sh --count      # collect only: how many tests there are
 ```
 
-Total: **2115 collected** across the nine suites (run `scripts/count_tests.sh` to
-re-derive; a few are deselected by default). A healthy install passes all of
-them. The project-state-graph suite is the long one (~8 min); run it in three
-segments if you want to see progress — scenarios + runner, the corpus, and the
-rest. The `llm_consistency` marker and the manual arbiter evaluations are
-deselected by default and never run in CI. Run each suite on its own: they set
-their import paths from their own directory, so a combined run reports failures
-that a separate run does not have; see
-[`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
+The script uses the active virtualenv (the one you made in §3), or the plugin's
+unified venv when none is active. The project-state-graph suite (`psg`) is the
+long one, about 8 minutes. The `live` and `llm_consistency` markers and the manual
+arbiter evaluations are deselected by default and never run unattended.
 
 The quickest end-to-end check is the demo — one command, deterministic,
 self-verifying. It runs `examples/phantom-uplift`: a revenue number that jumps
@@ -234,7 +228,7 @@ The failure class itself, with numbers, is written up in
 | level | command | expect |
 |---|---|---|
 | quickest — end to end | `make demo` | MISMATCH → revise → VERIFIED, `SELF-CHECK OK`, exit 0 |
-| full — every suite | the nine `pytest` commands above, **run separately** | 2115 tests, all passing |
+| full — every suite | `bash scripts/run_tests.sh` | every suite passes |
 | packaging — the pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
 | **release — before every release** | `bash scripts/release-e2e.sh` | three stages green from zero in a clean sandbox; exit 0 |
 
@@ -250,7 +244,7 @@ stayed green, because every one of them renders on the server and none drives a
 browser.
 
 ```bash
-bash scripts/release-e2e.sh                 # the release setting: all nine suites (~20 min)
+bash scripts/release-e2e.sh                 # the release setting: every suite (~20 min)
 bash scripts/release-e2e.sh --suites collect  # faster: collect the suites instead of running them
 bash scripts/release-e2e.sh --stage 2 --keep  # one stage, and keep the sandbox to look at
 ```
@@ -323,8 +317,8 @@ bash scripts/test_packaging.sh   # needs uv; fails loudly on any packaging gap
 
 The dashboard is a **read-only** view over an orchestrator SQLite database.
 
-> Needs `provledger` on your PATH (§4a). Without it the dashboard still starts
-> and still serves 200s, but its graph and `/ledger` pages say "unavailable"
+> Needs the `provledger` package installed (§4a). Without it the dashboard still
+> starts and still serves 200s, but its graph and `/ledger` pages say "unavailable"
 > instead of failing loudly — so a missing §4a looks like a broken dashboard.
 
 ```bash
@@ -337,9 +331,9 @@ Then open <http://127.0.0.1:8765>.
 
 - The DB path is resolved from the **`ORCH_DB`** environment variable, falling back
   to `~/skill-workspace/orchestrator.db`.
-- The dashboard opens the DB in **WAL read-only** mode, so it never blocks or mutates
-  the orchestrator — and the orchestrator works correctly even if the dashboard is
-  down.
+- The dashboard opens the DB **read-only**, so it never blocks or changes the
+  orchestrator — and the orchestrator works correctly even if the dashboard is
+  down. Its one write is a log row (`ask_log`) for each question asked on `/ledger`.
 
 ### Run the dashboard in the background
 
@@ -355,21 +349,15 @@ tail -f /tmp/provledger-dashboard.log
 
 ## 7 · Initialize an orchestrator database (optional)
 
-The database is created/migrated automatically the first time you publish a plan
-through the `writing-plans` skill. To create one manually from the migrations:
+The database is created and migrated automatically the first time anything opens
+it — a hook, a skill script or the `provledger` command. To create one by hand,
+use the same code path, which records each migration it applies:
 
 ```bash
-python3 - <<'PY'
-import sqlite3, glob, pathlib
-db = pathlib.Path.home() / "skill-workspace" / "orchestrator.db"
-db.parent.mkdir(parents=True, exist_ok=True)
-conn = sqlite3.connect(db)
-for f in sorted(glob.glob("orchestrator-backend/orchestrator/migrations/*.sql")):
-    conn.executescript(open(f).read())
-conn.commit()
-print("Initialized", db)
-PY
+python3 -c "from provledger import db; c = db.open_db(); db.run_migrations(c); print('ok')"
 ```
+
+`open_db()` uses `~/skill-workspace/orchestrator.db`; pass a path to put it elsewhere.
 
 ---
 

@@ -164,6 +164,30 @@ def test_the_demo_never_touches_the_real_workspace(demo):
     body = SCRIPT.read_text(encoding="utf-8")
     assert "skill-workspace" not in body or "DEMO_HOME" in body
     assert "ORCH_DB" in body and "PSG_REGISTRY_PATH" in body
+    # Only PSG_REGISTRY_PATH is set (here and in the script): init_project.sh must
+    # put the graph index beside that registry, not in the real
+    # ~/skill-workspace/project-graphs/PROJECT-STATE-GRAPHS.md.
+    index = demo["ws"] / "PROJECT-STATE-GRAPHS.md"
+    assert index.exists(), sorted(p.name for p in demo["ws"].iterdir())
+    assert "phantom-uplift-demo" in index.read_text(encoding="utf-8")
+
+
+def test_the_demo_ignores_a_ledger_and_registry_the_caller_exported(tmp_path):
+    """The demo owns its paths. A caller whose shell exports ORCH_DB or the PSG_*
+    paths (the release check does; a user's shell may point ORCH_DB at their real
+    ledger) must not have the demo write there — and README's next commands read
+    the ledger under DEMO_HOME."""
+    ws, elsewhere = tmp_path / "demo", tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    env = dict(os.environ, DEMO_HOME=str(ws), ORCH_DB=str(elsewhere / "orchestrator.db"),
+               PSG_REGISTRY_ROOT=str(elsewhere), PSG_REGISTRY_PATH=str(elsewhere / "projects.json"),
+               PSG_INDEX_PATH=str(elsewhere / "PROJECT-STATE-GRAPHS.md"))
+    proc = subprocess.run(["bash", str(SCRIPT)], cwd=str(REPO), env=env,
+                          capture_output=True, text=True, timeout=300)
+    assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-2000:]
+    assert sorted(p.name for p in elsewhere.iterdir()) == []
+    assert (ws / "orchestrator.db").exists()
+    assert (ws / "PROJECT-STATE-GRAPHS.md").exists()
 
 
 def test_the_walkthrough_script_exists_and_is_not_wired_into_ci():

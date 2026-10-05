@@ -5,7 +5,7 @@ Every skill recorded against a plan has a `source` field explaining WHY that ski
 | source             | Meaning                                                                       |
 |--------------------|-------------------------------------------------------------------------------|
 | `iron-law`         | Mandatory trigger — writing-plans, executing-plans, TDD on coding, etc.       |
-| `auto-search`      | Surfaced by your proactive `list_or_search_skills` topic-keyword search       |
+| `auto-search`      | Matched the task when you checked the available skills (the Skill tool's list) |
 | `explicit-mention` | The user named the skill (or its concept) in their prompt                     |
 | `deferred-load`    | Loaded mid-flight when the task evolved — record via `record-skill` not init  |
 
@@ -20,19 +20,21 @@ Include these in EVERY `skills` array in plan-input — they apply to every plan
 
 ## Skills activated mid-flight
 
-If a skill activates AFTER `publish-plan.sh` has already written the plan, do NOT re-publish. Use the executing-plans workflow:
+If a skill activates AFTER `publish-plan.sh` has already written the plan, do NOT re-publish. Record it with the executing-plans script — like every write after publish, it goes through a script, never the CLI:
 
 ```bash
-$PYBIN $CLI record-skill <plan_id> --name <skill> --source deferred-load --reason "<why>"
+cat > /tmp/skill.json <<'EOF'
+{"plan_id": "<plan_id>", "name": "<skill>", "source": "deferred-load", "step_id": "<step where it surfaced>", "reason": "<why>"}
+EOF
+bash ${CLAUDE_PLUGIN_ROOT}/skills/executing-plans/scripts/record-skill.sh /tmp/skill.json
 ```
 
-Source for these is almost always `deferred-load` (or `auto-search` if your search at that moment surfaced it).
+Source for these is almost always `deferred-load` (or `auto-search` if checking the skill list at that moment surfaced it).
 
 ## Inspection
 
 ```bash
-$PYBIN $CLI list-skills <plan_id>
-sqlite3 ~/skill-workspace/orchestrator.db \
+sqlite3 "${ORCH_DB:-$HOME/skill-workspace/orchestrator.db}" \
   "SELECT skill_name, source, COUNT(*) FROM SkillActivations \
    WHERE plan_id='<plan_id>' GROUP BY skill_name, source;"
 ```

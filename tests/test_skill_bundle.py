@@ -69,10 +69,9 @@ def test_the_ledger_skill_names_the_reads_added_in_0_4_2():
 
 
 def test_the_ledger_skill_says_a_completed_task_can_hide_failures():
-    """Verified on the live ledger: plan `dp6-a-20260927063613` reads COMPLETED and
-    holds three FAILED steps, one of whose logs carries the whole derivation of a
-    constant that was later questioned. A model that reads the status and stops
-    never reaches it."""
+    """Seen on a real ledger: a plan that reads COMPLETED can hold FAILED steps,
+    and one of their logs can carry the whole derivation of a constant that was
+    later questioned. A model that reads the status and stops never reaches it."""
     text = (SKILLS / "ledger" / "SKILL.md").read_text(encoding="utf-8")
     low = text.lower()
     assert "completed" in low and "recover" in low, \

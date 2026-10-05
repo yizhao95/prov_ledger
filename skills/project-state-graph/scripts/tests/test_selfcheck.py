@@ -181,3 +181,20 @@ def test_lineage_no_dangling_passes_on_good_db(tmp_path):
     result = selfcheck.run(path)
     chk = next(c for c in result["checks"] if c["name"] == "lineage_no_dangling")
     assert chk["ok"] is True
+
+
+def test_skill_md_lists_exactly_the_error_severity_checks(tmp_path, monkeypatch):
+    """SKILL.md names the checks that can fail a build (error severity) and points
+    at this module for the rest. The table drifted once — ten rows against 28
+    checks, three error checks missing — so it is pinned to the code here."""
+    import re
+    from pathlib import Path
+    monkeypatch.setenv("ORCH_DB", str(tmp_path / "no-orch.db"))
+    monkeypatch.setenv("PROVLEDGER_HOOK_ERRORS", str(tmp_path / "no-hook-errors.log"))
+    path, conn = _build_good_db(tmp_path)
+    conn.close()
+    errors = {c["name"] for c in selfcheck.run(path)["checks"] if c["severity"] == "error"}
+    md = (Path(selfcheck.__file__).resolve().parent.parent / "SKILL.md").read_text(encoding="utf-8")
+    section = md.split("## Self-check severity model", 1)[1].split("\n## ", 1)[0]
+    listed = set(re.findall(r"^\| `([a-z0-9_]+)` \|", section, flags=re.M))
+    assert listed == errors, f"SKILL.md lists {sorted(listed)}, selfcheck errors are {sorted(errors)}"

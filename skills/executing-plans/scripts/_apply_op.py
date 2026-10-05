@@ -11,8 +11,9 @@ user's input file. This module:
   - exits non-zero on any validation / state-machine / circuit-breaker failure
     with a friendly stderr message naming the offending field
 
-Op enum: start-step, complete-step, fail-step, append-log, deviate,
-         record-skill, finish-plan, agent-review-close, reason-slots, reason-fill
+Op enum: the keys of OPS at the bottom — one per scripts/*.sh wrapper except
+run-step.sh (tests/test_update_input_schema.py keeps OPS, the wrappers and
+update-input.schema.json in step).
 """
 from __future__ import annotations
 

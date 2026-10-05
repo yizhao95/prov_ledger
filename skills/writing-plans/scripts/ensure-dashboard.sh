@@ -7,7 +7,9 @@
 #
 # Behavior:
 #   1. Curl ${HEALTH_URL} (default: http://127.0.0.1:8765/api/health)
-#   2. If 200 → print "✅ dashboard already up" and exit 0
+#   2. If up → print "✅ dashboard already up" and exit 0. Up is 200, or 503 with
+#      the dashboard's own JSON ({"ok": false, …}): a dashboard started before the
+#      first plan created the ledger is running, and launching another collides.
 #   3. Otherwise → exec ${LAUNCH_CMD} (default: webapp/launch_dashboard.sh)
 #                   then wait up to ${WAIT_SECS} for /api/health to come up
 #   4. If still down → exit non-zero with diagnostic
@@ -36,9 +38,14 @@ if [[ "${ENSURE_DASHBOARD_PRINT_ONLY:-0}" == "1" ]]; then
 fi
 
 probe() {
-    # 200 + non-empty body counts as healthy. -s silent, -f fail-fast on 4xx/5xx,
-    # --max-time 2s so we never hang.
-    curl -sf --max-time 2 "${HEALTH_URL}" >/dev/null 2>&1
+    # --max-time 2s so we never hang. The status code is the last line of $out.
+    local out
+    out="$(curl -s --max-time 2 -w '\n%{http_code}' "${HEALTH_URL}" 2>/dev/null)" || return 1
+    case "${out##*$'\n'}" in
+        200) return 0 ;;
+        503) [[ "${out}" == *'"ok": false'* || "${out}" == *'"ok":false'* ]] ;;
+        *)   return 1 ;;
+    esac
 }
 
 if probe; then
@@ -61,5 +68,5 @@ done
 
 echo "❌ dashboard still unreachable at ${HEALTH_URL} after ${WAIT_SECS}s" >&2
 echo "   Tried launcher: ${LAUNCH_CMD}" >&2
-echo "   Run manually and inspect logs at /tmp/dashboard.log" >&2
+echo "   Run manually and inspect the launcher's log: ${PROVLEDGER_DASH_LOG:-/tmp/webapp-server.log}" >&2
 exit 1
