@@ -3,10 +3,10 @@
 Read-only dashboard: FastAPI + Jinja2 + HTMX, no Node at runtime. Routes in `app/main.py`,
 all SQL in `app/queries.py`, every user-facing word in `app/vocab.py`.
 
-## Commands (`PY=~/skill-workspace/.venv/bin/python`)
+## Commands (`PY=.venv/bin/python`, the repo's dev venv)
 - Test: `bash scripts/run_tests.sh webapp` (from repo root).
 - Run: `bash launch_dashboard.sh` (:8765), or from this dir
-  `ORCH_DB=<db> ~/skill-workspace/.venv/bin/uvicorn app.main:app --port 8765`
+  `ORCH_DB=<db> ../.venv/bin/uvicorn app.main:app --port 8765`
 - Colours: edit `app/static/tokens.json`, then `python3 scripts/gen_tokens.py` (`--check` to verify).
   Never hand-edit `app/static/tokens.js` or `design/src/tokens.ts`.
 

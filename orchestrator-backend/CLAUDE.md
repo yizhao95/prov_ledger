@@ -8,7 +8,7 @@ and the CLI, /ledger, /receipts and the dashboard read.
 Skills, hooks and tests import `orchestrator`; the webapp and PSG analyzer import `provledger`.
 Inside the package: relative imports only.
 
-## Commands (`PY=~/skill-workspace/.venv/bin/python`)
+## Commands (`PY=.venv/bin/python`, the repo's dev venv)
 - Tests: `bash scripts/run_tests.sh backend`, or one file: `$PY -m pytest orchestrator-backend/tests/test_x.py -q`
 - `orchestrator` is not importable from the venv outside pytest: use `PYTHONPATH=orchestrator-backend`.
   CLI: `python -m orchestrator.cli <cmd>`. Hook: `echo '<json>' | python -m orchestrator.hooks <Event>`.

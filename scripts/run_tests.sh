@@ -5,13 +5,15 @@
 #   bash scripts/run_tests.sh backend webapp     run the named suites
 #   bash scripts/run_tests.sh --count [name…]    collect only and print the counts
 #   bash scripts/run_tests.sh --list             print the suite names
+#   bash scripts/run_tests.sh --which            print the interpreter it would use
 #   bash scripts/run_tests.sh psg -- -x -k foo   extra pytest arguments go after --
 #
 # --count is the only source of a test count: the number in any document comes
 # from here, never from memory. Nothing is executed in that mode.
 #
-# Interpreter: $PYBIN, else the active virtualenv, else the unified venv
-# (${PROVLEDGER_VENV:-~/skill-workspace/.venv}), else python3.
+# Interpreter: $PYBIN, else the active virtualenv, else the repo's own .venv (the
+# working tree's provledger), else the plugin's venv (${PROVLEDGER_VENV:-
+# ~/skill-workspace/.venv}, which holds the installed release), else python3.
 #
 # Every suite is checked for writes to the real ~/skill-workspace
 # (scripts/home_guard.py): a suite that leaks there fails even if its tests pass.
@@ -25,6 +27,8 @@ if [[ -n "${PYBIN:-}" ]]; then
     PY="$PYBIN"
 elif [[ -n "${VIRTUAL_ENV:-}" && -x "$VIRTUAL_ENV/bin/python" ]]; then
     PY="$VIRTUAL_ENV/bin/python"
+elif [[ -x "$ROOT/.venv/bin/python" ]]; then
+    PY="$ROOT/.venv/bin/python"
 elif [[ -x "${PROVLEDGER_VENV:-$HOME/skill-workspace/.venv}/bin/python" ]]; then
     PY="${PROVLEDGER_VENV:-$HOME/skill-workspace/.venv}/bin/python"
 else
@@ -39,8 +43,9 @@ while (($#)); do
     case "$1" in
         --count) mode=count ;;
         --list)  mode=list ;;
+        --which) echo "$PY"; exit 0 ;;
         --)      shift; extra=("$@"); break ;;
-        -h|--help) sed -n '2,15p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        -h|--help) sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *)       names+=("$1") ;;
     esac
     shift

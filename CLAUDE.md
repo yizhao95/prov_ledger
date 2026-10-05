@@ -18,14 +18,17 @@ and shipped to every user.
 The backend, webapp, skills/ and the two state-graph skills each have their own CLAUDE.md.
 
 ## Environment
-`PY=~/skill-workspace/.venv/bin/python` (Python 3.13, built by `scripts/bootstrap.sh` from
-`requirements.txt`). System `python3` has no deps. `skills/project-state-graph/scripts` also has its
-own uv env (`uv sync`).
-- The venv's `provledger` is an editable install of the main checkout's `orchestrator-backend`, so in a
-  git worktree anything importing `provledger` runs main's code. Shadow it:
+Two venvs, never mixed:
+- **Dev:** `PY=.venv/bin/python` in the repo root (Python 3.13; `provledger` is an editable install of
+  this working tree). Create it with `uv venv --python 3.13 .venv && VIRTUAL_ENV=.venv uv pip install -r
+  requirements.txt`, from the repo root. `run_tests.sh` picks it up (`--which` shows the choice).
+- **Plugin runtime:** `~/skill-workspace/.venv`, built by the installed plugin's `bootstrap.sh`; its
+  `provledger` is the installed release. Never install into it from the working tree.
+- The installed plugin comes from a release tag (`claude plugin marketplace add
+  yizhao95/prov_ledger#vX.Y.Z`), never from this checkout, so live sessions do not run half-edited code.
+- In a git worktree the dev venv's `provledger` still points at the main checkout. Shadow it:
   `mkdir pp && ln -s "$PWD/orchestrator-backend/orchestrator" pp/provledger && PYTHONPATH=pp …`.
-- A plugin installed from a local checkout copies that checkout's current branch; `claude plugin update`
-  only notices a version change. Reinstall from an up-to-date `main`.
+- System `python3` has no deps. `skills/project-state-graph/scripts` also has its own uv env (`uv sync`).
 
 ## Tests
 `bash scripts/run_tests.sh [suite…]` runs each suite in its own pytest process (combining suites in
