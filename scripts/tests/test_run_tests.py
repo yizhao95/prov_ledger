@@ -101,3 +101,41 @@ def test_a_suite_that_writes_to_the_real_workspace_fails(tmp_path: Path) -> None
 def test_count_tests_sh_is_gone() -> None:
     assert not (REPO / "scripts" / "count_tests.sh").exists(), \
         "run_tests.sh --count replaces count_tests.sh; two scripts would be two lists"
+
+
+def _copy_runner(tmp_path: Path) -> Path:
+    """run_tests.sh + suites.sh in a scratch root, so `$ROOT/.venv` can be faked."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    for name in ("run_tests.sh", "suites.sh"):
+        (scripts / name).write_text((REPO / "scripts" / name).read_text())
+    return scripts / "run_tests.sh"
+
+
+def _which(runner: Path, **env: str) -> str:
+    base = {k: v for k, v in os.environ.items() if k not in ("PYBIN", "VIRTUAL_ENV")}
+    proc = subprocess.run(["bash", str(runner), "--which"], capture_output=True, text=True,
+                          env={**base, **env}, timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    return proc.stdout.strip()
+
+
+def test_the_repo_venv_comes_before_the_plugin_venv(tmp_path: Path) -> None:
+    """The plugin's venv (~/skill-workspace/.venv) holds the RELEASED provledger;
+    a test run must use the working tree's, from the repo's own .venv."""
+    runner = _copy_runner(tmp_path)
+    venv_py = tmp_path / ".venv" / "bin" / "python"
+    venv_py.parent.mkdir(parents=True)
+    venv_py.symlink_to(sys.executable)
+    assert _which(runner) == str(venv_py)
+
+
+def test_an_explicit_choice_still_wins(tmp_path: Path) -> None:
+    runner = _copy_runner(tmp_path)
+    (tmp_path / ".venv" / "bin").mkdir(parents=True)
+    (tmp_path / ".venv" / "bin" / "python").symlink_to(sys.executable)
+    other = tmp_path / "other-venv"
+    (other / "bin").mkdir(parents=True)
+    (other / "bin" / "python").symlink_to(sys.executable)
+    assert _which(runner, VIRTUAL_ENV=str(other)) == str(other / "bin" / "python")
+    assert _which(runner, PYBIN="/usr/bin/python3") == "/usr/bin/python3"

@@ -8,6 +8,28 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
+## Unreleased
+
+### Fixed
+
+- **`/ledger` and `/receipts` could not answer for a plugin user.** Both call
+  `provledger` by name, and the command lives in the plugin's venv, which nothing
+  put on the session's PATH: the first command failed with `command not found`.
+  The plugin now ships `bin/provledger`, which Claude Code puts on the Bash tool's
+  PATH while the plugin is enabled, and which hands every call to the venv. Found by
+  a sandboxed install with a real headless session, the first time the plugin path
+  itself was exercised. claude.ai and Cowork do not install a plugin with a
+  top-level `bin/`; install with the Claude Code CLI.
+- **Failed tool calls were never logged.** A failed call fires `PostToolUseFailure`,
+  not `PostToolUse`, and only the latter was hooked. Both are now, and
+  `tool_call_log.failed` (migration 032) marks the failures.
+
+### Development
+
+- The repository's own `.venv` is the development venv; `run_tests.sh` prefers it
+  to the plugin's venv, which now holds the installed release (`--which` prints the
+  choice). The home guard ignores SQLite's transient sidecar files.
+
 ## 0.4.3 — 2026-10-04
 
 **A clean-up of the development setup, and the defects it turned up.** A fresh read of

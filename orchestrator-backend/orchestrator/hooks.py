@@ -1,7 +1,7 @@
 """Claude Code hook entry points (decision provenance phase 0/1).
 
 `python -m orchestrator.hooks <event>` reads the hook's JSON on stdin and
-records it: PostToolUse → one tool_call_log row (phase 0, what a plan costs);
+records it: PostToolUse / PostToolUseFailure → one tool_call_log row, failed ones marked (phase 0, what a plan costs);
 UserPromptSubmit → the user's words verbatim into utterance (phase 1, Task 3),
 plus the source-mention hint when the sentence named an outside source (A3);
 PreToolUse (Edit | Write | MultiEdit) → the active constraints anchored on the
@@ -31,7 +31,7 @@ from . import db
 
 DEFAULT_ERROR_LOG = Path.home() / "skill-workspace" / "hook-errors.log"
 BUSY_TIMEOUT_MS = 2000
-EVENTS = ("PostToolUse", "UserPromptSubmit", "PreToolUse", "Stop")
+EVENTS = ("PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "PreToolUse", "Stop")
 HEADLESS_ENV = "PROVLEDGER_HEADLESS"   # set by testing.claude_arbiter on its claude child
 
 
@@ -75,9 +75,11 @@ def command_head(data: dict) -> str | None:
     return cmd.strip().replace("\n", " ")[:80]
 
 
-def record_tool_call(conn, data: dict) -> int:
-    cur = conn.execute("INSERT INTO tool_call_log (session_id, cwd, tool_name, command_head) VALUES (?, ?, ?, ?)",
-                       (str(data.get("session_id") or ""), data.get("cwd"), str(data.get("tool_name") or ""), command_head(data)))
+def record_tool_call(conn, data: dict, *, failed: bool = False) -> int:
+    """One tool_call_log row. A failed call arrives as PostToolUseFailure (FL-208)."""
+    cur = conn.execute("INSERT INTO tool_call_log (session_id, cwd, tool_name, command_head, failed) VALUES (?, ?, ?, ?, ?)",
+                       (str(data.get("session_id") or ""), data.get("cwd"), str(data.get("tool_name") or ""),
+                        command_head(data), 1 if failed else 0))
     conn.commit()
     return int(cur.lastrowid)
 
@@ -172,10 +174,10 @@ def handle(event: str, data: dict) -> dict | str | None:
     provLedger wrote to a model is not something the user said."""
     if os.environ.get(HEADLESS_ENV) == "1":
         return None
-    if event == "PostToolUse":
+    if event in ("PostToolUse", "PostToolUseFailure"):
         conn = _open()
         try:
-            record_tool_call(conn, data)
+            record_tool_call(conn, data, failed=(event == "PostToolUseFailure"))
         finally:
             conn.close()
     elif event == "UserPromptSubmit":

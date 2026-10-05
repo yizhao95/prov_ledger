@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# provledger — on the Bash tool's PATH while the plugin is enabled (Claude Code puts
+# a plugin's top-level bin/ there). The command itself lives in the plugin's venv,
+# which the SessionStart bootstrap builds; this hands every call to it (FL-195).
+VENV="${PROVLEDGER_VENV:-$HOME/skill-workspace/.venv}"
+if [ -x "$VENV/bin/provledger" ]; then exec "$VENV/bin/provledger" "$@"; fi
+if [ -x "$VENV/bin/python" ]; then exec "$VENV/bin/python" -m provledger.cli "$@"; fi
+echo "provledger: no venv at $VENV yet — the plugin's SessionStart bootstrap (scripts/bootstrap.sh) builds it" >&2
+exit 127

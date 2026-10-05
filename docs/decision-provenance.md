@@ -25,7 +25,7 @@ neutral on purpose — source, context, traceable — never blame.
 | `reference_check` | someone opened a pointer on a date and it was there, or it was not: `verdict` ok / gone / moved / no_access (migration 030) | `provledger reference mark` |
 | `trigger_log` | every rule verdict: auto / ask / silent, with its basis | `triggers.evaluate` |
 | `evidence_log` | what became of each evidence slot, so a blank can explain itself: `outcome` attached / found_nothing / timed_out / not_searched, with `searched`, `tool_hint`, `elapsed_ms` and the tier and level it landed at (migration 031). Not hash-chained — it is a log OF the records' making, like `trigger_log` beside it | `provledger review evidence-log` |
-| `tool_call_log` | one row per tool call (phase 0) | the `PostToolUse` hook |
+| `tool_call_log` | one row per tool call (phase 0); `failed` marks a call that failed (migration 032) | the `PostToolUse` and `PostToolUseFailure` hooks |
 
 All of them are append-only: no DELETE, and the only UPDATEs the triggers
 allow are `change_reason.superseded_by` (a correction is a new row that the

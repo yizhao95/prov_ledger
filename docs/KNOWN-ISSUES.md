@@ -166,11 +166,9 @@ and a combined run moves the rootdir to the common ancestor, which changes when
 conftest loads and in what order `sys.path` is extended. Two test file names
 also collide across suites.
 
-**After a plugin install, `provledger` is not on your PATH.** The plugin installs
-the command into its own venv, `~/skill-workspace/.venv/bin/`, and nothing adds
-that directory to the shell a session runs commands in — while the `/ledger` and
-`/receipts` skills call `provledger` by name. Until that is fixed, add the
-directory to your PATH (`export PATH="$HOME/skill-workspace/.venv/bin:$PATH"`).
+**claude.ai and Cowork do not install the plugin.** The plugin puts `provledger` on
+the session's PATH through a top-level `bin/` directory, and those two refuse a
+plugin that has one. Install it with the Claude Code CLI (`claude plugin install`).
 
 **A hook can lose its row under heavy concurrent writing.** When several sessions
 or a release run write to the same ledger at once, a hook waits two seconds for

@@ -15,7 +15,7 @@ Builds `<name>-state-graph.db` (SQLite code/data graph + append-only node histor
 ## Environment
 - `scripts/` is its own uv project (Python ≥ 3.13, `provledger` editable from `orchestrator-backend`).
   `init_project.sh` uses `uv run`; re-run `uv sync` after backend changes.
-- Tests use `PY=~/skill-workspace/.venv/bin/python`.
+- Tests use the repo's dev venv (`bash scripts/run_tests.sh psg`, or `PY=../../../.venv/bin/python` from `scripts/`).
 
 ## Tests
 - all, ~8 min: `bash scripts/run_tests.sh psg` (from repo root). Segments, from `scripts/`:
