@@ -11,6 +11,8 @@ and shipped to every user.
 - `skills/`: plan skills, the project-state-graph analyzer and its review driver, ledger, receipts,
   and superpowers-derived prompt skills.
 - `hooks/`: `_hook.sh` → `python -m orchestrator.hooks <Event>`; always exits 0.
+- `bin/provledger`: on the session's PATH while the plugin is enabled; hands every call to the
+  plugin venv's `provledger`.
 - `scripts/`: `bootstrap.sh` (builds the venv), `suites.sh` + `run_tests.sh`, `release-e2e.sh`,
   `test_packaging.sh`.
 - `examples/phantom-uplift/`: the demo (`make demo`).

@@ -180,13 +180,13 @@ Scope: 3 nodes, 2 constraints, 0 influencing records, 6 changes, 2026-10-04 to 2
 
 ## 4 · What it records on your machine
 
-Everything stays local, in SQLite files under `~/skill-workspace/`. Five hooks, and they only ever add:
+Everything stays local, in SQLite files under `~/skill-workspace/`. The hooks only ever add:
 
 | hook | what it records |
 |---|---|
 | `SessionStart` | installs dependencies once, in the background |
 | `UserPromptSubmit` | your prompt, verbatim, attributed to the repo and the open plan |
-| `PostToolUse` | one row per tool call, for the cost numbers |
+| `PostToolUse` / `PostToolUseFailure` | one row per tool call, failed ones marked, for the cost numbers |
 | `PreToolUse` (Edit / Write / MultiEdit) | shows the rules anchored on the lines about to change — at most 600 characters, nothing when nothing anchors there |
 | `Stop` | closes the session record and refreshes the graph |
 
