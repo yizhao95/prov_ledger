@@ -19,7 +19,9 @@ and a hook does not:
     write (a plan published by hand while the suites run will be reported too).
     The one hook write among them is the Stop hook's degraded-mode close, which
     files reasons under a `session:<id>` plan; those rows are left out;
-  * the entries at the top of the workspace, and whether it exists at all.
+  * the entries at the top of the workspace, and whether it exists at all —
+    leaving out SQLite's sidecar files (-journal, -wal, -shm), which exist for
+    the length of one write and which the hooks create all the time.
 
 The workspace is $PROVLEDGER_GUARD_HOME, else ~/skill-workspace. Stdlib only.
 """
@@ -35,6 +37,7 @@ LEDGER_TABLES = ("Plans", "Steps", "Deviations", "LedgerEntries", "change_reason
                  "declared_node", "expectations", "outcomes", "ask_log")
 # Rows a hook writes into a guarded table, by table: the Stop hook closes a
 # session that published no plan with reasons filed under `session:<id>`.
+SQLITE_SIDECARS = ("-journal", "-wal", "-shm")
 HOOK_ROWS = {"change_reason": "coalesce(plan_id, '') LIKE 'session:%'"}
 
 
@@ -90,7 +93,7 @@ def snapshot() -> dict:
     graphs = home / "project-graphs"
     return {
         "exists": True,
-        "entries": sorted(p.name for p in home.iterdir()),
+        "entries": sorted(p.name for p in home.iterdir() if not p.name.endswith(SQLITE_SIDECARS)),
         "registry": _registry(graphs),
         "index": _indexed(graphs),
         "ledger": _ledger(home / "orchestrator.db"),

@@ -157,3 +157,19 @@ def test_the_release_check_uses_this_guard_not_file_hashes() -> None:
     src = (REPO / "scripts" / "release-e2e.sh").read_text()
     assert "home_guard.py\" snapshot" in src and "home_guard.py\" check" in src
     assert "GUARD_REG_BEFORE" not in src and "GUARD_IDX_BEFORE" not in src
+
+
+def test_sqlite_sidecar_files_are_not_a_leak(tmp_path: Path) -> None:
+    """In rollback-journal mode SQLite creates orchestrator.db-journal for the
+    length of one write transaction — the session's own hooks write the real
+    ledger all the time, so a snapshot or a check can catch one."""
+    ws = _workspace(tmp_path)
+    (ws / "orchestrator.db-journal").write_text("")      # present at snapshot time
+    snap = _snapshot(ws, tmp_path)
+    (ws / "orchestrator.db-journal").unlink()
+    (ws / "orchestrator.db-wal").write_text("")
+    (ws / "orchestrator.db-shm").write_text("")
+    proc = _guard(ws, "check", str(snap))
+    assert proc.returncode == 0, proc.stdout
+    (ws / "notes.txt").write_text("")                     # anything else still counts
+    assert _guard(ws, "check", str(snap)).returncode == 1
