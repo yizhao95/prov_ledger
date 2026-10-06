@@ -92,7 +92,12 @@ def _build_context(request: Request, plan_id: str | None = None, node: str | Non
     try:
         conn = queries.open_db_readonly()
     except FileNotFoundError as e:
-        return _error_ctx(f"orchestrator.db not found: {e}. Have you run any plans yet?")
+        if plan_id is None:
+            # No ledger yet is the dashboard running before the first plan
+            # (launch_dashboard.sh says so): the empty state, which names the
+            # command that publishes one. Only a named plan is missing.
+            return {**_error_ctx(""), "error": None}
+        return _error_ctx(f"orchestrator.db not found: {e}")
     except sqlite3.Error as e:  # DASH-BUG2: locked/corrupt DB degrades, not 500s
         return _error_ctx(f"database error: {e}")
 

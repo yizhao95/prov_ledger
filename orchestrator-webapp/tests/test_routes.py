@@ -781,3 +781,23 @@ def test_session_pages_survive_an_old_db(client):
         conn.execute(f"DROP TABLE {t}")
     conn.commit(); conn.close()
     assert client.get("/session/x").status_code == 200 and client.get("/").status_code == 200
+
+
+def test_before_the_first_plan_the_page_shows_the_empty_state_not_an_error(tmp_path, monkeypatch):
+    """No ledger yet is the dashboard running before the first plan, not a
+    failure: launch_dashboard.sh says so and exits 0. The page rendered a red
+    "Error: orchestrator.db not found" box instead of the empty state that names
+    the command publishing a plan. Found by the release check's stage 0."""
+    monkeypatch.setenv("ORCH_DB", str(tmp_path / "not-yet" / "orchestrator.db"))
+    from app import queries, main
+    importlib.reload(queries)
+    importlib.reload(main)
+    from fastapi.testclient import TestClient
+    c = TestClient(main.app)
+    for path in ("/", "/api/dashboard"):
+        r = c.get(path)
+        assert r.status_code == 200, path
+        assert "publish-plan.sh" in r.text, path
+        assert "⚠️ Error" not in r.text, path
+    r = c.get("/plan/some-plan-20260101000000")
+    assert "not found" in r.text, "a named plan on a machine with no ledger is still missing"

@@ -88,6 +88,14 @@ Reply with ONE JSON object and nothing else:
 """
 
 
+# A real session also reads the code, which /receipts is allowed to do for
+# what and where — never for why (skills/receipts/SKILL.md, hard rule 2). Its
+# code reads are evidence for exactly that and nothing more.
+CODE_NOTE = (
+    "\n\n===== the code this session read itself (admissible for WHAT the code does and "
+    "WHERE, never for WHY it was changed, who decided it, or when) =====\n")
+
+
 def judge_one(q: dict) -> tuple[dict, dict, str]:
     must = q.get("must") or []
     must_not = q.get("must_not") or []
@@ -100,6 +108,7 @@ def judge_one(q: dict) -> tuple[dict, dict, str]:
            + "\n".join(f"- {m}" for m in must_not) if must_not else "")
         + "\n\n===== the material the tool computed (the only admissible evidence) =====\n"
         + (q.get("material") or "(none)")[:24000]
+        + (CODE_NOTE + q["code"][:12000] if q.get("code") else "")
         + "\n\n===== the answer to mark =====\n" + (q.get("answer") or "(empty)")
         + "\n"
     )

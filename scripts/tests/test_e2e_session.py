@@ -181,3 +181,50 @@ def test_stage_3_marks_the_real_answers_and_keeps_the_simulated_ones_apart(S2):
     assert [a["id"] for a in doc["answers"]] == ["Q1-cause"], "a question with no real answer is not marked"
     assert doc["answers"][0]["answer"] == "real 70/30 [#2]"
     assert doc["simulated"] == simulated and doc["facts"] == {"project": "p"}
+
+
+COMPOUND = [
+    INIT,
+    _use("c1", "grep -rn discount . ; ls; provledger --help 2>&1 | head -30"),
+    _result("c1", "pkg/rollup.py:7: given = sum(o['discount'] ...)\nusage: provledger"),
+    _use("c2", 'P=demo; provledger receipts candidates "who; and why" --project $P'),
+    _result("c2", "candidates: pkg.rollup.discount_rate"),
+    _use("c3", "provledger plan p-1; echo =====; provledger receipts facts a b --project demo"),
+    _result("c3", "plan p-1 ...\n===\nfacts ..."),
+    _use("c4", "for r in 1 2; do provledger record \"#$r\"; done"),
+    _result("c4", "Permission denied", is_error=True),
+    {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "c5", "name": "Read", "input": {"file_path": "/w/pkg/rollup.py"}}]}},
+    _result("c5", "22  return {'discount_rate_is_estimated': True}"),
+    {"type": "result", "subtype": "success", "is_error": False, "num_turns": 6, "result": "reply"},
+]
+
+
+def test_every_provledger_subcommand_is_found_inside_compound_and_prefixed_commands(PS):
+    """An agent writes `P=x; provledger receipts candidates …` and `a; echo; provledger …`:
+    a check that only looks at how a command starts misses reads that did run."""
+    inv = PS.parse_stream(_lines(COMPOUND)).invocations()
+    assert inv[0].startswith('receipts candidates "who; and why"'), "a quoted ; does not split"
+    assert [i.split()[0:2] for i in inv] == [["receipts", "candidates"], ["plan", "p-1"], ["receipts", "facts"]]
+
+
+def test_a_flag_is_not_a_read_and_a_failed_call_read_nothing(PS):
+    inv = PS.parse_stream(_lines(COMPOUND)).invocations()
+    assert not any(i.startswith("--help") for i in inv)
+    assert not any(i.startswith("record") for i in inv), "the denied loop never ran"
+
+
+def test_the_code_a_session_read_is_kept_apart_from_its_ledger_reads(PS):
+    t = PS.parse_stream(_lines(COMPOUND))
+    code = t.code_material()
+    assert "discount_rate_is_estimated" in code and "pkg/rollup.py:7" in code
+    assert "candidates: pkg.rollup.discount_rate" not in code
+    ledger = t.provledger_material()
+    assert "candidates: pkg.rollup.discount_rate" in ledger and "facts ..." in ledger
+    assert "discount_rate_is_estimated" not in ledger
+
+
+def test_a_real_answer_carries_the_code_its_session_read(PS, S2):
+    a = S2.real_answer(QUESTION, PS.parse_stream(_lines(COMPOUND)))
+    assert "discount_rate_is_estimated" in a["code"]
+    assert "discount_rate_is_estimated" not in a["material"]

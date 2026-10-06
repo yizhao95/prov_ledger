@@ -128,15 +128,79 @@ class Transcript:
         return [c.input.get("command", "") for c in self.calls if c.name == "Bash"]
 
     def provledger_calls(self) -> list[Call]:
-        return [c for c in self.calls if c.name == "Bash" and _is_provledger(c.input.get("command", ""))]
+        """The calls that read the ledger: a successful Bash call with at least one
+        `provledger <subcommand>` in it, wherever it sits in the command."""
+        return [c for c in self.calls if c.name == "Bash" and not c.is_error and _reads(c)]
+
+    def invocations(self) -> list[str]:
+        """Every `provledger` read the session ran, in order, as the text after
+        `provledger` — `receipts candidates "…" --project p`. Agents write
+        `P=x; provledger …` and `a; echo ---; provledger …`, so a check that only
+        looks at how a command starts misses reads that did run. A flag
+        (`--help`) is not a read, and a failed call read nothing."""
+        return [i for c in self.provledger_calls() for i in _reads(c)]
 
     def provledger_material(self) -> str:
-        """What the session read from the ledger: the output of every `provledger`
-        call that succeeded, each under the command that printed it. This is the
-        only admissible evidence for its answer — the material stage 3 marks
-        against."""
-        return "\n\n".join(f"$ {c.input.get('command', '')}\n{c.output}"
-                           for c in self.provledger_calls() if not c.is_error)
+        """What the session read from the ledger, each output under the command
+        that printed it — the evidence stage 3 marks an answer's reasons against."""
+        return "\n\n".join(f"$ {c.input.get('command', '')}\n{c.output}" for c in self.provledger_calls())
+
+    def code_material(self) -> str:
+        """What the session read that was not the ledger: files it opened, greps it
+        ran. /receipts may use the code for what and where, never for why (its
+        hard rule 2), so stage 3 is shown this apart from the ledger reads."""
+        out = []
+        for c in self.calls:
+            if c.is_error or not c.output or c in self.provledger_calls():
+                continue
+            if c.name == "Bash":
+                out.append(f"$ {c.input.get('command', '')}\n{c.output}")
+            elif c.name in ("Read", "Grep", "Glob"):
+                what = c.input.get("file_path") or c.input.get("pattern") or ""
+                out.append(f"[{c.name} {what}]\n{c.output}")
+        return "\n\n".join(out)
+
+
+def _segments(command: str) -> list[str]:
+    """The simple commands in a shell line, split on ; & | and newlines outside
+    quotes. Close enough for reading what an agent ran; not a shell parser."""
+    out, cur, quote, i = [], [], None, 0
+    while i < len(command):
+        ch = command[i]
+        if quote:
+            cur.append(ch)
+            if ch == "\\" and quote == '"' and i + 1 < len(command):
+                cur.append(command[i + 1])
+                i += 1
+            elif ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+            cur.append(ch)
+        elif ch in ";&|\n":
+            out.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+        i += 1
+    out.append("".join(cur))
+    return [x.strip() for x in out if x.strip()]
+
+
+def _reads(call: Call) -> list[str]:
+    """The `provledger` reads in one Bash call: the text after `provledger` in
+    each simple command that runs it, flags (`--help`) left out."""
+    found = []
+    for seg in _segments(call.input.get("command", "")):
+        if not _is_provledger(seg):
+            continue
+        words = seg.split()
+        while words and os.path.basename(words[0]) != "provledger":
+            words = words[1:]
+        rest = seg[seg.find(words[0]) + len(words[0]):].strip() if words else ""
+        if rest and not rest.startswith("-"):
+            found.append(rest)
+    return found
 
 
 def _is_provledger(command: str) -> bool:

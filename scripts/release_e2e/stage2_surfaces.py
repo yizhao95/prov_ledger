@@ -424,7 +424,7 @@ def real_answer(q: dict, s: PS.Transcript) -> dict:
     admits), the commands it ran and where its raw stream is kept."""
     ok = s.ok and bool(s.result.strip())
     return {**q, "path": "real", "answer": s.result if ok else "", "material": s.provledger_material(),
-            "commands": s.bash_commands(), "session_id": s.session_id,
+            "code": s.code_material(), "commands": s.bash_commands(), "session_id": s.session_id,
             "outcome": "ok" if ok else ("timeout" if s.rc is None else "failed"),
             "turns": s.num_turns, "elapsed_s": s.elapsed_s, "transcript": s.raw_path}
 
@@ -477,21 +477,21 @@ def real_sessions(t: Tally, facts: dict, qs: list[dict]) -> list[dict]:
             continue
         t.record(OK, f"{label}: the real session answered",
                  f"{s.num_turns} turns, {s.elapsed_s} s, {len(a['answer'].split())} words")
-        reads = [c.input.get("command", "").strip() for c in s.provledger_calls()]
+        reads = s.invocations()
         t.record(OK if f"provledger:{name}" in s.slash_commands else FAIL,
                  f"{label}: the plugin offers /{name}", f"{len(s.slash_commands)} slash commands loaded")
         if name == "ledger":
             first = reads[0] if reads else ""
-            t.record(OK if first.startswith("provledger ask ") else FAIL,
+            t.record(OK if first.startswith("ask ") and not first.startswith("ask submit") else FAIL,
                      f"{label}: its first ledger read is `provledger ask`, as SKILL.md says",
                      first[:140] or "no `provledger` call at all")
             grew = ask_log_rows(db) > asked
-            submitted = any(r.startswith("provledger ask submit") for r in reads)
+            submitted = any(r.startswith("ask submit") for r in reads)
             t.record(OK if grew and submitted else FAIL,
                      f"{label}: the question is in ask_log and the draft went through `ask submit`",
                      f"ask_log {'grew' if grew else 'did not grow'}; submit {'ran' if submitted else 'never ran'}")
         else:
-            both = [any(r.startswith(f"provledger receipts {w}") for r in reads) for w in ("candidates", "facts")]
+            both = [any(r.startswith(f"receipts {w}") for r in reads) for w in ("candidates", "facts")]
             t.record(OK if all(both) else FAIL,
                      f"{label}: it ran the two reads SKILL.md requires, `receipts candidates` and `receipts facts`",
                      f"candidates {'ran' if both[0] else 'never ran'}; facts {'ran' if both[1] else 'never ran'}")
