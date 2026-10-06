@@ -227,3 +227,22 @@ def test_it_shows_how_to_get_from_a_record_to_the_task_that_made_it():
     assert "provledger plan " in text
     assert "names the plan" in low or "names the task" in low or "plan id" in low, \
         "the skill must say that a record points at the task that produced it"
+
+
+def test_a_source_is_a_pointer_and_a_tier_is_part_of_what_a_record_says():
+    """The release check's judge caught two replies saying more than the record:
+    an email recorded as a link and never checked became 'the email attached ...
+    happy to forward it', and an asserted instruction became 'what had been
+    agreed'. The ledger holds a source's label, time and link — never its body —
+    and an asserted record is the agent's reading, not an agreement."""
+    text = " ".join(SKILL.read_text(encoding="utf-8").split())      # prose wraps; the phrase does not
+    assert "never its body" in text
+    assert "never write that the email is attached" in text
+    assert "offer to send it" in text
+    assert "not something anyone agreed" in text
+    # asserted is a reading recorded as such — the agent's, or a note a person typed
+    # (ledger-add records recorded_by human): saying "the agent's" made a reply call
+    # a person's own note "an interpretation nobody confirmed"
+    assert "the agent's or a person's" in text and "`recorded_by` says which" in text
+    assert "not a quote" in text
+    assert "an `asserted` record is the agent's reading" not in text

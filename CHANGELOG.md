@@ -8,7 +8,7 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
-## Unreleased
+## 0.4.4 — 2026-10-05
 
 ### Fixed
 
@@ -20,6 +20,19 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   a sandboxed install with a real headless session, the first time the plugin path
   itself was exercised. claude.ai and Cowork do not install a plugin with a
   top-level `bin/`; install with the Claude Code CLI.
+- **A constraint added to a new ledger was recorded twice.** A ledger constraint is
+  mirrored into the readers' table when it is added, and the one-time reclass that
+  every ledger runs on a later open copied it again — so on any ledger created
+  since decision provenance, a constraint added before that first reclass became
+  two. Readers folded the twins only when both writes fell in the same second;
+  under load they did not, and a plan close recorded the bypass of one constraint
+  twice. The reclass now leaves an already-mirrored constraint alone. Found as a
+  scenario that failed about one run in fifteen under load.
+- **`/receipts` could say more than a record says.** A source is a pointer — the
+  ledger holds its label, time and link, never its body — and the skill now says so
+  in its hard rules: never call a linked email attached, never offer to send it,
+  and never present an asserted record as something anyone agreed. Found by the
+  release check's judge.
 - **Failed tool calls were never logged.** A failed call fires `PostToolUseFailure`,
   not `PostToolUse`, and only the latter was hooked. Both are now, and
   `tool_call_log.failed` (migration 032) marks the failures.
