@@ -54,9 +54,12 @@ and your judgement picks.
    has no reason of its own (`unstated`), say the task which changed it recorded no
    reason for it — name the task by what it set out to do and when. That is still a
    complete account; it is also a line for section c.
-6. **Every number comes off a record** — not a count you worked out, not a rounding,
-   not a date you inferred. A number from a step log is sourced: quote it and say
-   which record or step it came from.
+6. **Every number and identifier is copied from a read** — a commit, a plan id, a
+   file:line, a date: something a read printed, not a count you worked out, a
+   rounding or a date you inferred. The colleague may go and look it up, and an
+   identifier nobody printed sends them after something that does not exist. A
+   number from a step log is sourced: quote it and say which record or step it
+   came from.
 7. **An absence is a usable reply.** "There is no record of why that was chosen" is
    often the honest answer, and said plainly it is still a good one. Reproduce the
    computed absence sentences word for word in section b.
@@ -182,7 +185,9 @@ not assign. No ids and no hedging about what you looked at in this paragraph.
 ### b · The evidence
 
 One line per claim in the reply, oldest first, each ending in its id; then the
-computed absences word for word, then the scope line. This is what the user skims
+computed absences word for word, then the scope line as each read printed it —
+one per `receipts facts` read, never added together, since a summed line
+describes a search nobody ran. This is what the user skims
 before sending and forwards if the colleague pushes back. If the record does not
 support a sentence of the reply, fix the reply rather than annotating this list.
 

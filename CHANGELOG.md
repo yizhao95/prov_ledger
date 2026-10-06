@@ -22,6 +22,31 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   first session and a first task the agent plans itself; stage 2 also asks every
   question as a real `/ledger` or `/receipts` slash command; stage 3 marks those
   real answers, and a disagreement is a finding a person decides.
+- **`/ledger` answers as a handoff, and `/receipts` says what to check before you
+  send.** Both skills are rewritten from Anthropic's public guidance on skills and
+  prompts: the intent first, every rule with its reason, a template and complete
+  examples. `/ledger` leads with the answer, then where it came from (who asked,
+  when, in their own words), what was done about it, and what holds now, in date
+  order. It checks every sentence against what this session read before
+  submitting, never shows a sentence the check deleted, and may resubmit once
+  with an id it found. `/receipts` writes a complete reply told as a timeline and
+  lists, apart from it, what the record does not settle — for you to confirm or
+  add before sending. Both copy every number and identifier from a read, and the
+  scope line as each read printed it.
+- **The fact table says what an agent used to guess.** A node whose reason was
+  closed `unstated` now shows a cited line ("nobody said why this changed") and
+  the absence "No reason was recorded for X." — before, it printed `reasons (0)`,
+  which reads like "never touched", and an agent supplied the goal of the task
+  that changed it. Every source says it is a link only, that the body is not in
+  the ledger, and whether anyone checked it. The table, and the `/receipts`
+  material, open with a legend: what each tier and cite token is, and how to put
+  it into words.
+- Measured on real sessions before release: the dummy project's twelve questions,
+  asked twice of the old skills and of the new ones and marked by a model judge.
+  Answers told in date order went from 9 to 21 of 24, questions whose two runs
+  disagreed from 5 to 1, answers with a claim resting on no record from 5 to 3;
+  key points hit stayed at 43 of 48. (`scripts/release_e2e/skill_ab.py` runs that
+  comparison for any two refs.)
 
 ## 0.4.4 — 2026-10-05
 

@@ -290,3 +290,12 @@ def test_the_tiers_are_defined_by_the_legend_not_here():
     text = " ".join(SKILL.read_text(encoding="utf-8").split())
     assert "legend" in text.lower()
     assert "`stated` = the user's own recorded words" not in text, "one definition, in the CLI legend"
+
+
+def test_identifiers_and_the_scope_line_are_copied_never_made():
+    """The A/B run of the redesign: a commit hash no read had printed, and a scope
+    line summed from two `receipts facts` reads into one no command had printed."""
+    text = " ".join(SKILL.read_text(encoding="utf-8").split())
+    assert "every number and identifier" in text.lower()
+    assert "a commit, a plan id, a file:line" in text
+    assert "the scope line as each read printed it" in text.lower() and "never added together" in text

@@ -82,3 +82,13 @@ def test_the_draft_is_written_with_the_write_tool():
     """A heredoc into mktemp is a compound shell command a user's permission
     settings stop on every time; the real sessions in the release check all hit it."""
     assert "with the Write tool" in _flat()
+
+
+def test_identifiers_and_the_scope_line_are_copied_never_made():
+    """The A/B run of the redesign (2026-10-06): a commit hash no read had printed,
+    and a scope line summed from two reads into one no command had printed. A
+    number rule alone did not cover either."""
+    t = _flat()
+    assert "every number and identifier" in t.lower()
+    assert "a commit, a plan id, a file:line" in t
+    assert "the scope line as each read printed it" in t.lower() and "never added together" in t

@@ -29,16 +29,20 @@ points at nothing. You read, choose, and write.
    is written this way, so presumably because X") — the real reason is usually
    recorded, and a plausible guess will be believed instead of it.
 3. **Every sentence ends in the id it rests on** — `[#12]`, `[#r3]`, `[scope]` —
-   and every number in it is printed in a record. That is what lets the user
-   check you, and what `ask submit` checks.
+   and every number and identifier in it (a commit, a plan id, a file:line, a
+   date) is copied from something a read printed. That is what lets the user
+   check you; an identifier nobody printed sends them looking for something that
+   does not exist.
 4. **Say what a record is, the way the record says it.** The fact table opens
    with a legend: what each tier and cite token means, and how to put it into a
    sentence. Follow it — it is why a person's words are given as theirs, a
    reading is never called an agreement, and a link is never called the email.
 5. **An absence is an answer.** "No reason was recorded for X" is complete and
    useful. Code computes those sentences against the searched range; reproduce
-   them word for word, and when you have searched without finding, say where you
-   searched rather than that nothing exists.
+   them word for word, with the scope line as each read printed it — one per
+   read, never added together, because a summed line describes a search nobody
+   ran. When you have searched without finding, say where you searched rather
+   than that nothing exists.
 
 The reads this skill uses are all permitted and write nothing the project
 depends on: `ask`, `ask submit`, `graph`, `why`, `record`, `plan`, and the
