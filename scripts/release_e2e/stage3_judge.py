@@ -150,8 +150,9 @@ def main() -> int:
     answers = [a for a in doc.get("answers") or [] if (a.get("answer") or "").strip()]
     if not answers:
         t.record(BLOCKED, "there are answers to mark",
-                 "stage 2 produced no non-empty answer, so there is nothing to judge. "
-                 "This is reported rather than passed: an unmarked release is not a marked one.")
+                 "stage 2's real /ledger and /receipts sessions produced no non-empty answer, so "
+                 "there is nothing to judge (stage 2 says why). This is reported rather than "
+                 "passed: an unmarked release is not a marked one.")
         write_verdict("3", t.verdict)
         return 0
 
@@ -165,6 +166,10 @@ def main() -> int:
     info(f"judge: {why}")
     info(f"marking {len(answers)} answer(s) · the judge is a model, so read the verdicts as "
          f"evidence, not proof")
+    real = sum(1 for a in answers if a.get("path") == "real")
+    info(f"{real} of them from real /ledger and /receipts sessions with the plugin installed; "
+         f"each one's material is what that session's own `provledger` reads printed, and its raw "
+         f"stream is in the logs (s4-<id>.jsonl)")
 
     cards = []
     for a in answers:

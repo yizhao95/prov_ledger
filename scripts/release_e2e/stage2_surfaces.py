@@ -18,8 +18,13 @@ PATH with a stub that fails loudly, running the documented flows, and checking
 the stub was never touched — with a control run that proves the stub does fire
 when `--runner claude` asks for it.
 
-The answers themselves are written by a stand-in for the session model (see
-session_model.py) and marked in stage 3.
+Each question is then asked twice. The stand-in path hands the skill's
+SKILL.md and the CLI's material to one headless call (session_model.py):
+deterministic enough to tell a retrieval gap from a wording one. The real path
+(S4) asks it as a `/ledger` or `/receipts` slash command in a session with the
+plugin installed (stage 0's install), so the skill is loaded by the plugin, the
+agent picks its own commands and finds `provledger` on its own PATH — the path
+FL-195 broke and the stand-in could never see. Stage 3 marks the real answers.
 """
 from __future__ import annotations
 
@@ -27,6 +32,7 @@ import json
 import os
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -35,7 +41,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import dummy_project as DP                                          # noqa: E402
+import plugin_session as PS                                         # noqa: E402
 import session_model as SM                                          # noqa: E402
+import stage0_plugin as P0                                          # noqa: E402
 from e2elib import (BLOCKED, FAIL, OK, LOGS, ROOT, Tally,  # noqa: E402
                     UNDER_TEST, banner, info, step, write_verdict)
 
@@ -405,6 +413,98 @@ def answer_questions(t: Tally, cli, facts: dict, qs: list[dict]) -> list[dict]:
     return out
 
 
+# ── S4 · /ledger and /receipts as real slash commands ────────────────────────
+S4_TOOLS = ("Bash(provledger:*)", "Bash(mktemp:*)", "Bash(cat:*)", "Read", "Grep", "Glob", "Write")
+SLASH = {"ask": "ledger", "receipts": "receipts"}
+
+
+def real_answer(q: dict, s: PS.Transcript) -> dict:
+    """One question's real-path record: the session's final answer, the
+    material its own `provledger` reads printed (the only evidence stage 3
+    admits), the commands it ran and where its raw stream is kept."""
+    ok = s.ok and bool(s.result.strip())
+    return {**q, "path": "real", "answer": s.result if ok else "", "material": s.provledger_material(),
+            "commands": s.bash_commands(), "session_id": s.session_id,
+            "outcome": "ok" if ok else ("timeout" if s.rc is None else "failed"),
+            "turns": s.num_turns, "elapsed_s": s.elapsed_s, "transcript": s.raw_path}
+
+
+def stage3_payload(facts: dict, real: list[dict], simulated: list[dict]) -> dict:
+    """Stage 3 marks the real answers; the stand-in ones are kept beside them,
+    unmarked, for telling a harness problem from a plugin one."""
+    return {"facts": facts, "answers": [a for a in real if (a.get("answer") or "").strip()],
+            "simulated": simulated}
+
+
+def ask_log_rows(db: str) -> int:
+    try:
+        c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            return c.execute("SELECT count(*) FROM ask_log").fetchone()[0]
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return -1
+
+
+def real_sessions(t: Tally, facts: dict, qs: list[dict]) -> list[dict]:
+    step("S4 · /ledger and /receipts as real slash commands in a plugin session")
+    state = P0.ensure_installed(t)
+    if not state:
+        t.record(BLOCKED, "S4 runs in a session with the plugin installed",
+                 "the plugin could not be installed (see stage 0), so there is no session to ask in")
+        return []
+    env = PS.stranger_env(Path(state["home"]), Path(state["config"]))
+    # the dummy project's ledger and registry: a user whose project has history
+    for k in ("ORCH_DB", "PSG_REGISTRY_ROOT", "PSG_REGISTRY_PATH", "PSG_INDEX_PATH"):
+        if os.environ.get(k):
+            env[k] = os.environ[k]
+    env["PROVLEDGER_BOOTSTRAP_LOG"] = str(LOGS / "plugin-bootstrap.log")
+    db = os.environ.get("ORCH_DB") or ""
+    out = []
+    for q in qs:
+        name = SLASH[q["surface"]]
+        label = f"{q['id']} · /{name}"
+        asked = ask_log_rows(db)
+        s = PS.run_session(f"/{name} {q['question']}", cwd=Path(facts["repo"]), env=env,
+                           allowed_tools=S4_TOOLS, max_turns=40, timeout_s=420, model=MODEL,
+                           log=LOGS / f"s4-{q['id']}.jsonl")
+        a = real_answer(q, s)
+        out.append(a)
+        if a["outcome"] != "ok":
+            t.record(FAIL, f"{label}: the real session answered",
+                     f"{a['outcome']} after {s.elapsed_s} s (rc={s.rc}); stream {s.raw_path}")
+            continue
+        t.record(OK, f"{label}: the real session answered",
+                 f"{s.num_turns} turns, {s.elapsed_s} s, {len(a['answer'].split())} words")
+        reads = [c.input.get("command", "").strip() for c in s.provledger_calls()]
+        t.record(OK if f"provledger:{name}" in s.slash_commands else FAIL,
+                 f"{label}: the plugin offers /{name}", f"{len(s.slash_commands)} slash commands loaded")
+        if name == "ledger":
+            first = reads[0] if reads else ""
+            t.record(OK if first.startswith("provledger ask ") else FAIL,
+                     f"{label}: its first ledger read is `provledger ask`, as SKILL.md says",
+                     first[:140] or "no `provledger` call at all")
+            grew = ask_log_rows(db) > asked
+            submitted = any(r.startswith("provledger ask submit") for r in reads)
+            t.record(OK if grew and submitted else FAIL,
+                     f"{label}: the question is in ask_log and the draft went through `ask submit`",
+                     f"ask_log {'grew' if grew else 'did not grow'}; submit {'ran' if submitted else 'never ran'}")
+        else:
+            both = [any(r.startswith(f"provledger receipts {w}") for r in reads) for w in ("candidates", "facts")]
+            t.record(OK if all(both) else FAIL,
+                     f"{label}: it ran the two reads SKILL.md requires, `receipts candidates` and `receipts facts`",
+                     f"candidates {'ran' if both[0] else 'never ran'}; facts {'ran' if both[1] else 'never ran'}")
+        needle = q.get("needle")
+        if needle:      # evidence, not a verdict: stage 3 marks whether the answer used it
+            seen = needle.lower() in a["material"].lower()
+            info(f"{label}: the {q.get('kind', 'record')} {'was' if seen else 'was NOT'} in what this session read")
+        if s.permission_denials:
+            info(f"{label}: {len(s.permission_denials)} permission denial(s): "
+                 + "; ".join(str(d.get('tool_input', d))[:80] for d in s.permission_denials[:3]))
+    return out
+
+
 # ── the stage ────────────────────────────────────────────────────────────────
 def main() -> int:
     banner("STAGE 2 · a dummy project, then /ledger, /receipts and the dashboard")
@@ -497,10 +597,12 @@ def main() -> int:
         info(f"stand-in session model: {why}")
         answers = answer_questions(t, cli, facts, qs)
 
+    real = real_sessions(t, facts, qs)
+
     dashboard_check(t, facts["project"], db)
 
     (ROOT / "stage3-input.json").write_text(
-        json.dumps({"facts": facts, "answers": answers}, indent=1, default=str), encoding="utf-8")
+        json.dumps(stage3_payload(facts, real, answers), indent=1, default=str), encoding="utf-8")
     info(f"answers for stage 3: {ROOT / 'stage3-input.json'}")
     write_verdict("2", t.verdict)
     return 0

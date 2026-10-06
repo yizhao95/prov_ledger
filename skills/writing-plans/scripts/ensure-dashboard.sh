@@ -15,18 +15,19 @@
 #   4. If still down → exit non-zero with diagnostic
 #
 # Env overrides (mostly for tests):
-#   HEALTH_URL   probe URL   default http://127.0.0.1:8765/api/health
+#   HEALTH_URL   probe URL   default http://127.0.0.1:${PROVLEDGER_DASH_PORT:-8765}/api/health
+#                (the launcher starts on PROVLEDGER_DASH_PORT, so the probe follows it)
 #   LAUNCH_CMD   command to start the dashboard
 #                default: bash <plugin root>/orchestrator-webapp/launch_dashboard.sh
 #                (plugin root = $CLAUDE_PLUGIN_ROOT, else three dirs above this script)
 #   WAIT_SECS    seconds to wait for healthy after launch   default 10
-#   ENSURE_DASHBOARD_PRINT_ONLY=1   print the resolved LAUNCH_CMD and exit (tests)
+#   ENSURE_DASHBOARD_PRINT_ONLY=1   print the resolved LAUNCH_CMD and HEALTH_URL and exit (tests)
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
-HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8765/api/health}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:${PROVLEDGER_DASH_PORT:-8765}/api/health}"
 # FL-012: the bundled webapp is the launcher; the old ~/skill-workspace path only
 # existed on the author's machine.
 LAUNCH_CMD="${LAUNCH_CMD:-bash ${PLUGIN_ROOT}/orchestrator-webapp/launch_dashboard.sh}"
@@ -34,6 +35,7 @@ WAIT_SECS="${WAIT_SECS:-10}"
 
 if [[ "${ENSURE_DASHBOARD_PRINT_ONLY:-0}" == "1" ]]; then
     echo "LAUNCH_CMD=${LAUNCH_CMD}"
+    echo "HEALTH_URL=${HEALTH_URL}"
     exit 0
 fi
 
