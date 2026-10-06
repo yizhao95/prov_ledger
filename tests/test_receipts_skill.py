@@ -262,3 +262,31 @@ def test_the_reply_is_a_timeline_and_a_tasks_goal_is_not_a_nodes_reason():
     assert "give it as theirs and trust it" in text
     assert "tell it as a timeline" in text.lower()
     assert "when it was said" in text and "when it changed" in text
+
+
+def test_the_reply_is_complete_and_hands_back_what_the_record_does_not_settle():
+    """The user's ruling (2026-10-06): /receipts speaks to someone else on the
+    user's behalf, so it aims at a complete answer — what it is, who asked and in
+    what words, what was done, what holds now — and lists, apart from the reply,
+    what the user must confirm or add before sending."""
+    text = " ".join(SKILL.read_text(encoding="utf-8").split())
+    assert "who asked, when, in their own words" in text
+    c = text[text.index("### c · Before you send"):]
+    assert "confirm or add" in c
+    assert "tone" in c.lower(), "the tone question still closes it"
+    assert "A claim you cannot point at does not go in the reply — it goes in section c" in text
+
+
+def test_one_complete_generic_example_with_why_it_is_right():
+    import re
+    examples = re.findall(r"<example>(.*?)</example>", SKILL.read_text(encoding="utf-8"), re.S)
+    assert len(examples) >= 1 and all("Why this is right:" in e for e in examples)
+    joined = " ".join(examples).lower()
+    for word in ("discount", "orders feed", "rollup", "load_orders", "weekly_report", "list_price"):
+        assert word not in joined, f"a shipped example must not carry the release check's answers: {word}"
+
+
+def test_the_tiers_are_defined_by_the_legend_not_here():
+    text = " ".join(SKILL.read_text(encoding="utf-8").split())
+    assert "legend" in text.lower()
+    assert "`stated` = the user's own recorded words" not in text, "one definition, in the CLI legend"

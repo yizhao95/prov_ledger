@@ -4,6 +4,7 @@ The hardest thing for a language model to say honestly is "there is nothing".
 So it is never asked. Code reads four absences straight off the fact table:
 
   not_in_graph            the node is not in the project graph at all
+  no_reason_recorded      it changed, and the slot for why was closed `unstated`
   graph_unavailable       the graph could not be asked (missing, mid-refresh)
   never_verified          no outcome was ever recorded for it
   no_alternatives_tested  one value, no rejected path, no second measurement
@@ -40,6 +41,14 @@ def absences(conn, ft: dict) -> list[dict]:
             out.append({"code": "not_in_graph", "node": qn, "cite": SCOPE_CITE, "value": None,
                         "text": _sentence(f"`{qn}` is not in the project graph, and nothing in the ledger is anchored to it")})
             continue
+
+        reasons = n.get("reasons") or []
+        if reasons and all(r.get("tier") == "unstated" for r in reasons):
+            # Said by code, so an agent never has to: the honest answer to "why
+            # did this change" is that nobody recorded why, and not the goal of
+            # the task that changed it.
+            out.append({"code": "no_reason_recorded", "node": qn, "cite": SCOPE_CITE, "value": None,
+                        "text": _sentence(f"No reason was recorded for `{qn}`")})
 
         expectations = n.get("expectations") or []
         outcomes = [e for e in expectations if e.get("outcome")]
