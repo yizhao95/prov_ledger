@@ -42,10 +42,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import session_model as SM                                          # noqa: E402
-from e2elib import (BLOCKED, FAIL, OK, RED, GRN, YEL, Z, ROOT,      # noqa: E402
+from e2elib import (BLOCKED, FINDING, OK, RED, GRN, YEL, Z, ROOT,        # noqa: E402
                     Tally, banner, info, step, write_verdict)
 
 MODEL = (os.environ.get("E2E_MODEL") or "").strip() or None
+KEEP = os.environ.get("E2E_KEEP_DIR") or str(ROOT)
 
 RUBRIC = """\
 You are marking one answer produced by a provenance tool against key points
@@ -94,6 +95,20 @@ Reply with ONE JSON object and nothing else:
 CODE_NOTE = (
     "\n\n===== the code this session read itself (admissible for WHAT the code does and "
     "WHERE, never for WHY it was changed, who decided it, or when) =====\n")
+
+
+def judge_verdict(card: dict) -> int:
+    """OK when the judge agrees with the answer; FINDING when it does not.
+
+    Never FAIL. The answers come from real sessions, which are nondeterministic,
+    and the judge is a model: across two runs different questions fell. A
+    disagreement goes to a person before the release (the user's rule,
+    2026-10-06) — it does not decide the release on its own, and it is not
+    waved through either: an unconfirmed finding still stops the release rule."""
+    pts = card.get("points") or []
+    misses = any(str(p.get("verdict", "")).lower() == "miss" for p in pts)
+    unsupported = bool((card.get("unsupported_claim") or {}).get("found"))
+    return FINDING if (misses or unsupported) else OK
 
 
 def judge_one(q: dict) -> tuple[dict, dict, str]:
@@ -202,13 +217,15 @@ def main() -> int:
                    + (f", {len(misses)} missed" if misses else "")
                    + (", a claim resting on no record" if bad_claim else "")
                    + (", a recorded fact missed" if missed else ""))
-        # An unsupported claim fails on its own: it is the one output of this
-        # tool that is worse than no output, because it travels as evidence.
-        verdict = FAIL if (bad_claim or misses) else OK
-        t.record(verdict, f"{a['id']}: {summary}",
-                 "" if verdict == OK else "the judge is a model — read its words above and "
-                                          "decide; a disagreement here wants a person, not an "
-                                          "automatic pass or fail")
+        # An unsupported claim is the one output of this tool that is worse than
+        # no output, because it travels as evidence — so it is never waved
+        # through. It goes to a person, with everything they need to decide.
+        if judge_verdict(card) == OK:
+            t.record(OK, f"{a['id']}: {summary}")
+        else:
+            t.finding(f"stage 3 · {a['id']}: the judge marked the real answer down — {summary}",
+                      f"judge: {str(card.get('note') or '')[:240]} · the reply, its material and "
+                      f"the marking: {KEEP}")
         cards.append({"id": a["id"], "outcome": "ok", "card": card})
 
     out = ROOT / "stage3-marking.json"

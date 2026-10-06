@@ -99,6 +99,9 @@ E2E_TALLY="$E2E_ROOT/tally.txt";       : > "$E2E_TALLY"
 export E2E_LOGS E2E_CLONE E2E_HOME E2E_FINDINGS E2E_TALLY
 export E2E_SUITES="$SUITES" E2E_CLONE_FROM="$CLONE_FROM" E2E_MODEL="$MODEL"
 export E2E_REPO="$REPO"
+# Where stage 3's input and marking and the real sessions' streams are copied at
+# exit, outside the sandbox, so a person can check the judging (FL-213).
+export E2E_KEEP_DIR="${PROVLEDGER_RELEASE_KEEP:-$REAL_HOME/.cache/provledger/release-checks}/$E2E_NONCE"
 # The developer's workspace, checked at the end by the suites' own guard
 # (scripts/home_guard.py): one definition of a leak, not a second one here.
 GUARD_SNAP="$E2E_ROOT/home-guard.json"
@@ -113,7 +116,7 @@ cleanup() {
         done < "$E2E_ROOT/ports.txt"
     fi
     # What a person needs to check the judging outlives the sandbox (FL-213).
-    local keep_dir="${PROVLEDGER_RELEASE_KEEP:-$REAL_HOME/.cache/provledger/release-checks}/$E2E_NONCE"
+    local keep_dir="$E2E_KEEP_DIR"
     if ls "$E2E_ROOT"/stage3-*.json "$E2E_LOGS"/s[0-9]*-*.jsonl >/dev/null 2>&1; then
         mkdir -p "$keep_dir" && cp "$E2E_ROOT"/stage3-*.json "$E2E_LOGS"/s[0-9]*-*.jsonl "$keep_dir"/ 2>/dev/null
         printf '\n  kept for review: %s\n' "$keep_dir"
@@ -225,7 +228,7 @@ wants 2 && printf '  stage 2  %-8s  dummy project · /ledger · /receipts (stand
 wants 3 && printf '  stage 3  %-8s  a model marks the answers against key points\n' "$(verdict_name "$V3")"
 
 if [ -s "$E2E_FINDINGS" ]; then
-    printf '\n  %s%sFINDINGS — a reader following the documents is stuck at each of these%s\n' "$C_B" "$C_YEL" "$C_0"
+    printf '\n  %s%sFINDINGS — a person decides each one before the release: a place a reader following the\n  documents is stuck, or an answer the stage-3 judge marked down%s\n' "$C_B" "$C_YEL" "$C_0"
     awk '!seen[$0]++' "$E2E_FINDINGS" | nl -ba -w4 -s'  ' | sed 's/^/  /'
 fi
 

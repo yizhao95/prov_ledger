@@ -228,3 +228,29 @@ def test_a_real_answer_carries_the_code_its_session_read(PS, S2):
     a = S2.real_answer(QUESTION, PS.parse_stream(_lines(COMPOUND)))
     assert "discount_rate_is_estimated" in a["code"]
     assert "discount_rate_is_estimated" not in a["material"]
+
+
+@pytest.fixture
+def S3():
+    import stage3_judge
+    return stage3_judge
+
+
+def _card(points, unsupported=False, missed=False):
+    return {"points": [{"point": p, "verdict": v} for p, v in points],
+            "unsupported_claim": {"found": unsupported}, "missed_fact": {"found": missed}}
+
+
+def test_a_judge_that_agrees_passes(S3):
+    from e2elib import OK
+    assert S3.judge_verdict(_card([("a", "hit"), ("b", "hit")])) == OK
+    assert S3.judge_verdict(_card([("a", "hit"), ("b", "partial")], missed=True)) == OK
+
+
+def test_a_judge_that_disagrees_is_a_finding_for_a_person_never_a_fail(S3):
+    """The real sessions are nondeterministic and the judge is a model: across two
+    runs different questions fell. The user's rule: a disagreement goes to a
+    person before release; it does not decide the release on its own."""
+    from e2elib import FINDING
+    assert S3.judge_verdict(_card([("a", "hit")], unsupported=True)) == FINDING
+    assert S3.judge_verdict(_card([("a", "miss"), ("b", "hit")])) == FINDING
