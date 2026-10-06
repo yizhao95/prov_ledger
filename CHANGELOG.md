@@ -8,6 +8,21 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
+## Unreleased
+
+- **Before the first plan, the dashboard shows the empty state, not an error.**
+  With no ledger yet the page rendered a red "orchestrator.db not found" box,
+  although the launcher says the dashboard is running; it now shows the empty
+  state naming the command that publishes a plan. Found by the release check.
+- **`ensure-dashboard.sh` probes the port the dashboard starts on.** Setting
+  `PROVLEDGER_DASH_PORT` alone started the dashboard there and then waited on
+  8765 — or, with another dashboard already on 8765, reported that one as up.
+- **The release check walks a plugin user's path** (`scripts/release-e2e.sh`,
+  INSTALL.md §5): a new stage 0 installs the plugin into a sandbox and runs a cold
+  first session and a first task the agent plans itself; stage 2 also asks every
+  question as a real `/ledger` or `/receipts` slash command; stage 3 marks those
+  real answers, and a disagreement is a finding a person decides.
+
 ## 0.4.4 — 2026-10-05
 
 ### Fixed
