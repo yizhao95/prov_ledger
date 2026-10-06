@@ -68,9 +68,9 @@ behind `/ledger`, still takes its top-scored nodes when no model is called;
    record does ("an email, linked, never checked"); never write that the email is
    attached, that you have it, or offer to send it. If the colleague wants the
    original, tell the user where the pointer leads so they can find it. A tier is
-   part of what a record says, too: an `asserted` record is the agent's reading at
-   the time, not something anyone agreed; only a `stated` record is a person's own
-   words.
+   part of what a record says, too: `asserted` is a reading recorded as such — the
+   agent's or a person's (`recorded_by` says which) — not a quote and not something
+   anyone agreed; only a `stated` record carries someone's own words.
 
 ## What the ledger holds
 

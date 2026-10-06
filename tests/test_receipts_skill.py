@@ -239,5 +239,10 @@ def test_a_source_is_a_pointer_and_a_tier_is_part_of_what_a_record_says():
     assert "never its body" in text
     assert "never write that the email is attached" in text
     assert "offer to send it" in text
-    assert "an `asserted` record is the agent's reading" in text
     assert "not something anyone agreed" in text
+    # asserted is a reading recorded as such — the agent's, or a note a person typed
+    # (ledger-add records recorded_by human): saying "the agent's" made a reply call
+    # a person's own note "an interpretation nobody confirmed"
+    assert "the agent's or a person's" in text and "`recorded_by` says which" in text
+    assert "not a quote" in text
+    assert "an `asserted` record is the agent's reading" not in text
