@@ -91,6 +91,16 @@ def run(conn) -> dict:
         anchor = _first_subject(e.get("subjects"))
         if anchor is None:
             continue
+        # Since DP phase 1 ledger_store mirrors a new constraint into change_reason
+        # when it is added. On a ledger created after that, the constraint may be
+        # added before this reclass first runs; copying it again would record it
+        # twice. A subject that already carries the mirrored row is left alone.
+        mirrored = {r[0] for r in conn.execute(
+            "SELECT node_key FROM change_reason WHERE role = 'constraint' AND rule_id IS NULL "
+            "AND statement = ? AND plan_id = ?", (e["statement"], e.get("plan_id") or "ledger"))}
+        subjects = [s for s in subjects if s not in mirrored]
+        if not subjects:
+            continue
         refs = []
         if e.get("why_ref"):
             refs.append(provenance.insert_reference(conn, project=e["project"], kind="doc", label=str(e["why_ref"])[:512],
