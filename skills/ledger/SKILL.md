@@ -126,7 +126,9 @@ now — in the order it happened, which is the fastest way to see cause and effe
 ```
 
 Leave out a part the records do not cover rather than filling it.
-At most 8 sentences. No headings of your own, no list of record links, no account
+At most 15 sentences. The answer is for the user, so it may be detailed: give
+the dates, the words and the steps that matter rather than a summary of them.
+No headings of your own, no list of record links, no account
 of how you searched — the command prints the links, and the scope line says what
 was searched.
 
@@ -146,7 +148,7 @@ provledger ask submit <ask_id> --answer-file <file>
 ```
 
 It reads the draft back and deletes a sentence with no id, a sentence citing an
-id the table does not hold, and anything past the eighth. A number the table does
+id the table does not hold, and anything past the fifteenth. A number the table does
 not state is named in a note rather than deleted: a number from a step log is
 sourced but not citable here, so keep it, cite the record it came from, and let
 the note say so.

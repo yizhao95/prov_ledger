@@ -6,16 +6,16 @@ description: "Help the user reply to a colleague who questioned a decision — r
 # Receipts — answer the colleague, on the record
 
 Someone questioned a decision, and the user has to answer them. What helps most
-is a reply that hands the colleague the whole situation: what the thing is, who
-asked for it and in what words, what was done and when, and what holds now — so
-the next person understands without another round of questions. Your job is to
-write that reply from the ledger, show the records under it, and tell the user
-plainly which parts the record does not settle, so they can confirm or add them
-before they send it.
+is an official reply that answers the question they asked, with the record
+behind every sentence: where the decision came from, who asked and in what
+words, what was done and when. Your job is to write that reply from the ledger,
+show the records under it, and hand the user — outside the reply — every point
+the record does not settle, so they can check it or fill it in before sending.
 
-`/ledger` answers the user's own question, strictly. This one speaks to someone
-else on the user's behalf, so it aims to be complete — and it is honest about
-where completeness runs out.
+`/ledger` answers the user's own question and may go into detail. This one
+speaks to someone else on the user's behalf: it keeps to their question, in an
+official register, and nothing uncertain goes into the words the colleague
+reads.
 
 **You are the model.** No second one is spawned: the code searches the ledger and
 computes what is missing; you decide which records the challenge is about and
@@ -52,8 +52,9 @@ and your judgement picks.
    where the pointer leads.
 5. **A task's goal is not a node's reason.** When the node the colleague asks about
    has no reason of its own (`unstated`), say the task which changed it recorded no
-   reason for it — name the task by what it set out to do and when. That is still a
-   complete account; it is also a line for section c.
+   reason for it — name the task by what it set out to do and when. When the
+   question is "why", that absence is part of the answer; it is also a line for
+   section c.
 6. **Every number and identifier is copied from a read** — a commit, a plan id, a
    file:line, a date: something a read printed, not a count you worked out, a
    rounding or a date you inferred. The colleague may go and look it up, and an
@@ -168,19 +169,24 @@ finished reply comes first.
 
 ### a · The reply
 
-Ready to **copy and paste**, nothing to fill in. Tell it as a timeline, in the
-order things happened, because dates carry a reply — when it was said, when it changed, when it
-was last checked — and a colleague can use a date where a plan id means nothing:
+Ready to **copy and paste**, nothing to fill in. Official in register whatever
+the colleague's tone — calm, specific, no apology for a decision the record
+supports and no blame it does not assign — and about the question that was
+asked: answer it in the first sentence, then give only what bears on it. Tell it
+as a timeline, because dates carry a reply — when it was said, when it changed,
+when it was checked — and a colleague can use a date where a plan id means
+nothing:
 
 - what the thing is, or what changed;
 - where it came from: who asked, when, in their own words;
 - what was done about it, and what was tried and rejected on the way;
-- what holds now, and what the record does not say.
+- what holds now.
 
-Match the colleague's register: a neutral question gets a neutral answer; a
-pointed one gets a calm, specific one, and specificity does the work. Do not
-apologise for a decision the record supports, and do not volunteer blame it does
-not assign. No ids and no hedging about what you looked at in this paragraph.
+Keep everything uncertain out of the reply: what the record does not settle —
+a source nobody checked, an approval nobody recorded, who else was told — goes
+in section c, for the user to check or fill in. The one exception is an absence
+that is itself the answer: asked who signed off, when no sign-off is recorded,
+the reply says so. No ids and no account of what you looked at in this paragraph.
 
 ### b · The evidence
 
@@ -205,7 +211,7 @@ The colleague: "Why does the returns report suddenly exclude marketplace orders?
 
 ### a · The reply
 
-> The returns report has excluded marketplace orders since 14 May. On 2 May the finance lead asked for it in writing: "returns should only count orders we fulfil ourselves, marketplace returns are the seller's". The change was made on 14 May and checked against April's figures the same day. Before that, tagging marketplace orders instead of dropping them was tried and set aside, because the tag was missing on a third of older orders. I can't see a record of who else was told about the change, which is fair to raise.
+> Marketplace orders were removed from the returns report on 14 May, at the finance lead's request. On 2 May the finance lead asked for it: "returns should only count orders we fulfil ourselves, marketplace returns are the seller's". The change was made on 14 May and checked against April's figures the same day. Tagging marketplace orders instead of removing them was considered first and set aside, because the tag was missing on a third of older orders.
 
 ### b · The evidence
 
@@ -213,15 +219,16 @@ The colleague: "Why does the returns report suddenly exclude marketplace orders?
 - 14 May: the change to `returns.filter_orders`, by the task "exclude marketplace returns". [#e57]
 - 14 May: checked against April's figures. [#o9]
 - Tagging instead of dropping was rejected: the tag was missing on a third of older orders. [#44]
-- Nobody being informed: not on record. [scope]
+- `returns.filter_orders` has not changed since 2026-05-14. [scope]
+- Scope: 1 node, 0 constraints, 0 influencing records, 1 change, 2026-05-02 to 2026-05-14; 3 candidates, 1 chosen; nothing truncated.
 
 ### c · Before you send
 
-- Whether anyone outside finance was told — nothing records it.
+- Whether you or anyone else told them, or other teams, about the change — nothing records who was told.
 - The finance lead's request links an email thread; the ledger holds only the link, never checked.
 - Does the tone need adjusting?
 
-Why this is right: the reply gives the whole situation in date order, with the request in the requester's own words; every claim has a line in b; what the record cannot settle is handed to the user in c instead of being guessed.
+Why this is right: the first sentence answers what was asked; the reply stays official and in date order, with the request in the requester's own words; every claim has a line in b; and what the record cannot settle — who was told — is kept out of the reply and handed to the user in c.
 </example>
 
 ## What this skill never does

@@ -36,7 +36,7 @@ from importlib import resources
 
 from . import facts as F, runner as R
 
-MAX_SENTENCES = 8
+MAX_SENTENCES = 15
 # One note per cause. They used to be one sentence, "summary unavailable: no
 # model", printed for four different things — including a packaging bug (see
 # TESTING_PACKAGE below), which read as "you have no model".

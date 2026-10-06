@@ -299,3 +299,20 @@ def test_identifiers_and_the_scope_line_are_copied_never_made():
     assert "every number and identifier" in text.lower()
     assert "a commit, a plan id, a file:line" in text
     assert "the scope line as each read printed it" in text.lower() and "never added together" in text
+
+
+def test_the_reply_is_official_keeps_to_the_question_and_holds_nothing_uncertain():
+    """The user (2026-10-06): /receipts replies to someone else, so it is official
+    and about the question asked; what is uncertain stays out of the reply and is
+    listed apart, for the user to check or fill in."""
+    import re
+    text = " ".join(SKILL.read_text(encoding="utf-8").split())
+    a = text[text.index("### a · The reply"):text.index("### b · The evidence")]
+    assert "official" in a.lower() and "the question that was asked" in a
+    assert "Keep everything uncertain out of the reply" in a
+    example = re.findall(r"<example>(.*?)</example>", SKILL.read_text(encoding="utf-8"), re.S)[0]
+    reply = example[example.index("### a · The reply"):example.index("### b · The evidence")].lower()
+    for doubt in ("can't see", "cannot see", "no record", "not on record", "don't know", "unclear"):
+        assert doubt not in reply, f"the example's reply says something uncertain: {doubt!r}"
+    c = example[example.index("### c · Before you send"):].lower()
+    assert "told" in c, "the uncertainty the reply leaves out is listed in c"

@@ -31,7 +31,10 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   submitting, never shows a sentence the check deleted, and may resubmit once
   with an id it found. `/receipts` writes a complete reply told as a timeline and
   lists, apart from it, what the record does not settle — for you to confirm or
-  add before sending. Both copy every number and identifier from a read, and the
+  add before sending. `/ledger` is for you, so it may go into detail: `ask
+  submit` now keeps up to 15 sentences, not 8. `/receipts` speaks for you to
+  someone else, so its reply is official, keeps to their question and holds
+  nothing uncertain. Both copy every number and identifier from a read, and the
   scope line as each read printed it.
 - **The fact table says what an agent used to guess.** A node whose reason was
   closed `unstated` now shows a cited line ("nobody said why this changed") and

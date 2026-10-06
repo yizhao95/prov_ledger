@@ -286,7 +286,7 @@ thing, and because there is already a model in the room:
 
 ```
 a.  provledger ask "<question>" --json --no-model     # code locates + computes
-b.  the SESSION's model drafts ≤ 8 sentences, each ending in [#id] or [scope]
+b.  the SESSION's model drafts ≤ 15 sentences, each ending in [#id] or [scope]
 c.  provledger ask submit <ask_id> --answer-file <f>  # code checks and records
 d.  the checked answer, the scope line, the cited records, two follow-up reads
 ```

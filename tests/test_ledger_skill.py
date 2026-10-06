@@ -92,3 +92,11 @@ def test_identifiers_and_the_scope_line_are_copied_never_made():
     assert "every number and identifier" in t.lower()
     assert "a commit, a plan id, a file:line" in t
     assert "the scope line as each read printed it" in t.lower() and "never added together" in t
+
+
+def test_the_answer_may_be_detailed_up_to_fifteen_sentences():
+    """The user (2026-10-06): /ledger is for the user, so it may be detailed and
+    meticulous; ask submit keeps fifteen sentences."""
+    t = _flat()
+    assert "At most 15 sentences" in t and "At most 8 sentences" not in t
+    assert "may be detailed" in t
