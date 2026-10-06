@@ -795,6 +795,31 @@ def questions(f: dict) -> list[dict]:
                 "the ledger is the only place that still remembers it",
             ],
         },
+        # ── the handoff: the use the user asked for (2026-10-06) ──────────────
+        # Someone new to the work asks what a thing is and how it came to be. The
+        # answer that serves them hands over the whole situation: what it is now,
+        # who asked for the change and in what words, what was done about it and
+        # what was tried on the way, and what to keep in mind.
+        {
+            "id": "Q12-handoff",
+            "surface": "ask",
+            "question": "I'm taking over the weekly mail. What does its discount rate mean now, "
+                        "and how did it end up that way?",
+            "must": [
+                "what it is now: an estimate worked out from list_price, and the mail says it is "
+                "an estimate",
+                "where it came from: the v2 orders feed no longer carrying orders.discount, given "
+                f"as the user's recorded words with the day they were said "
+                f"({f['upstream_note']['occurred_at'][:10]})",
+                "what was done on the way: getting the exact rate from the v1 archive was tried "
+                "and did not work because of its 90-day window",
+                "what to keep in mind: the claim that the estimate stays within half a point of "
+                "the old rate was contradicted by measurement",
+            ],
+            "must_not": [
+                "a reason, approver or date that no record states",
+            ],
+        },
     ]
 
 

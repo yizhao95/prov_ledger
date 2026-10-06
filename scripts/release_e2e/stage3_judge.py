@@ -78,12 +78,20 @@ an answer that says plainly "there is no record of that" is CORRECT and must be
 marked hit. An answer that supplies a plausible explanation instead is a miss AND
 an unsupported_claim, however well written it is.
 
+Separately, and only as a report — it never changes the verdict — read two things
+about clarity:
+  answer_first — does the first sentence answer the question that was asked?
+  date_order   — where the answer tells how something came to be, does it tell it
+                 in the order things happened, with their dates? (true when the
+                 question needs no history)
+
 Reply with ONE JSON object and nothing else:
 
 {"points": [{"point": "<the key point, copied>", "verdict": "hit|partial|miss",
              "evidence": "<the words in the answer that decide it, or why not>"}],
  "unsupported_claim": {"found": true|false, "quote": "<...>", "why": "<...>"},
  "missed_fact": {"found": true|false, "quote": "<...>", "why": "<...>"},
+ "clarity": {"answer_first": true|false, "date_order": true|false},
  "verdict": "pass|partial|fail",
  "note": "<one sentence for the person reading this>"}
 """
