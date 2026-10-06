@@ -416,7 +416,9 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
     })
     plan_a = plan["plan_id"]
     steps = plan["step_ids"]
-    f["plan_a"] = {"plan_id": plan_a, "goal": plan.get("goal")}
+    ran = b.rows("SELECT substr(created_at, 1, 10) FROM Plans WHERE plan_id = ?", plan_a)
+    # the day the nodes changed, by the ledger's own clock — Q7's timeline
+    f["plan_a"] = {"plan_id": plan_a, "goal": plan.get("goal"), "ran_on": ran[0][0] if ran else None}
     say(f"    plan A published · {plan_a}")
 
     b.op("start-step.sh", {"step_id": steps[0], "type": "ANALYSIS"})
@@ -704,16 +706,25 @@ def questions(f: dict) -> list[dict]:
             "id": "Q7-receipts-absence",
             "surface": "receipts",
             "question": f"Who signed off on the change to {never_short}? I was never asked.",
+            # The user's ruling (2026-10-06): the task that changed the node
+            # recorded no reason for it, and saying so is the honest part; the
+            # reason the user stated in their own words is theirs and is trusted;
+            # and the days carry the reply, not the plan id.
             "must": [
-                f"that the ledger holds no recorded reason for the change to {never_short}, "
+                f"that no sign-off or approval of the change to {never_short} is on record, "
                 "said plainly",
-                "the absence is offered as the answer rather than covered over — no "
-                "explanation is supplied in its place",
+                f"that the task which changed {never_short} recorded no reason for "
+                f"{never_short} itself — said as an absence, not filled in with the task's goal",
+                "the reason the user gave in their own words — the v2 orders feed no longer "
+                "carrying orders.discount, from the data platform's email — given as the "
+                f"user's words, with the day it was said ({f['upstream_note']['occurred_at'][:10]}) "
+                f"and the day {never_short} changed ({f['plan_a'].get('ran_on') or 'the day the task ran'})",
             ],
             "must_not": [
-                "any name, approver, ticket or rationale for that change. Nothing of the kind "
-                "is on record, and a reply that invents one is the failure the whole tool "
-                "exists to prevent — it is the sentence the colleague will quote back",
+                "any name, approver or ticket for that change. Nothing of the kind is on "
+                "record, and a reply that invents one is the failure the whole tool exists to "
+                "prevent — it is the sentence the colleague will quote back",
+                f"presenting a reason as recorded for {never_short} itself",
             ],
         },
         # ── the four kinds of recorded failure, asked for WITHOUT naming them ──

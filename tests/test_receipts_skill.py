@@ -246,3 +246,19 @@ def test_a_source_is_a_pointer_and_a_tier_is_part_of_what_a_record_says():
     assert "the agent's or a person's" in text and "`recorded_by` says which" in text
     assert "not a quote" in text
     assert "an `asserted` record is the agent's reading" not in text
+
+
+def test_the_reply_is_a_timeline_and_a_tasks_goal_is_not_a_nodes_reason():
+    """The user's ruling on a real /receipts reply. Asked who signed off on a
+    change to a node whose own reason was never recorded (`unstated`), the reply
+    said "what's on the record is why the change was made" and gave the goal of
+    the task that changed it. The task's goal is not the node's reason: say the
+    task recorded none for it. A reason a person stated in their own words is
+    theirs — give it as theirs and trust it. And the dates carry the reply (when
+    it was said, when it changed), not the plan ids."""
+    text = " ".join(SKILL.read_text(encoding="utf-8").split())
+    assert "a task's goal is not a node's reason" in text.lower()
+    assert "recorded no reason for it" in text
+    assert "give it as theirs and trust it" in text
+    assert "tell it as a timeline" in text.lower()
+    assert "when it was said" in text and "when it changed" in text
