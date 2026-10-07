@@ -170,11 +170,19 @@ also collide across suites.
 the session's PATH through a top-level `bin/` directory, and those two refuse a
 plugin that has one. Install it with the Claude Code CLI (`claude plugin install`).
 
-**A hook can lose its row under heavy concurrent writing.** When several sessions
-or a release run write to the same ledger at once, a hook waits two seconds for
-the write lock, then logs `OperationalError: database is locked` to
-`hook-errors.log` and exits 0. The tool call goes ahead; that one row (a tool
-call, or a prompt) is missing from the ledger.
+**A session's end can still go unrecorded under heavy concurrent writing.** The
+ledger runs in WAL, so reading never holds a write up, and a prompt or a tool
+call that cannot get the write lock within two seconds is written to
+`orchestrator.db.spool.jsonl` beside the ledger and replayed, with the time it
+happened, by the next hook. The Stop hook's row is not spooled: when another
+writer holds the lock past two seconds, that session's end is logged to
+`hook-errors.log` and not recorded.
+
+**Copy the ledger with SQLite, not `cp`.** In WAL, recent commits can sit in
+`orchestrator.db-wal` until SQLite folds them into the main file, so a plain file
+copy can miss them. Use `sqlite3 orchestrator.db ".backup copy.db"`, or
+`provledger`'s own `db.copy_ledger` from Python. The `-wal` and `-shm` files
+beside the ledger are SQLite's and belong to it.
 
 **The session that installs the plugin does not count itself.** Hooks load when
 a session starts, so the session in which you install provLedger records no

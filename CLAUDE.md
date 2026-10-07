@@ -56,8 +56,9 @@ goes red, first ask whether the product or the harness failed.
   (repo-wide check in the PSG suite's `test_host_import.py`).
 - Examples in shipped files (docs, SKILL.md, docstrings, tests) are generic. A real case from the
   ledger is an answer key for the local eval (`local-eval/`) and must not ship.
-- Experiments and audits run on a copy of the ledger: `why` and `ask` append access-log rows. Read
-  SQLite with Python's `sqlite3` module (`?mode=ro`); the `sqlite3` CLI may not be installed.
+- Experiments and audits run on a copy of the ledger: `why` and `ask` append access-log rows. The
+  ledger is in WAL, so copy it with `orchestrator.db.copy_ledger` (SQLite's backup API), never
+  `cp`. Read SQLite with Python's `sqlite3` module (`?mode=ro`); the `sqlite3` CLI may not be installed.
 - Anything run by hand that touches a DB: point `ORCH_DB` and `PSG_REGISTRY_ROOT` at temp paths
   first, or it writes to the real ledger (see README §4). Never hand-edit ledger tables.
 - Release: bump the version in every file `orchestrator-backend/tests/test_version.py` checks, add a

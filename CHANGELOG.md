@@ -10,6 +10,30 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
 ## Unreleased
 
+- **A plan close takes seconds, not minutes, and finishes.** On a large project the
+  close's rules read the state graph without an index — every lookup of a node's
+  latest snapshot scanned the whole table — and recomputed the plan's changed
+  nodes once per file a sentence named. On provLedger's own graph a close took
+  1 to 10 minutes; the review's 60 s ceiling cut every one, rolled it back, and
+  the plan was closed by hand without its rules ever writing a reason. The graph
+  now has the two indexes (created by the review's refresh, before the close),
+  the changed nodes are computed once, and the rule that matches node names
+  against the user's words looks them up instead of running one regex per name:
+  the same closes now take 1-2 s with identical results. When a write still
+  outlives its ceiling, the review driver reads the step and the plan back and
+  says what they show.
+- **The hooks stop losing the user's words to a locked ledger.** The ledger now
+  runs in WAL, so the dashboard's poll, a long read or a plan close no longer
+  holds a hook's write up, and a prompt or a tool call that cannot get the write
+  lock within two seconds goes to a spool file beside the ledger and is written,
+  with the time it happened, by the next hook. Before, it was logged to
+  `hook-errors.log` and gone. (The Stop hook's row is not spooled yet.)
+- **The provenance hash chains cannot fork under two writers.** A chained insert
+  read the chain head before taking the write lock, so a second writer could slip
+  in between and both rows would point at the same predecessor — which `verify`
+  reports as tampering. The head is now read under the write lock, and compound
+  writes take the lock when they open.
+
 - **Before the first plan, the dashboard shows the empty state, not an error.**
   With no ledger yet the page rendered a red "orchestrator.db not found" box,
   although the launcher says the dashboard is running; it now shows the empty
