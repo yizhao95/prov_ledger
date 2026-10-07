@@ -73,7 +73,8 @@ def available() -> tuple[bool, str]:
 def call(prompt: str, *, model: str | None = None,
          timeout_s: float = DEFAULT_TIMEOUT_S) -> tuple[str, dict, str]:
     """(text, detail, outcome) for one call. Outcomes, as ask.runner names them:
-    ok · empty · refused (the model talked about itself) · failed · timeout."""
+    ok · empty · refused (the model talked about itself) · failed · timeout ·
+    blocked (not made: the login would expire during it; see plugin_session.login_ready)."""
     cmd = command(model)
     detail: dict = {"cmd": " ".join(cmd[:8]) + " …", "model": model,
                     "prompt_chars": len(prompt or ""), "timeout_s": timeout_s}
@@ -83,6 +84,12 @@ def call(prompt: str, *, model: str | None = None,
     def timed(d: dict) -> dict:
         return {**d, "elapsed_ms": int((time.perf_counter() - started) * 1000)}
 
+    if os.environ.get("CLAUDE_CONFIG_DIR"):      # the sandbox's login, current (see plugin_session.login_ready)
+        import plugin_session
+        ready, why = plugin_session.login_ready(os.environ["CLAUDE_CONFIG_DIR"],
+                                                os.environ.get("E2E_REAL_HOME") or Path.home(), timeout_s)
+        if not ready:
+            return "", timed({**detail, "reason": why}), "blocked"
     try:
         p = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
                            timeout=timeout_s, cwd=os.environ.get("TMPDIR") or "/tmp")

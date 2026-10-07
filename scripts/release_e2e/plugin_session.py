@@ -61,6 +61,46 @@ def seed_config(config_dir: Path, real_home: Path) -> None:
     (config_dir / "settings.json").write_text(json.dumps({"language": "en"}), encoding="utf-8")
 
 
+def refresh_login(config_dir: Path | str, real_home: Path | str) -> None:
+    """Copy the developer's current credential into a sandbox config, right before
+    a call. A copy made at the start of a run went stale over the hour: when the
+    developer's own session rotated the refresh token, every later call failed
+    with "OAuth session expired and could not be refreshed". Only ever copies
+    INTO the sandbox, and does nothing for the developer's own config."""
+    cfg, real = Path(config_dir), Path(real_home)
+    src = real / ".claude" / ".credentials.json"
+    if not src.is_file() or cfg.resolve() == (real / ".claude").resolve():
+        return
+    cfg.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, cfg / ".credentials.json")
+
+
+LOGIN_MARGIN_S = 300
+
+
+def login_ready(config_dir: Path | str, real_home: Path | str, run_for_s: float) -> tuple[bool, str]:
+    """Copy the current login in, then say whether a call may run on it.
+
+    A sandbox claude whose access token has expired refreshes it inside the
+    sandbox: the refresh token rotates, and the developer's own ~/.claude login
+    can no longer refresh. So a call that may still be running when the login
+    expires — its own time limit plus a margin — is not made, and the reason says
+    how long the login had left. A login without an expiry is not judged."""
+    refresh_login(config_dir, real_home)
+    try:
+        cred = json.loads((Path(config_dir) / ".credentials.json").read_text(encoding="utf-8"))
+        expires_at = float(cred["claudeAiOauth"]["expiresAt"]) / 1000
+    except (OSError, ValueError, KeyError, TypeError):
+        return True, ""
+    left = expires_at - time.time()
+    if left > run_for_s + LOGIN_MARGIN_S:
+        return True, ""
+    return False, (f"the developer's login expires in {max(0, round(left / 60))} min; this call may run "
+                   f"{round(run_for_s / 60)} min, plus a {LOGIN_MARGIN_S // 60} min margin. A sandbox "
+                   f"session that refreshes the login leaves the developer's own refresh token unusable, "
+                   f"so the call was not made.")
+
+
 def stranger_env(home: Path, config_dir: Path, base: dict | None = None) -> dict:
     """The environment of someone who has only installed the plugin.
 
@@ -123,6 +163,7 @@ class Transcript:
     elapsed_s: float = 0.0
     stderr: str = ""
     raw_path: str = ""
+    blocked: str = ""                                    # why the session was not started (login_ready)
 
     def bash_commands(self) -> list[str]:
         return [c.input.get("command", "") for c in self.calls if c.name == "Bash"]
@@ -272,6 +313,11 @@ def run_session(prompt: str, *, cwd: Path, env: dict, allowed_tools: tuple[str, 
         cmd += ["--model", model]
     if allowed_tools:
         cmd += ["--allowedTools", *allowed_tools]
+    if env.get("CLAUDE_CONFIG_DIR"):
+        ready, why = login_ready(env["CLAUDE_CONFIG_DIR"], os.environ.get("E2E_REAL_HOME") or Path.home(),
+                                 timeout_s)
+        if not ready:
+            return Transcript(blocked=why, stderr=why)
     started = time.monotonic()
     try:
         p = subprocess.run(cmd, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
@@ -287,6 +333,13 @@ def run_session(prompt: str, *, cwd: Path, env: dict, allowed_tools: tuple[str, 
         Path(log).write_text(out, encoding="utf-8")
         t.raw_path = str(log)
     return t
+
+
+def session_verdict(t: Transcript) -> int:
+    """OK for a session that finished, BLOCKED for one that was never started
+    (login_ready said no), FAIL for one that ran and did not finish."""
+    from e2elib import BLOCKED, FAIL, OK
+    return BLOCKED if t.blocked else (OK if t.ok else FAIL)
 
 
 # ── the dashboards these sessions start ───────────────────────────────────────

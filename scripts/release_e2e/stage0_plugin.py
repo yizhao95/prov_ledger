@@ -154,7 +154,8 @@ def cold_session(t: Tally) -> PS.Transcript | None:
                        allowed_tools=("Bash(command -v:*)", "Bash(provledger:*)"),
                        max_turns=8, timeout_s=300, model=MODEL, log=LOGS / "s0a-session.jsonl")
     if not s.ok:
-        t.record(FAIL, "the cold session answers", f"rc={s.rc} · {s.stderr[-500:]} · stream {s.raw_path}")
+        t.record(PS.session_verdict(s), "the cold session answers",
+                 s.blocked or f"rc={s.rc} · {s.stderr[-500:]} · stream {s.raw_path}")
         return None
     t.record(OK, "the cold session answers", f"{s.num_turns} turns in {s.elapsed_s} s · session {s.session_id}")
     root = s.plugins.get("provledger")
@@ -261,8 +262,10 @@ def first_task(t: Tally, root: Path, cold: PS.Transcript | None) -> None:
     try:
         s = PS.run_session(TASK, cwd=proj, env=e, allowed_tools=TASK_TOOLS, max_turns=80,
                            timeout_s=1200, model=MODEL, log=LOGS / "s1-session.jsonl")
-        t.record(OK if s.ok else FAIL, "the first-task session finishes",
-                 f"{s.num_turns} turns in {s.elapsed_s} s" + ("" if s.ok else f" · rc={s.rc} {s.stderr[-300:]}"))
+        t.record(PS.session_verdict(s), "the first-task session finishes",
+                 s.blocked or f"{s.num_turns} turns in {s.elapsed_s} s" + ("" if s.ok else f" · rc={s.rc} {s.stderr[-300:]}"))
+        if s.blocked:
+            return
         new = [r for r in (q("SELECT plan_id, status FROM Plans ORDER BY created_at") or []) if r[0] not in before]
         if not new:
             t.record(FAIL, "the agent published a plan through writing-plans",

@@ -40,6 +40,8 @@ one pytest command fails spuriously) and fails any suite that writes to the real
 memory. There is no CI: run what you touched before calling it done. Never run the suites and
 `release-e2e.sh` at the same time: wall-clock assertions turn machine load into failures. When the e2e
 goes red, first ask whether the product or the harness failed.
+- The repo-wide checks (no `sys.path.insert` of `orchestrator-backend` outside `_host.py`) live in the
+  psg suite: run `psg` for any change that adds or edits a Python file anywhere in the repo.
 - A retrieval fix is proven end to end: run the read a person would run and check the needle is in
   its output. Green unit tests have missed four "read, then dropped by the renderer" defects.
 

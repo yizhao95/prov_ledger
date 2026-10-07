@@ -425,7 +425,7 @@ def real_answer(q: dict, s: PS.Transcript) -> dict:
     ok = s.ok and bool(s.result.strip())
     return {**q, "path": "real", "answer": s.result if ok else "", "material": s.provledger_material(),
             "code": s.code_material(), "commands": s.bash_commands(), "session_id": s.session_id,
-            "outcome": "ok" if ok else ("timeout" if s.rc is None else "failed"),
+            "outcome": "ok" if ok else ("blocked" if s.blocked else ("timeout" if s.rc is None else "failed")),
             "turns": s.num_turns, "elapsed_s": s.elapsed_s, "transcript": s.raw_path}
 
 
@@ -472,8 +472,8 @@ def real_sessions(t: Tally, facts: dict, qs: list[dict]) -> list[dict]:
         a = real_answer(q, s)
         out.append(a)
         if a["outcome"] != "ok":
-            t.record(FAIL, f"{label}: the real session answered",
-                     f"{a['outcome']} after {s.elapsed_s} s (rc={s.rc}); stream {s.raw_path}")
+            t.record(BLOCKED if s.blocked else FAIL, f"{label}: the real session answered",
+                     s.blocked or f"{a['outcome']} after {s.elapsed_s} s (rc={s.rc}); stream {s.raw_path}")
             continue
         t.record(OK, f"{label}: the real session answered",
                  f"{s.num_turns} turns, {s.elapsed_s} s, {len(a['answer'].split())} words")

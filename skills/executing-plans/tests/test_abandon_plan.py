@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import sys
-from pathlib import Path
 
 
 def _plan(db_path, plan_id):
@@ -45,8 +43,7 @@ def test_a_plan_nobody_started_is_abandoned_with_its_reason(seeded_plan, tmp_db,
 
 
 def test_a_plan_left_with_no_steps_by_a_failed_publish_can_be_abandoned(tmp_db, run_script_fn):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "orchestrator-backend"))
-    from orchestrator import db
+    from orchestrator import db                    # on the path through conftest (ORCH_ROOT)
     conn = db.open_db(tmp_db)
     db.insert_plan(conn, "orphan-1", "g")          # what a half-done publish left behind
     conn.close()

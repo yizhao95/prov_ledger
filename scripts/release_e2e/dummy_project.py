@@ -60,7 +60,7 @@ from .feed import fetch_orders
 
 def load_orders(day):
     """Every order of one day, with its discount."""
-    return [o for o in fetch_orders(day) if o["region"] != "TEST"]
+    return [o for o in fetch_orders(day) if o["region"] != "TEST" and o["discount"] >= 0]
 
 
 def discount_rate(orders):
