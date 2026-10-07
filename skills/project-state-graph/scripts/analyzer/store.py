@@ -118,6 +118,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_node_snapshot_run_key ON node_snapshot(run
     WHERE node_key <> '';
 CREATE INDEX IF NOT EXISTS idx_node_snapshot_run_qn ON node_snapshot(run_id, node_type, qualified_name);
 CREATE INDEX IF NOT EXISTS idx_node_event_key ON node_event(node_key, run_id);
+-- FL-211: a node's latest snapshot is looked up by node_key, and a plan's events
+-- by run_id; without these both scanned the whole table on every lookup.
+CREATE INDEX IF NOT EXISTS idx_node_snapshot_key_run ON node_snapshot(node_key, run_id);
+CREATE INDEX IF NOT EXISTS idx_node_event_run ON node_event(run_id);
 CREATE TRIGGER IF NOT EXISTS trg_node_event_no_update BEFORE UPDATE ON node_event
     BEGIN SELECT RAISE(ABORT, 'append-only'); END;
 CREATE TRIGGER IF NOT EXISTS trg_node_event_no_delete BEFORE DELETE ON node_event

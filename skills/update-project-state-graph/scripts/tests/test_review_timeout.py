@@ -324,3 +324,30 @@ def test_a_timed_out_graph_refresh_leaves_no_surviving_analyzer(harness, tmp_pat
         assert _gone_within(pid), f"the analyzer stand-in {pid} outlived the refresh ceiling"
     finally:
         _reap(pid)
+
+
+def test_a_timed_out_write_reports_what_the_ledger_shows_afterwards(harness, monkeypatch, capsys):
+    """FL-211. complete-step REVIEW.1 outlived its ceiling while the step had in
+    fact been written; the driver said "nothing it would have written is
+    confirmed", which was false, and left nothing to go on. It now reads the step
+    and the plan back and says what they show."""
+    def read_after(self, sql, *params):
+        wrote = any(c["kind"] == "complete-step" for c in getattr(subprocess.run, "calls", []))
+        if "FROM Steps WHERE step_id" in sql:
+            return [("COMPLETED",)] if wrote else [("PENDING",)]
+        if "review_state FROM Plans" in sql:
+            return [("IN_PROGRESS", "awaiting_agent")]
+        if "FROM Steps" in sql:
+            return [("PENDING", None)]
+        if "FROM Plans" in sql:
+            return [("COMPLETED",)]
+        return []
+
+    monkeypatch.setattr(review_run.Driver, "read", read_after)
+    rec, code = harness(timeout_on="complete-step")
+    assert code == 5
+    said = capsys.readouterr()
+    text = said.err + said.out
+    assert "nothing it would have written is confirmed" not in text
+    assert f"{CHILD} reads COMPLETED" in text and "IN_PROGRESS" in text, text[-600:]
+    assert "the close did not finish" in text

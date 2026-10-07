@@ -134,6 +134,41 @@ def _literal(name: str) -> re.Pattern:
     return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])")
 
 
+_IDENT_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_")
+
+
+def _name_index(names_by_key: dict) -> dict:
+    """Every node's names, by length, for `_names_in` (FL-211)."""
+    by_len: dict[int, dict[str, set]] = {}
+    for key, names in names_by_key.items():
+        for n in names:
+            if n:
+                by_len.setdefault(len(n), {}).setdefault(n, set()).add(key)
+    return {"lengths": sorted(by_len), "by_len": by_len}
+
+
+def _names_in(sentence: str, index: dict) -> set:
+    """The keys whose names occur in `sentence` — exactly what `_literal(name).search`
+    finds (the name verbatim, with no identifier character glued to either end), by
+    dictionary lookup at each word boundary instead of one regex per name: one close
+    on a large graph ran 16.9M searches."""
+    found: set = set()
+    n, lengths, by_len = len(sentence), index["lengths"], index["by_len"]
+    for i in range(n):
+        if i and sentence[i - 1] in _IDENT_CHARS:
+            continue
+        for ln in lengths:
+            j = i + ln
+            if j > n:
+                break
+            if j < n and sentence[j] in _IDENT_CHARS:
+                continue
+            keys = by_len[ln].get(sentence[i:j])
+            if keys:
+                found |= keys
+    return found
+
+
 def r0_names(node: dict) -> list[str]:
     """The literals that count for a node under the local-name rule: its local
     name (≥ 4 chars, not a stopword) and its qualified name. The file's basename
@@ -179,12 +214,11 @@ def _sentence_hits(ctx: Ctx) -> dict:
     cache = getattr(ctx, "_r0_hits", None)
     if cache is not None:
         return cache
-    pats = {key: [_literal(n) for n in r0_names(node)] for key, node in ctx.touched.items()}
+    index = _name_index({key: r0_names(node) for key, node in ctx.touched.items()})
     hits: dict = {}
     for u in candidate_utterances(ctx):
         for s, e in sentences(u["text"]):
-            sent = u["text"][s:e]
-            keys = {key for key, ps_ in pats.items() if any(p.search(sent) for p in ps_)}
+            keys = _names_in(u["text"][s:e], index)
             if keys:
                 hits[(u["id"], s, e)] = keys
     ctx._r0_hits = hits

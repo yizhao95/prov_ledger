@@ -198,10 +198,12 @@ class Driver:
             p = subprocess.run(["bash", str(EXEC / f"{script}.sh"), str(f)], env=self.env,
                                capture_output=True, text=True, timeout=TIMEOUT_WRITE_S)
         except subprocess.TimeoutExpired:
-            # A write script is one sqlite write: past 60s it is wedged, not slow.
-            # Exit 5 (a write script failed) — the same path as a non-zero exit.
+            # Exit 5 (a write script failed) — the same path as a non-zero exit. What
+            # the ledger shows afterwards is read back and said (FL-211): a
+            # complete-step can have written its step and then been cut inside the
+            # plan close, and "nothing confirmed" was false then.
             _die(f"{script}.sh timed out: exceeded the {TIMEOUT_WRITE_S}s ceiling "
-                 f"(elapsed {time.monotonic() - t0:.1f}s); nothing it would have written is confirmed", 5)
+                 f"(elapsed {time.monotonic() - t0:.1f}s); {self.state_after(payload)}", 5)
         # stdout = the op's result (pretty JSON, multi-line) followed by ONE
         # single-line OK marker {"ok":true,"op":...}. Parse both.
         lines = p.stdout.strip().splitlines()
@@ -219,6 +221,28 @@ class Driver:
         if p.returncode not in ok_codes:
             _die(f"{script}.sh exited {p.returncode}: {(p.stderr or p.stdout)[-800:]}", 5)
         return p.returncode, {**body, "_marker": marker}, p.stdout + p.stderr
+
+    def state_after(self, payload: dict) -> str:
+        """What the ledger shows for a write that outlived its ceiling: the step it
+        named and the plan, as they read now. Observations only."""
+        step_id = payload.get("step_id")
+        try:
+            step = self.read("SELECT status FROM Steps WHERE step_id = ?", step_id) if step_id else []
+            plan = self.read("SELECT status, review_state FROM Plans WHERE plan_id = ?", self.a.plan_id)
+        except Exception as exc:                           # the ledger itself could not be read
+            return f"afterwards the ledger could not be read ({type(exc).__name__}: {exc})"
+        step_status = step[0][0] if step and step[0] else None
+        plan_status = plan[0][0] if plan and plan[0] else None
+        plan_review = plan[0][1] if plan and len(plan[0]) > 1 else None
+        said = []
+        if step_id:
+            said.append(f"{step_id} reads {step_status or 'absent'}")
+        if plan_status:
+            said.append(f"plan {self.a.plan_id} reads {plan_status} ({plan_review or 'no review state'})")
+        text = "afterwards " + "; ".join(said) if said else "afterwards nothing could be read back"
+        if step_status == "COMPLETED" and plan_status and plan_status != "COMPLETED" and str(step_id).endswith("REVIEW.1"):
+            text += " — the step was written, the close did not finish"
+        return text
 
     def read(self, sql: str, *params):
         c = sqlite3.connect(self.orch_db)
