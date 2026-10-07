@@ -230,7 +230,7 @@ The failure class itself, with numbers, is written up in
 | quickest — end to end | `make demo` | MISMATCH → revise → VERIFIED, `SELF-CHECK OK`, exit 0 |
 | full — every suite | `bash scripts/run_tests.sh` | every suite passes |
 | packaging — the pip install case | `bash scripts/test_packaging.sh` (needs `uv`) | wheel **and** sdist each install into a fresh venv and pass the smoke test |
-| **release — before every release** | `bash scripts/release-e2e.sh` | three stages green from zero in a clean sandbox; exit 0 |
+| **release — before every release** | `bash scripts/release-e2e.sh` | four stages from zero in a clean sandbox; exit 0, or every finding read and accepted by a person |
 
 ### Before every release — `scripts/release-e2e.sh`
 
@@ -249,30 +249,41 @@ bash scripts/release-e2e.sh --suites collect  # faster: collect the suites inste
 bash scripts/release-e2e.sh --stage 2 --keep  # one stage, and keep the sandbox to look at
 ```
 
-Three stages, and each does the part the suites structurally cannot reach:
+Four stages, and each does the part the suites structurally cannot reach:
 
+0. **A plugin user.** The plugin installed from a clone of this tree into a
+   `HOME` and a Claude configuration of its own, then one cold session: the
+   bootstrap builds the venv, `provledger` is on the session's `PATH`, and the
+   hooks write their first rows. The dashboard is started before there is any
+   ledger, and the agent is given a first task it plans and runs itself.
 1. **A stranger's install.** Clone into an empty directory and follow this
    document as written, through `make demo`. Anywhere the script must deviate
    from what is printed here to succeed, it reports a **FINDING** — that is a
    place a new reader is stuck.
 2. **A dummy project, then the three surfaces.** A small project whose whole
    history the script writes, so the right answer to every question about it is
-   known in advance; then `/ledger`, `/receipts` and the dashboard **clicked by
-   a real Chromium**. It also plants all four kinds of recorded failure and asks
+   known in advance; then `/ledger` and `/receipts` — once through a stand-in for
+   the session, once as **real slash commands** in stage 0's plugin session — and
+   the dashboard **clicked by a real Chromium**. It also plants all four kinds of recorded failure and asks
    questions that deliberately avoid their vocabulary, and checks that no
    documented flow forks a second model when nobody asked for one.
-3. **A model marks the answers** against key points written down before the
-   questions were asked — whether the answer is *right*, which no existing
-   assertion can tell. The judge is itself a model, so its verdicts are evidence
-   and not proof; a disagreement wants a person's eye.
+3. **A model marks the real sessions' answers** against key points written
+   down before the questions were asked — whether the answer is *right*, which
+   no existing assertion can tell. Real sessions are nondeterministic and the
+   judge is itself a model, so a disagreement is reported as a **FINDING** for a
+   person to read, never decided automatically either way.
 
 It is safe to run repeatedly: one temporary directory it creates and removes,
 its own `HOME`, its own ledger, its own graph registry and its own
 `CLAUDE_CONFIG_DIR`. It never touches `~/skill-workspace/orchestrator.db` or
 your registered projects, and it proves that at the end rather than promising it.
 
-Exit code: `0` all green · `2` green but the documents were deviated from ·
-`3` a check could not run at all · `1` a check ran and said no. Only `0` ships.
+Exit code: `0` all green · `2` green but with findings — a place the documents
+were deviated from, or an answer the judge marked down · `3` a check could not
+run at all · `1` a check ran and said no. `0` ships; `2` ships only once a person
+has read every finding and accepted it in the release PR. Stage 3's input and
+marking and the real sessions' raw streams are kept outside the sandbox, in
+`~/.cache/provledger/release-checks/<run>/`, so the findings can be checked.
 Stage 2's browser needs Playwright, which is deliberately not in
 `requirements.txt` — a 150 MB browser has no business in a plugin's runtime
 dependencies:

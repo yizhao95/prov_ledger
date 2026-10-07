@@ -113,6 +113,32 @@ def test_plugin_root_env_overrides_launcher_location(scripts_dir: Path, tmp_path
     assert f"LAUNCH_CMD=bash {root}/orchestrator-webapp/launch_dashboard.sh" in result.stdout
 
 
+def _health_url(scripts_dir: Path, env: dict) -> str:
+    base = {k: v for k, v in os.environ.items() if k not in ("HEALTH_URL", "PROVLEDGER_DASH_PORT")}
+    result = subprocess.run(["bash", str(scripts_dir / "ensure-dashboard.sh")], capture_output=True,
+                            text=True, env={**base, "ENSURE_DASHBOARD_PRINT_ONLY": "1", **env}, timeout=15)
+    assert result.returncode == 0, result.stderr
+    return next(l for l in result.stdout.splitlines() if l.startswith("HEALTH_URL=")).split("=", 1)[1]
+
+
+def test_the_probe_follows_the_launchers_port(scripts_dir: Path):
+    """One port, one knob. The launcher starts on $PROVLEDGER_DASH_PORT; probing
+    8765 regardless started a dashboard on the new port and then waited on the
+    old one — or, on a machine already running a dashboard there, reported that
+    one as up."""
+    assert _health_url(scripts_dir, {"PROVLEDGER_DASH_PORT": "9911"}) == "http://127.0.0.1:9911/api/health"
+
+
+def test_an_explicit_health_url_still_wins(scripts_dir: Path):
+    url = _health_url(scripts_dir, {"PROVLEDGER_DASH_PORT": "9911",
+                                    "HEALTH_URL": "http://127.0.0.1:9922/api/health"})
+    assert url == "http://127.0.0.1:9922/api/health"
+
+
+def test_with_neither_set_the_probe_stays_on_8765(scripts_dir: Path):
+    assert _health_url(scripts_dir, {}) == "http://127.0.0.1:8765/api/health"
+
+
 class _Health:
     """A one-route server answering /api/health with a fixed status and body."""
 

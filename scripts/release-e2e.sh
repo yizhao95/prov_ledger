@@ -13,16 +13,22 @@
 #
 # So this script does only the part the suites structurally cannot reach.
 #
+#   Stage 0  a plugin user: the plugin installed from a clone of this tree into
+#            a HOME and a Claude configuration of its own, a cold first session
+#            (bootstrap, `provledger` on the session's PATH, the hooks' first
+#            rows), the dashboard before there is a ledger, and a first task the
+#            agent plans and runs itself through writing-plans/executing-plans.
 #   Stage 1  a stranger's install: clone into an empty directory and follow
 #            INSTALL.md as written, ending at `make demo`. Every place the
 #            script must deviate from the document to succeed is reported as a
 #            FINDING, because it is where a new reader gets stuck.
 #   Stage 2  a dummy project built from scratch, then all three ways in:
-#            `provledger ask`, `provledger receipts`, and the dashboard driven
-#            by a real browser.
-#   Stage 3  a model marks the answers against key points written down in
-#            advance — whether the answer is RIGHT, which no existing assertion
-#            can tell.
+#            `/ledger` and `/receipts` — once through a stand-in for the
+#            session, once as real slash commands in stage 0's plugin session —
+#            and the dashboard driven by a real browser.
+#   Stage 3  a model marks the real sessions' answers against key points
+#            written down in advance — whether the answer is RIGHT, which no
+#            existing assertion can tell.
 #
 # Usage:  bash scripts/release-e2e.sh [options]
 #   --suites full|collect|none   stage 1's documented suites. `full` runs all
@@ -30,12 +36,16 @@
 #                                only collects them, which still catches a
 #                                dependency the docs forgot; `none` reports the
 #                                suites as BLOCKED. Default: full.
-#   --clone-from <url|path>      what stage 1 clones. Default: this working
+#   --clone-from <url|path>      what stages 0 and 1 clone. Default: this working
 #                                tree — before a release, that is the thing
 #                                being released. Pass the GitHub URL to check
 #                                what is already published.
-#   --stage 1|2|3                run one stage only (repeatable).
+#   --stage 0|1|2|3              run one stage only (repeatable).
 #   --keep                       do not delete the sandbox; print its path.
+#                                Either way, stage 3's input and marking and
+#                                the real sessions' raw streams are copied to
+#                                $PROVLEDGER_RELEASE_KEEP (default
+#                                ~/.cache/provledger/release-checks/<run>/).
 #   --model <name>               the model stage 3 judges with.
 #
 # Exit code = the worst outcome:  0 OK · 2 FINDING (docs deviated from)
@@ -60,12 +70,12 @@ while [ $# -gt 0 ]; do
         --stage)      STAGES="$STAGES ${2:?}"; shift 2;;
         --model)      MODEL="${2:?}"; shift 2;;
         --keep)       KEEP=1; shift;;
-        -h|--help)    sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
+        -h|--help)    sed -n '2,52p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
         *) echo "unknown option: $1" >&2; exit 64;;
     esac
 done
 case "$SUITES" in full|collect|none) ;; *) echo "--suites must be full|collect|none" >&2; exit 64;; esac
-[ -n "$STAGES" ] || STAGES="1 2 3"
+[ -n "$STAGES" ] || STAGES="0 1 2 3"
 wants() { case " $STAGES " in *" $1 "*) return 0;; *) return 1;; esac; }
 
 # ── what must not be touched ─────────────────────────────────────────────────
@@ -89,6 +99,9 @@ E2E_TALLY="$E2E_ROOT/tally.txt";       : > "$E2E_TALLY"
 export E2E_LOGS E2E_CLONE E2E_HOME E2E_FINDINGS E2E_TALLY
 export E2E_SUITES="$SUITES" E2E_CLONE_FROM="$CLONE_FROM" E2E_MODEL="$MODEL"
 export E2E_REPO="$REPO"
+# Where stage 3's input and marking and the real sessions' streams are copied at
+# exit, outside the sandbox, so a person can check the judging (FL-213).
+export E2E_KEEP_DIR="${PROVLEDGER_RELEASE_KEEP:-$REAL_HOME/.cache/provledger/release-checks}/$E2E_NONCE"
 # The developer's workspace, checked at the end by the suites' own guard
 # (scripts/home_guard.py): one definition of a leak, not a second one here.
 GUARD_SNAP="$E2E_ROOT/home-guard.json"
@@ -96,6 +109,18 @@ PROVLEDGER_GUARD_HOME="$REAL_HOME/skill-workspace" python3 "$HERE/home_guard.py"
 
 cleanup() {
     local rc=$?
+    # A dashboard a session launched in the background outlives the session.
+    if [ -s "$E2E_ROOT/ports.txt" ]; then
+        while read -r port; do
+            for pid in $(lsof -ti "tcp:$port" 2>/dev/null); do kill "$pid" 2>/dev/null; done
+        done < "$E2E_ROOT/ports.txt"
+    fi
+    # What a person needs to check the judging outlives the sandbox (FL-213).
+    local keep_dir="$E2E_KEEP_DIR"
+    if ls "$E2E_ROOT"/stage3-*.json "$E2E_LOGS"/s[0-9]*-*.jsonl >/dev/null 2>&1; then
+        mkdir -p "$keep_dir" && cp "$E2E_ROOT"/stage3-*.json "$E2E_LOGS"/s[0-9]*-*.jsonl "$keep_dir"/ 2>/dev/null
+        printf '\n  kept for review: %s\n' "$keep_dir"
+    fi
     if [ "$KEEP" = 1 ]; then printf '\n  sandbox kept: %s\n' "$E2E_ROOT"
     else rm -rf "$E2E_ROOT"; fi
     exit $rc
@@ -158,12 +183,16 @@ info "claude conf  $CLAUDE_CONFIG_DIR"
 info "guarded      $GUARDED  [$GUARD_BEFORE]"
 info "stages       $STAGES · suites: $SUITES"
 
-V1=$OK; V2=$OK; V3=$OK
+V0=$OK; V1=$OK; V2=$OK; V3=$OK
 # A clone carries committed history only. Say so when the tree is dirty, so
 # nobody reads a green stage 1 as covering edits that are not in it yet.
 if [ "$CLONE_FROM" = "$REPO" ] && [ -n "$(git -C "$REPO" status --porcelain 2>/dev/null)" ]; then
-    printf '  %sNOTE%s    the working tree is dirty; stage 1 clones committed HEAD, so uncommitted\n' "$C_YEL" "$C_0"
-    info "        changes to INSTALL.md, the Makefile or the suites are NOT covered by this run."
+    printf '  %sNOTE%s    the working tree is dirty; stages 0 and 1 clone committed HEAD, so uncommitted\n' "$C_YEL" "$C_0"
+    info "        changes to INSTALL.md, the Makefile, the plugin or the suites are NOT covered by this run."
+fi
+if wants 0; then
+    python3 "$HERE/release_e2e/stage0_plugin.py"
+    V0="$(cat "$E2E_ROOT/stage0.verdict" 2>/dev/null || echo $FAIL)"
 fi
 if wants 1; then
     bash "$HERE/release_e2e/stage1_install.sh"
@@ -193,12 +222,13 @@ fi
 
 # ── the summary ──────────────────────────────────────────────────────────────
 banner "SUMMARY"
+wants 0 && printf '  stage 0  %-8s  a plugin user: install · cold first session · first task\n' "$(verdict_name "$V0")"
 wants 1 && printf '  stage 1  %-8s  a stranger'\''s install (INSTALL.md as written)\n' "$(verdict_name "$V1")"
-wants 2 && printf '  stage 2  %-8s  dummy project · ask · receipts · dashboard in a real browser\n' "$(verdict_name "$V2")"
+wants 2 && printf '  stage 2  %-8s  dummy project · /ledger · /receipts (stand-in and real) · dashboard in a real browser\n' "$(verdict_name "$V2")"
 wants 3 && printf '  stage 3  %-8s  a model marks the answers against key points\n' "$(verdict_name "$V3")"
 
 if [ -s "$E2E_FINDINGS" ]; then
-    printf '\n  %s%sFINDINGS — a reader following the documents is stuck at each of these%s\n' "$C_B" "$C_YEL" "$C_0"
+    printf '\n  %s%sFINDINGS — a person decides each one before the release: a place a reader following the\n  documents is stuck, or an answer the stage-3 judge marked down%s\n' "$C_B" "$C_YEL" "$C_0"
     awk '!seen[$0]++' "$E2E_FINDINGS" | nl -ba -w4 -s'  ' | sed 's/^/  /'
 fi
 
@@ -245,6 +275,6 @@ if [ "$GUARD_BEFORE" != "$GUARD_AFTER" ]; then
     info "        the provLedger hooks record that session's own words. Not a failure."
 fi
 
-FINAL="$(worst "$V1" "$V2" "$V3" "$V_GUARD")"
+FINAL="$(worst "$V0" "$V1" "$V2" "$V3" "$V_GUARD")"
 printf '\n  %sVERDICT: %s%s  (exit %s)\n\n' "$C_B" "$(verdict_name "$FINAL")" "$C_0" "$FINAL"
 exit "$FINAL"
