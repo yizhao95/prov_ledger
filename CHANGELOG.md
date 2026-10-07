@@ -26,6 +26,11 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   review's refresh and the session refresh wrote a new graph, with no history,
   into the default directory, and the registry followed it; both now refresh the
   graph where the project is registered.
+- **A plan whose failed retry was retried in turn closes.** A plan that failed
+  through a regular step is judged again once every failure is recovered. When a
+  retry had itself failed and been retried (the retry a child of the attempt, as
+  the executing-plans skill says), that judging stopped with
+  `'sqlite3.Row' object has no attribute 'get'` and the plan stayed FAILED.
 
 - **A plan close takes seconds, not minutes, and finishes.** On a large project the
   close's rules read the state graph without an index — every lookup of a node's

@@ -539,7 +539,9 @@ def _regular_failures_recovered(conn: sqlite3.Connection, plan_id: str) -> bool:
     if not failed:
         return False          # nothing to re-judge: the plan did not fail through a regular step
     by_id = {r["step_id"]: r for r in rows}
-    top = [r for r in failed if r["parent_step_id"] is None or by_id.get(r["parent_step_id"], {}).get("status") != "FAILED"]
+    # a sqlite3.Row has no .get: a FAILED retry under a FAILED attempt (FL-138) used to crash here
+    top = [r for r in failed
+           if r["parent_step_id"] not in by_id or by_id[r["parent_step_id"]]["status"] != "FAILED"]
     return all(_is_step_recovered(conn, r["step_id"]) for r in top)
 
 
