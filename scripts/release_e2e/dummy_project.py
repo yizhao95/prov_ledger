@@ -272,6 +272,17 @@ class Build:
             conn.close()
         return row[0] if row else node_key
 
+    def wait_past(self, stamp: str, limit_s: float = 5.0) -> None:
+        """Return once the ledger's clock reads later than `stamp`. Timestamps come
+        from the DB clock at one-second resolution, and a reading that has to come
+        "after" something cannot share its second."""
+        import time
+        deadline = time.monotonic() + limit_s
+        while self.rows("SELECT CURRENT_TIMESTAMP")[0][0] <= stamp:
+            if time.monotonic() > deadline:
+                raise RuntimeError(f"the ledger clock did not pass {stamp} within {limit_s:g} s")
+            time.sleep(0.1)
+
     def rows(self, sql: str, *params) -> list[tuple]:
         """Read the sandbox ledger. Only the build's own invariants are checked
         this way; every write goes through the project's own commands."""
@@ -554,7 +565,10 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
     # in the same second as the expectation is not an "after" at all; and
     # `outcomes.backfill` judges the expectations of OTHER plans only
     # (`get_pending_expectations` excludes the closing plan), so plan A's claim
-    # is settled by plan B's close and never by its own.
+    # is settled by plan B's close and never by its own. And the build waits for
+    # the ledger clock to leave the second of plan A's claim: a fast close once put
+    # both in the same second, and the measurement read as `before`.
+    b.wait_past(b.rows("SELECT max(created_at) FROM expectations WHERE plan_id = ?", plan_a)[0][0])
     b.op("record-metric.sh", {"name": "discount_rate_pct", "value": 14.7, "unit": "percent",
                               "project": b.project, "plan_id": plan_b, "source": "release-e2e"})
     f["falsified_claim"] = {

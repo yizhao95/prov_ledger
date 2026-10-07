@@ -374,3 +374,20 @@ def test_a_blocked_model_call_is_never_made_and_the_model_reads_as_unreachable(t
     text, detail, outcome = SM.call("prompt")
     assert (text, outcome) == ("", "blocked") and detail["reason"] == "the login expires in 3 min"
     assert SM.available() == (False, "blocked: the login expires in 3 min")
+
+
+def test_the_build_can_wait_for_the_ledger_clock_to_pass_a_stamp(tmp_path, monkeypatch):
+    """Plan B's measurement has to come strictly after plan A's expectation, and
+    db.get_metrics compares the two on the ledger clock, which has one-second
+    resolution. Once plan A's close got fast, both landed in the same second: the
+    measurement counted as `before`, backfill wrote `none_available`, and plan A's
+    claim was never contradicted (kind 3/4)."""
+    import sqlite3
+    import dummy_project as DP
+    db = tmp_path / "o.db"
+    sqlite3.connect(str(db)).close()
+    monkeypatch.setenv("ORCH_DB", str(db))
+    b = object.__new__(DP.Build)                    # rows() reads ORCH_DB and nothing else
+    now = b.rows("SELECT CURRENT_TIMESTAMP")[0][0]
+    b.wait_past(now)
+    assert b.rows("SELECT CURRENT_TIMESTAMP")[0][0] > now
