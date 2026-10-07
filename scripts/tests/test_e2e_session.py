@@ -254,3 +254,168 @@ def test_a_judge_that_disagrees_is_a_finding_for_a_person_never_a_fail(S3):
     from e2elib import FINDING
     assert S3.judge_verdict(_card([("a", "hit")], unsupported=True)) == FINDING
     assert S3.judge_verdict(_card([("a", "miss"), ("b", "hit")])) == FINDING
+
+
+def test_refresh_login_copies_the_current_credential_over_a_stale_copy(PS, tmp_path):
+    """A release check runs for over an hour on a copied OAuth credential. When the
+    developer's own session rotated the refresh token, the copy went stale and every
+    later model call failed ("OAuth session expired and could not be refreshed").
+    The login is copied again right before each call."""
+    real = tmp_path / "real"
+    (real / ".claude").mkdir(parents=True)
+    (real / ".claude" / ".credentials.json").write_text('{"token": "old"}')
+    cfg = tmp_path / "cfg"
+    PS.seed_config(cfg, real)
+    (real / ".claude" / ".credentials.json").write_text('{"token": "rotated"}')
+    PS.refresh_login(cfg, real)
+    assert json.loads((cfg / ".credentials.json").read_text()) == {"token": "rotated"}
+
+
+def test_every_session_refreshes_its_login_first(PS, tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(PS, "refresh_login", lambda cfg, real: seen.append(str(cfg)))
+    monkeypatch.setattr(PS.subprocess, "run", lambda *a, **k: PS.subprocess.CompletedProcess(a, 0, stdout="", stderr=""))
+    PS.run_session("hi", cwd=tmp_path, env={"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg")})
+    assert seen == [str(tmp_path / "cfg")]
+
+
+def test_the_judges_calls_refresh_the_login_too(tmp_path, monkeypatch):
+    import session_model as SM
+    import plugin_session as PS
+    seen = []
+    monkeypatch.setattr(PS, "refresh_login", lambda cfg, real: seen.append(str(cfg)))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "judge-cfg"))
+    monkeypatch.setattr(SM.subprocess, "run", lambda *a, **k: SM.subprocess.CompletedProcess(a, 0, stdout='{"result": "ok"}', stderr=""))
+    SM.call("prompt")
+    assert seen == [str(tmp_path / "judge-cfg")]
+
+
+def _function(source: str, name: str) -> str:
+    start = source.index(f"def {name}(")
+    end = source.find("\ndef ", start + 1)
+    return source[start:end if end > 0 else None]
+
+
+def test_the_dummy_load_orders_reads_the_discount_and_then_stops():
+    """Plan A's analysis says load_orders is one of the three readers of
+    orders.discount, and Q4 / Q7 ask why it changed and who signed it off. In
+    v1 it never read the column and v2 changed only its docstring, so its
+    structure never changed: it looked "changed and unexplained" only because the
+    review built a fresh graph with no history (FL-084). With that fixed it read
+    as untouched and the release check had no unexplained node to ask about."""
+    import dummy_project as DP
+    v1 = _function(DP.V1["pkg/rollup.py"], "load_orders")
+    v2 = _function(DP.V2["pkg/rollup.py"], "load_orders")
+    assert "discount" in v1.split('"""')[-1], "v1 load_orders reads orders.discount in its code"
+    assert "discount" not in v2.split('"""')[-1], "v2 load_orders no longer reads it"
+
+
+def _login(real, expires_in_s):
+    import time
+    (real / ".claude").mkdir(parents=True, exist_ok=True)
+    oauth = {"accessToken": "a", "refreshToken": "r"}
+    if expires_in_s is not None:
+        oauth["expiresAt"] = int((time.time() + expires_in_s) * 1000)
+    (real / ".claude" / ".credentials.json").write_text(json.dumps({"claudeAiOauth": oauth}))
+
+
+def test_a_call_the_login_would_expire_during_is_not_made(PS, tmp_path):
+    """A sandbox session whose access token expires refreshes it inside the sandbox,
+    and the developer's own refresh token then stops working. A call that may run
+    past the expiry (its timeout plus a margin) is not made; the verdict says how
+    long the login had left."""
+    _login(tmp_path / "real", 8 * 60)
+    ready, why = PS.login_ready(tmp_path / "cfg", tmp_path / "real", run_for_s=240)
+    assert ready is False
+    assert "expires in 8 min" in why and "not made" in why
+
+
+def test_a_call_with_time_to_spare_goes_ahead(PS, tmp_path):
+    _login(tmp_path / "real", 2 * 3600)
+    assert PS.login_ready(tmp_path / "cfg", tmp_path / "real", run_for_s=1200)[0] is True
+    assert (tmp_path / "cfg" / ".credentials.json").is_file(), "the current login was copied in"
+
+
+def test_a_login_without_an_expiry_does_not_block(PS, tmp_path):
+    _login(tmp_path / "real", None)
+    assert PS.login_ready(tmp_path / "cfg", tmp_path / "real", run_for_s=240)[0] is True
+
+
+def test_a_blocked_session_is_never_started_and_reads_as_blocked(PS, tmp_path, monkeypatch):
+    import stage2_surfaces as S2
+    monkeypatch.setattr(PS, "login_ready", lambda cfg, real, run_for_s: (False, "the login expires in 3 min"))
+
+    def never(*a, **k):
+        raise AssertionError("a session was started")
+
+    monkeypatch.setattr(PS.subprocess, "run", never)
+    s = PS.run_session("hi", cwd=tmp_path, env={"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg")})
+    assert s.blocked == "the login expires in 3 min" and not s.ok
+    assert S2.real_answer({"id": "Q1"}, s)["outcome"] == "blocked"
+    assert PS.session_verdict(s) == S2.BLOCKED
+
+
+def test_a_finished_or_failed_session_keeps_its_verdict(PS):
+    from e2elib import FAIL, OK
+    assert PS.session_verdict(PS.Transcript(ok=True)) == OK
+    assert PS.session_verdict(PS.Transcript(ok=False, rc=1)) == FAIL
+
+
+def test_a_blocked_model_call_is_never_made_and_the_model_reads_as_unreachable(tmp_path, monkeypatch):
+    import plugin_session as PS
+    import session_model as SM
+    monkeypatch.setattr(PS, "login_ready", lambda cfg, real, run_for_s: (False, "the login expires in 3 min"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "judge-cfg"))
+
+    def never(*a, **k):
+        raise AssertionError("a model call was made")
+
+    monkeypatch.setattr(SM.subprocess, "run", never)
+    text, detail, outcome = SM.call("prompt")
+    assert (text, outcome) == ("", "blocked") and detail["reason"] == "the login expires in 3 min"
+    assert SM.available() == (False, "blocked: the login expires in 3 min")
+
+
+def test_the_build_can_wait_for_the_ledger_clock_to_pass_a_stamp(tmp_path, monkeypatch):
+    """Plan B's measurement has to come strictly after plan A's expectation, and
+    db.get_metrics compares the two on the ledger clock, which has one-second
+    resolution. Once plan A's close got fast, both landed in the same second: the
+    measurement counted as `before`, backfill wrote `none_available`, and plan A's
+    claim was never contradicted (kind 3/4)."""
+    import sqlite3
+    import dummy_project as DP
+    db = tmp_path / "o.db"
+    sqlite3.connect(str(db)).close()
+    monkeypatch.setenv("ORCH_DB", str(db))
+    b = object.__new__(DP.Build)                    # rows() reads ORCH_DB and nothing else
+    now = b.rows("SELECT CURRENT_TIMESTAMP")[0][0]
+    b.wait_past(now)
+    assert b.rows("SELECT CURRENT_TIMESTAMP")[0][0] > now
+
+
+def _judge_prompt(S3, monkeypatch, q):
+    seen = {}
+
+    def call(prompt, **k):
+        seen["prompt"] = prompt
+        return "", {"reason": "stub"}, "failed"
+
+    monkeypatch.setattr(S3.SM, "call", call)
+    S3.judge_one({"question": "why?", "must": ["a point"], "answer": "an answer", **q})
+    return seen["prompt"]
+
+
+def test_the_judge_sees_the_whole_material_the_session_saw(S3, monkeypatch):
+    """The judge used to get each material cut at 24000 characters, and was not
+    told. A /receipts answer quoted the scope line its own read printed; the line
+    sat past the cut, and the judge marked it as resting on no record."""
+    material = "x" * 29_990 + "\nScope: 2 nodes"
+    code = "y" * 15_000 + "\nNEEDLE_IN_CODE"
+    prompt = _judge_prompt(S3, monkeypatch, {"material": material, "code": code})
+    assert "Scope: 2 nodes" in prompt and "NEEDLE_IN_CODE" in prompt
+
+
+def test_past_the_limit_the_judge_is_told_what_was_cut(S3, monkeypatch):
+    material = "x" * (S3.MATERIAL_LIMIT + 500)
+    prompt = _judge_prompt(S3, monkeypatch, {"material": material})
+    assert "500 of" in prompt and "not shown" in prompt
