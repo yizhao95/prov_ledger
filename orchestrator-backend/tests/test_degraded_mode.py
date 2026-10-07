@@ -164,3 +164,12 @@ def test_hooks_json_registers_stop_and_the_shell_hook_stays_silent(world):
     r = subprocess.run(["bash", str(repo / "hooks" / "session_close.sh")], input=json.dumps({"session_id": "sh-1", "cwd": "/nowhere"}), capture_output=True, text=True, env=env, timeout=30)
     assert r.returncode == 0 and r.stdout == ""
     assert session.get(sqlite3.connect(str(world["db"])), "sh-1")["note"] == "cwd is not inside a registered project"
+
+
+def test_the_session_refresh_writes_the_graph_where_the_project_is_registered(world, monkeypatch, capsys):
+    """FL-084: a project registered with --out-dir was refreshed into the default
+    directory — a new graph with no history, which the registry then pointed at,
+    leaving every old node key unmatched and the ledger's records unreachable."""
+    _session(world, monkeypatch, capsys)
+    argv = world["spawned"][0]
+    assert "--out-dir" in argv and argv[argv.index("--out-dir") + 1] == str(world["gdir"])

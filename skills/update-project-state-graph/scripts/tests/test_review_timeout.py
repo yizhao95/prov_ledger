@@ -351,3 +351,12 @@ def test_a_timed_out_write_reports_what_the_ledger_shows_afterwards(harness, mon
     assert "nothing it would have written is confirmed" not in text
     assert f"{CHILD} reads COMPLETED" in text and "IN_PROGRESS" in text, text[-600:]
     assert "the close did not finish" in text
+
+
+def test_the_review_refresh_writes_the_graph_where_the_project_is_registered(harness, tmp_path):
+    """FL-084: the review's refresh named no --out-dir, so a project registered with
+    one got a fresh graph with no history in the default directory."""
+    rec, code = harness()
+    assert code == 0, rec.kinds
+    args = [str(a) for a in rec.of("graph")[0]["args"]]
+    assert "--out-dir" in args and args[args.index("--out-dir") + 1] == str(tmp_path)

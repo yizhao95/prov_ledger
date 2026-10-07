@@ -10,6 +10,23 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
 ## Unreleased
 
+- **A failed publish leaves nothing behind, and a plan nobody started can be put
+  down.** A step type the orchestrator does not know, expectations on a plan
+  without a tracked project, or a headline note citing a record that does not
+  exist were found only after the plan row was written, leaving a plan
+  IN_PROGRESS with no steps that nothing could close. Every check now runs
+  before the first write, and the plan, its steps and its skills are written
+  together. `abandon-plan.sh` (plan id, reason) turns a plan whose steps never
+  started into the new status ABANDONED, with the reason on the plan's record.
+- **A COMMAND step is never left stuck.** `start-step` refuses a COMMAND step —
+  only `run-step.sh` starts one, because only its exit code completes it — and
+  `run-step` stopped by a timeout or Ctrl-C fails its step and says it was
+  stopped, instead of dying with the step IN_PROGRESS.
+- **A project registered outside the default directory keeps its graph.** The
+  review's refresh and the session refresh wrote a new graph, with no history,
+  into the default directory, and the registry followed it; both now refresh the
+  graph where the project is registered.
+
 - **A plan close takes seconds, not minutes, and finishes.** On a large project the
   close's rules read the state graph without an index — every lookup of a node's
   latest snapshot scanned the whole table — and recomputed the plan's changed

@@ -148,8 +148,11 @@ def on_stop(conn, data: dict, *, orch_db_path: str | None = None, commit: bool =
         else:
             lock.parent.mkdir(parents=True, exist_ok=True)
             lock.write_text(f"{session_id} {_now()}\n")
-            argv = ["bash", str(init_project_script()), "--name", project, "--repo", repo, "--trigger", "session",
-                    "--session-id", session_id, "--notify-orch-db", orch_db_path or str(db.DEFAULT_DB_PATH)]
+            # FL-084: the graph is refreshed where the project is registered (the
+            # lock sits beside it), not in the default directory
+            argv = ["bash", str(init_project_script()), "--name", project, "--repo", repo, "--out-dir", str(lock.parent),
+                    "--trigger", "session", "--session-id", session_id,
+                    "--notify-orch-db", orch_db_path or str(db.DEFAULT_DB_PATH)]
             try:
                 pid = _spawn(argv, lock.parent / "refresh.log")
                 state, note = "queued", f"refresh queued (pid {pid}): {why}"
