@@ -391,3 +391,31 @@ def test_the_build_can_wait_for_the_ledger_clock_to_pass_a_stamp(tmp_path, monke
     now = b.rows("SELECT CURRENT_TIMESTAMP")[0][0]
     b.wait_past(now)
     assert b.rows("SELECT CURRENT_TIMESTAMP")[0][0] > now
+
+
+def _judge_prompt(S3, monkeypatch, q):
+    seen = {}
+
+    def call(prompt, **k):
+        seen["prompt"] = prompt
+        return "", {"reason": "stub"}, "failed"
+
+    monkeypatch.setattr(S3.SM, "call", call)
+    S3.judge_one({"question": "why?", "must": ["a point"], "answer": "an answer", **q})
+    return seen["prompt"]
+
+
+def test_the_judge_sees_the_whole_material_the_session_saw(S3, monkeypatch):
+    """The judge used to get each material cut at 24000 characters, and was not
+    told. A /receipts answer quoted the scope line its own read printed; the line
+    sat past the cut, and the judge marked it as resting on no record."""
+    material = "x" * 29_990 + "\nScope: 2 nodes"
+    code = "y" * 15_000 + "\nNEEDLE_IN_CODE"
+    prompt = _judge_prompt(S3, monkeypatch, {"material": material, "code": code})
+    assert "Scope: 2 nodes" in prompt and "NEEDLE_IN_CODE" in prompt
+
+
+def test_past_the_limit_the_judge_is_told_what_was_cut(S3, monkeypatch):
+    material = "x" * (S3.MATERIAL_LIMIT + 500)
+    prompt = _judge_prompt(S3, monkeypatch, {"material": material})
+    assert "500 of" in prompt and "not shown" in prompt

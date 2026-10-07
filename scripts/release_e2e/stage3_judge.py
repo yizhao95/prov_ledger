@@ -119,6 +119,21 @@ def judge_verdict(card: dict) -> int:
     return FINDING if (misses or unsupported) else OK
 
 
+MATERIAL_LIMIT = 200_000     # characters; the longest material seen was 35275
+
+
+def admitted(text: str, what: str) -> str:
+    """All of it, so the judge sees what the session saw. Each material used to be
+    cut at 24000 characters without a word: a /receipts answer quoted the scope
+    line its own read printed, the line sat past the cut, and the judge marked it
+    as resting on no record. Past the limit the cut is said, with its size."""
+    if len(text) <= MATERIAL_LIMIT:
+        return text
+    return (text[:MATERIAL_LIMIT]
+            + f"\n[the {what} is cut here: {len(text) - MATERIAL_LIMIT} of {len(text)} characters not shown. "
+              f"A claim whose support may be in the part not shown is not resting on no record.]")
+
+
 def judge_one(q: dict) -> tuple[dict, dict, str]:
     must = q.get("must") or []
     must_not = q.get("must_not") or []
@@ -130,8 +145,8 @@ def judge_one(q: dict) -> tuple[dict, dict, str]:
         + ("\n\n===== and what it must NOT do =====\n"
            + "\n".join(f"- {m}" for m in must_not) if must_not else "")
         + "\n\n===== the material the tool computed (the only admissible evidence) =====\n"
-        + (q.get("material") or "(none)")[:24000]
-        + (CODE_NOTE + q["code"][:12000] if q.get("code") else "")
+        + admitted(q.get("material") or "(none)", "material")
+        + (CODE_NOTE + admitted(q["code"], "code") if q.get("code") else "")
         + "\n\n===== the answer to mark =====\n" + (q.get("answer") or "(empty)")
         + "\n"
     )
