@@ -16,6 +16,7 @@ from orchestrator.ask import facts as F, summarize as SU
 
 sys.path.insert(0, str(Path(__file__).parent))
 import _psg_schema as ps  # noqa: E402
+from orchestrator.db import copy_ledger  # noqa: E402
 
 QUESTION = "why does build_features drop null labels?"
 
@@ -153,7 +154,7 @@ def test_cli_ask_no_model_prints_the_fact_table_the_scope_and_the_records(conn, 
     db_path = tmp_path / "orch.db"
     import shutil
     conn.commit()
-    shutil.copy(conn.execute("PRAGMA database_list").fetchone()[2], db_path)
+    copy_ledger(conn.execute("PRAGMA database_list").fetchone()[2], db_path)
     registry = tmp_path / "projects.json"
     registry.write_text(json.dumps({"projects": [{"name": "proj", "db_path": graph, "repo": str(tmp_path)}]}))
     monkeypatch.setenv("ORCH_DB", str(db_path))
@@ -171,7 +172,7 @@ def test_cli_ask_json_carries_everything_the_page_needs(conn, graph, seeded, tmp
     db_path = tmp_path / "orch.db"
     import shutil
     conn.commit()
-    shutil.copy(conn.execute("PRAGMA database_list").fetchone()[2], db_path)
+    copy_ledger(conn.execute("PRAGMA database_list").fetchone()[2], db_path)
     registry = tmp_path / "projects.json"
     registry.write_text(json.dumps({"projects": [{"name": "proj", "db_path": graph, "repo": str(tmp_path)}]}))
     monkeypatch.setenv("ORCH_DB", str(db_path))

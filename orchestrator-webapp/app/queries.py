@@ -1,7 +1,8 @@
 """Read-only SQLite queries for the orchestrator dashboard.
 
-Opens the orchestrator DB read-only (`mode=ro`, WAL) so we can read while hooks
-and skill scripts write. The one write is `log_ask`: one `ask_log` row per
+Opens the orchestrator DB read-only (`mode=ro`). The ledger is in WAL — the
+writers' `db.open_db` keeps it there (FL-193) — so these reads and the hooks'
+writes do not block each other. The one write is `log_ask`: one `ask_log` row per
 `/ledger` question, on its own connection.
 """
 from __future__ import annotations
@@ -32,10 +33,10 @@ def db_path_display() -> str:
 
 
 def open_db_readonly(path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
-    """Open SQLite read-only with WAL enabled (non-blocking concurrent reads).
+    """Open SQLite read-only (URI mode=ro, so nothing here can mutate it).
 
-    Uses URI mode with mode=ro so we cannot accidentally mutate. WAL pragma
-    must still be set on the connection for concurrent-read semantics.
+    The ledger is in WAL, set by the writers (`db.open_db`, FL-193): a reader
+    here does not hold a hook's write up, and a write does not hold this up.
     """
     path = Path(path)
     if not path.exists():
@@ -43,8 +44,8 @@ def open_db_readonly(path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     uri = f"file:{path}?mode=ro"
     conn = sqlite3.connect(uri, uri=True, isolation_level=None)
     conn.row_factory = sqlite3.Row
-    # WAL must be set globally by writer; reader just relies on it being on.
-    # We can still set busy_timeout so we wait briefly if writer is mid-tx.
+    # A ledger still in rollback mode (opened only by an older writer) can be
+    # mid-commit; wait briefly rather than fail.
     conn.execute("PRAGMA busy_timeout = 2000")
     return conn
 
