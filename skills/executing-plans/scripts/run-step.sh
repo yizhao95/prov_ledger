@@ -108,6 +108,7 @@ print(json.dumps({
     'step_id': sys.argv[1],
     'type':    sys.argv[2],
     'log_context': sys.argv[3],
+    '_via':    'run-step',
 }))
 " "${STEP_ID}" "${STEP_TYPE}" "${KICKOFF_BANNER}")"
 START_TMP="${TMPDIR:-/tmp}/orch-rs-start-$$-${RANDOM}.json"
@@ -118,6 +119,30 @@ if ! "${SCRIPT_DIR}/start-step.sh" "${START_TMP}" >/dev/null; then
     echo "run-step: start-step failed for ${STEP_ID}" >&2
     exit 3
 fi
+
+# ---- 1b. stopped before the command finishes → fail the step (FL-214) ----
+# A Bash tool timeout or a Ctrl-C signals the whole process group. Without this,
+# bash died on the signal and left the step IN_PROGRESS, which nothing could then
+# complete (complete-step refuses COMMAND, run-step refuses an IN_PROGRESS step).
+# The handler runs once the interrupted command has returned.
+on_stop() {
+    trap - TERM INT
+    local sig="$1"
+    local fail_tmp="${TMPDIR:-/tmp}/orch-rs-stop-$$-${RANDOM}.json"
+    "${PYBIN}" -c "
+import json, sys
+try:
+    log = open(sys.argv[3], encoding='utf-8', errors='replace').read()[-4000:] if sys.argv[3] else ''
+except OSError:
+    log = ''
+print(json.dumps({'step_id': sys.argv[1], 'reason': f'run-step was stopped by SIG{sys.argv[2]} before its command finished', 'log_context': log}))
+" "${STEP_ID}" "${sig}" "${LOG_TMP:-}" > "${fail_tmp}"
+    "${SCRIPT_DIR}/fail-step.sh" "${fail_tmp}" >/dev/null 2>&1 || echo "run-step: could not fail ${STEP_ID} after SIG${sig}" >&2
+    rm -f "${fail_tmp}"
+    [[ "${sig}" == "INT" ]] && exit 130 || exit 143
+}
+trap 'on_stop TERM' TERM
+trap 'on_stop INT' INT
 
 # ---- 2. run the wrapped command, tee combined stdout+stderr ----
 LOG_TMP="${TMPDIR:-/tmp}/orch-rs-log-$$-${RANDOM}.log"
@@ -178,6 +203,7 @@ TRUNC_TMP="${TMPDIR:-/tmp}/orch-rs-trunc-$$-${RANDOM}.log"
 FINAL_LEN=$(( $(wc -c < "${TRUNC_TMP}") + ${#FOOTER} ))
 
 # ---- 5. complete-step OR fail-step ----
+trap - TERM INT                    # the command has finished; from here the normal path decides
 COMPLETE_TMP="${TMPDIR:-/tmp}/orch-rs-fin-$$-${RANDOM}.json"
 trap 'rm -f "${START_TMP}" "${LOG_TMP:-}" "${TRUNC_TMP:-}" "${COMPLETE_TMP:-}"' EXIT
 "${PYBIN}" - "${STEP_ID}" "${SUMMARY}" "${EXIT_CODE}" "${TRUNC_TMP}" "${FOOTER}" > "${COMPLETE_TMP}" <<'PYEOF'

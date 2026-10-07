@@ -305,7 +305,8 @@ def test_e6_5_invalid_utf8_output_completes_with_replacement(seeded_plan, tmp_db
 class TestCommandGate:
     def test_e6_2_manual_complete_of_command_step_is_refused(self, seeded_plan, tmp_db, scripts_dir, run_script_fn):
         sid = seeded_plan["step_ids"][1]
-        run_script_fn("start-step", {"step_id": sid, "type": "COMMAND"}, tmp_db)
+        # started the way run-step starts it (FL-214: start-step refuses a COMMAND step otherwise)
+        run_script_fn("start-step", {"step_id": sid, "type": "COMMAND", "_via": "run-step"}, tmp_db)
         r = run_script_fn("complete-step", {"step_id": sid, "summary": "ran it by hand"}, tmp_db)
         assert r.returncode == 5 and "run-step.sh" in r.stderr
         assert sqlite3.connect(str(tmp_db)).execute("SELECT status FROM Steps WHERE step_id=?", (sid,)).fetchone()[0] == "IN_PROGRESS"
@@ -322,7 +323,7 @@ class TestCommandGate:
     def test_stored_footer_evidence_passes(self, seeded_plan, tmp_db, scripts_dir, run_script_fn):
         """A run-step transcript appended earlier counts as evidence too."""
         sid = seeded_plan["step_ids"][1]
-        run_script_fn("start-step", {"step_id": sid, "type": "COMMAND"}, tmp_db)
+        run_script_fn("start-step", {"step_id": sid, "type": "COMMAND", "_via": "run-step"}, tmp_db)
         run_script_fn("append-log", {"step_id": sid, "text": "pytest -q\n3 passed\n--- exit_code=0, runtime=2s ---"}, tmp_db)
         r = run_script_fn("complete-step", {"step_id": sid, "summary": "ok"}, tmp_db)
         assert r.returncode == 0, r.stderr

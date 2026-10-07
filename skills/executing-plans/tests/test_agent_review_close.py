@@ -158,7 +158,7 @@ def test_fl019_auto_reopen_when_substep_completes_via_scripts(seeded_plan, tmp_d
     r = run_script_fn("deviate", {"parent_step_id": child, "justification": "additive kwargs; suite green",
                                   "sub_steps": ["manual verdict + refresh"]}, tmp_db, env_extra=env)
     assert r.returncode == 0, r.stderr
-    run_script_fn("start-step", {"step_id": f"{child}.1", "type": "COMMAND"}, tmp_db, env_extra=env)
+    run_script_fn("start-step", {"step_id": f"{child}.1", "type": "COMMAND", "_via": "run-step"}, tmp_db, env_extra=env)
     r = run_script_fn("complete-step", {"step_id": f"{child}.1", "log_context": "refresh ok\n--- exit_code=0, runtime=1s ---"}, tmp_db, env_extra=env)
     assert r.returncode == 0, r.stderr
     c = sqlite3.connect(str(tmp_db))
