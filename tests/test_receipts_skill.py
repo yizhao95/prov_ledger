@@ -262,3 +262,57 @@ def test_the_reply_is_a_timeline_and_a_tasks_goal_is_not_a_nodes_reason():
     assert "give it as theirs and trust it" in text
     assert "tell it as a timeline" in text.lower()
     assert "when it was said" in text and "when it changed" in text
+
+
+def test_the_reply_is_complete_and_hands_back_what_the_record_does_not_settle():
+    """The user's ruling (2026-10-06): /receipts speaks to someone else on the
+    user's behalf, so it aims at a complete answer — what it is, who asked and in
+    what words, what was done, what holds now — and lists, apart from the reply,
+    what the user must confirm or add before sending."""
+    text = " ".join(SKILL.read_text(encoding="utf-8").split())
+    assert "who asked, when, in their own words" in text
+    c = text[text.index("### c · Before you send"):]
+    assert "confirm or add" in c
+    assert "tone" in c.lower(), "the tone question still closes it"
+    assert "A claim you cannot point at does not go in the reply — it goes in section c" in text
+
+
+def test_one_complete_generic_example_with_why_it_is_right():
+    import re
+    examples = re.findall(r"<example>(.*?)</example>", SKILL.read_text(encoding="utf-8"), re.S)
+    assert len(examples) >= 1 and all("Why this is right:" in e for e in examples)
+    joined = " ".join(examples).lower()
+    for word in ("discount", "orders feed", "rollup", "load_orders", "weekly_report", "list_price"):
+        assert word not in joined, f"a shipped example must not carry the release check's answers: {word}"
+
+
+def test_the_tiers_are_defined_by_the_legend_not_here():
+    text = " ".join(SKILL.read_text(encoding="utf-8").split())
+    assert "legend" in text.lower()
+    assert "`stated` = the user's own recorded words" not in text, "one definition, in the CLI legend"
+
+
+def test_identifiers_and_the_scope_line_are_copied_never_made():
+    """The A/B run of the redesign: a commit hash no read had printed, and a scope
+    line summed from two `receipts facts` reads into one no command had printed."""
+    text = " ".join(SKILL.read_text(encoding="utf-8").split())
+    assert "every number and identifier" in text.lower()
+    assert "a commit, a plan id, a file:line" in text
+    assert "the scope line as each read printed it" in text.lower() and "never added together" in text
+
+
+def test_the_reply_is_official_keeps_to_the_question_and_holds_nothing_uncertain():
+    """The user (2026-10-06): /receipts replies to someone else, so it is official
+    and about the question asked; what is uncertain stays out of the reply and is
+    listed apart, for the user to check or fill in."""
+    import re
+    text = " ".join(SKILL.read_text(encoding="utf-8").split())
+    a = text[text.index("### a · The reply"):text.index("### b · The evidence")]
+    assert "official" in a.lower() and "the question that was asked" in a
+    assert "Keep everything uncertain out of the reply" in a
+    example = re.findall(r"<example>(.*?)</example>", SKILL.read_text(encoding="utf-8"), re.S)[0]
+    reply = example[example.index("### a · The reply"):example.index("### b · The evidence")].lower()
+    for doubt in ("can't see", "cannot see", "no record", "not on record", "don't know", "unclear"):
+        assert doubt not in reply, f"the example's reply says something uncertain: {doubt!r}"
+    c = example[example.index("### c · Before you send"):].lower()
+    assert "told" in c, "the uncertainty the reply leaves out is listed in c"

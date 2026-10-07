@@ -178,7 +178,9 @@ def _source_text(ref: dict, extra: dict) -> str:
     checked = f"checked {str(extra['last_checked'])[:10]}" if extra.get("last_checked") else "never checked"
     if verifiability != "linked":
         checked = "nothing to open"
-    return f'source · {ref.get("kind")} · "{_clip(ref.get("label") or "")}" · {verifiability}, {checked}'
+    held = "link only" if ref.get("uri") else "label only"
+    return (f'source · {ref.get("kind")} · "{_clip(ref.get("label") or "")}" · {held} — the body is not in '
+            f'the ledger · {verifiability}, {checked}')
 
 
 def _record_text(kind: str, node: str, r: dict) -> str:
@@ -396,7 +398,9 @@ def render_text(doc: dict) -> str:
     nodes = [f"  {n['qn']} · {n['status']} ({STATUS_GLOSS.get(n['status'], n['status'])}) · {how}"
              for n in doc["facts"].get("nodes") or []]
 
-    out = _asked(doc)
+    from .facts import LEGEND
+
+    out = _asked(doc) + [LEGEND, ""]
     out += [NODES_HEADER] + (nodes or [f"  {NO_CANDIDATE}"])
     if doc.get("picked_by") == "score":
         out += ["", UNCHOSEN]

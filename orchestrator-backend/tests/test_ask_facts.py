@@ -72,7 +72,7 @@ def test_fact_table_has_every_field_and_writes_nothing(conn, graph, seeded):
     assert con["cite"] == f"#{seeded['constraint']}" and con["tier"] == "stated" and con["state"] == "active"
     assert "null label" in con["text"] and con["shown"] == 1 and sorted(con["adopted_by"]) == ["P2", "P3"]
     assert con["references"] == [{"cite": f"#r{seeded['reference']}", "kind": "meeting",
-                                 "label": "feature review 2026-09-01", "uri": None}]
+                                 "label": "feature review 2026-09-01", "uri": None, "last_checked": None}]
 
     assert [r["cite"] for r in n["reasons"]] == [f"#{seeded['reason']}"]
     assert len(n["influence"]) == 2 and {i["plan_id"] for i in n["influence"]} == {"P2", "P3"}

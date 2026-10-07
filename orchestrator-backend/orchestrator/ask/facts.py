@@ -62,9 +62,10 @@ def numbers_in(text: str) -> set[str]:
 # ── per-record decoration ────────────────────────────────────────────────────
 
 def _references(conn, reason_id: int) -> list[dict]:
-    return [{"cite": f"#r{r[0]}", "kind": r[1], "label": r[2], "uri": r[3]} for r in conn.execute(
-        "SELECT f.id, f.kind, f.label, f.uri FROM reference_link l JOIN reference f ON f.id = l.reference_id "
-        "WHERE l.reason_id = ? ORDER BY f.id", (reason_id,))]
+    return [{"cite": f"#r{r[0]}", "kind": r[1], "label": r[2], "uri": r[3], "last_checked": r[4]}
+            for r in conn.execute(
+        "SELECT f.id, f.kind, f.label, f.uri, f.last_checked FROM reference_link l "
+        "JOIN reference f ON f.id = l.reference_id WHERE l.reason_id = ? ORDER BY f.id", (reason_id,))]
 
 
 def _shown_and_adopted(conn, reason_ids: list[int]) -> dict[int, dict]:
@@ -248,7 +249,11 @@ def facts(conn, psg_db_path: str | None, chosen: list[str], *, project: str) -> 
             stats = _shown_and_adopted(conn, [r["id"] for r in recs])
             cons = [r for r in recs if r["role"] == "constraint" and r["state"] == "active" and r["superseded_by"] is None]
             rej = [r for r in recs if r["role"] == "rejected_path"]
-            rea = [r for r in recs if r["role"] == "reason" and r["tier"] != "unstated"]
+            # An `unstated` slot is kept: "it changed and nobody said why" is a
+            # recorded fact, and leaving it out printed `reasons (0)`, which reads
+            # the same as "never touched" — an agent then filled the gap with the
+            # goal of the task that changed it, or a neighbour's reason.
+            rea = [r for r in recs if r["role"] == "reason"]
             node: dict = {"qn": qn, "node_key": key, "status": status, "identity_chain": chain}
             for name, rows in (("constraints", cons), ("reasons", rea), ("rejected_paths", rej)):
                 decisions = _merge(list(reversed(rows)))          # oldest first: the first write is the decision
@@ -298,6 +303,36 @@ def facts(conn, psg_db_path: str | None, chosen: list[str], *, project: str) -> 
 
 # ── rendering: the exact text the model is given ─────────────────────────────
 
+# What the tiers and the cite tokens mean — defined here once and printed at the
+# top of every table, so both skills read it where they use it instead of each
+# carrying its own copy. No digit may appear in it: ask submit allows an answer
+# exactly the numbers the rendered table contains.
+LEGEND = (
+    "Legend — what each record is, and how to say it\n"
+    "  stated    a person's own words, quoted — say \"<who> said on <date>: '…'\" and trust it\n"
+    "  asserted  a reading recorded at the time, the agent's or a person's — say \"on <date> it was "
+    "recorded as the understanding that …\"; not a quote, not an agreement\n"
+    "  derived   worked out from other records — say what it was worked out from\n"
+    "  observed  measured — say what was measured and when\n"
+    "  unstated  it changed and nobody said why — say exactly that, with the date; the goal of the "
+    "task that changed it is the task's, not this node's reason\n"
+    "  [#N] a record · [#rN] a source: a pointer (label, time, link), never its body — say \"a link "
+    "to …\", and \"never checked\" or when it was last checked · [#iN] a plan that changed because of a record · "
+    "[#eN] a change in the project graph · [#xN] / [#oN] an expectation and its outcome · "
+    "[#mN] a measured value · [scope] an absence, computed over the range searched — reproduce it "
+    "word for word")
+
+
+def _source_line(ref: dict, indent: str) -> str:
+    """A source is a pointer. Saying so on the line itself: an agent shown only
+    `email · <label>` called a never-checked email "attached"."""
+    held = "link only" if ref.get("uri") else "label only"
+    checked = f"last checked {str(ref['last_checked'])[:10]}" if ref.get("last_checked") else "never checked"
+    return (f"{indent}    source [{ref['cite']}] {ref['kind']} · {ref['label']}"
+            + (f" · {ref['uri']}" if ref.get("uri") else "")
+            + f" · {held} — the body is not in the ledger · {checked}")
+
+
 def _fmt_record(r: dict, indent: str = "  ") -> list[str]:
     head = f"{indent}[{r['cite']}] {r['tier']} · {r.get('evidence_level') or '?'} · {(r.get('occurred_at') or '')[:10]}"
     plans = r.get("plans") or ([r["plan_id"]] if r.get("plan_id") else [])
@@ -310,6 +345,8 @@ def _fmt_record(r: dict, indent: str = "  ") -> list[str]:
     out = [head]
     if r.get("text"):
         out.append(f"{indent}    {r['text']}")
+    elif r.get("tier") == "unstated":
+        out.append(f"{indent}    nobody said why this changed")
     if r.get("quoted"):
         # Said, not paraphrased. Marked as a quotation so a reader can tell which
         # of the two lines is the record's own wording and which is someone's
@@ -317,13 +354,13 @@ def _fmt_record(r: dict, indent: str = "  ") -> list[str]:
         # only place a decider or a date spoken aloud can come from.
         out.append(f'{indent}    said: "{r["quoted"]}"')
     for ref in r.get("references") or ():
-        out.append(f"{indent}    source [{ref['cite']}] {ref['kind']} · {ref['label']}" + (f" · {ref['uri']}" if ref.get("uri") else ""))
+        out.append(_source_line(ref, indent))
     return out
 
 
 def render(ft: dict) -> str:
     """The fact table as text — the model's only material, and the reader's fallback."""
-    lines = [f"Fact table · project {ft['project']} · {len(ft['nodes'])} node(s)"]
+    lines = [f"Fact table · project {ft['project']} · {len(ft['nodes'])} node(s)", LEGEND]
     for n in ft["nodes"]:
         lines.append("")
         title = n["qn"]

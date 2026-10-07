@@ -116,11 +116,15 @@ def test_scope_cites_and_table_numbers_are_allowed(conn, ft, seeded):
     assert "[scope]" in got["answer"] and "2026-09-01" in got["answer"]
 
 
-def test_more_than_eight_sentences_are_cut_and_counted(conn, ft, seeded):
+def test_more_than_fifteen_sentences_are_cut_and_counted(conn, ft, seeded):
+    """The cap was 8. The user (2026-10-06): /ledger is for the user and may be
+    detailed — a handoff answer (what it is, who asked and in what words, what
+    was done, what holds now) did not fit in eight."""
+    assert SU.MAX_SENTENCES == 15
     cid = seeded["constraint"]
-    answer = " ".join(f"Sentence number x [#{cid}]." for _ in range(11))
+    answer = " ".join(f"Sentence number x [#{cid}]." for _ in range(18))
     got = SU.summarize(QUESTION, ft, runner=_runner(answer))
-    assert len(got["sentences"]) == SU.MAX_SENTENCES and got["dropped"]["over_limit"] == 3
+    assert len(got["sentences"]) == 15 and got["dropped"]["over_limit"] == 3
 
 
 def test_j7_without_a_model_the_fact_table_is_the_answer(conn, graph, seeded):

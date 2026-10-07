@@ -1,328 +1,244 @@
 ---
 name: receipts
-description: "Help the user reply to a colleague who questioned a decision — read-only. Use when the user types `/receipts <what they said>`, or asks how to answer someone who challenged a number, a change or a choice in this project (\"why did you change this\", \"didn't we agree the other way\", \"where did this number come from\"). Writes a courteous reply grounded ONLY in recorded rows, lists the evidence under it with a record id per line, and asks whether the tone needs adjusting. Never sends anything. Changes nothing the project depends on."
+description: "Help the user reply to a colleague who questioned a decision — read-only. Use when the user types `/receipts <what they said>`, or asks how to answer someone who challenged a number, a change or a choice in this project (\"why did you change this\", \"didn't we agree the other way\", \"where did this number come from\"). Writes a reply grounded ONLY in recorded rows, lists the evidence under it with a record id per line, and names what the user should confirm or add before sending. Never sends anything. Changes nothing the project depends on."
 ---
 
 # Receipts — answer the colleague, on the record
 
-Someone questioned a decision. The user wants to reply well and not carry blame
-for something they can account for. Your job is to hand them **a reply they can
-paste**, with the record under it.
+Someone questioned a decision, and the user has to answer them. What helps most
+is an official reply that answers the question they asked, with the record
+behind every sentence: where the decision came from, who asked and in what
+words, what was done and when. Your job is to write that reply from the ledger,
+show the records under it, and hand the user — outside the reply — every point
+the record does not settle, so they can check it or fill it in before sending.
 
-`/ledger` is for the user's own questions about the project's history. This is
-the other one: the user is not asking what happened, they already know — they
-need it said to somebody else, in a tone that holds up, resting on rows.
+`/ledger` answers the user's own question and may go into detail. This one
+speaks to someone else on the user's behalf: it keeps to their question, in an
+official register, and nothing uncertain goes into the words the colleague
+reads.
 
-**You are the model.** No second one is spawned: the code searches the ledger
-and computes what is missing, and *you* decide which records the challenge is
-actually about and write the reply. The code's ranking is word overlap, and word
-overlap can put first a node whose name shares words with the question but has
-nothing to do with it. So here the score only orders the candidates, and the
-flow below has two reads with your judgement in between. (`provledger ask`,
-behind `/ledger`, still takes its top-scored nodes when no model is called;
-`/receipts` does not.)
+**You are the model.** No second one is spawned: the code searches the ledger and
+computes what is missing; you decide which records the challenge is about and
+write the reply. The code's ranking is word overlap, which can put first a node
+that only shares a word with the question — so the score orders the candidates
+and your judgement picks.
 
 ## The hard rules
 
-1. **The `provledger` reads below, and nothing else.** Every read this skill
-   documents is permitted, and several are required — `receipts candidates`,
-   `receipts facts`, `graph`, `why`, `record`, `plan`. Forbidden is everything
-   that is not one of those: no edits, no writes of your own, no querying the
-   database by hand. If the ledger does not say it, the reply does not say it.
-2. **Read the code freely. This tool supplements it; it does not replace it.**
-   Grep it, open it, follow it — that is your job and nothing here restricts it.
-   What the code physically cannot contain is the part this ledger holds: why a
-   choice was made, who asked for it, what was rejected on the way, and what it
-   cost. The code only ever shows the winner.
-
-   **The one thing to never do is read the code and invent a reason for it.**
-   "It's written this way, so presumably because X" is the single failure this
-   tool exists to prevent — because the real reason is usually recorded in the
-   task that made the change, and a plausible guess will be believed instead of
-   it. Use the code to find out *what* and *where*; use the ledger for *why*,
-   and when the ledger has no why, say so.
-
-   **Never answer from memory**, either. You may have read this code earlier in
-   this session. That is not a recorded decision.
-3. **Every line of evidence ends in the id it rests on.** The reply itself reads
-   like a person wrote it (ids in prose are unreadable), but every claim in it
-   must map to a line in section b. If you cannot point at a row, the sentence
-   does not go in the reply.
-4. **Every number comes off a record, never out of your head** — not a count you
-   worked out, not a rounding, not a date you inferred.
-
-   A number the fact table does not happen to state is **not** forbidden: a
-   figure read out of a step log is sourced, and the checker names such numbers
-   rather than deleting them. So quote the measurement you found and say which
-   record or step it came from. What is forbidden is a number no record states.
-5. **An absence is a usable reply.** "There is no record of why that was chosen"
-   is often the honest answer, and said plainly it is *still* a good reply — it
-   names what is known, names what is not, and offers to find out. Reproduce the
-   computed absence sentences verbatim in section b; never write one of your own,
-   and never let a gap in the record turn into a plausible-sounding explanation
-   in the reply.
-6. **You never send it.** You produce text. Whether it goes out, to whom, and in
-   what tone is the user's decision, and section c is where you hand that back.
-7. **Say only what a record says it is.** A source is a pointer: the ledger holds
-   its label, its time and its link — never its body. Describe it the way the
-   record does ("an email, linked, never checked"); never write that the email is
-   attached, that you have it, or offer to send it. If the colleague wants the
-   original, tell the user where the pointer leads so they can find it. A tier is
-   part of what a record says, too: `asserted` is a reading recorded as such — the
-   agent's or a person's (`recorded_by` says which) — not a quote and not something
-   anyone agreed; only a `stated` record carries someone's own words.
-8. **A task's goal is not a node's reason.** When the node the colleague asks
-   about has no reason of its own (its slot is `unstated`), say that the task
-   which changed it recorded no reason for it — name the task by what it set out
-   to do and when, never present its goal as the node's recorded reason. A reason
-   a person stated in their own words (`stated`) is theirs: give it as theirs and
-   trust it, with the day they said it.
+1. **Answer from the records you read in this session.** The colleague may forward
+   the reply as evidence, so every claim in it comes from a `provledger` read you
+   ran just now: `receipts candidates` and `receipts facts`, and `graph`, `why`,
+   `record` and `plan` to follow a record to the task behind it. All of them are
+   permitted, and none changes anything the project depends on.
+   **Never answer from memory**: having read the code earlier is not a recorded
+   decision.
+2. **Read the code freely — for what and where, never for why.** Grep it, open it,
+   follow it; that is how you find the node. What the code cannot hold is why it
+   was written that way, and the one failure this tool exists to prevent is to
+   read the code and invent a reason for it. Use the code for *what* and *where*,
+   the ledger for *why*, and when the ledger has no why, say so.
+3. **Every line of evidence ends in the id it rests on.** The reply reads like a
+   person wrote it, with no ids in it; every claim in it maps to a line in section
+   b. A claim you cannot point at does not go in the reply — it goes in section c,
+   as something for the user to confirm.
+4. **Say what a record is, the way the record says it.** The material opens with a
+   legend: what each tier and cite token means and how to put it into words. A
+   reason a person stated in their own words is theirs: give it as theirs and
+   trust it, with the day they said it. An `asserted` record is a reading recorded at the time,
+   the agent's or a person's (`recorded_by` says which) — not a quote and not
+   something anyone agreed. A source is a pointer: the ledger holds its label, time
+   and link, never its body, so never write that the email is attached, that you
+   have it, or offer to send it; if the colleague wants the original, tell the user
+   where the pointer leads.
+5. **A task's goal is not a node's reason.** When the node the colleague asks about
+   has no reason of its own (`unstated`), say the task which changed it recorded no
+   reason for it — name the task by what it set out to do and when. When the
+   question is "why", that absence is part of the answer; it is also a line for
+   section c.
+6. **Every number and identifier is copied from a read** — a commit, a plan id, a
+   file:line, a date: something a read printed, not a count you worked out, a
+   rounding or a date you inferred. The colleague may go and look it up, and an
+   identifier nobody printed sends them after something that does not exist. A
+   number from a step log is sourced: quote it and say which record or step it
+   came from.
+7. **An absence is a usable reply.** "There is no record of why that was chosen" is
+   often the honest answer, and said plainly it is still a good one. Reproduce the
+   computed absence sentences word for word in section b.
+8. **You never send it.** You produce text; whether it goes out, to whom and in what
+   tone is the user's decision, and section c hands it back.
 
 ## What the ledger holds
 
-You decide for yourself which history to read. To decide well, know what is in
-there and how it connects — everything below is queryable, and none of it is
-inferred:
+Everything below is queryable and none of it is inferred.
 
-**Nodes** are the things a decision can be about: a function, a column, a table,
-or something declared by hand that lives outside the code (a business rule, an
-external system, a stakeholder decision). They sit in a graph, so each one has
-**upstream** and **downstream** neighbours — callers, output consumers, data
-lineage. A challenge about a number is often really about something upstream of
-it.
+**Nodes** are what a decision can be about: a function, a column, a table, or
+something declared by hand outside the code (a business rule, an external system,
+a stakeholder decision). They sit in a graph, so each has **upstream** and
+**downstream** neighbours — callers, consumers, data lineage. A challenge about a
+number is often really about something upstream of it.
 
-**Records hang off nodes**, and the kind matters because each kind answers a
-different challenge:
+**Records hang off nodes**, and each kind answers a different challenge:
 
 | kind | what it answers |
 |---|---|
-| a **reason** | why this, and who said so. Carries a **tier** (`stated` = the user's own recorded words / `asserted` = someone's reading of them / `derived` / `unstated` = nobody knows) and separately an **evidence level** (`linked` to a source you can open / `verbal` / `task_context` / `unstated`) |
-| a **constraint** | something that must hold. An *active* one is still binding |
-| a **rejected** path | an option considered and turned down — the answer to "why didn't you just do it the other way", which is never in the current code, because code only remembers the winner |
-| a prior claim / **expectation** and its outcome | something believed at the time, and what was actually observed. An expectation with a failed outcome is a recorded mistake |
-| an **anti-pattern** entry | tried it, it failed, here is why. Being read again is the only reason that row exists |
-| a **reference** | a pointer to a source outside the ledger — an email, a meeting, a ticket — with when it was last opened and whether it still opens |
-| an **influence** row | a task that was shown a record and actually changed because of it |
+| a **reason** | why this, and who said so — with a tier (see the legend) |
+| a **constraint** | something that must hold; an *active* one still binds |
+| a **rejected** path | "why not the other way" — never in the current code, which only remembers the winner |
+| an **expectation** and its outcome | what was believed at the time and what was observed; a failed outcome is a recorded mistake |
+| an **anti-pattern** entry | tried it, it failed, here is why |
+| a **reference** | a pointer to an email, a meeting, a ticket — with whether it was ever checked |
+| an **influence** row | a task that was shown a record and changed because of it |
 | a **measured value** | a number someone observed, with its unit and when |
 
-**History is append-only and dated**, so order is recoverable — which is what
-answers "wasn't it agreed the other way round". Nothing is ever overwritten.
-
-**Tasks (plans) have steps, and steps have revisions**, with the logs of what
-actually ran. One thing to know about them: a task whose failure was later
-recovered **closes as COMPLETED**, so a detour disappears from the task's own
-status. The ledger is the only place that still remembers it happened.
+**History is append-only and dated**, so the order is recoverable — which is what
+answers "wasn't it agreed the other way round". **Tasks (plans) have steps, and
+steps have revisions**, with the logs of what ran. A task whose failure was later
+recovered **closes as COMPLETED**, so the detour is gone from its status; only its
+step rows remember it.
 
 ## How to read it
 
-**You decide what to open.** Nothing below pre-selects for you; these are ways to
-look, not a route to follow. Reading is a loop — open something, read it, follow
-what it points at, open the next — and every read tells you the command that goes
-deeper.
+You decide what to open. Reading is a loop — open something, follow what it points
+at, open the next — and every read prints the command that goes deeper.
 
-### Start from the code
-
-The quickest way in is usually the repository, used as an **index**:
+**Start from the code.** The repository is the quickest index:
 
 ```bash
 grep -rn "<the constant, function or column they asked about>" --include=*.py .
 provledger why <path/to/file.py>:<line> --project <name>
 ```
 
-`why` accepts a `file:line` and resolves it to the node the ledger knows. Be aware
-it resolves to the **nearest** node, so a module-level constant can land on a
-neighbouring function — check the name it printed is the one you meant, and widen
-with `graph` if not.
+`why` turns a `file:line` into the **nearest** node the ledger knows — check the
+name it printed. From a node, the chain that usually holds the substance: its
+records → **one record names the plan and step that produced it**
+(`provledger record '#<id>'` prints `plan <plan-id> · step <step-id>`) → that
+task's steps, failures and logs (`provledger plan`).
 
-From there the chain runs on its own, and this is the part worth knowing:
-
-> a node's records → **one record names the plan and step that produced it** → that
-> task's steps, their failures and their logs
-
-`provledger record '#<id>'` prints `plan <plan-id> · step <step-id>` for the record
-it shows. Take that plan id to `provledger plan` and you have the task: what it was
-for, what failed inside it, and what was measured and decided. That last hop is
-where the substance usually is, and nothing else will lead you to it.
-
-### The map
-
-```bash
-provledger graph [<area|node|nk_…>] --project <name> [--depth N] [--limit N] [--type T]
-```
-
-With no target: the graph folded to areas, with how many nodes each holds and
-**how many of those carry ledger records** — an area with no records is one you can
-skip. With a target: unfold it, and neighbour **names** come back with the edge type
-(`calls`, `consumes`, `lineage`, …), each one fully qualified and printed with the
-command that opens it — so a name from `graph` goes straight into the next read.
-
-`why --impact` is **not** the same thing: it gives you the counts and **short**
-names (`caller · _close`), which `facts` will not take. When you want to walk to a
-neighbour, walk with `graph`; use `--impact` to find out whether walking is worth it.
-
-It is folded because it has to be — this project's node names alone run to hundreds
-of thousands of tokens. **The folding is pagination, not a judgement about what
-matters.** Unfold as wide and as deep as you want; every cut states its size and the
-command that lifts it.
-
-### A node's history
-
-```bash
-provledger why <node|nk_…|file:line> --project <name> [--all] [--impact] [--search TEXT]
-```
-
-A header of counts first — `history`, `constraints (N active)`, `rejected`,
-`pending` — so you can tell whether a node is worth opening before you spend
-anything on it. `--all` expands the records, `--impact` names the neighbours,
-`--search` looks inside record text.
-
-**`why` bounds each record's text.** When it does, it says so and names the read
-that has the rest. Do not quote a bounded record as though you had all of it.
-
-### One record, whole
-
-```bash
-provledger record '#12'        # or '#r3' for a source
-```
-
-The full untruncated text, its tier and evidence level, its dates, who recorded it,
-the node it hangs on, the words it quotes, and its sources. **Use this before you
-put any record in front of a colleague** — a severed clause can read as though it
-says the opposite of what it says.
-
-### A task's steps — and the failures its status hides
-
-```bash
-provledger plan <plan_id> [--step <step_id>] [--full]
-```
-
-This is the one that catches what nothing else will. **A task whose failure was
-recovered closes `COMPLETED`.** The detour is then gone from the task's own status,
-and only these step rows remember it: the failed step, its failure reason, its log,
-and the nested sub-step that recovered it.
-
-It is not a rare case, and the step **log** is usually where the substance is —
-the failure reason says what broke, the log says what was measured and decided
-about it. A plan's default view bounds every log, so when a step looks relevant,
-open it with `--step <id> --full` rather than reading the stub.
-
-So when a challenge is about *how* something came to be — why a number changed, why
-an approach was abandoned — look at the task, and do not read `COMPLETED` as "it
-went smoothly".
-
-### Where to start
+**Where to start when the code does not point anywhere:**
 
 ```bash
 provledger receipts candidates "<what the colleague said, verbatim>" --project <name> [--cap N]
 ```
 
-An **entry point**, nothing more: nodes whose text, names or literals match, each
-with `why` (which matcher found it) and `score`, plus the cap and how many were cut.
-It states outright that the score orders the list and does not choose.
+An entry point: nodes whose text, names or literals match, each with `why` (which
+matcher found it) and a `score`. **Read `why`, not `score`**: a match on a common
+word in a name is usually noise; a match on a literal the colleague wrote — an
+identifier, a number, a file name — is usually the subject. Raise `--cap` rather
+than work from a cut list.
 
-**Read `why`, not `score`.** A node that matched a common word in its *name*
-("review", "run", "test") is usually noise; one that matched a **literal** the
-colleague wrote — an identifier, a number, a file name — is usually the subject.
-Take a starting point and navigate; and raise `--cap` rather than working from a
-truncated list.
-
-### When you know which nodes matter
+**When you know which nodes matter:**
 
 ```bash
 provledger receipts facts <qn> [<qn> …] --project <name>
 ```
 
-The fact table, the timeline oldest-first, the computed absences and the scope line
-for the nodes you chose. The timeline order is what answers "wasn't it the other way
-round". Graph bookkeeping is left out and counted separately — it records what
-changed, never why.
+The legend, the fact table, the timeline oldest first, the computed absences and
+the scope line for the nodes you chose.
 
-The cite namespace, shared with `/ledger`:
+**To go further:**
 
-| token | what it is |
-|---|---|
-| `[#12]` | a ledger record — a constraint, a reason, a rejected path |
-| `[#r3]` | a source (email, meeting, ticket, doc) |
-| `[#i4]` | an influence row — a task that changed because of a record |
-| `[#x6]` / `[#o7]` | an expectation / its outcome |
-| `[#m8]` | a measured value |
-| `[scope]` | an absence sentence, reproduced verbatim |
+```bash
+provledger graph [<area|node>] --project <name> [--depth N]   # the map, folded; unfold what you want
+provledger why <node> --project <name> [--all] [--impact]     # one node's history; --impact counts neighbours
+provledger record '#12'                                       # one record, whole and untruncated
+provledger plan <plan_id> [--step <id>] [--full]              # a task's steps, failures and logs
+```
 
-A `[#r…]` is the strongest thing to put in front of a colleague: a source outside
-this tool, which they can open themselves. Lead with those when they exist.
+- `graph` folds because the full graph is too large to print; the folding is
+  pagination, not a judgement. Neighbour names it prints go straight into the next
+  read; `why --impact` gives only counts and short names.
+- `why` bounds each record's text and says so. Read a record whole with
+  `provledger record` before you put it in front of a colleague.
+- A task that reads `COMPLETED` can hold failed steps. When the challenge is about
+  *how* something came to be, open the task and the relevant step with
+  `--step <id> --full`; the step log is where what was measured and decided is
+  written.
 
 ## Before you claim nothing was recorded
 
-**"I searched and found nothing" does not mean "there is no record."** They are not
-the same claim: the first is about where you looked, the second is about the ledger,
-and only the first one is ever yours to make.
-
-This is not a hypothetical caution; it has happened repeatedly on this project. A
-capable model searched honestly, found nothing, and reported that nothing was
-recorded — while the answer sat in a column it had not thought to search. No search
-was careless. Each conclusion simply followed from its own coverage, and coverage is
-invisible from the inside.
-
-So before writing that something is unrecorded:
-
-- did you look at the **task** as well as the node (`provledger plan`), including a
-  task whose status is `COMPLETED`?
-- did you read the records **whole** (`provledger record`), or only what `why`
-  printed?
-- did you try the neighbours (`--impact`), or only the nodes the question named?
-
-If you have not, say what you searched, not what exists. An honest "I looked at
-these places and did not find it" is a good reply; "there is no record of that" is a
-claim about the ledger, and you can only make it about ground you actually covered.
+"I searched and found nothing" does not mean "there is no record": the first is
+about where you looked, and only that one is yours to say. Before writing that
+something is unrecorded, you have looked at the task (`provledger plan`), read the
+records whole (`provledger record`) and tried the neighbours (`--impact`). If you
+have not, say what you searched — and put the open question in section c.
 
 ## What you produce
 
-Three sections, in this order, and the order is the point: the user opened this
-to reply to someone, not to read a dossier. Give them the finished thing first.
+Three sections, in this order: the user opened this to reply to someone, so the
+finished reply comes first.
 
 ### a · The reply
 
-The paragraph itself — ready to **copy and paste**, nothing to fill in. Address
-what was actually asked. Match the colleague's register: a neutral question gets
-a neutral answer; a pointed one gets a calm, specific one, and specificity is
-what does the work. Do not perform politeness, do not apologise for a decision
-the record supports, and do not volunteer blame the record does not assign.
+Ready to **copy and paste**, nothing to fill in. Official in register whatever
+the colleague's tone — calm, specific, no apology for a decision the record
+supports and no blame it does not assign — and about the question that was
+asked: answer it in the first sentence, then give only what bears on it. Tell it
+as a timeline, because dates carry a reply — when it was said, when it changed,
+when it was checked — and a colleague can use a date where a plan id means
+nothing:
 
-Tell it as a timeline. Dates carry a reply — when it was said, when it changed,
-when it was last checked — and a colleague can use a date where a plan id means
-nothing to them.
+- what the thing is, or what changed;
+- where it came from: who asked, when, in their own words;
+- what was done about it, and what was tried and rejected on the way;
+- what holds now.
 
-No ids in this paragraph. No hedging about what you looked at. Just the reply.
+Keep everything uncertain out of the reply: what the record does not settle —
+a source nobody checked, an approval nobody recorded, who else was told — goes
+in section c, for the user to check or fill in. The one exception is an absence
+that is itself the answer: asked who signed off, when no sign-off is recorded,
+the reply says so. No ids and no account of what you looked at in this paragraph.
 
 ### b · The evidence
 
-Under a short heading, one line per claim in the reply, each ending in its id,
-oldest first where the order matters. Then the computed absences verbatim, then
-the scope line. This is what the user skims before sending, and what they forward
-if the colleague pushes back.
+One line per claim in the reply, oldest first, each ending in its id; then the
+computed absences word for word, then the scope line as each read printed it —
+one per `receipts facts` read, never added together, since a summed line
+describes a search nobody ran. This is what the user skims
+before sending and forwards if the colleague pushes back. If the record does not
+support a sentence of the reply, fix the reply rather than annotating this list.
 
-If the record does not support part of the reply, that part should not be in
-section a — fix section a, do not annotate section b.
+### c · Before you send
 
-### c · The tone
+List, one line each, what the record does not settle and the user should confirm
+or add — for example whether a linked source says what the note says (the ledger
+holds only the link), whether anyone approved the change (no record), or why a
+node changed when its reason is `unstated`. Then ask whether the tone needs
+adjusting, and stop. Do not send it, do not offer to send it, do not draft a
+follow-up.
 
-Close by asking whether the tone needs adjusting, and stop. One line. The reply
-is written; how it should land is not yours to decide, and this is the only
-decision the user actually has to make here.
+<example>
+The colleague: "Why does the returns report suddenly exclude marketplace orders? Nobody asked me."
 
-Then stop. Do not send it, do not offer to send it, do not draft a follow-up.
+### a · The reply
+
+> Marketplace orders were removed from the returns report on 14 May, at the finance lead's request. On 2 May the finance lead asked for it: "returns should only count orders we fulfil ourselves, marketplace returns are the seller's". The change was made on 14 May and checked against April's figures the same day. Tagging marketplace orders instead of removing them was considered first and set aside, because the tag was missing on a third of older orders.
+
+### b · The evidence
+
+- 2 May: the finance lead's request, in their words. [#41]
+- 14 May: the change to `returns.filter_orders`, by the task "exclude marketplace returns". [#e57]
+- 14 May: checked against April's figures. [#o9]
+- Tagging instead of dropping was rejected: the tag was missing on a third of older orders. [#44]
+- `returns.filter_orders` has not changed since 2026-05-14. [scope]
+- Scope: 1 node, 0 constraints, 0 influencing records, 1 change, 2026-05-02 to 2026-05-14; 3 candidates, 1 chosen; nothing truncated.
+
+### c · Before you send
+
+- Whether you or anyone else told them, or other teams, about the change — nothing records who was told.
+- The finance lead's request links an email thread; the ledger holds only the link, never checked.
+- Does the tone need adjusting?
+
+Why this is right: the first sentence answers what was asked; the reply stays official and in date order, with the request in the requester's own words; every claim has a line in b; and what the record cannot settle — who was told — is kept out of the reply and handed to the user in c.
+</example>
 
 ## What this skill never does
 
 - It **never sends** the reply, or any message, anywhere.
 - It never edits, creates or deletes anything in the repository, and it changes
-  nothing the project depends on. `receipts candidates`, `receipts facts`,
-  `graph`, `record` and `plan` write nothing at all, not even a record of having
-  been asked; `why` appends a `read_hit` row for each record it shows, an access
-  log and nothing more.
+  nothing the project depends on. `receipts candidates`, `receipts facts`, `graph`,
+  `record` and `plan` write nothing; `why` appends a `read_hit` row per record it
+  shows, an access log and nothing more.
 - It never runs tests, builds, or any command other than the `provledger` reads
   above.
-- It never fills a gap in the ledger with a plausible explanation. "There is no
-  record of that" is a complete and useful answer, and it is the one answer a
-  model is worst at giving unprompted — which is why the absence sentences are
-  computed and handed to you rather than asked of you.
+- It never fills a gap in the ledger with a plausible explanation: the gap goes in
+  section c, for the user.
