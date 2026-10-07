@@ -77,3 +77,25 @@ def test_fl022_completed_plan_untouched(conn, tmp_path):
     api.review_and_complete(conn, "P1", registry_path=reg)
     out = api.review_and_complete(conn, "P1", registry_path=reg)
     assert out["plan_status"] == "COMPLETED" and "idempotent" in out["reason"] and "reopened" not in out
+
+
+def test_fl022_reopens_a_plan_whose_failed_retry_was_retried_in_turn(conn, tmp_path):
+    """The documented retry (FL-138) is a child of the attempt it retries: B fails,
+    B.1 is its retry and fails too, B.1.1 completes. B.1 is FAILED with a FAILED
+    parent, and looking that parent's status up read a sqlite3.Row with .get —
+    AttributeError, so the re-judge never ran and the plan stayed FAILED. It came
+    up when the last pending step was put down as "not run" before its deviation:
+    the plan failed at that instant and had to be re-judged later."""
+    reg = _registry(tmp_path, "prov_ledger")
+    review = _seed(conn, "P1", "x", ["COMPLETED", "FAILED"])
+    db.set_plan_project(conn, "P1", "prov_ledger", "declared")
+    api.review_and_complete(conn, "P1", registry_path=reg)
+    assert db.get_plan(conn, "P1")["status"] == "FAILED"
+    out = api.evaluate_and_update_plan(conn, deviation_detected=True, target_step_id="P1-B",
+                                       justification="retry", new_sub_steps=["first try"])
+    assert out.get("accepted", True), out
+    api.start_step(conn, "P1-B.1"); api.fail_step(conn, "P1-B.1", reason="the first try failed")
+    _recover(conn, "P1-B.1")                                            # B.1.1 completes
+    out = api.review_and_complete(conn, "P1", registry_path=reg)
+    assert out.get("needs_agent_review") is True and out["reopened"] is True
+    assert db.get_step(conn, review)["status"] == "NEEDS_REVIEW"
