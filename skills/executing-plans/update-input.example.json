@@ -91,6 +91,13 @@
     "reason": "two of the five revisions were mid-flight corrections from the coordinator, not plan defects; one recovery sub-step is still to open"
   },
 
+  "abandon_plan__published_by_mistake": {
+    "_use_with": "scripts/abandon-plan.sh",
+    "_why": "A plan nobody started has to be put down — published with the wrong goal, or left with no steps by a publish that failed half-way. Only a plan whose steps never left PENDING; the reason is required and lands in Deviations.",
+    "plan_id": "deep-health-20260514153045",
+    "reason": "published with the wrong goal; replaced by deep-health-20260514154210"
+  },
+
   "finish_plan": {
     "_use_with": "scripts/finish-plan.sh",
     "_why": "Rarely needed: the last regular step closes the plan. For back-filling a legacy plan, or force-finishing one with PENDING steps.",

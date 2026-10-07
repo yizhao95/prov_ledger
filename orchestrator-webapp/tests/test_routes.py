@@ -801,3 +801,8 @@ def test_before_the_first_plan_the_page_shows_the_empty_state_not_an_error(tmp_p
         assert "⚠️ Error" not in r.text, path
     r = c.get("/plan/some-plan-20260101000000")
     assert "not found" in r.text, "a named plan on a machine with no ledger is still missing"
+
+
+def test_an_abandoned_plan_has_its_own_badge():
+    from app import queries
+    assert queries.status_badge("ABANDONED") != queries.status_badge("SOMETHING-UNKNOWN")

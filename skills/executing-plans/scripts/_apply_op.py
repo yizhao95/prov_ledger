@@ -122,6 +122,13 @@ def _op_start_step(conn, data: dict) -> dict:
     agent_input = data.get("agent_input")
     if step_type and step_type not in VALID_STEP_TYPES:
         _die(f"'type' must be one of {sorted(VALID_STEP_TYPES)}; got {step_type!r}")
+    # FL-214: a COMMAND step is completed only on run-step's exit code, and
+    # run-step will not start a step that is already IN_PROGRESS — so a COMMAND
+    # step started here by hand could never be completed.
+    stored = conn.execute("SELECT step_type FROM Steps WHERE step_id = ?", (step_id,)).fetchone()
+    if (step_type or (stored[0] if stored else None)) == "COMMAND" and data.get("_via") != "run-step":
+        _die(f"{step_id} is a COMMAND step: run it with run-step.sh, which starts it, runs the command and "
+             f"completes or fails it on the exit code (a COMMAND step started by hand cannot be completed)")
     try:
         result = api.start_step(conn, step_id)
     except Exception as e:
@@ -347,6 +354,18 @@ def _op_raise_budget(conn, data: dict) -> dict:
     return {"raised": True, **result}
 
 
+def _op_abandon_plan(conn, data: dict) -> dict:
+    """Put down a plan nobody started, with a REQUIRED reason (FL-216)."""
+    _require(data, "plan_id", "reason")
+    if not str(data["reason"]).strip():
+        _die("'reason' must be a non-empty sentence: abandoning a plan is a recorded decision")
+    try:
+        result = api.abandon_plan(conn, data["plan_id"], str(data["reason"]))
+    except Exception as e:
+        _die(f"abandon_plan failed: {e}")
+    return {"abandoned": True, **result}
+
+
 def _op_record_skill(conn, data: dict) -> dict:
     _require(data, "plan_id", "name", "source")
     if data["source"] not in VALID_SKILL_SOURCES:
@@ -528,6 +547,7 @@ OPS = {
     "deviate":      _op_deviate,
     "record-skill": _op_record_skill,
     "raise-budget": _op_raise_budget,
+    "abandon-plan": _op_abandon_plan,
     "finish-plan":  _op_finish_plan,
     "agent-review-close": _op_agent_review_close,
     "reason-slots": _op_reason_slots,
