@@ -173,3 +173,16 @@ def test_sqlite_sidecar_files_are_not_a_leak(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stdout
     (ws / "notes.txt").write_text("")                     # anything else still counts
     assert _guard(ws, "check", str(snap)).returncode == 1
+
+
+def test_the_hooks_spool_is_not_a_leak(tmp_path: Path) -> None:
+    """FL-193: a hook that cannot get the write lock appends its row to
+    orchestrator.db.spool.jsonl, and the next hook moves it aside to
+    orchestrator.db.spool.jsonl.<pid> while it replays — the session's own
+    hooks, writing the real ledger, not a test."""
+    ws = _workspace(tmp_path)
+    snap = _snapshot(ws, tmp_path)
+    (ws / "orchestrator.db.spool.jsonl").write_text("{}\n")
+    (ws / "orchestrator.db.spool.jsonl.4242").write_text("{}\n")
+    proc = _guard(ws, "check", str(snap))
+    assert proc.returncode == 0, proc.stdout

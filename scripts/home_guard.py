@@ -38,6 +38,8 @@ LEDGER_TABLES = ("Plans", "Steps", "Deviations", "LedgerEntries", "change_reason
 # Rows a hook writes into a guarded table, by table: the Stop hook closes a
 # session that published no plan with reasons filed under `session:<id>`.
 SQLITE_SIDECARS = ("-journal", "-wal", "-shm")
+# The hooks' spool (FL-193): orchestrator.db.spool.jsonl, and .<pid> while one replays it.
+SPOOL_MARK = ".spool.jsonl"
 HOOK_ROWS = {"change_reason": "coalesce(plan_id, '') LIKE 'session:%'"}
 
 
@@ -93,7 +95,7 @@ def snapshot() -> dict:
     graphs = home / "project-graphs"
     return {
         "exists": True,
-        "entries": sorted(p.name for p in home.iterdir() if not p.name.endswith(SQLITE_SIDECARS)),
+        "entries": sorted(p.name for p in home.iterdir() if not p.name.endswith(SQLITE_SIDECARS) and SPOOL_MARK not in p.name),
         "registry": _registry(graphs),
         "index": _indexed(graphs),
         "ledger": _ledger(home / "orchestrator.db"),

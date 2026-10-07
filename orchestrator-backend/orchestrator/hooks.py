@@ -21,8 +21,10 @@ so a locked orchestrator DB costs at most that.
 """
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import sqlite3
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +34,10 @@ from . import db
 DEFAULT_ERROR_LOG = Path.home() / "skill-workspace" / "hook-errors.log"
 BUSY_TIMEOUT_MS = 2000
 EVENTS = ("PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "PreToolUse", "Stop")
+# The events whose row is spooled when the ledger is locked (FL-193). Stop is not:
+# replayed later it would queue a graph refresh at an arbitrary moment and stamp
+# the session's end with the wrong time.
+SPOOLED_EVENTS = ("UserPromptSubmit", "PostToolUse", "PostToolUseFailure")
 HEADLESS_ENV = "PROVLEDGER_HEADLESS"   # set by testing.claude_arbiter on its claude child
 
 
@@ -75,12 +81,17 @@ def command_head(data: dict) -> str | None:
     return cmd.strip().replace("\n", " ")[:80]
 
 
-def record_tool_call(conn, data: dict, *, failed: bool = False) -> int:
-    """One tool_call_log row. A failed call arrives as PostToolUseFailure (FL-208)."""
-    cur = conn.execute("INSERT INTO tool_call_log (session_id, cwd, tool_name, command_head, failed) VALUES (?, ?, ?, ?, ?)",
-                       (str(data.get("session_id") or ""), data.get("cwd"), str(data.get("tool_name") or ""),
-                        command_head(data), 1 if failed else 0))
-    conn.commit()
+def record_tool_call(conn, data: dict, *, failed: bool = False, at: str | None = None,
+                     commit: bool = True) -> int:
+    """One tool_call_log row. A failed call arrives as PostToolUseFailure (FL-208).
+    `at` is given only when a spooled call is replayed: the time it happened, not
+    the time it finally reached the ledger."""
+    cols = "session_id, cwd, tool_name, command_head, failed" + (", at" if at else "")
+    vals = [str(data.get("session_id") or ""), data.get("cwd"), str(data.get("tool_name") or ""),
+            command_head(data), 1 if failed else 0] + ([at] if at else [])
+    cur = conn.execute(f"INSERT INTO tool_call_log ({cols}) VALUES ({', '.join('?' * len(vals))})", vals)
+    if commit:
+        conn.commit()
     return int(cur.lastrowid)
 
 
@@ -110,7 +121,7 @@ def _current_plan_id(conn, project: str | None) -> str | None:
     return r[0] if r else None
 
 
-def record_utterance(conn, data: dict) -> int | None:
+def record_utterance(conn, data: dict, *, occurred_at: str | None = None, commit: bool = True) -> int | None:
     """UserPromptSubmit → one utterance row with the prompt VERBATIM. An empty
     prompt, a slash command, or text Claude Code itself injected (DP phase 2d,
     Task 0) is not a decision and is not recorded."""
@@ -122,12 +133,13 @@ def record_utterance(conn, data: dict) -> int | None:
         return None
     project = psg_bridge.project_for_cwd(data.get("cwd"))
     plan_id = _current_plan_id(conn, project)
-    occurred_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    occurred_at = occurred_at or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     # origin='hook' (A1) is this path's one privilege and it is not transferable:
     # the words arrived through UserPromptSubmit, so this is the only writer that
     # can say they were captured as they were typed rather than recalled later.
     return provenance.insert_utterance(conn, session_id=str(data.get("session_id") or ""), project=project,
-                                       plan_id=plan_id, text=prompt, occurred_at=occurred_at, origin="hook")
+                                       plan_id=plan_id, text=prompt, occurred_at=occurred_at, origin="hook",
+                                       commit=commit)
 
 
 # A3: the sentence named a source, so ask for the pointer while it is still cheap.
@@ -164,6 +176,121 @@ def source_hint(utterance_id: int | None, prompt: str | None) -> str | None:
     return SOURCE_HINT.format(word=word, uid=int(utterance_id))
 
 
+# ── the spool (FL-193): a row that cannot be written now is written by the next hook ──
+
+def spool_path(ledger: Path | str | None = None) -> Path:
+    """Beside the ledger: `orchestrator.db` -> `orchestrator.db.spool.jsonl`."""
+    p = Path(ledger) if ledger is not None else db_path()
+    return p.with_name(p.name + ".spool.jsonl")
+
+
+def _busy(exc: BaseException) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and any(w in str(exc).lower() for w in ("locked", "busy"))
+
+
+def _stamp(event: str) -> str:
+    """The time an event happened, in the format of the column it lands in. The
+    system clock, not the DB's: the DB is exactly what could not be reached."""
+    now = datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%d %H:%M:%S") if event == "UserPromptSubmit" else now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _append(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.write(text)
+            f.flush()
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def spool(event: str, data: dict, occurred_at: str) -> None:
+    _append(spool_path(), json.dumps({"event": event, "occurred_at": occurred_at, "data": data},
+                                     ensure_ascii=False) + "\n")
+
+
+def replay_spool(conn) -> int:
+    """Write the spooled rows, oldest first, with the times they happened, in one
+    transaction. The write lock is taken first and the spool is then moved aside
+    under its file lock, so a second hook waiting for the lock finds it gone and
+    nothing is written twice. On failure the lines go back for the next hook. A
+    line that cannot be read is skipped and logged. The plan an utterance is
+    attributed to is the one open when it is replayed."""
+    p = spool_path()
+    if not p.exists():
+        return 0
+    conn.execute("BEGIN IMMEDIATE")
+    mine = p.with_name(f"{p.name}.{os.getpid()}")
+    try:
+        with p.open("a", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                os.replace(p, mine)
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+    except FileNotFoundError:
+        conn.rollback()
+        return 0
+    text = mine.read_text(encoding="utf-8")
+    done = 0
+    try:
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                e = json.loads(line)
+                event, data, at = e["event"], e["data"], e["occurred_at"]
+            except (ValueError, KeyError, TypeError):
+                log_error("spool", ValueError(f"an unreadable spool line was skipped: {line[:80]}"))
+                continue
+            if event == "UserPromptSubmit":
+                record_utterance(conn, data, occurred_at=at, commit=False)
+            elif event in ("PostToolUse", "PostToolUseFailure"):
+                record_tool_call(conn, data, failed=(event == "PostToolUseFailure"), at=at, commit=False)
+            done += 1
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        _append(p, text)
+        mine.unlink(missing_ok=True)
+        raise
+    mine.unlink(missing_ok=True)
+    return done
+
+
+def _write(event: str, data: dict, fn):
+    """Open, replay the spool, write this event's row with `fn(conn)`. When the
+    ledger is locked past the busy timeout, a spooled event's row goes to the
+    spool instead of being lost; returns None then."""
+    at = _stamp(event)
+    try:
+        conn = _open()
+    except Exception as exc:
+        if event in SPOOLED_EVENTS and _busy(exc):
+            spool(event, data, at)
+            log_error(event, exc)
+            return None
+        raise
+    try:
+        try:
+            replay_spool(conn)
+        except Exception as exc:          # the spool never stops this event's own row
+            if conn.in_transaction:
+                conn.rollback()
+            log_error("spool", exc)
+        return fn(conn)
+    except Exception as exc:
+        if event in SPOOLED_EVENTS and _busy(exc):
+            spool(event, data, at)
+            log_error(event, exc)
+            return None
+        raise
+    finally:
+        conn.close()
+
+
 def handle(event: str, data: dict) -> dict | str | None:
     """Dispatch one hook payload. Unknown events are ignored on purpose. Two events
     may return something for main() to print: PreToolUse its hook JSON, and
@@ -175,29 +302,17 @@ def handle(event: str, data: dict) -> dict | str | None:
     if os.environ.get(HEADLESS_ENV) == "1":
         return None
     if event in ("PostToolUse", "PostToolUseFailure"):
-        conn = _open()
-        try:
-            record_tool_call(conn, data, failed=(event == "PostToolUseFailure"))
-        finally:
-            conn.close()
+        _write(event, data, lambda conn: record_tool_call(conn, data, failed=(event == "PostToolUseFailure")))
     elif event == "UserPromptSubmit":
-        conn = _open()
-        try:
-            uid = record_utterance(conn, data)
-        finally:
-            conn.close()
-        # The words are down first, and they stay down whatever the rule decides:
-        # the hint is an addition to the turn, never a condition on it.
+        uid = _write(event, data, lambda conn: record_utterance(conn, data))
+        # The words are down first (or spooled), and they stay down whatever the
+        # rule decides: the hint is an addition to the turn, never a condition on it.
         return source_hint(uid, data.get("prompt"))
     elif event == "Stop":
         # DP phase 2 (Task 7b): the degraded mode — record the session, queue a graph
         # refresh when nothing else will; stdout stays empty
         from . import session
-        conn = _open()
-        try:
-            session.on_stop(conn, data, orch_db_path=str(db_path()))
-        finally:
-            conn.close()
+        _write(event, data, lambda conn: session.on_stop(conn, data, orch_db_path=str(db_path())))
         return None
     elif event == "PreToolUse":
         # the registry decides first (no DB, no PSG for a file outside every registered repo)
