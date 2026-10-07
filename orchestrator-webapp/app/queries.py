@@ -444,6 +444,7 @@ STATUS_BADGES = {
     "COMPLETED":    ("✅", "bg-[#0ca30c]/10 text-[#006300]"),
     "FAILED":       ("✕",  "bg-brand-red text-white"),
     "NEEDS_REVIEW": ("👀", "bg-[#ec835a]/15 text-[#8a3416]"),
+    "ABANDONED":    ("⊘",  "bg-gray-500/10 text-gray-500 line-through"),
 }
 
 # Step type = IDENTITY -> categorical slots in fixed order (validated set,

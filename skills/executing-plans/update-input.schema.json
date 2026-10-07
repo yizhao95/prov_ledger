@@ -45,6 +45,7 @@
       "additionalProperties": false,
       "patternProperties": {"^_": {}},
       "properties": {
+        "_via": {"type": "string", "enum": ["run-step"], "description": "Set by run-step.sh only. FL-214: a COMMAND step is started by run-step, never by hand — it completes on run-step's exit code alone."},
         "step_id":     {"type": "string", "minLength": 1},
         "type":        {"enum": ["THINKING","ANALYSIS","CODE","COMMAND","DOCUMENTATION","SUB_AGENT"]},
         "agent_input": {"type": "string", "description": "Required when type=SUB_AGENT — the verbatim prompt sent to the delegated agent"},
@@ -129,6 +130,18 @@
         "plan_id": {"type": "string", "minLength": 1},
         "new_max": {"type": "integer", "minimum": 1, "description": "The new ceiling. Must be GREATER than the plan's current max_revisions; anything else exits non-zero and writes nothing."},
         "reason":  {"type": "string", "minLength": 1, "description": "Why these extra revisions are warranted. Required — blank is refused."}
+      }
+    },
+    {
+      "title": "abandon-plan",
+      "description": "FL-216: put down a plan nobody started. Only an IN_PROGRESS plan whose regular steps never left PENDING — or that has none, as a publish that failed half-way left it. `reason` REQUIRED; it lands in Deviations (target_step_id NULL) and revision_count is untouched. A plan with a started step is refused.",
+      "type": "object",
+      "required": ["plan_id", "reason"],
+      "additionalProperties": false,
+      "patternProperties": {"^_": {}},
+      "properties": {
+        "plan_id": {"type": "string", "minLength": 1},
+        "reason":  {"type": "string", "minLength": 1, "description": "Why the plan is put down. Required — blank is refused."}
       }
     },
     {

@@ -218,6 +218,11 @@ def _validate(data: dict) -> None:
             _die(f"steps[{i}] must be a string OR an object with at least a 'description' field")
         if not isinstance(step["description"], str) or not step["description"].strip():
             _die(f"steps[{i}].description must be a non-empty string")
+        if "type" in step:
+            from orchestrator.db import VALID_STEP_TYPES
+            if step["type"] not in VALID_STEP_TYPES:
+                _die(f"steps[{i}].type = {step['type']!r} is not a step type; valid: {sorted(VALID_STEP_TYPES)} "
+                     f"(a TEST step is type CODE, its description starting 'TEST:')")
     skills = data.get("skills") or []
     if not isinstance(skills, list):
         _die("'skills' must be an array (or omitted entirely)")
@@ -264,6 +269,19 @@ def _normalize_steps(steps: list) -> list:
     return out
 
 
+def _check_note_cites(conn, notes) -> None:
+    """A headline note may cite only records that exist (I3) — checked before
+    anything is written, so a bad cite cannot leave a half-published plan."""
+    for i, note in enumerate(notes):
+        for rid in (note.get("cites") or []) if isinstance(note, dict) else []:
+            try:
+                found = conn.execute("SELECT 1 FROM change_reason WHERE id = ?", (int(rid),)).fetchone()
+            except (TypeError, ValueError):
+                found = None
+            if not found:
+                _die(f"headline_notes[{i}] cites record {rid!r}, which does not exist")
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         _die("usage: publish-plan.sh <plan-input.json|yaml>")
@@ -308,6 +326,11 @@ def main() -> None:
         [{"skill_name": s["name"], "source": s["source"]} for s in skills_activated_input]
         if skills_activated_input else None
     )
+    # Every check that can fail runs before the first write (FL-216): a failure
+    # after the plan row existed left a plan that nothing could close.
+    if (data.get("expectations") or []) and not tracked:
+        _die("'expectations' need a tracked project (declared, or published from a registered repo)")
+    _check_note_cites(conn, data.get("headline_notes") or [])
     result = api.initialize_plan(
         conn,
         original_goal=data["goal"],

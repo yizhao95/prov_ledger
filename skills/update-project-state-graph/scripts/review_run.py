@@ -451,7 +451,11 @@ class Driver:
         env = dict(self.env, PROVLEDGER_PLAN_ID=self.plan, PROVLEDGER_STEP_ID=self.child, PROVLEDGER_TRIGGER="review")
         t0 = time.monotonic()
         try:
-            p = _run_group(["bash", str(INIT_PROJECT), "--name", self.project, "--repo", repo],
+            # FL-084: refresh the graph where the project is registered. Without
+            # --out-dir a project registered elsewhere got a new graph with no
+            # history in the default directory, and the registry followed it.
+            out_dir = ["--out-dir", str(Path(entry["db_path"]).parent)] if entry.get("db_path") else []
+            p = _run_group(["bash", str(INIT_PROJECT), "--name", self.project, "--repo", repo, *out_dir],
                            env=env, capture_output=True, text=True, timeout=a.timeout_graph)
         except subprocess.TimeoutExpired:
             self.fail(self.timeout_reason("graph refresh (init_project.sh)", a.timeout_graph,

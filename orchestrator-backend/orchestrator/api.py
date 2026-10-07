@@ -80,22 +80,24 @@ def initialize_plan(
     while conn.execute("SELECT 1 FROM Plans WHERE plan_id = ?", (plan_id,)).fetchone():
         n += 1
         plan_id = f"{base}-{n}"
-    db.insert_plan(conn, plan_id, original_goal, max_revisions=max_revisions, user_query=user_query,
-                   project=project, project_source=project_source)
+    # One transaction (FL-216): a step that fails to insert used to leave the plan
+    # row behind, IN_PROGRESS with no steps, which nothing could close.
     step_ids = []
-    for i, spec in enumerate(initial_steps):
-        desc, step_type = _step_spec(spec)
-        sid = f"{plan_id}-{_step_label(i)}"
-        db.insert_step(
-            conn, sid, plan_id, desc,
-            execution_order=i, depth_level=0, parent_step_id=None,
-            step_type=step_type,
-        )
-        step_ids.append(sid)
+    with db.transaction(conn):
+        db.insert_plan(conn, plan_id, original_goal, max_revisions=max_revisions, user_query=user_query,
+                       project=project, project_source=project_source, commit=False)
+        for i, spec in enumerate(initial_steps):
+            desc, step_type = _step_spec(spec)
+            sid = f"{plan_id}-{_step_label(i)}"
+            db.insert_step(
+                conn, sid, plan_id, desc,
+                execution_order=i, depth_level=0, parent_step_id=None,
+                step_type=step_type, commit=False,
+            )
+            step_ids.append(sid)
 
-    # Record any pre-activated skills (init-time, step_id=NULL)
-    if skills_activated:
-        for entry in skills_activated:
+        # Record any pre-activated skills (init-time, step_id=NULL)
+        for entry in skills_activated or ():
             db.add_skill_activation(
                 conn,
                 plan_id=plan_id,
@@ -103,6 +105,7 @@ def initialize_plan(
                 source=entry["source"],
                 step_id=None,
                 reason=entry.get("reason"),
+                commit=False,
             )
 
     return {"plan_id": plan_id, "step_ids": step_ids}
@@ -255,6 +258,37 @@ def complete_plan(conn: sqlite3.Connection, plan_id: str) -> dict:
     """Mark plan COMPLETED. Doesn't validate that all steps are done — caller's job."""
     db.update_plan_status(conn, plan_id, "COMPLETED")
     return db.get_plan(conn, plan_id)
+
+
+def abandon_plan(conn: sqlite3.Connection, plan_id: str, reason: str) -> dict:
+    """Put down a plan nobody started (FL-216), with the reason on its record.
+
+    A publish that failed half-way left a plan IN_PROGRESS with no steps, and the
+    only close available (finish-plan) would have called it COMPLETED. This turns
+    a plan whose regular steps never left PENDING — or that has none — into
+    ABANDONED, and, like a raised budget, puts the reason in Deviations without
+    spending the revision budget. A plan with a started step is refused:
+    abandoning work that ran would hide it.
+    """
+    plan = db.get_plan(conn, plan_id)
+    if not plan:
+        raise ValueError(f"plan_id not found: {plan_id}")
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError("reason is required: abandoning a plan is a recorded decision")
+    if plan["status"] != "IN_PROGRESS":
+        raise ValueError(f"plan {plan_id} is {plan['status']}; only an IN_PROGRESS plan can be abandoned")
+    started = [r[0] for r in conn.execute(
+        "SELECT step_id FROM Steps WHERE plan_id = ? AND COALESCE(is_review, 0) = 0 AND status <> 'PENDING' "
+        "ORDER BY execution_order", (plan_id,))]
+    if started:
+        raise ValueError(f"plan {plan_id} has steps that started ({', '.join(started)}); only a plan nobody "
+                         f"started can be abandoned")
+    with db.transaction(conn):
+        db.update_plan_status(conn, plan_id, "ABANDONED", commit=False)
+        deviation_id = db.insert_deviation(conn, plan_id, None, f"[ABANDONED] {reason}", new_step_ids=[],
+                                           revision_count=plan["revision_count"], commit=False)
+    return {"plan_id": plan_id, "status": "ABANDONED", "deviation_id": deviation_id}
 
 
 def raise_revision_budget(conn: sqlite3.Connection, plan_id: str, new_max, reason: str) -> dict:

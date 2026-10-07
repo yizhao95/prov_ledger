@@ -297,6 +297,7 @@ def insert_plan(
     user_query: str | None = None,
     project: str | None = None,
     project_source: str | None = None,
+    commit: bool = True,
 ) -> None:
     if (project is None) != (project_source is None):
         raise ValueError("project and project_source must be given together")
@@ -307,7 +308,8 @@ def insert_plan(
         "project, project_source) VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?)",
         (plan_id, original_goal, max_revisions, status, created_at, user_query, project, project_source),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def set_plan_project(conn: sqlite3.Connection, plan_id: str, project: str, project_source: str,
@@ -361,7 +363,7 @@ def set_plan_impact_context(conn: sqlite3.Connection, plan_id: str, impact_conte
 
 def update_plan_status(conn: sqlite3.Connection, plan_id: str, new_status: str,
                        commit: bool = True) -> None:
-    completed_at = _now() if new_status in ("COMPLETED", "FAILED") else None
+    completed_at = _now() if new_status in ("COMPLETED", "FAILED", "ABANDONED") else None
     conn.execute(
         "UPDATE Plans SET status = ?, updated_at = ?, "
         "completed_at = COALESCE(?, completed_at) WHERE plan_id = ?",
@@ -871,6 +873,7 @@ def add_skill_activation(
     source: str,
     step_id: str | None = None,
     reason: str | None = None,
+    commit: bool = True,
 ) -> int:
     """Record one skill activation event. Returns the new activation_id.
 
@@ -888,7 +891,8 @@ def add_skill_activation(
            VALUES (?, ?, ?, ?, ?)""",
         (plan_id, step_id, skill_name, source, reason),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return cur.lastrowid
 
 
