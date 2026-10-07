@@ -16,6 +16,7 @@ import pytest
 
 from orchestrator import integrity
 from orchestrator import provenance as pv
+from orchestrator.db import copy_ledger  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -68,7 +69,7 @@ def test_cli_verify_json_is_the_report(conn):
 def test_cli_verify_exits_three_on_a_broken_chain(conn, tmp_path):
     rid = _seed(conn)
     dst = tmp_path / "tampered.db"
-    shutil.copy(_db_path(conn), dst)
+    copy_ledger(_db_path(conn), dst)
     c = sqlite3.connect(dst)
     for (name,) in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='change_reason'").fetchall():
         c.execute(f"DROP TRIGGER {name}")

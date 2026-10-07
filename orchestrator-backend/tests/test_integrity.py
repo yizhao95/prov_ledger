@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from orchestrator import provenance as pv
+from orchestrator.db import copy_ledger  # noqa: E402
 
 try:
     from orchestrator import integrity
@@ -62,7 +63,7 @@ def _tampered_copy(conn, tmp_path, row_id, *, table="change_reason", column="int
     src = conn.execute("PRAGMA database_list").fetchone()[2]
     conn.commit()
     dst = tmp_path / name
-    shutil.copy(src, dst)
+    copy_ledger(src, dst)
     c = sqlite3.connect(dst)
     for (trg,) in c.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=?",
                             (table,)).fetchall():

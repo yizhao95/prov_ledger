@@ -94,10 +94,33 @@ def _query(psg_db_path: str | None, sql: str, params: tuple = ()) -> list[sqlite
         conn.close()
 
 
+_CHANGED_CACHE: dict[tuple, list[dict]] = {}
+
+
 def changed_node_keys(psg_db_path: str | None, plan_id: str) -> list[dict]:
     """Nodes this plan changed, added or removed, one dict per node_key:
     {node_key, qualified_name, node_type, event_types: [...], run_id}. The
-    qualified_name/node_type are the node's latest snapshot values."""
+    qualified_name/node_type are the node's latest snapshot values.
+
+    Remembered per graph file state (FL-211): a plan close asks for this once per
+    file name a sentence mentions, and recomputing it each time was most of a
+    close on a large graph. A refresh changes the file, so the key changes too."""
+    try:
+        st = os.stat(psg_db_path) if psg_db_path else None
+    except OSError:
+        st = None
+    key = (psg_db_path, plan_id, st.st_mtime_ns, st.st_size) if st else None
+    if key is not None and key in _CHANGED_CACHE:
+        return [dict(d, event_types=list(d["event_types"])) for d in _CHANGED_CACHE[key]]
+    out = _changed_node_keys(psg_db_path, plan_id)
+    if key is not None:
+        if len(_CHANGED_CACHE) > 32:
+            _CHANGED_CACHE.clear()
+        _CHANGED_CACHE[key] = [dict(d, event_types=list(d["event_types"])) for d in out]
+    return out
+
+
+def _changed_node_keys(psg_db_path: str | None, plan_id: str) -> list[dict]:
     rows = _query(psg_db_path, """
         SELECT e.node_key, e.event_type, e.run_id, e.payload_json,
                (SELECT qualified_name FROM node_snapshot s WHERE s.node_key = e.node_key

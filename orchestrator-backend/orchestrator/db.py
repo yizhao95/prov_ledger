@@ -27,9 +27,38 @@ def open_db(path: Path | str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    _wal(conn)
     _reclass_once(conn)
     _retract_injected_once(conn)
     return conn
+
+
+def copy_ledger(src: Path | str, dst: Path | str) -> None:
+    """Copy a ledger through SQLite's backup API. The ledger is in WAL (FL-193):
+    a plain file copy can miss commits that are still in the -wal file."""
+    s = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+    d = sqlite3.connect(str(dst))
+    try:
+        s.backup(d)
+    finally:
+        d.close()
+        s.close()
+
+
+def _wal(conn: sqlite3.Connection) -> None:
+    """Keep the ledger in WAL (FL-193): readers and the writer stop blocking each
+    other, so a hook no longer waits out its busy timeout behind the dashboard's
+    poll or a long read and drops the user's words. Tried on every open rather
+    than in a migration: SQLite answers a switch it cannot apply right now (another
+    connection is reading) by quietly keeping the old mode, and a migration runs
+    once. Never raises; the next open tries again."""
+    try:
+        if conn.execute("PRAGMA journal_mode").fetchone()[0] != "wal":
+            conn.execute("PRAGMA busy_timeout=500")
+            conn.execute("PRAGMA journal_mode=WAL").fetchone()
+            conn.execute("PRAGMA busy_timeout=5000")
+    except sqlite3.Error:
+        pass
 
 
 def _reclass_once(conn: sqlite3.Connection) -> None:
@@ -241,6 +270,11 @@ def transaction(conn: sqlite3.Connection):
     (e.g. insert N sub-steps + bump revision + record deviation) can never leave a
     plan half-mutated. Helpers called inside MUST be passed ``commit=False``.
     """
+    # The write lock is taken when the unit opens (FL-224): a compound operation
+    # that reads and then writes must not have its reads go stale under another
+    # writer, and in WAL a stale read cannot be upgraded to a write at all.
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
     with conn:  # sqlite3 connection CM: commit on success, rollback on exception
         yield conn
 

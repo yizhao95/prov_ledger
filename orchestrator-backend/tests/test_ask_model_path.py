@@ -25,6 +25,7 @@ from orchestrator.testing import claude_arbiter as ca
 
 sys.path.insert(0, str(Path(__file__).parent))
 import _psg_schema as ps  # noqa: E402
+from orchestrator.db import copy_ledger  # noqa: E402
 
 QUESTION = "why did we stop using orders.discount? was it ever tested?"
 NOWHERE = "what did the zzzqqq widget decide about xylophones?"
@@ -272,7 +273,7 @@ def test_cli_ask_prints_the_real_reason_not_no_model(conn, graph, seeded, tmp_pa
     import shutil
     conn.commit()
     db_path = tmp_path / "orch.db"
-    shutil.copy(conn.execute("PRAGMA database_list").fetchone()[2], db_path)
+    copy_ledger(conn.execute("PRAGMA database_list").fetchone()[2], db_path)
     registry = tmp_path / "projects.json"
     registry.write_text(json.dumps({"projects": [{"name": "proj", "db_path": graph, "repo": str(tmp_path)}]}))
     monkeypatch.setenv("ORCH_DB", str(db_path))

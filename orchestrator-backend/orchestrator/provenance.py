@@ -70,6 +70,11 @@ def _db_now(conn) -> str:
 
 
 def _insert_chained(conn, table: str, row: dict) -> int:
+    # The head is read under the write lock (FL-224). Python's sqlite3 opens its
+    # implicit transaction only before the INSERT, so without this a second
+    # writer could insert between the read and the write and fork the chain.
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
     prev = _last_hash(conn, table)
     row = dict(row, prev_hash=prev)
     row["hash"] = chain_hash(prev, row)
