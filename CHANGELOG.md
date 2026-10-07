@@ -8,7 +8,9 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
-## Unreleased
+## 0.4.5 — 2026-10-07
+
+### Fixed
 
 - **A failed publish leaves nothing behind, and a plan nobody started can be put
   down.** A step type the orchestrator does not know, expectations on a plan
@@ -31,7 +33,6 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   retry had itself failed and been retried (the retry a child of the attempt, as
   the executing-plans skill says), that judging stopped with
   `'sqlite3.Row' object has no attribute 'get'` and the plan stayed FAILED.
-
 - **A plan close takes seconds, not minutes, and finishes.** On a large project the
   close's rules read the state graph without an index — every lookup of a node's
   latest snapshot scanned the whole table — and recomputed the plan's changed
@@ -55,7 +56,6 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   in between and both rows would point at the same predecessor — which `verify`
   reports as tampering. The head is now read under the write lock, and compound
   writes take the lock when they open.
-
 - **Before the first plan, the dashboard shows the empty state, not an error.**
   With no ledger yet the page rendered a red "orchestrator.db not found" box,
   although the launcher says the dashboard is running; it now shows the empty
@@ -63,11 +63,9 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 - **`ensure-dashboard.sh` probes the port the dashboard starts on.** Setting
   `PROVLEDGER_DASH_PORT` alone started the dashboard there and then waited on
   8765 — or, with another dashboard already on 8765, reported that one as up.
-- **The release check walks a plugin user's path** (`scripts/release-e2e.sh`,
-  INSTALL.md §5): a new stage 0 installs the plugin into a sandbox and runs a cold
-  first session and a first task the agent plans itself; stage 2 also asks every
-  question as a real `/ledger` or `/receipts` slash command; stage 3 marks those
-  real answers, and a disagreement is a finding a person decides.
+
+### Changed
+
 - **`/ledger` answers as a handoff, and `/receipts` says what to check before you
   send.** Both skills are rewritten from Anthropic's public guidance on skills and
   prompts: the intent first, every rule with its reason, a template and complete
@@ -90,6 +88,20 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   the ledger, and whether anyone checked it. The table, and the `/receipts`
   material, open with a legend: what each tier and cite token is, and how to put
   it into words.
+
+### Development
+
+- **The release check walks a plugin user's path** (`scripts/release-e2e.sh`,
+  INSTALL.md §5): a new stage 0 installs the plugin into a sandbox and runs a cold
+  first session and a first task the agent plans itself; stage 2 also asks every
+  question as a real `/ledger` or `/receipts` slash command; stage 3 marks those
+  real answers, and a disagreement is a finding a person decides.
+  Its model calls copy the developer's current login right before each call, and
+  a call that could outlive the login is not made and reads as BLOCKED: a sandbox
+  that refreshed the login would leave the developer's own unable to refresh. The
+  judge is handed the whole material an answer was written from; it used to be cut
+  at 24000 characters without a word, and a quoted line past the cut was marked as
+  resting on no record.
 - Measured on real sessions before release: the dummy project's twelve questions,
   asked twice of the old skills and of the new ones and marked by a model judge.
   Answers told in date order went from 9 to 21 of 24, questions whose two runs
