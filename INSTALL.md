@@ -305,11 +305,15 @@ pip install provledger                  # or, from a clone: pip install ./orches
 python3 -c "from provledger import api, db; print('ok')"
 ```
 
-The published release is **0.1.0**, which predates decision provenance
-entirely: no `utterance` / `reference` / `change_reason` tables, no hooks, no
-`provledger` command, no dashboard, no `/ledger`. Everything README describes
-ships with the plugin from this repository instead. Install from PyPI only if
-the plan and step machinery really is all you want.
+The package on PyPI is the same `provledger` the plugin ships: the ledger and
+its tables, the `provledger` command (`why`, `ask`, `receipts`, `plan`, …) and
+the migrations. What only the plugin brings is everything that runs inside
+Claude Code: the hooks that record your words and the tool calls as you work,
+the plan skills, `/ledger` and `/receipts`, and the dashboard. Install from PyPI
+to read or write a ledger from your own code, or to run `provledger` against a
+ledger the plugin keeps. A PyPI upload is a separate step from a plugin release
+and can trail it: `pip show provledger` names the version you have, and the
+CHANGELOG says what each version holds.
 
 The wheel ships the SQL migrations inside the package, so
 `db.run_migrations()` works from a plain install — no clone needed.

@@ -100,7 +100,7 @@ claude plugin marketplace add yizhao95/prov_ledger
 claude plugin install provledger@provledger
 ```
 
-Or only the core library, to read and write a ledger from your own code (the PyPI release lags the plugin; see [`INSTALL.md` §5b](INSTALL.md)):
+Or only the core library, to read and write a ledger from your own code (no hooks, skills or dashboard; see [`INSTALL.md` §5b](INSTALL.md)):
 
 ```bash
 pip install provledger
