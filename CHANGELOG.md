@@ -8,6 +8,18 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
+## Unreleased
+
+### Development
+
+- **A test that opens the real ledger fails its suite even when it adds no row.**
+  One backend test ran `provledger trigger eval` without its own `ORCH_DB`, so it
+  opened `~/skill-workspace/orchestrator.db` with the working tree's code: that
+  switched the ledger to WAL and ran the branch's migrations on it before any
+  release carried them, while every row count stayed the same. The test now uses
+  a ledger of its own, and `scripts/home_guard.py` also compares the real ledger's
+  applied migrations and journal mode before and after each suite.
+
 ## 0.4.5 — 2026-10-07
 
 ### Fixed

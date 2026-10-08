@@ -19,6 +19,11 @@ and a hook does not:
     write (a plan published by hand while the suites run will be reported too).
     The one hook write among them is the Stop hook's degraded-mode close, which
     files reasons under a `session:<id>` plan; those rows are left out;
+  * the ledger's applied migrations (`schema_version`) and its journal mode. A
+    test that opens the real ledger with the working tree's code runs the
+    branch's migrations on it and switches it to WAL, without adding a row
+    anywhere (FL-237). The hooks run the installed release, whose migrations
+    are already applied and which already put the ledger in WAL;
   * the entries at the top of the workspace, and whether it exists at all —
     leaving out SQLite's sidecar files (-journal, -wal, -shm), which exist for
     the length of one write and which the hooks create all the time.
@@ -88,6 +93,24 @@ def _ledger(db: Path) -> dict[str, int | None]:
     return out
 
 
+def _schema(db: Path) -> dict:
+    """The migration files applied to the ledger, and its journal mode. A row
+    from before schema_version had a migration_file column has none; every
+    migration applied since records its file name."""
+    if not db.exists():
+        return {}
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5)
+    try:
+        try:
+            migrations = sorted(r[0] for r in conn.execute(
+                "SELECT migration_file FROM schema_version WHERE migration_file IS NOT NULL"))
+        except sqlite3.Error:
+            migrations = []                     # a ledger no migration has run on
+        return {"migrations": migrations, "journal_mode": conn.execute("PRAGMA journal_mode").fetchone()[0]}
+    finally:
+        conn.close()
+
+
 def snapshot() -> dict:
     home = _home()
     if not home.exists():
@@ -99,6 +122,7 @@ def snapshot() -> dict:
         "registry": _registry(graphs),
         "index": _indexed(graphs),
         "ledger": _ledger(home / "orchestrator.db"),
+        "schema": _schema(home / "orchestrator.db"),
     }
 
 
@@ -123,6 +147,16 @@ def diff(before: dict, after: dict) -> list[str]:
         now = after["ledger"].get(table)
         if now != was:
             changes.append(f"orchestrator.db {table}: newest row {was} -> {now}")
+    was, now = before.get("schema", {}), after.get("schema", {})
+    if was and now:
+        ran = sorted(set(now["migrations"]) - set(was["migrations"]))
+        gone = sorted(set(was["migrations"]) - set(now["migrations"]))
+        if ran:
+            changes.append(f"orchestrator.db schema_version: migrations applied {', '.join(ran)}")
+        if gone:
+            changes.append(f"orchestrator.db schema_version: migrations gone {', '.join(gone)}")
+        if was["journal_mode"] != now["journal_mode"]:
+            changes.append(f"orchestrator.db journal_mode: {was['journal_mode']} -> {now['journal_mode']}")
     return changes
 
 

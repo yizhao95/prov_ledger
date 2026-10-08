@@ -160,6 +160,8 @@ def test_a_wrong_label_lowers_the_accuracy_it_is_meant_to_measure(conn, tmp_path
 # ── the CLI ──────────────────────────────────────────────────────────────────
 
 def test_trigger_eval_writes_a_report_and_prints_the_gates_verdict(tmp_path, capsys, monkeypatch):
+    # its own ledger: the default is the real one, which this code would migrate (FL-237)
+    monkeypatch.setenv("ORCH_DB", str(tmp_path / "orch.db"))
     monkeypatch.setenv("PROVLEDGER_ARBITER_EVAL_DIR", str(tmp_path))
     assert cli.main(["trigger", "eval", "--runner", "stub-truthful", "--n-runs", "2"]) == 0
     out = json.loads(capsys.readouterr().out)

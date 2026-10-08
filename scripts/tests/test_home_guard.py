@@ -6,8 +6,8 @@ prompts into the real ledger, and the Stop hook rewrites the project's graph and
 its index, all while the suites run. A guard that went red on those would be
 ignored within a day. So it checks what a leaking test changes and a hook does
 not: which projects the registry and its index list, the newest row of the
-tables only plans and questions write, and new entries at the top of the
-workspace.
+tables only plans and questions write, the ledger's applied migrations and
+journal mode, and new entries at the top of the workspace.
 """
 from __future__ import annotations
 
@@ -186,3 +186,62 @@ def test_the_hooks_spool_is_not_a_leak(tmp_path: Path) -> None:
     (ws / "orchestrator.db.spool.jsonl.4242").write_text("{}\n")
     proc = _guard(ws, "check", str(snap))
     assert proc.returncode == 0, proc.stdout
+
+
+def test_a_migration_applied_to_the_real_ledger_is_a_leak(tmp_path: Path) -> None:
+    """FL-237: a test that opened the real ledger with the working tree's code
+    ran a development branch's migration on it, and every row count stayed the
+    same. A migration that has run anywhere is frozen, so a wrong one would be
+    frozen on the real ledger. The hooks run the installed release, whose
+    migrations are already applied, so they never add one."""
+    ws = _workspace(tmp_path)
+    conn = sqlite3.connect(ws / "orchestrator.db")
+    conn.executescript("""
+        CREATE TABLE schema_version (version INTEGER PRIMARY KEY, migration_file TEXT);
+        INSERT INTO schema_version VALUES (1, '001_init.sql');
+    """)
+    conn.close()
+    snap = _snapshot(ws, tmp_path)
+    conn = sqlite3.connect(ws / "orchestrator.db")
+    conn.execute("INSERT INTO schema_version VALUES (2, '002_next.sql')")
+    conn.commit()
+    conn.close()
+    proc = _guard(ws, "check", str(snap))
+    assert proc.returncode == 1
+    assert "schema_version" in proc.stdout and "002_next.sql" in proc.stdout
+
+
+def test_switching_the_real_ledger_to_wal_is_a_leak(tmp_path: Path) -> None:
+    """FL-237: opening a ledger with the working tree's `db.open_db` switches it
+    to WAL; the real ledger was in WAL before the release that does so was
+    installed."""
+    ws = _workspace(tmp_path)
+    snap = _snapshot(ws, tmp_path)
+    conn = sqlite3.connect(ws / "orchestrator.db")
+    assert conn.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    conn.close()
+    proc = _guard(ws, "check", str(snap))
+    assert proc.returncode == 1
+    assert "journal_mode" in proc.stdout and "delete" in proc.stdout and "wal" in proc.stdout
+
+
+def test_a_legacy_migration_row_without_a_file_name_is_read_and_not_a_leak(tmp_path: Path) -> None:
+    """The real ledger's schema_version starts with a row from before the table
+    had a migration_file column (version 1, NULL). The guard must read past it,
+    and still see a migration applied after the snapshot."""
+    ws = _workspace(tmp_path)
+    conn = sqlite3.connect(ws / "orchestrator.db")
+    conn.executescript("""
+        CREATE TABLE schema_version (version INTEGER PRIMARY KEY, migration_file TEXT);
+        INSERT INTO schema_version VALUES (1, NULL), (2, '001_init.sql');
+    """)
+    conn.close()
+    snap = _snapshot(ws, tmp_path)
+    proc = _guard(ws, "check", str(snap))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    conn = sqlite3.connect(ws / "orchestrator.db")
+    conn.execute("INSERT INTO schema_version VALUES (3, '002_next.sql')")
+    conn.commit()
+    conn.close()
+    proc = _guard(ws, "check", str(snap))
+    assert proc.returncode == 1 and "002_next.sql" in proc.stdout
