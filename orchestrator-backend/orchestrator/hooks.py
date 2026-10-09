@@ -30,6 +30,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import db
+# What counts as the user speaking is decided in one place, provenance.py: the
+# rules that turn words into a `stated` reason read it too (FL-238).
+from .provenance import INJECTED_PROMPT_PREFIXES, is_injected_prompt  # noqa: F401
 
 DEFAULT_ERROR_LOG = Path.home() / "skill-workspace" / "hook-errors.log"
 BUSY_TIMEOUT_MS = 2000
@@ -94,22 +97,6 @@ def record_tool_call(conn, data: dict, *, failed: bool = False, at: str | None =
         conn.commit()
     return int(cur.lastrowid)
 
-
-# DP phase 2d (Task 0): Claude Code delivers some of its OWN text through
-# UserPromptSubmit — a finished subagent's report, a system reminder, the caveat
-# in front of a local command, the name of a slash command. None of it is the
-# user speaking, so none of it may become a `stated` reason's verbatim span.
-# The match is on the PREFIX of the stripped prompt: a person who writes ABOUT
-# `<system-reminder>` is still a person, and their words are still recorded.
-# `<agent-message` (FL-182) is a subagent's report handed back to the parent
-# session; it carries attributes, so it is matched without the closing bracket.
-INJECTED_PROMPT_PREFIXES = ("<task-notification>", "<system-reminder>",
-                            "<local-command-caveat>", "<command-name>", "<agent-message")
-
-
-def is_injected_prompt(prompt: str | None) -> bool:
-    """True when the prompt is Claude Code's own injected text, not the user's."""
-    return isinstance(prompt, str) and prompt.lstrip().startswith(INJECTED_PROMPT_PREFIXES)
 
 
 def _current_plan_id(conn, project: str | None) -> str | None:

@@ -26,7 +26,7 @@ import os
 import re
 import sqlite3
 
-from . import context_pack, psg_bridge
+from . import context_pack, provenance, psg_bridge
 
 LEVEL_LABELS = {"linked": "linked", "verbal": "verbal", "task_context": "task context", "unstated": "unstated"}
 ROLE_LABELS = {"constraint": "constraint", "rejected_path": "rejected path", "reason": "reason"}
@@ -85,7 +85,14 @@ def _line(rec: dict, st: dict) -> str:
     cut = rec.get("text_cut") or 0
     tail = f"\n    … [+{cut} chars cut of {rec.get('text_chars')} — `provledger record #{rec['id']}` reads it whole]" if cut else ""
     return (f"#{rec['id']} · {rec['tier']} · {LEVEL_LABELS.get(rec.get('evidence_level'), rec.get('evidence_level') or '?')} · "
-            f"{(rec.get('occurred_at') or '')[:16]} · shown {st.get('shown', 0)} · {adopted}\n    {text}{tail}")
+            f"{(rec.get('occurred_at') or '')[:16]} · shown {st.get('shown', 0)} · {adopted}{_corrects(rec)}\n    {text}{tail}")
+
+
+def _corrects(rec: dict) -> str:
+    """' · corrects #12' on a row that supersedes another (FL-238): the corrected
+    row is not shown, and `provledger record #12` still prints it."""
+    ids = rec.get("corrects") or provenance.supersedes_ids(rec.get("supersedes"))
+    return f" · corrects {', '.join(f'#{i}' for i in ids)}" if ids else ""
 
 
 # ── FTS (lazy) ───────────────────────────────────────────────────────────────
@@ -117,7 +124,7 @@ def _fts_query(conn, project: str, q: str, limit: int) -> list[dict]:
     rows = conn.execute(
         f"SELECT r.id, r.node_key, r.plan_id, r.role, r.tier, r.evidence_level, r.recorded_by, r.occurred_at, "
         f"       COALESCE(r.interpretation, r.statement) AS text "
-        f"FROM {FTS_TABLE} f JOIN change_reason_v r ON r.id = f.rowid WHERE {FTS_TABLE} MATCH ? AND r.project = ? "
+        f"FROM {FTS_TABLE} f JOIN change_reason_v r ON r.id = f.rowid WHERE {FTS_TABLE} MATCH ? AND r.project = ? AND {provenance.live('r')} "
         f"ORDER BY rank LIMIT ?", (q, project, limit)).fetchall()
     return [dict(zip(("id", "node_key", "plan_id", "role", "tier", "evidence_level", "recorded_by", "occurred_at", "text"), r)) for r in rows]
 
@@ -127,7 +134,7 @@ def _like_query(conn, project: str, q: str, limit: int) -> list[dict]:
     rows = conn.execute(
         "SELECT r.id, r.node_key, r.plan_id, r.role, r.tier, r.evidence_level, r.recorded_by, r.occurred_at, "
         "       COALESCE(r.interpretation, r.statement) AS text "
-        "FROM change_reason_v r WHERE r.project = ? AND (r.interpretation LIKE ? OR r.statement LIKE ?) "
+        f"FROM change_reason_v r WHERE r.project = ? AND (r.interpretation LIKE ? OR r.statement LIKE ?) AND {provenance.live('r')} "
         "ORDER BY r.id DESC LIMIT ?", (project, like, like, limit)).fetchall()
     return [dict(zip(("id", "node_key", "plan_id", "role", "tier", "evidence_level", "recorded_by", "occurred_at", "text"), r)) for r in rows]
 
@@ -146,14 +153,15 @@ def search(conn, *, project: str, query: str, limit: int = 20) -> tuple[list[dic
 
 def pending(conn, *, project: str, anchors: list[str] | None = None, limit: int = 50) -> list[dict]:
     """Unstated slots (the gaps): of the target when anchors are given, else of the project."""
-    sql = ("SELECT id, node_key, plan_id, role, tier, evidence_level, recorded_by, occurred_at, NULL AS text "
-           "FROM change_reason_v WHERE project = ? AND tier = 'unstated'")
+    sql = ("SELECT id, node_key, plan_id, role, tier, evidence_level, recorded_by, occurred_at, NULL AS text, supersedes "
+           "FROM change_reason_v WHERE project = ? AND tier = 'unstated' AND superseded_by IS NULL")
     params: list = [project]
     if anchors:
         sql += f" AND node_key IN ({','.join('?' * len(anchors))})"
         params += anchors
     rows = conn.execute(sql + " ORDER BY id DESC LIMIT ?", (*params, limit)).fetchall()
-    return [dict(zip(("id", "node_key", "plan_id", "role", "tier", "evidence_level", "recorded_by", "occurred_at", "text"), r)) for r in rows]
+    return [dict(zip(("id", "node_key", "plan_id", "role", "tier", "evidence_level", "recorded_by", "occurred_at", "text", "supersedes"), r))
+            for r in rows]
 
 
 def never_read(conn, *, project: str, limit: int = 50) -> list[dict]:
@@ -257,7 +265,7 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
                 st = stats_for(conn, [r["id"] for r in items])
                 for r in items:
                     if r.get("tier") == "unstated":
-                        lines.append(f" #{r['id']} · unstated · {r['plan_id']} · {(r['occurred_at'] or '')[:16]}")
+                        lines.append(f" #{r['id']} · unstated · {r['plan_id']} · {(r['occurred_at'] or '')[:16]}{_corrects(r)}")
                         continue
                     lines.append(" " + _line(r, st.get(r["id"], {})))
                     shown.append(r["id"])
@@ -340,7 +348,8 @@ def export_md(conn, *, project: str, out_dir: str, psg_db_path: str | None = Non
         "                 AND COALESCE(u.visibility, 'personal') <> 'shareable' "
         "            THEN r.verbatim_utterance_id END AS withheld_utterance "
         "FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
-        "WHERE r.project = ? AND r.node_key IS NOT NULL AND r.statement_visibility = 'shareable' ORDER BY r.node_key, r.id", (project,)).fetchall()
+        f"WHERE r.project = ? AND r.node_key IS NOT NULL AND r.statement_visibility = 'shareable' AND {provenance.live('r')} "
+        "ORDER BY r.node_key, r.id", (project,)).fetchall()
     by_node: dict[str, list] = {}
     for r in rows:
         by_node.setdefault(r[1], []).append(r)

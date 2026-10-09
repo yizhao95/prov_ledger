@@ -19,6 +19,7 @@ in the repo, `provledger ...` once installed.
   review evidence-log --plan <id> [...]   what became of each slot: why this one is blank
   reasons reclass-status                  the state of the legacy-reason migration
   reasons ask-basis [--since]             the close-time questions, grouped by plan and node type
+  reasons recheck [--project] [--apply]   stated rows quoting injected text, R6 rows on the wrong node; --apply corrects
   why <node|nk_…|file:line> [...]         one bounded read: history, constraints, rejected paths, blast radius
   graph [<area|path|node>] [--depth N] [--type T]
                                           the project graph folded to areas, and any branch of it unfolded by name
@@ -744,6 +745,11 @@ def _reasons_cmd(args) -> int:
         if args.sub == "ask-basis":
             print(json.dumps(_ask_basis(conn, args.since), indent=1, sort_keys=True))
             return 0
+        if args.sub == "recheck":
+            from . import reasons
+            out = reasons.recheck(conn, project=args.project, apply=args.apply)
+            print(json.dumps(out, indent=1, sort_keys=True) if args.json else _recheck_text(out))
+            return 0
         if args.sub == "reclass-status":
             row = conn.execute("SELECT value, at FROM migration_state WHERE key='dp_reclass'").fetchone()
             counts = dict(conn.execute("SELECT tier, COUNT(*) FROM change_reason GROUP BY tier").fetchall())
@@ -754,6 +760,21 @@ def _reasons_cmd(args) -> int:
         return 2
     finally:
         conn.close()
+
+
+def _recheck_text(out: dict) -> str:
+    lines = [f"stated rows quoting text the user did not type: {len(out['stated'])}"]
+    lines += [f"  #{r['id']} · {r['plan_id']} · {r['node_key']} · quotes utterance #{r['utterance_id']} ({r['starts_with']}…)"
+              for r in out["stated"]]
+    lines.append(f"R6 rejected paths on a node their text does not name: {len(out['rejected'])}")
+    lines += [f"  #{r['id']} · {r['plan_id']} · {r['from'] or 'the plan'} -> {r['to'] or 'the plan'}" for r in out["rejected"]]
+    if out["graph_unread"]:
+        lines.append(f"plans whose graph could not be read, R6 not checked: {', '.join(out['graph_unread'])}")
+    if out["applied"]:
+        lines.append(f"{out['written']} correction(s) written; each supersedes the row it corrects")
+    else:
+        lines.append("dry run: nothing written (--apply appends these corrections)")
+    return "\n".join(lines)
 
 
 def _why_cmd(args) -> int:
@@ -1529,6 +1550,12 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_parser("reclass-status", help="whether the legacy node_reason / ledger rows were migrated into change_reason, and the tier counts")
     ab = rs.add_parser("ask-basis", help="the close-time questions (trigger_log verdict ask) grouped by plan and node type — what the rules did not recognise")
     ab.add_argument("--since", default=None, help="only verdicts at or after this timestamp")
+    rc = rs.add_parser("recheck", help="rows the close-time rules wrote before FL-238/FL-239 that are not true: a stated "
+                                       "reason quoting text Claude Code injected, an R6 rejected path on a node its text "
+                                       "does not name. Lists them; --apply appends a correction that supersedes each")
+    rc.add_argument("--project", default=None, help="one project (default: every project in the ledger)")
+    rc.add_argument("--apply", action="store_true", help="append the corrections (one transaction)")
+    rc.add_argument("--json", action="store_true")
     return p
 
 

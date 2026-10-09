@@ -192,13 +192,16 @@ def r0_basename(node: dict) -> str:
 def candidate_utterances(ctx: Ctx) -> list[dict]:
     """The words that may explain this plan: utterances attributed to it, the
     project's utterances inside the plan window, and everything said in the
-    same session(s) as those (before a plan exists the hook cannot attribute)."""
+    same session(s) as those (before a plan exists the hook cannot attribute).
+    A row an older hook recorded from Claude Code's own injected text (a
+    subagent's report, a reminder) stays in the ledger but is left out here:
+    it is never the user's words (FL-238)."""
     created = ctx.plan.get("created_at") or "0000-00-00 00:00:00"
     completed = ctx.plan.get("completed_at") or "9999-12-31 23:59:59"
     if str(ctx.plan_id).startswith("session:") and ctx.plan.get("session_id"):     # a session's placeholder plan: only what was said in that session
         return [dict(r) for r in ctx.conn.execute(
             "SELECT id, session_id, text FROM utterance WHERE session_id = ? OR plan_id = ? ORDER BY id",
-            (ctx.plan["session_id"], ctx.plan_id))]
+            (ctx.plan["session_id"], ctx.plan_id)) if not provenance.is_injected_prompt(r["text"])]
     # DP phase 2b (FL-069): Plans.session_id — everything said in the session that
     # published the plan counts, whether or not it carries a plan_id or predates created_at
     return [dict(r) for r in ctx.conn.execute(
@@ -206,7 +209,8 @@ def candidate_utterances(ctx: Ctx) -> list[dict]:
         "OR (project = ? AND occurred_at BETWEEN ? AND ?) "
         "OR session_id IN (SELECT session_id FROM utterance WHERE plan_id = ?) "
         "OR (? IS NOT NULL AND session_id = ?) ORDER BY id",
-        (ctx.plan_id, ctx.project, created, completed, ctx.plan_id, ctx.plan.get("session_id"), ctx.plan.get("session_id")))]
+        (ctx.plan_id, ctx.project, created, completed, ctx.plan_id, ctx.plan.get("session_id"), ctx.plan.get("session_id")))
+        if not provenance.is_injected_prompt(r["text"])]
 
 
 def _sentence_hits(ctx: Ctx) -> dict:
@@ -386,13 +390,30 @@ RULES: tuple[Rule, ...] = (
 
 # ── R6: rejected paths ────────────────────────────────────────────────────────
 
+def _named_explicitly(text: str, node: dict) -> bool:
+    """The text names the node as code, not as a word: its last two qualified-name
+    segments (`Driver.run`), its local name called (`snapshot(`) or in backticks,
+    or a local name no prose word looks like (snake_case, camelCase) as a whole word."""
+    qn = node.get("qualified_name") or ""
+    local = _local(node)
+    if not local:
+        return False
+    forms = [re.escape(local) + r"\(", "`" + re.escape(local) + "`"]
+    if "_" in local or re.search(r"[a-z][A-Z]", local):
+        forms.append(re.escape(local) + r"(?!\w)")
+    if qn.count(".") >= 1:
+        forms.append(re.escape(".".join(qn.split(".")[-2:])) + r"(?!\w)")
+    return any(re.search(r"(?<![\w])" + f, text) for f in forms)
+
+
 def _anchor(text: str | None, nodes: list[dict]) -> str | None:
-    toks = {t.lower() for t in _TOKEN_RE.findall(text or "")}
-    for n in nodes:
-        local = _local(n).lower()
-        if local and local in toks:
-            return n["node_key"]
-    return None
+    """FL-239: the one changed node the failure text names explicitly, else None
+    (the rejected path belongs to the plan). A bare word is not a name: failure
+    text is full of run / psg / ledger / review, and a node merely touched by the
+    plan did not change, so it is never where an attempt failed."""
+    hits = {n["node_key"] for n in nodes
+            if set(n.get("event_types") or []) - PASSIVE_EVENTS and _named_explicitly(text or "", n)}
+    return hits.pop() if len(hits) == 1 else None
 
 
 def r6_candidates(ctx: Ctx) -> list[tuple[str, str | None, str]]:
@@ -453,6 +474,26 @@ def rejected_paths(conn, *, project: str, plan_id: str, psg_db_path: str | None,
         conn.commit()
     return n
 
+
+
+def misanchored(conn, *, project: str, plan_id: str, psg_db_path: str | None) -> list[dict] | None:
+    """FL-239: the plan's live R6 rows whose node is not the one today's rule
+    gives their text — [{id, plan_id, from, to, row}], `to` None for the plan.
+    None when the graph holds nothing of the plan: without its changed nodes
+    every row would look plan-level, which is not the same as being one."""
+    ctx = _ctx(conn, project, plan_id, psg_db_path)
+    if not ctx.touched:
+        return None
+    nodes = list(ctx.touched.values())
+    anchor_text = {text: a for text, _, a in r6_candidates(ctx)}
+    out = []
+    for r in conn.execute("SELECT * FROM change_reason WHERE plan_id = ? AND role = 'rejected_path' AND rule_id = 'R6' "
+                          "AND superseded_by IS NULL ORDER BY id", (plan_id,)).fetchall():
+        r = dict(r)
+        to = _anchor(anchor_text.get(r["interpretation"], r["interpretation"]), nodes)
+        if to != r["node_key"]:
+            out.append({"id": r["id"], "plan_id": plan_id, "from": r["node_key"], "to": to, "row": r})
+    return out
 
 # ── evaluate ──────────────────────────────────────────────────────────────────
 
@@ -563,4 +604,5 @@ def auto_filled(conn, plan_id: str) -> list[dict]:
     return [dict(r) for r in conn.execute(
         "SELECT r.node_key, r.rule_id, COALESCE(r.interpretation, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS basis "
         "FROM change_reason r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
-        "WHERE r.plan_id = ? AND r.role = 'reason' AND r.tier IN ('derived', 'stated') AND r.rule_id IS NOT NULL ORDER BY r.id", (plan_id,))]
+        "WHERE r.plan_id = ? AND r.role = 'reason' AND r.tier IN ('derived', 'stated') AND r.rule_id IS NOT NULL "
+        "AND r.superseded_by IS NULL ORDER BY r.id", (plan_id,))]

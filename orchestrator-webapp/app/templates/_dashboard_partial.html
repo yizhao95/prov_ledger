@@ -296,6 +296,7 @@
         <span class="font-mono text-xs">{{ r.node_key or '—' }}</span>
         {% endif %}
         <span class="text-sm text-gray-800">{{ r.text if r.text is not none else '— unstated —' }}</span>
+        {% if r.corrects %}<span class="text-[11px] text-brand-muted" data-corrects="{{ r.corrects|join(',') }}" title="provledger record #{{ r.corrects[0] }}">{{ ui('corrects', lang, ids='#' ~ (r.corrects|join(', #'))) }}</span>{% endif %}
         <span class="text-[11px] text-brand-muted" data-source-level="{{ r.evidence_level }}">{{ r.source_level if lang != 'zh' else r.evidence_level|say('evidence_level', 'zh') }}{% if r.rule_id %} · {{ 'rule' if lang != 'zh' else '规则' }} {{ r.rule_id }}{% endif %}</span>
       </div>
       {% endfor %}

@@ -25,7 +25,7 @@ import re
 import sqlite3
 from datetime import datetime, timezone
 
-from .. import context_pack, psg_bridge
+from .. import context_pack, provenance, psg_bridge
 
 CAP = {"constraints": 20, "reasons": 10, "rejected_paths": 10, "influence": 20, "changes": 20,
        "expectations": 10, "values": 20}
@@ -130,6 +130,8 @@ def _record(conn, r: dict, stats: dict) -> dict:
             # confirming sentence cannot be recovered from a paraphrase that never
             # contained them.
             **({"quoted": (r.get("quoted") or "").replace("\n", " ").strip()} if r.get("quoted") else {}),
+            # FL-238: the rows this one corrects; they are not in the table
+            **({"corrects": provenance.supersedes_ids(r["supersedes"])} if r.get("supersedes") else {}),
             "shown": shown, "adopted_by": sorted(adopted), "merged": len(merged), "merged_ids": merged,
             "plans": sorted(r.get("plans") or ([r["plan_id"]] if r.get("plan_id") else [])),
             "references": _references(conn, r["id"])}
@@ -320,7 +322,9 @@ LEGEND = (
     "to …\", and \"never checked\" or when it was last checked · [#iN] a plan that changed because of a record · "
     "[#eN] a change in the project graph · [#xN] / [#oN] an expectation and its outcome · "
     "[#mN] a measured value · [scope] an absence, computed over the range searched — reproduce it "
-    "word for word")
+    "word for word\n"
+    "  corrects #N  the record replaces an earlier one that was found wrong; the earlier one is not "
+    "in this table and is not evidence")
 
 
 def _source_line(ref: dict, indent: str) -> str:
@@ -340,6 +344,8 @@ def _fmt_record(r: dict, indent: str = "  ") -> list[str]:
         head += f" · plan{'s' if len(plans) > 1 else ''} {', '.join(plans)}"
     if r.get("merged"):
         head += f" · merged {r['merged']}"
+    if r.get("corrects"):
+        head += " · corrects " + ", ".join(f"#{i}" for i in r["corrects"])
     head += f" · shown {r.get('shown', 0)}"
     head += (" · adopted by " + ", ".join(r["adopted_by"])) if r.get("adopted_by") else " · not adopted"
     out = [head]

@@ -186,6 +186,63 @@ def draft(conn, project: str, plan_id: str, psg_db_path: str | None, per_slot: i
     return out
 
 
+
+# ── recheck (FL-238, FL-239) ─────────────────────────────────────────────────
+
+def recheck(conn, *, project: str | None = None, apply: bool = False) -> dict:
+    """The rows the close-time rules wrote before FL-238 / FL-239 that are not
+    true: a `stated` reason quoting text Claude Code injected (nobody said it),
+    and an R6 rejected path hung on a node its text never names as code.
+    Without `apply` it only lists them. With `apply`, one transaction appends a
+    correction for each — an `unstated` system row for the same plan and node,
+    or the same R6 text anchored by today's rule — that supersedes it. The
+    corrected rows keep their words (`provledger record #id`); readers show the
+    correction. Plans whose graph cannot be read are listed, never guessed at."""
+    from . import triggers
+    where, params = ("AND r.project = ?", [project]) if project else ("", [])
+    stated = []
+    for row in conn.execute(
+            "SELECT r.*, u.text AS quoted_text FROM change_reason r JOIN utterance u ON u.id = r.verbatim_utterance_id "
+            f"WHERE r.role = 'reason' AND r.tier = 'stated' AND r.superseded_by IS NULL {where} ORDER BY r.id", params).fetchall():
+        if provenance.is_injected_prompt(row["quoted_text"]):
+            prefix = next(p for p in provenance.INJECTED_PROMPT_PREFIXES if row["quoted_text"].lstrip().startswith(p))
+            stated.append({"id": row["id"], "project": row["project"], "plan_id": row["plan_id"], "node_key": row["node_key"],
+                           "utterance_id": row["verbatim_utterance_id"], "starts_with": prefix, "row": dict(row)})
+    rejected, unread = [], []
+    for proj, plan_id in conn.execute(
+            "SELECT DISTINCT r.project, r.plan_id FROM change_reason r WHERE r.role = 'rejected_path' AND r.rule_id = 'R6' "
+            f"AND r.superseded_by IS NULL {where} ORDER BY 1, 2", params).fetchall():
+        psg = psg_bridge.db_path_for(proj) if proj else None
+        found = triggers.misanchored(conn, project=proj, plan_id=plan_id, psg_db_path=psg) if psg else None
+        if found is None:
+            unread.append(plan_id)
+        else:
+            rejected += found
+    written = 0
+    if apply and (stated or rejected):
+        with db.transaction(conn):
+            for s in stated:
+                old = s["row"]
+                new = provenance.insert_reason(conn, project=old["project"], plan_id=old["plan_id"], node_key=old["node_key"],
+                                               kind=old["kind"], occurred_at=old["occurred_at"], step_id=old["step_id"],
+                                               run_id=old["run_id"], recorded_by="system", commit=False)
+                provenance.supersede(conn, old["id"], new, commit=False)
+                written += 1
+            for m in rejected:
+                old = m["row"]
+                new = provenance.insert_reason(conn, project=old["project"], plan_id=old["plan_id"], node_key=m["to"],
+                                               kind=old["kind"], role="rejected_path", occurred_at=old["occurred_at"],
+                                               step_id=old["step_id"], run_id=old["run_id"], interpretation=old["interpretation"],
+                                               rule_id="R6", recorded_by="system", commit=False)
+                provenance.supersede(conn, old["id"], new, commit=False)
+                written += 1
+    return {"stated": _without_row(stated), "rejected": _without_row(rejected), "graph_unread": unread,
+            "written": written, "applied": bool(apply)}
+
+
+def _without_row(found: list[dict]) -> list[dict]:
+    return [{k: v for k, v in x.items() if k != "row"} for x in found]
+
 # ── close-time backstops ─────────────────────────────────────────────────────
 
 def backstop_unstated(conn, *, project: str, plan_id: str, psg_db_path: str | None,

@@ -611,6 +611,19 @@ def test_dp_reasons_carry_evidence_level(tmp_path, monkeypatch):
     assert rows[0]["tier"] == "stated" and rows[0]["text"] is None and rows[1]["text"] == "finance asked"
 
 
+
+def test_a_superseded_reason_is_not_a_reason_of_the_target(tmp_path):
+    """FL-238: a correction supersedes a row instead of rewriting it; the
+    plan-time reasons of a target are the newest row of each chain."""
+    from orchestrator import provenance as pv
+    orch_db = _orch(tmp_path)
+    old = pv.insert_reason(orch_db, project="proj", plan_id="P0b", node_key="nk_a", kind="technical",
+                           interpretation="corrected away", recorded_by="agent")
+    new = pv.insert_reason(orch_db, project="proj", plan_id="P0b", node_key="nk_a", kind="technical", recorded_by="system")
+    pv.supersede(orch_db, old, new)
+    texts = [r["text"] for r in impact_preflight._reasons(orch_db, "nk_a")]
+    assert "corrected away" not in texts and texts[-1] is None
+
 def test_dp2_impact_context_carries_the_pack_and_records_hits_under_the_plan(graph_db_with_history, orch_db):
     """DP phase 2 Task 2: compute_impact_context builds the context pack (the same
     build `provledger why` uses) and the pack's records are read_hits of the plan."""

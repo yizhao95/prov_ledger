@@ -223,10 +223,11 @@ def _history(conn, node_key: Optional[str], limit: int) -> List[Dict]:
 def _reasons(orch_conn, node_key: Optional[str]) -> List[Dict]:
     if orch_conn is None or not node_key:
         return []
+    from orchestrator import provenance          # a corrected row is not a reason of the target (FL-238)
     try:
         rows = orch_conn.execute(
             "SELECT node_key, plan_id, step_id, role, COALESCE(interpretation, statement), recorded_by, tier, recorded_at, evidence_level "
-            "FROM change_reason_v WHERE node_key = ? ORDER BY id", (node_key,)).fetchall()
+            f"FROM change_reason_v r WHERE node_key = ? AND {provenance.live('r')} ORDER BY id", (node_key,)).fetchall()
     except sqlite3.OperationalError:      # orchestrator DB predates migration 018
         return []
     cols = ("node_key", "plan_id", "step_id", "kind", "text", "source", "tier", "created_at", "evidence_level")
