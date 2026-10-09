@@ -19,7 +19,7 @@ from provledger import graph_api, providers, testing     # noqa: E402, F401  (ph
 print(f"import ok — provledger {provledger.__version__} "
       f"from {Path(provledger.__file__).parent}")
 assert "site-packages" in provledger.__file__, "not running from the wheel!"
-assert provledger.__version__ == "0.4.5", f"wheel version {provledger.__version__} != 0.4.5"
+assert provledger.__version__ == "0.4.6", f"wheel version {provledger.__version__} != 0.4.6"
 import subprocess as _sp
 _exe = Path(sys.executable).parent / "provledger"          # the console entry point of the venv that installed the wheel
 _help = _sp.run([str(_exe), "--help"], capture_output=True, text=True)
