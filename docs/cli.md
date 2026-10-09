@@ -70,6 +70,7 @@ believed instead of it.
 | `reason mark` | a person's word on a reason's significance, logged as judged by a human |
 | `significance eval` / `disagreements` | manual: an LLM verdict on reasons that carry only a hint; where hint and verdict disagree |
 | `reasons reclass-status` / `ask-basis` | migration state and tier counts; the close-time questions the rules did not recognise |
+| `reasons recheck` | rows the close-time rules wrote before 0.4.6 that are not true: a `stated` reason quoting text Claude Code injected (a subagent's report, a reminder), an R6 rejected path on a node its text does not name. A dry run lists them; `--apply` appends a correction that supersedes each, in one transaction |
 | `trigger eval` / `label` | the external-artifact judge: manual replay of its paired examples against a runner, with its gate; a person marks one verdict right or wrong (appended, never overwritten) |
 
 `export` never lets verbatim words out: a shareable record that quotes personal

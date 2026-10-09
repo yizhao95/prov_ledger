@@ -129,22 +129,22 @@ RETRACT_RULE = "utterance-filter"
 
 def retract_injected_utterances(conn) -> int:
     """Append one `retract` trigger_log row per utterance that is Claude Code's
-    own injected text (`<task-notification>` & co — hooks.INJECTED_PROMPT_PREFIXES).
+    own injected text (`<task-notification>` & co — provenance.INJECTED_PROMPT_PREFIXES).
 
     The rows themselves stay: `utterance` is append-only and deleting them
     would erase the evidence that the hook once mis-recorded them. The
     retraction says, in the same ledger the rules write to, that they are not
     the user speaking and must not anchor a `stated` reason. Idempotent via
     migration_state; returns how many rows it retracted (0 on a re-run)."""
-    from . import hooks
+    from .provenance import INJECTED_PROMPT_PREFIXES, is_injected_prompt
     if conn.execute("SELECT 1 FROM migration_state WHERE key = ?", (RETRACT_KEY,)).fetchone():
         return 0
     n = 0
     for r in conn.execute("SELECT id, project, plan_id, text FROM utterance ORDER BY id").fetchall():
         rid, project, plan_id, text = r[0], r[1], r[2], r[3]
-        if not hooks.is_injected_prompt(text):
+        if not is_injected_prompt(text):
             continue
-        prefix = next(p for p in hooks.INJECTED_PROMPT_PREFIXES if text.lstrip().startswith(p))
+        prefix = next(p for p in INJECTED_PROMPT_PREFIXES if text.lstrip().startswith(p))
         conn.execute(
             "INSERT INTO trigger_log (project, plan_id, node_key, path, rule_id, verdict, basis) "
             "VALUES (?, ?, NULL, 'code', ?, 'retract', ?)",

@@ -10,6 +10,35 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
 ## Unreleased
 
+### Fixed
+
+- **A `stated` reason quotes only what the user typed.** Claude Code sends some of
+  its own text through the prompt hook: a finished subagent's report, a task
+  notification, a system reminder. Older hooks recorded some of it as the user's
+  words. Those rows stay in the ledger, but the close-time rule that quotes the
+  user's words still read them, so a sentence from a subagent's report could
+  become a node's `stated` reason. The rule now leaves that text out, and the
+  ledger refuses to quote it as `stated` whoever asks. The hook and the rule use
+  one definition of injected text.
+- **A rejected path hangs on the node its failure names, or on the plan.** The
+  close-time rule that records a failed step as a rejected path used to pick the
+  first node whose name was any word of the failure text, so "run the suites"
+  landed on a function called `run`, and `why` told that function's story with
+  someone else's failure. It now anchors only on a node the plan changed and the
+  text names as code (`Module.func`, `func(`, `` `func` ``, or a snake_case or
+  camelCase name), and otherwise on the plan. Ordinary words never anchor.
+- **A corrected record reads as its correction.** A correction is appended and
+  supersedes the row it corrects; the old row keeps its words. `why`, the
+  `/ledger` and `/receipts` fact table, the plan-time context, the export and
+  the dashboard now show the newest row of each chain and say which row it
+  corrects (`corrects #N`); `provledger record #N` still prints the old one. The
+  node badge counts a chain once.
+- **`provledger reasons recheck`** lists the rows the two rules above wrote
+  before this release: `stated` reasons quoting injected text, and rejected
+  paths on a node their text does not name. `--apply` appends a correction for
+  each (an `unstated` row, or the same rejected path re-anchored) in one
+  transaction. Run it once after upgrading; without `--apply` it writes nothing.
+
 ### Development
 
 - **A test that opens the real ledger fails its suite even when it adds no row.**

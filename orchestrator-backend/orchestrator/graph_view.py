@@ -46,7 +46,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from . import psg_bridge
+from . import provenance, psg_bridge
 
 IMPORT_EDGE = "imports"
 DEFAULT_LIMIT = 40              # names printed per group / per hop before folding
@@ -107,7 +107,8 @@ def _record_counts(ledger_conn, project: str | None) -> dict[str, int]:
         return {}
     try:
         return {r[0]: r[1] for r in ledger_conn.execute(
-            "SELECT node_key, COUNT(*) FROM change_reason WHERE project = ? AND node_key IS NOT NULL GROUP BY 1",
+            "SELECT node_key, COUNT(*) FROM change_reason r WHERE project = ? AND node_key IS NOT NULL "
+            f"AND {provenance.live('r')} GROUP BY 1",
             (project,)) if r[0]}
     except sqlite3.Error:
         return {}

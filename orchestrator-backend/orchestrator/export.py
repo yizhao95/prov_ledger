@@ -37,7 +37,7 @@ import sqlite3
 import zipfile
 from datetime import datetime, timezone
 
-from . import integrity, psg_bridge
+from . import integrity, provenance, psg_bridge
 
 FORMATS = ("md", "json", "zip")
 
@@ -390,7 +390,9 @@ def bundle(conn, project: str, out_dir: str, *, include_rationale=(), fmt: str =
         for node in nodes:
             path = os.path.join(root, "nodes", _safe_name(node["qualified_name"]) + ".md")
             with open(path, "w", encoding="utf-8") as f:
-                f.write(_node_md(node, reasons, refs_by_id, links))
+                # a node file reads like every other reader: a corrected row is not
+                # shown (records.jsonl keeps every row, with its superseded_by)
+                f.write(_node_md(node, [r for r in reasons if provenance.is_live(r)], refs_by_id, links))
             node_files.append(os.path.relpath(path, root))
 
     heads = integrity.chain_heads(conn)

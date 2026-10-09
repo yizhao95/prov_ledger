@@ -158,6 +158,8 @@ UI: dict[str, dict[str, str]] = {
     "verbatim": {"en": "verbatim", "zh": "逐字"},
     "context_estimate": {"en": "Context", "zh": "上下文估算"},
     "reasons_panel": {"en": "Reasons", "zh": "变更原因"},
+    # FL-238: a row that replaces a corrected one; the corrected row is not shown
+    "corrects": {"en": "corrects {ids}", "zh": "更正 {ids}"},
     "upstream": {"en": "upstream", "zh": "上游"},
     "downstream": {"en": "downstream", "zh": "下游"},
     "records": {"en": "records", "zh": "条记录"},

@@ -26,7 +26,7 @@ import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from . import psg_bridge
+from . import provenance, psg_bridge
 
 CAP_CALLERS = 12          # a card's callers list is folded to this many (a hot function has hundreds of test callers)
 CAP_REJECTED = 5
@@ -217,7 +217,7 @@ def _records(conn, project: str, anchors: list[str]) -> list[dict]:
         return []
     ph = ",".join("?" * len(anchors))
     return [dict(r) for r in conn.execute(
-        f"SELECT r.id, r.node_key, r.plan_id, r.step_id, r.role, r.tier, r.evidence_level, r.rule_id, r.state, r.superseded_by, "
+        f"SELECT r.id, r.node_key, r.plan_id, r.step_id, r.role, r.tier, r.evidence_level, r.rule_id, r.state, r.superseded_by, r.supersedes, "
         f"       r.recorded_by, r.significance_eff AS significance, r.occurred_at, r.statement, "
         f"       COALESCE(r.interpretation, r.statement, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS text, "
         # The quoted span used to be reachable ONLY as this COALESCE's last
@@ -229,7 +229,7 @@ def _records(conn, project: str, anchors: list[str]) -> list[dict]:
         f"       CASE WHEN r.verbatim_utterance_id IS NOT NULL AND (r.interpretation IS NOT NULL OR r.statement IS NOT NULL) "
         f"            THEN substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start) END AS quoted "
         f"FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
-        f"WHERE r.project = ? AND r.node_key IN ({ph}) ORDER BY r.id DESC", (project, *anchors))]
+        f"WHERE r.project = ? AND r.node_key IN ({ph}) AND {provenance.live('r')} ORDER BY r.id DESC", (project, *anchors))]
 
 
 def _slim(r: dict) -> dict:
@@ -251,6 +251,7 @@ def _slim(r: dict) -> dict:
             # The words the record quotes, when it has a paraphrase as well. Bounded
             # like `text` and, like `text`, saying how much was cut — a new field
             # that truncated in silence would be FL-154 a second time.
+            **({"corrects": provenance.supersedes_ids(r["supersedes"])} if r.get("supersedes") else {}),
             **({"quoted": (r["quoted"] or "")[:CAP_TEXT],
                 "quoted_chars": len(r["quoted"] or ""),
                 "quoted_cut": max(0, len(r["quoted"] or "") - CAP_TEXT)} if r.get("quoted") else {})}

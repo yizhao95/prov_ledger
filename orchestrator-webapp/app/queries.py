@@ -680,14 +680,16 @@ SOURCE_LEVELS = {"linked": "source level linked · a reference you can open",
 
 def get_node_reasons(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
     """node_reason rows of a plan (migration 014) + display_tier ('unstated'
-    when text is NULL). Degrades to [] on an older DB. Read-only."""
+    when text is NULL). Degrades to [] on an older DB. Read-only. A corrected
+    row is not shown; its successor carries `corrects` (FL-238)."""
+    from provledger import provenance as _pv
     try:
         rows = conn.execute(
             "SELECT r.id, r.node_key, r.run_id, r.step_id, r.role AS kind, "
             "       COALESCE(r.interpretation, r.statement, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS text, "
-            "       r.recorded_by AS source, r.tier, r.recorded_at AS created_at, r.evidence_level, r.rule_id "
+            "       r.recorded_by AS source, r.tier, r.recorded_at AS created_at, r.evidence_level, r.rule_id, r.supersedes "
             "FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
-            "WHERE r.plan_id = ? ORDER BY r.id", (plan_id,)).fetchall()
+            f"WHERE r.plan_id = ? AND {_pv.live('r')} ORDER BY r.id", (plan_id,)).fetchall()
     except sqlite3.Error:
         return []
     out = []
@@ -695,6 +697,7 @@ def get_node_reasons(conn: sqlite3.Connection, plan_id: str) -> list[dict]:
         d = dict(r)
         d["display_tier"] = d["tier"]                     # DP phase 1: unstated is a real tier now
         d["source_level"] = SOURCE_LEVELS.get(d.get("evidence_level") or "", d.get("evidence_level") or "—")
+        d["corrects"] = _pv.supersedes_ids(d.pop("supersedes"))
         out.append(d)
     return out
 
@@ -1033,7 +1036,8 @@ def get_node_ledger(conn: sqlite3.Connection, project: str, qualified_name: str,
                             "       COALESCE(r.interpretation, r.statement, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS text, "
                             "       r.recorded_by AS source, r.tier, r.recorded_at AS created_at, r.evidence_level, r.rule_id "
                             "FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
-                            "WHERE r.node_key = ? AND r.role <> 'constraint' ORDER BY r.id", (node_key,)).fetchall()
+                            "WHERE r.node_key = ? AND r.role <> 'constraint' AND r.superseded_by IS NULL ORDER BY r.id",
+                            (node_key,)).fetchall()
         base["reasons"] = [dict(r, display_tier=r["tier"], source_level=SOURCE_LEVELS.get(r["evidence_level"] or "", "—")) for r in rows]
     except sqlite3.Error:
         base["reasons"] = []

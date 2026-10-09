@@ -102,6 +102,25 @@ def insert_utterance(conn, *, session_id: str, project: str | None, plan_id: str
     return rid
 
 
+# DP phase 2d (Task 0): Claude Code delivers some of its OWN text through
+# UserPromptSubmit — a finished subagent's report, a system reminder, the caveat
+# in front of a local command, the name of a slash command. None of it is the
+# user speaking, so none of it may become a `stated` reason's verbatim span:
+# the hook does not record it, and R0 does not quote a row an older hook did
+# record (FL-238).
+# The match is on the PREFIX of the stripped prompt: a person who writes ABOUT
+# `<system-reminder>` is still a person, and their words are still recorded.
+# `<agent-message` (FL-182) is a subagent's report handed back to the parent
+# session; it carries attributes, so it is matched without the closing bracket.
+INJECTED_PROMPT_PREFIXES = ("<task-notification>", "<system-reminder>",
+                            "<local-command-caveat>", "<command-name>", "<agent-message")
+
+
+def is_injected_prompt(prompt: str | None) -> bool:
+    """True when the prompt is Claude Code's own injected text, not the user's."""
+    return isinstance(prompt, str) and prompt.lstrip().startswith(INJECTED_PROMPT_PREFIXES)
+
+
 def get_utterance(conn, utterance_id: int) -> dict | None:
     r = conn.execute("SELECT * FROM utterance WHERE id = ?", (utterance_id,)).fetchone()
     return dict(r) if r else None
@@ -263,6 +282,9 @@ def _check_span(conn, verbatim) -> tuple[int, int, int]:
     u = get_utterance(conn, int(utterance_id))
     if u is None:
         raise ValueError(f"utterance {utterance_id} does not exist")
+    if is_injected_prompt(u["text"]):
+        raise ValueError(f"utterance {utterance_id} is text Claude Code injected (a subagent's report, a reminder), "
+                         "not the user's words: it cannot be quoted as stated (FL-238)")
     start, end = int(start), int(end)
     if not (0 <= start < end <= len(u["text"])):
         raise ValueError(f"span [{start}, {end}) is outside utterance {utterance_id} (length {len(u['text'])})")
@@ -337,6 +359,24 @@ def supersede(conn, old_id: int, new_id: int, commit: bool = True) -> None:
     if commit:
         conn.commit()
 
+
+
+def live(alias: str = "r") -> str:
+    """SQL: the rows a reader shows. A reason or a rejected path that points at
+    a successor was corrected, and its successor is shown instead (FL-238);
+    constraints keep their own rule (active and not superseded), which every
+    constraint reader applies."""
+    return f"({alias}.role = 'constraint' OR {alias}.superseded_by IS NULL)"
+
+
+def is_live(row) -> bool:
+    """live() for a row already read."""
+    return row["role"] == "constraint" or row["superseded_by"] is None
+
+
+def supersedes_ids(value) -> list[int]:
+    """change_reason_v.supersedes ('12,15', or NULL) as sorted ids."""
+    return sorted(int(x) for x in str(value).split(",") if x.strip()) if value else []
 
 # ── integrity ─────────────────────────────────────────────────────────────────
 
