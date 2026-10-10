@@ -24,7 +24,7 @@ Otherwise: announce "trivial — no plan needed" and proceed directly. (Trivial 
    bash ${CLAUDE_PLUGIN_ROOT}/skills/writing-plans/scripts/ensure-dashboard.sh
    ```
 
-3. **Draft `plan-input.json`** (or `.yaml`). Schema: `plan-input.schema.json`. Worked example: `plan-input.example.json`. Required fields: `goal`, `prefix`, `steps[]`. Strongly recommended: `user_query` (verbatim), `skills[]` (every iron-law + topic skill activated).
+3. **Draft `plan-input.json`** (or `.yaml`). Schema: `plan-input.schema.json`. Worked example: `plan-input.example.json`. Required fields: `goal`, `prefix`, `steps[]`. Strongly recommended: `user_query` (verbatim), `skills[]` (every iron-law + topic skill activated), `root` (see Root cause below).
 
 4. **Self-review** (5-bullet checklist — see `reference/step-quality.md`):
    - [ ] Spec coverage — every requirement maps to a step
@@ -37,7 +37,7 @@ Otherwise: announce "trivial — no plan needed" and proceed directly. (Trivial 
    ```bash
    bash ${CLAUDE_PLUGIN_ROOT}/skills/writing-plans/scripts/publish-plan.sh path/to/plan-input.json
    ```
-   The script returns `{plan_id, step_ids, review_step_id, skills_recorded}` as JSON.
+   The script returns `{plan_id, step_ids, review_step_id, skills_recorded, root}` as JSON.
    `review_step_id` is the auto-appended `<plan>-REVIEW` step (migration 006). It
    flips to COMPLETED or FAILED automatically when the last regular step terminates
    — no `finish-plan.sh` call needed. See `executing-plans/SKILL.md` for details.
@@ -95,6 +95,31 @@ Which registered project a plan belongs to is **explicit** (`Plans.project` +
 A declared project that contradicts the cwd repo fails the publish ("pick one").
 Plans published before this column existed are matched once from goal text at
 close and labelled `legacy`.
+
+## 🌱 Root cause
+
+A plan is one task. Why it exists usually started earlier, in the user's own
+words, and several plans may carry the same root forward: a reviewer asked for
+the model to be judged on the last two quarters of production traffic, then an
+outage inside that window made the plain average misleading, so a second task
+compared against the previous model on the same window. Both answer "why" with
+the same root. Say which in the plan-input:
+
+- `"root": {"kind": "new", "basis": "<the cause, one sentence>"}` — this task
+  starts a root. Add `"utterance_id": <id>` when the user's recorded sentence
+  states it (never text Claude Code injected, such as a subagent's report).
+- `"root": {"kind": "continues", "plan_id": "<P>", "basis": "<why>"}` — this
+  task carries plan P's root forward: a follow-up, or a change made because of
+  what an earlier task found. Continuing P resolves to where P's root started.
+- Omit `root` when you cannot tell. It is recorded as unknown; for a tracked
+  project, publish then lists the project's recent roots on stderr, after the
+  headline, for the plans that follow.
+
+Whether two tasks share a root is your judgement, recorded as `asserted`; a
+person may confirm or reject it later. A plan that continues a root gets a
+third headline layer: the earlier tasks under that root (`same_root_task`) and
+what they tried and gave up (`same_root_rejected`, a warning you may answer with
+`headline-respond` like any other finding).
 
 ## 📓 Decision-Memory Ledger (provLedger Phase E)
 

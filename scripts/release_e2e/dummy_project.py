@@ -330,6 +330,24 @@ def _json_objects(text: str):
                 start = -1
 
 
+def root_checks(facts: dict) -> list[tuple[bool, str, str]]:
+    """What the story must show about root causes (task-level redesign, step 2):
+    plan A starts a root, plan B continues it, and B's headline names A."""
+    a = facts["plan_a"]["plan_id"]
+    roots = facts.get("roots") or {}
+    ra, rb = roots.get("a") or {}, roots.get("b") or {}
+    line = roots.get("b_headline") or ""
+    return [
+        (ra.get("kind") == "new" and ra.get("root_plan_id") == a,
+         "plan A starts a root", f"{ra}"),
+        (rb.get("kind") == "continues" and rb.get("root_plan_id") == a,
+         "plan B continues plan A's root", f"{rb}"),
+        (f"same root: {a}" in line,
+         "plan B's headline names plan A as the same root",
+         "" if f"same root: {a}" in line else line[-400:]),
+    ]
+
+
 _SLOT_RE = __import__("re").compile(r"^\s+(\S+) \([^)]*\) \[(nk_[0-9a-f]+)\]\s*$", __import__("re").M)
 
 
@@ -411,6 +429,7 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
         "prefix": f"{PROJECT_BASE}-a",
         "project": b.project,
         "user_query": "The v2 feed drops orders.discount. Get it out of the rollup.",
+        "root": {"kind": "new", "basis": "the v2 upstream feed no longer carries orders.discount"},
         "declared_targets": TARGETS,
         "skills": [{"name": "writing-plans", "source": "iron-law"}],
         "expectations": [
@@ -430,6 +449,7 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
     ran = b.rows("SELECT substr(created_at, 1, 10) FROM Plans WHERE plan_id = ?", plan_a)
     # the day the nodes changed, by the ledger's own clock — Q7's timeline
     f["plan_a"] = {"plan_id": plan_a, "goal": plan.get("goal"), "ran_on": ran[0][0] if ran else None}
+    f["roots"] = {"a": plan.get("root")}
     say(f"    plan A published · {plan_a}")
 
     b.op("start-step.sh", {"step_id": steps[0], "type": "ANALYSIS"})
@@ -545,11 +565,15 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
         "prefix": f"{PROJECT_BASE}-b",
         "project": b.project,
         "user_query": "Make it obvious in the mail that the rate is estimated now.",
+        "root": {"kind": "continues", "plan_id": plan_a,
+                 "basis": "plan A made the discount rate an estimate, so the mail has to say so"},
         "declared_targets": ["pkg.rollup.weekly_report"],
         "steps": [{"description": "DOCUMENTATION: note the estimate in the weekly mail",
                    "type": "DOCUMENTATION"}],
     })
     plan_b = plan2["plan_id"]
+    f["roots"]["b"] = plan2.get("root")
+    f["roots"]["b_headline"] = (plan2.get("headline") or {}).get("text", "")
     b.op("start-step.sh", {"step_id": plan2["step_ids"][0], "type": "DOCUMENTATION"})
     V3 = {**V2, "pkg/rollup.py": V2["pkg/rollup.py"].replace(
         '"""The numbers the weekly mail carries."""',

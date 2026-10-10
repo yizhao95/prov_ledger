@@ -116,6 +116,18 @@
         }
       }
     },
+    "root": {
+      "type": "object",
+      "description": "Why this task exists at the level of a root cause: it starts a new root (the user stated a cause) or continues an earlier plan's root. Omitted = unknown. Whether two tasks share a root is your judgement, recorded as asserted; when root is omitted, publish lists the project's recent roots on stderr.",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {"type": "string", "enum": ["new", "continues"]},
+        "plan_id": {"type": "string", "description": "kind continues: the plan whose root this one carries on."},
+        "utterance_id": {"type": "integer", "description": "kind new, optional: the recorded user sentence that states the cause; never text Claude Code injected."},
+        "basis": {"type": "string", "description": "One sentence: what the root is, or why this task continues it."}
+      }
+    },
     "headline_notes": {
       "type": "array",
       "description": "Your own findings for the plan headline (project-scoped plans). Each is tiered 'asserted' and must cite records that exist, or publish exits non-zero.",

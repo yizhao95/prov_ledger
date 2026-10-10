@@ -544,6 +544,8 @@ def main() -> int:
         t.record(OK if need else FAIL, label,
                  "" if need else "without it the questions that go looking for it prove nothing "
                                  "and stage 3's grading is meaningless")
+    for ok, label, detail in DP.root_checks(facts):
+        t.record(OK if ok else FAIL, label, "" if ok else detail)
 
     def cli(args: list[str], env: dict | None = None) -> tuple[int, str]:
         e = dict(os.environ)

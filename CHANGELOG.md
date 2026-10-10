@@ -8,6 +8,24 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
+## Unreleased
+
+### Added
+
+- **A plan says which root cause it serves.** A plan is one task; why it exists
+  usually started earlier, in the user's own words, and several plans may carry
+  the same root forward. The plan-input takes an optional `root`:
+  `{"kind": "new"}` when this task starts one (optionally pointing at the user's
+  recorded sentence), or `{"kind": "continues", "plan_id": …}` when it carries an
+  earlier plan's root on. Without it the root is recorded as unknown, and
+  publish lists the project's recent roots after the headline. Every judgement is
+  a new row in an append-only table, recorded as `asserted`; continuing a plan
+  resolves to where its root started.
+- **The headline shows the earlier tasks under the same root.** A plan that
+  continues a root gets a third layer: each earlier task under it, and each
+  rejected path those tasks recorded, which can be answered (and so adopted)
+  like any other finding.
+
 ## 0.4.6 — 2026-10-09
 
 ### Fixed

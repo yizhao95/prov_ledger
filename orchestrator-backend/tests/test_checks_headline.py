@@ -158,3 +158,45 @@ def test_i11_showing_is_not_adopting(conn, graph):
     checks.headline(conn, project="proj", plan_id="P1", pack=_pack(conn, graph))
     assert conn.execute("SELECT COUNT(*) FROM read_hit WHERE plan_id='P1'").fetchone()[0] >= 1
     assert conn.execute("SELECT COUNT(*) FROM influence").fetchone()[0] == 0
+
+
+# ── task-level redesign, step 2: the earlier tasks under the same root ───────
+
+def _task(conn, plan_id, goal, status):
+    conn.execute("INSERT INTO Plans (plan_id, original_goal, status, project, project_source) VALUES (?, ?, ?, 'proj', 'declared')",
+                 (plan_id, goal, status))
+    conn.commit()
+
+
+def test_a_plan_continuing_a_root_sees_the_earlier_tasks_and_what_they_tried(conn, graph):
+    from orchestrator import roots
+    _task(conn, "P0", "set the two-month window", "COMPLETED")
+    _task(conn, "P1", "compare against last year", "IN_PROGRESS")
+    roots.record(conn, plan_id="P0", root={"kind": "new"})
+    roots.record(conn, plan_id="P1", root={"kind": "continues", "plan_id": "P0", "basis": "a holiday sits in the window"})
+    rj = pv.insert_reason(conn, project="proj", plan_id="P0", node_key=None, kind="technical", role="rejected_path",
+                          interpretation="averaging the whole year hid the holiday spike", rule_id="R6", recorded_by="system")
+    pack = cp.build(conn, project="proj", targets=["pkg.m.clean"], psg_db_path=graph, plan_id="P1", record=False)
+    doc = checks.headline(conn, project="proj", plan_id="P1", pack=pack)
+    kinds = {f["kind"]: f for f in doc["findings"]}
+    task = kinds["same_root_task"]
+    assert task["layer"] == "root" and task["severity"] == "info" and task["tier"] == "observed"
+    assert "P0" in task["text"] and "set the two-month window" in task["text"] and "COMPLETED" in task["text"]
+    tried = kinds["same_root_rejected"]
+    assert tried["severity"] == "warning" and tried["evidence"] == {"reason_id": rj} and "holiday spike" in tried["text"]
+    assert doc["summary"]["layers"] == 3 and doc["summary"]["unanswered"] == 0
+    assert "plan headline · 1 targets · 3 layers" in checks.render(doc)
+    checks.respond(conn, plan_id="P1", finding_id=tried["id"], action="proceed",
+                   rationale="the year-on-year comparison is the answer to it", by="agent", cites=[])
+    assert conn.execute("SELECT COUNT(*) FROM influence WHERE reason_id = ? AND plan_id = 'P1'", (rj,)).fetchone()[0] == 1
+
+
+@pytest.mark.parametrize("root", [None, {"kind": "new"}])
+def test_a_plan_that_starts_a_root_or_names_none_keeps_two_layers(conn, graph, root):
+    from orchestrator import roots
+    _plan(conn)
+    roots.record(conn, plan_id="P1", root=root)
+    pack = cp.build(conn, project="proj", targets=["pkg.m.clean"], psg_db_path=graph, plan_id="P1", record=False)
+    doc = checks.headline(conn, project="proj", plan_id="P1", pack=pack)
+    assert not [f for f in doc["findings"] if f["kind"].startswith("same_root")]
+    assert doc["summary"]["layers"] == 2 and "· 2 layers" in checks.render(doc)

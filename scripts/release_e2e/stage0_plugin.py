@@ -251,6 +251,17 @@ TASK = ("Add a function add(a, b) that returns a + b to calc.py, and a script ch
 TASK_TOOLS = ("Skill", "Bash", "Read", "Write", "Edit", "Glob", "Grep")
 
 
+def root_check(q, plan_id: str) -> tuple[bool, str]:
+    """Task-level redesign, step 2: every published plan has a plan_root row —
+    the agent's own judgement (new / continues), or unknown when it named none.
+    The kind is reported, not judged: naming a root is optional."""
+    rows = q("SELECT kind, root_plan_id FROM plan_root WHERE plan_id = ? ORDER BY id DESC LIMIT 1", (plan_id,)) or []
+    if not rows:
+        return False, f"the agent's plan records a root: no plan_root row for {plan_id}"
+    kind = rows[0][0]
+    return True, f"the agent's plan records a root: {kind}" + (" (none named)" if kind == "unknown" else "")
+
+
 def first_task(t: Tally, root: Path, cold: PS.Transcript | None) -> None:
     step("S1 · the first task: the agent plans it and runs it itself")
     port = PS.free_port()
@@ -282,6 +293,8 @@ def first_task(t: Tally, root: Path, cold: PS.Transcript | None) -> None:
         t.record(OK if commands else FAIL, "a COMMAND step completed — only run-step.sh can complete one",
                  f"{commands[:3]}" if commands else f"step types: {sorted({x[1] for x in regular})}")
         t.record(OK if status == "COMPLETED" else FAIL, "the plan closed by itself", f"status {status}")
+        ok, said = root_check(q, pid)
+        t.record(OK if ok else FAIL, said)
         chk = subprocess.run(["python3", "-c", "import calc; assert calc.add(2, 3) == 5"], cwd=proj,
                              capture_output=True, text=True)
         t.record(OK if chk.returncode == 0 else FAIL, "the code really changed: calc.add(2, 3) == 5",

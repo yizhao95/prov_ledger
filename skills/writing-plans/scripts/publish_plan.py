@@ -32,7 +32,7 @@ _DEV_ORCH = Path.home() / "skill-workspace" / "orchestrator"
 ORCH_ROOT = _BUNDLED_ORCH if (_BUNDLED_ORCH / "orchestrator" / "__init__.py").exists() else _DEV_ORCH
 sys.path.insert(0, str(ORCH_ROOT))
 
-from orchestrator import api, db  # noqa: E402
+from orchestrator import api, db, roots  # noqa: E402
 
 # impact_preflight lives beside this script (Phase D). stdlib-only, no orch deps.
 import impact_preflight  # noqa: E402
@@ -47,6 +47,9 @@ REQUIRED_FIELDS = ("goal", "prefix", "steps")
 # verbatim (db.insert_expectation); never invented. Requires `project`.
 VALID_TARGET_KINDS = {"node", "column", "dataset", "metric"}
 VALID_CHANNELS = {"graph", "profile_drift", "none"}   # plus "metric:<name>"
+# Task-level redesign, step 2: optional `root` — this plan starts a root cause
+# (new) or carries an earlier plan's forward (continues); omitted = unknown.
+ROOT_KINDS = roots.KINDS
 
 # Registry of built project state-graphs (env-overridable for tests).
 _REGISTRY_PATH = os.environ.get(
@@ -248,6 +251,11 @@ def _validate(data: dict) -> None:
         ch = e["channel"]
         if ch not in VALID_CHANNELS and not (ch.startswith("metric:") and len(ch) > 7):
             _die(f"expectations[{i}].channel = {ch!r} is invalid; valid: {sorted(VALID_CHANNELS)} or metric:<name>")
+    root = data.get("root")
+    if root is not None and not isinstance(root, dict):
+        _die("root must be an object with a kind ('new' or 'continues'), or omitted")
+    if isinstance(root, dict) and root.get("kind") not in ROOT_KINDS:
+        _die(f"root.kind = {root.get('kind')!r} is invalid; valid: {list(ROOT_KINDS)}")
 
 
 def _normalize_steps(steps: list) -> list:
@@ -331,6 +339,10 @@ def main() -> None:
     if (data.get("expectations") or []) and not tracked:
         _die("'expectations' need a tracked project (declared, or published from a registered repo)")
     _check_note_cites(conn, data.get("headline_notes") or [])
+    try:
+        roots.validate(conn, data.get("root"))
+    except ValueError as e:
+        _die(str(e))
     result = api.initialize_plan(
         conn,
         original_goal=data["goal"],
@@ -345,6 +357,8 @@ def main() -> None:
     if project is not None:
         result["project"] = project
         result["project_source"] = project_source
+    # before the headline, which reads it (the same-root layer)
+    result["root"] = roots.record(conn, plan_id=result["plan_id"], root=data.get("root"))
     # Append the deterministic auto-review-and-complete marker step (migration
     # 006). This guarantees every newly-published plan has a terminal step that
     # the executing-plans complete-step / fail-step / finish-plan ops can flip
@@ -402,6 +416,16 @@ def main() -> None:
         print(text, file=sys.stderr)
         result["headline"] = {"headline_id": doc["headline_id"], "summary": doc["summary"], "text": text}
         hard_unanswered = doc["summary"].get("hard_unanswered", 0)
+    # No root named: the project's recent roots, after the headline (stderr keeps
+    # the headline first), so the agent can see what this plan might carry on.
+    if data.get("root") is None and tracked:
+        recent = [r for r in roots.recent(conn, project) if r["root_plan_id"] != result["plan_id"]]
+        if recent:
+            print(f"── recent roots of {project} (this plan named none) " + "─" * 20, file=sys.stderr)
+            for r in recent:
+                words = " ".join((r["words"] or "").split())[:90]
+                print(f" {r['root_plan_id']} · {str(r['created_at'] or '')[:10]} · {r['tasks']} task(s) · {words}",
+                      file=sys.stderr)
     if skills_activated_input:
         result["skills_recorded"] = [s["name"] for s in skills_activated_input]
     exps = data.get("expectations") or []
