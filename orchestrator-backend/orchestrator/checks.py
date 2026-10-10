@@ -28,13 +28,14 @@ from . import db, provenance
 KINDS_SELF = ("active_constraint", "rejected_path", "prior_outcome_failed", "removed_upstream")
 KINDS_IMPACT = ("downstream_break", "unverified_upstream", "downstream_constraint")
 KINDS_ASSERTED = ("similar_intent",)
+KINDS_ROOT = ("same_root_task", "same_root_rejected")
 SEVERITIES = ("blocking", "warning", "info")
 
 
 @dataclass
 class Finding:
     id: str
-    layer: str                      # self | impact
+    layer: str                      # self | impact | root
     kind: str
     tier: str                       # observed | derived | stated | asserted
     severity: str                   # blocking | warning | info
@@ -199,8 +200,38 @@ def asserted_notes(conn, notes, targets: list[str]) -> list[Finding]:
     return out
 
 
+def layer_root(conn, plan_id: str | None) -> list[Finding]:
+    """Task-level redesign, step 2: a plan that continues a root sees the earlier
+    tasks under it, and what they tried and gave up. Whether the tasks share a
+    root is the agent's own judgement at publish (`roots`), not a text match.
+    Numbering runs across the layer: plan ids often share their first twelve
+    characters, and a finding id is unique within its headline."""
+    if not plan_id:
+        return []
+    from . import roots
+    r = conn.execute("SELECT kind FROM plan_root WHERE plan_id = ? ORDER BY id DESC LIMIT 1", (plan_id,)).fetchone()
+    root = roots.root_of(conn, plan_id) if r and r["kind"] == "continues" else None
+    if not root:
+        return []
+    out: list[Finding] = []
+    for t in roots.tasks_under(conn, root, exclude=plan_id):
+        out.append(Finding(_fid("same_root_task", t["plan_id"], len(out) + 1), "root", "same_root_task", "observed", "info",
+                           f"same root: {t['plan_id']} ({t['status']}, {str(t['created_at'] or '')[:10]}) — {(t['goal'] or '')[:200]}",
+                           t["plan_id"], {"plan_id": t["plan_id"]}))
+        for rj in provenance.reasons_for_plan(conn, t["plan_id"], role="rejected_path"):
+            if rj.get("superseded_by") is not None:
+                continue
+            out.append(Finding(_fid("same_root_rejected", t["plan_id"], len(out) + 1), "root", "same_root_rejected",
+                               rj["tier"], "warning",
+                               f"tried under the same root in {t['plan_id']}: {(rj.get('interpretation') or '')[:200]}",
+                               t["plan_id"], {"reason_id": rj["id"]}))
+    return out
+
+
 def summarize(findings: list[Finding], n_targets: int, shown: int, adopted: int = 0) -> dict:
-    return {"targets": n_targets, "layers": 2, "findings": len(findings),
+    # the self and impact layers always run; the root layer runs for a plan that continues a root
+    layers = 3 if any(f.layer == "root" for f in findings) else 2
+    return {"targets": n_targets, "layers": layers, "findings": len(findings),
             "blocking": sum(1 for f in findings if f.severity == "blocking"),
             "warning": sum(1 for f in findings if f.severity == "warning"),
             "info": sum(1 for f in findings if f.severity == "info"),
@@ -214,6 +245,7 @@ def headline(conn, *, project: str, pack, plan_id: str | None = None, session_id
     """Compute, store (a new headline row every time) and return the headline. Never empty (I1)."""
     findings = layer_self(pack, hard_statements=hard_statements, conn=conn) + layer_impact(pack, hard_statements=hard_statements)
     findings += asserted_notes(conn, notes, [t.qualified_name for t in pack.targets])
+    findings += layer_root(conn, plan_id)
     doc = {"findings": [f.as_dict() for f in findings],
            "summary": summarize(findings, len(pack.targets), pack.shown),
            "hints": list(getattr(pack, "hints", []) or []), "generated_at": pack.generated_at}
@@ -321,7 +353,7 @@ def close_headline(conn, *, plan_id: str, commit: bool = False) -> dict:
 def render(doc: dict, width: int = 60) -> str:
     """The terminal shape (human-readable); the same text goes to the plan row."""
     s = doc["summary"]
-    lines = [f"── plan headline · {s['targets']} targets · 2 layers " + "─" * max(4, width - 30)]
+    lines = [f"── plan headline · {s['targets']} targets · {s.get('layers', 2)} layers " + "─" * max(4, width - 30)]
     mark = {"blocking": "⚠", "warning": "·", "info": "·"}
     for f in doc["findings"]:
         resp = f.get("response")

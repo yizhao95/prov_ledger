@@ -583,3 +583,71 @@ def test_publish_without_a_recent_tool_call_falls_back_to_the_env_then_null_and_
     assert payload["session_id"] is None and "no session" in res.stderr
     c = _sqlite.connect(str(tmp_db))
     assert c.execute("SELECT session_id FROM Plans WHERE plan_id=?", (payload["plan_id"],)).fetchone()[0] is None
+
+
+# ── task-level redesign, step 2: a plan's root cause ─────────────────────────
+def _publish_tracked(tmp_path, tmp_db, scripts_dir, prefix, root=None):
+    gdb = tmp_path / "proj.db"
+    if not gdb.exists():
+        _seed_project_graph(gdb)
+    reg = _registry(tmp_path, "demoproj", gdb)
+    plan = _valid_input_dict(); plan["prefix"] = prefix; plan["goal"] = f"goal of {prefix}"
+    plan["project"] = "demoproj"; plan["declared_targets"] = ["pipeline.process"]
+    if root is not None:
+        plan["root"] = root
+    p = tmp_path / f"{prefix}.json"; p.write_text(_json.dumps(plan))
+    return _run_publish_env(scripts_dir, p, tmp_db, reg)
+
+
+def _root_row(db_path, plan_id):
+    c = _sqlite.connect(str(db_path)); c.row_factory = _sqlite.Row
+    r = c.execute("SELECT * FROM plan_root WHERE plan_id = ? ORDER BY id DESC LIMIT 1", (plan_id,)).fetchone()
+    c.close()
+    return dict(r) if r else None
+
+
+def test_a_plan_without_a_root_is_recorded_unknown_and_publish_lists_the_projects_roots(tmp_path, tmp_db, scripts_dir):
+    a = _publish_tracked(tmp_path, tmp_db, scripts_dir, "roota", root={"kind": "new", "basis": "the lead set a two-month window"})
+    assert a.returncode == 0, a.stderr
+    a_id = _json.loads(a.stdout)["plan_id"]
+    assert _root_row(tmp_db, a_id)["kind"] == "new"
+    b = _publish_tracked(tmp_path, tmp_db, scripts_dir, "rootb")
+    assert b.returncode == 0, b.stderr
+    payload = _json.loads(b.stdout)
+    assert payload["root"] == {"kind": "unknown", "root_plan_id": None, "continues_plan_id": None}
+    assert _root_row(tmp_db, payload["plan_id"])["recorded_by"] == "system"
+    err = b.stderr
+    assert "recent roots" in err and a_id in err
+    assert err.index("plan headline") < err.index("recent roots")       # the headline stays first on stderr
+
+
+def test_a_plan_continuing_a_root_records_it_and_its_headline_names_the_earlier_task(tmp_path, tmp_db, scripts_dir):
+    a = _publish_tracked(tmp_path, tmp_db, scripts_dir, "roota", root={"kind": "new"})
+    a_id = _json.loads(a.stdout)["plan_id"]
+    c = _publish_tracked(tmp_path, tmp_db, scripts_dir, "rootc",
+                         root={"kind": "continues", "plan_id": a_id, "basis": "a holiday sits in the window"})
+    assert c.returncode == 0, c.stderr
+    payload = _json.loads(c.stdout)
+    assert payload["root"] == {"kind": "continues", "root_plan_id": a_id, "continues_plan_id": a_id}
+    assert "· 3 layers" in c.stderr and f"same root: {a_id}" in c.stderr
+    assert "recent roots" not in c.stderr                                 # a root was given: nothing to choose from
+
+
+@pytest.mark.parametrize("root, says", [
+    ({"kind": "continues", "plan_id": "nope-20260101000000"}, "no plan nope-20260101000000"),
+    ({"kind": "sideways"}, "root.kind"),
+    ("new", "root must be an object"),
+])
+def test_a_root_that_cannot_be_recorded_stops_the_publish_before_anything_is_written(tmp_path, tmp_db, scripts_dir, root, says):
+    r = _publish_tracked(tmp_path, tmp_db, scripts_dir, "rootbad", root=root)
+    assert r.returncode == 1 and says in r.stderr
+    c = _sqlite.connect(str(tmp_db))
+    assert c.execute("SELECT COUNT(*) FROM Plans WHERE plan_id LIKE 'rootbad-%'").fetchone()[0] == 0
+    c.close()
+
+
+def test_a_projectless_plan_gets_an_unknown_root_and_no_list(tmp_path, tmp_db, scripts_dir):
+    p = tmp_path / "in.json"; p.write_text(_json.dumps(_valid_input_dict()))
+    r = _run_publish(scripts_dir, p, tmp_db)
+    assert r.returncode == 0, r.stderr
+    assert _root_row(tmp_db, _json.loads(r.stdout)["plan_id"])["kind"] == "unknown" and "recent roots" not in r.stderr

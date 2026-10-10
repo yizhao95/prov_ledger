@@ -74,6 +74,7 @@ def test_schema_required_and_enums_match_the_validator():
     assert set(exp["properties"]["target_kind"]["enum"]) == mod.VALID_TARGET_KINDS
     channel = exp["properties"]["channel"]
     assert set(channel["anyOf"][0]["enum"]) == mod.VALID_CHANNELS
+    assert set(SCHEMA["properties"]["root"]["properties"]["kind"]["enum"]) == set(mod.ROOT_KINDS)
     assert re.fullmatch(channel["anyOf"][1]["pattern"], "metric:auc")
     assert not re.fullmatch(channel["anyOf"][1]["pattern"], "metric:")
     assert {"target", "target_kind", "claim", "channel"} <= set(exp["required"])

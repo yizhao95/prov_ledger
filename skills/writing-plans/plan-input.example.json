@@ -8,6 +8,8 @@
 
   "user_query": "we keep getting paged for /api/health returning 200 even when DB is wedged — give me a deep health check",
 
+  "root": {"kind": "new", "basis": "on-call is paged while /api/health says 200 with the database wedged"},
+
   "skills": [
     {"name": "writing-plans",                  "source": "iron-law"},
     {"name": "executing-plans",                "source": "iron-law"},
