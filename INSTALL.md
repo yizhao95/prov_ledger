@@ -25,7 +25,7 @@ Or from a shell:
 ```bash
 claude plugin marketplace add yizhao95/prov_ledger
 claude plugin install provledger@provledger
-claude plugin list          # provledger@provledger · Version: 0.4.7 · Status: ✔ enabled
+claude plugin list          # provledger@provledger · Version: 0.4.8 · Status: ✔ enabled
 ```
 
 Dependencies install themselves on first session: a background `SessionStart`

@@ -23,7 +23,7 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Iterator, Optional
 
-TOOL_VERSION = "0.4.7"
+TOOL_VERSION = "0.4.8"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS node_type (
