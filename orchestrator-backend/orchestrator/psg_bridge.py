@@ -147,6 +147,40 @@ def _changed_node_keys(psg_db_path: str | None, plan_id: str) -> list[dict]:
     return list(out.values())
 
 
+def plans_that_changed(psg, node_keys) -> dict[str, list[str]]:
+    """{node_key: [plan_id, ...]}: the plans whose runs changed each node, in run
+    order — the history points a task reason reaches a node through (task-level
+    redesign, step 3a). Same rule as changed_node_keys: added / removed, or
+    changed with a struct_sig change; a match or an identity event is not a
+    change. `psg` is a path or an open connection; {} without a graph."""
+    keys = [k for k in dict.fromkeys(node_keys or []) if k]
+    if not keys or psg is None:
+        return {}
+    sql = (f"SELECT e.node_key, e.event_type, e.payload_json, a.plan_id FROM node_event e "
+           f"JOIN analysis_run a ON a.id = e.run_id WHERE e.node_key IN ({','.join('?' * len(keys))}) "
+           f"AND e.event_type IN (?, ?, ?) AND a.plan_id IS NOT NULL ORDER BY e.run_id, e.seq")
+    params = (*keys, *CHANGED_EVENTS)
+    if isinstance(psg, sqlite3.Connection):
+        try:
+            rows = psg.execute(sql, params).fetchall()
+        except sqlite3.Error:
+            rows = []
+    else:
+        rows = _query(psg, sql, params)
+    out: dict[str, list[str]] = {}
+    for node_key, event_type, payload, plan_id in rows:
+        if event_type == "node_changed":
+            try:
+                if "struct_sig" not in json.loads(payload or "{}").get("changed", []):
+                    continue
+            except ValueError:
+                continue
+        plans = out.setdefault(node_key, [])
+        if plan_id not in plans:
+            plans.append(plan_id)
+    return out
+
+
 def node_key_of(psg_db_path: str | None, qualified_name: str) -> str | None:
     """The node_key behind a qualified name (latest snapshot carrying it), so a
     reason recorded under an old name still resolves after a rename."""

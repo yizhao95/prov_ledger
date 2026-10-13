@@ -84,7 +84,8 @@ def _line(rec: dict, st: dict) -> str:
     text = (rec.get("text") or "").replace("\n", " ")
     cut = rec.get("text_cut") or 0
     tail = f"\n    … [+{cut} chars cut of {rec.get('text_chars')} — `provledger record #{rec['id']}` reads it whole]" if cut else ""
-    return (f"#{rec['id']} · {rec['tier']} · {LEVEL_LABELS.get(rec.get('evidence_level'), rec.get('evidence_level') or '?')} · "
+    task = f" · task reason of {rec['task_of']}" if rec.get("task_of") else ""
+    return (f"#{rec['id']} · {rec['tier']}{task} · {LEVEL_LABELS.get(rec.get('evidence_level'), rec.get('evidence_level') or '?')} · "
             f"{(rec.get('occurred_at') or '')[:16]} · shown {st.get('shown', 0)} · {adopted}{_corrects(rec)}\n    {text}{tail}")
 
 
@@ -151,14 +152,20 @@ def search(conn, *, project: str, query: str, limit: int = 20) -> tuple[list[dic
 
 # ── the lists: --pending / --never-read ──────────────────────────────────────
 
-def pending(conn, *, project: str, anchors: list[str] | None = None, limit: int = 50) -> list[dict]:
-    """Unstated slots (the gaps): of the target when anchors are given, else of the project."""
+def pending(conn, *, project: str, anchors: list[str] | None = None, limit: int = 50,
+            psg_db_path: str | None = None) -> list[dict]:
+    """Unstated slots (the gaps): of the target when anchors are given, else of
+    the project. With anchors and a graph, the unstated task reasons of the plans
+    that changed the target count too (task-level redesign, step 3a)."""
     sql = ("SELECT id, node_key, plan_id, role, tier, evidence_level, recorded_by, occurred_at, NULL AS text, supersedes "
            "FROM change_reason_v WHERE project = ? AND tier = 'unstated' AND superseded_by IS NULL")
     params: list = [project]
     if anchors:
-        sql += f" AND node_key IN ({','.join('?' * len(anchors))})"
-        params += anchors
+        from . import reasons
+        tasks = list(reasons.task_reasons_for(conn, psg_db_path, anchors)) if psg_db_path else []
+        sql += (f" AND (node_key IN ({','.join('?' * len(anchors))})"
+                + (f" OR id IN ({','.join('?' * len(tasks))})" if tasks else "") + ")")
+        params += [*anchors, *tasks]
     rows = conn.execute(sql + " ORDER BY id DESC LIMIT ?", (*params, limit)).fetchall()
     return [dict(zip(("id", "node_key", "plan_id", "role", "tier", "evidence_level", "recorded_by", "occurred_at", "text", "supersedes"), r))
             for r in rows]
@@ -235,7 +242,7 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
             doc["records"] = []
         else:
             anchors = ([tp.node_key] if tp.node_key else []) + [n for n in tp.identity_chain if n]
-            allrecs = context_pack._records(conn, project, anchors)
+            allrecs = context_pack._records(conn, project, anchors, psg)
             cons_all = [r for r in allrecs if r["role"] == "constraint"]
             cons_active = [r for r in cons_all if r["state"] == "active" and r["superseded_by"] is None]
             rej_all = [r for r in allrecs if r["role"] == "rejected_path"]
@@ -265,7 +272,8 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
                 st = stats_for(conn, [r["id"] for r in items])
                 for r in items:
                     if r.get("tier") == "unstated":
-                        lines.append(f" #{r['id']} · unstated · {r['plan_id']} · {(r['occurred_at'] or '')[:16]}{_corrects(r)}")
+                        task = " task reason" if r.get("task_of") else ""
+                        lines.append(f" #{r['id']} · unstated{task} · {r['plan_id']} · {(r['occurred_at'] or '')[:16]}{_corrects(r)}")
                         continue
                     lines.append(" " + _line(r, st.get(r["id"], {})))
                     shown.append(r["id"])

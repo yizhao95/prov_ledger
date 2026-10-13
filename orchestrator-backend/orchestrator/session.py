@@ -172,9 +172,11 @@ def on_stop(conn, data: dict, *, orch_db_path: str | None = None, commit: bool =
 # ── after the refresh: the rules, the backstop, a headline nobody prints ────
 
 def evaluate_session(conn, *, project: str, session_id: str, psg_db_path: str | None, commit: bool = False) -> dict:
-    from . import checks, context_pack, reasons, triggers
+    from . import checks, context_pack, external_trigger, reasons
     pid = session_plan_id(session_id)
-    trig = triggers.evaluate(conn, project=project, plan_id=pid, psg_db_path=psg_db_path, ask=True, commit=False)
+    # task-level redesign (step 3a): no per-node rules; the external log as before
+    trig = {"external": external_trigger.evaluate_external(conn, project=project, plan_id=pid, psg_db_path=psg_db_path,
+                                                           mode="off", commit=False)}
     n_unstated = reasons.backstop_unstated(conn, project=project, plan_id=pid, psg_db_path=psg_db_path, commit=False)
     changed = psg_bridge.changed_node_keys(psg_db_path, pid)
     doc = None

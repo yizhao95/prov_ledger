@@ -183,21 +183,11 @@
    "type": "node_added"
   },
   {
-   "node": "pkg.pipeline.dedupe",
+   "node": null,
    "plan": "t1",
    "run": 2,
    "source": "agent",
-   "text": "new step: duplicate ids double-counted revenue",
-   "text_is": "stated",
-   "tier": "asserted",
-   "type": "reason"
-  },
-  {
-   "node": "pkg.pipeline.main",
-   "plan": "t1",
-   "run": 2,
-   "source": "agent",
-   "text": "wires dedupe between clean and split",
+   "text": "duplicate ids double-counted revenue, so a dedupe step now runs between clean and split",
    "text_is": "stated",
    "tier": "asserted",
    "type": "reason"

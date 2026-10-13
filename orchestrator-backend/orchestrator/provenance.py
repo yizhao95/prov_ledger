@@ -302,8 +302,9 @@ def insert_reason(conn, *, project: str, plan_id: str, node_key: str | None, kin
     there is deliberately no way to pass it, and no way to pass recorded_at."""
     if kind not in KINDS or role not in ROLES or recorded_by not in RECORDED_BY:
         raise ValueError(f"bad kind/role/recorded_by {kind!r}/{role!r}/{recorded_by!r}")
-    if node_key is None and role != "rejected_path":
-        raise ValueError("a reason needs a node_key (only a rejected_path may float)")
+    if node_key is None and role not in ("reason", "rejected_path"):
+        # a task's reason belongs to the plan (migration 036); a constraint names its code
+        raise ValueError(f"a {role} needs a node_key (only a reason and a rejected_path may float)")
     tier = derive_tier(verbatim=verbatim, rule_id=rule_id, interpretation=interpretation, statement=statement)
     if tier == "unstated" and rationale:
         raise ValueError("a rationale needs a statement or an interpretation to hang on")

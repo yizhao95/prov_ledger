@@ -22,7 +22,7 @@ name = "t1"
 goal = "loosen the qty filter while touching the split"
 declared_targets = ["pkg.pipeline.split"]
 change = { replace = { "pkg/pipeline.py" = [['r["qty"] > MIN_QTY', 'r["qty"] >= MIN_QTY']] } }
-reasons = { "pkg.pipeline.clean" = "zero-quantity rows are returns; kept for the report" }
+reasons = "zero-quantity rows are returns; kept for the report"
 
 [expect]
 events = [

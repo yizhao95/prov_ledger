@@ -132,6 +132,7 @@ def _record(conn, r: dict, stats: dict) -> dict:
             **({"quoted": (r.get("quoted") or "").replace("\n", " ").strip()} if r.get("quoted") else {}),
             # FL-238: the rows this one corrects; they are not in the table
             **({"corrects": provenance.supersedes_ids(r["supersedes"])} if r.get("supersedes") else {}),
+            **({"task_of": r["task_of"]} if r.get("task_of") else {}),
             "shown": shown, "adopted_by": sorted(adopted), "merged": len(merged), "merged_ids": merged,
             "plans": sorted(r.get("plans") or ([r["plan_id"]] if r.get("plan_id") else [])),
             "references": _references(conn, r["id"])}
@@ -247,7 +248,7 @@ def facts(conn, psg_db_path: str | None, chosen: list[str], *, project: str) -> 
                 status = "existing" if key else ("new" if graph_ok else "graph unavailable")
             chain = context_pack._identity_chain(pcon, key, qn)
             anchors = ([key] if key else []) + chain
-            recs = context_pack._records(conn, project, anchors)
+            recs = context_pack._records(conn, project, anchors, pcon)
             stats = _shown_and_adopted(conn, [r["id"] for r in recs])
             cons = [r for r in recs if r["role"] == "constraint" and r["state"] == "active" and r["superseded_by"] is None]
             rej = [r for r in recs if r["role"] == "rejected_path"]
@@ -318,6 +319,8 @@ LEGEND = (
     "  observed  measured — say what was measured and when\n"
     "  unstated  it changed and nobody said why — say exactly that, with the date; the goal of the "
     "task that changed it is the task's, not this node's reason\n"
+    "  task reason of <plan>  why the task of the plan that changed this node was done, recorded once "
+    "for the whole task — say \"<plan> changed it; that task was done because …\"\n"
     "  [#N] a record · [#rN] a source: a pointer (label, time, link), never its body — say \"a link "
     "to …\", and \"never checked\" or when it was last checked · [#iN] a plan that changed because of a record · "
     "[#eN] a change in the project graph · [#xN] / [#oN] an expectation and its outcome · "
@@ -338,7 +341,8 @@ def _source_line(ref: dict, indent: str) -> str:
 
 
 def _fmt_record(r: dict, indent: str = "  ") -> list[str]:
-    head = f"{indent}[{r['cite']}] {r['tier']} · {r.get('evidence_level') or '?'} · {(r.get('occurred_at') or '')[:10]}"
+    task = f" · task reason of {r['task_of']}" if r.get("task_of") else ""
+    head = f"{indent}[{r['cite']}] {r['tier']}{task} · {r.get('evidence_level') or '?'} · {(r.get('occurred_at') or '')[:10]}"
     plans = r.get("plans") or ([r["plan_id"]] if r.get("plan_id") else [])
     if plans:
         head += f" · plan{'s' if len(plans) > 1 else ''} {', '.join(plans)}"

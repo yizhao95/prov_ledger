@@ -220,18 +220,26 @@ def _history(conn, node_key: Optional[str], limit: int) -> List[Dict]:
     return out
 
 
-def _reasons(orch_conn, node_key: Optional[str]) -> List[Dict]:
+def _reasons(orch_conn, node_key: Optional[str], psg=None) -> List[Dict]:
+    """The node's live records, plus — with the graph connection — the task
+    reasons of the plans that changed it, marked `task_of` (step 3a)."""
     if orch_conn is None or not node_key:
         return []
     from orchestrator import provenance          # a corrected row is not a reason of the target (FL-238)
+    tasks: Dict[int, str] = {}
+    if psg is not None:
+        from orchestrator import reasons
+        tasks = reasons.task_reasons_for(orch_conn, psg, [node_key])
+    ids = ",".join("?" * len(tasks))
     try:
         rows = orch_conn.execute(
-            "SELECT node_key, plan_id, step_id, role, COALESCE(interpretation, statement), recorded_by, tier, recorded_at, evidence_level "
-            f"FROM change_reason_v r WHERE node_key = ? AND {provenance.live('r')} ORDER BY id", (node_key,)).fetchall()
+            "SELECT node_key, plan_id, step_id, role, COALESCE(interpretation, statement), recorded_by, tier, recorded_at, evidence_level, id "
+            f"FROM change_reason_v r WHERE (node_key = ?{f' OR id IN ({ids})' if tasks else ''}) AND {provenance.live('r')} "
+            "ORDER BY id", (node_key, *tasks)).fetchall()
     except sqlite3.OperationalError:      # orchestrator DB predates migration 018
         return []
     cols = ("node_key", "plan_id", "step_id", "kind", "text", "source", "tier", "created_at", "evidence_level")
-    return [dict(zip(cols, r)) for r in rows]
+    return [{**dict(zip(cols, r)), **({"task_of": tasks[r[-1]]} if r[-1] in tasks else {})} for r in rows]
 
 
 def _constraints(orch_conn, project: str, node_key: Optional[str], qualified_name: Optional[str] = None) -> List[Dict]:
@@ -264,7 +272,7 @@ def verify_symbol(conn, name: str, *, orch_conn=None, project: str = "",
     key = node["node_key"]
     extras = {"kind": node["kind"], "node_key": key,
               "history": _history(conn, key, history_limit),
-              "reasons": _reasons(orch_conn, key),
+              "reasons": _reasons(orch_conn, key, conn),
               "constraints": _constraints(orch_conn, project, key, node.get("qualified_name"))}
     nid = node["id"]
     if nid is None:                       # column / dataframe: identity + history only

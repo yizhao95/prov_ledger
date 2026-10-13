@@ -8,6 +8,42 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
+## Unreleased
+
+### Changed
+
+- **A plan's close records why the task was done, once.** Close-time reasons
+  were one per changed function or column; they are one per task now — why it
+  was done, who asked, what was not chosen — as a quote of the user's words
+  (`stated`), a reading (`asserted`) or `unstated`. A plan that did several
+  things records one reason per task, assigns each changed node to one of them,
+  and says in one sentence why they share the plan. `reason-fill` takes `tasks`
+  (and `bundle`); the per-node `reasons` list exits 2 and names the new shape.
+  `reason-slots` lists the changed nodes, the plan's root and the task reasons
+  already written. `review_run.py --reasons <file>` takes the same
+  `{"tasks": […], "bundle"?}`.
+- **Rules R0–R5 no longer write reasons at close.** They wrote one reason per
+  node (a sentence that named it, a test that failed and then passed, a pure
+  refactor, an anchored constraint, …); the task's reason carries the why now.
+  R6 still turns a failed step that a deviation recovered into a rejected path,
+  and the external trigger still logs one verdict per candidate. Rows written
+  before are kept and read as before.
+- **A plan nobody explained gets one `unstated` task reason**, not one per
+  changed node. The session close of the hooks-only mode does the same.
+- **The reads show the task reasons of the plans that changed a node.**
+  `provledger why`, the `/ledger` fact table, the `/receipts` timeline, the
+  context pack, the plan pre-flight and the evidence slots: for each node, the
+  task reasons of the plans whose runs changed it (the state graph's history),
+  marked `task reason of <plan>`. With several tasks, only the task the node
+  was assigned to. A node a plan only matched does not get its reason.
+
+### Migration
+
+- 036 rebuilds `change_reason` so a reason may have no node (a constraint still
+  names one), keeping every row, id and hash; it adds the append-only tables
+  `reason_node` (which task a node was assigned to) and `plan_bundle` (why
+  several tasks share a plan).
+
 ## 0.4.7 — 2026-10-09
 
 ### Added

@@ -84,7 +84,7 @@ class Recorder:
         if kind == self.timeout_on:
             raise subprocess.TimeoutExpired(cmd=args, timeout=kw.get("timeout"))
         if kind == "reason-slots":
-            stdout = json.dumps({"slots": [], "checklist": "(no slots)"}, indent=1) + "\n" + json.dumps({"ok": True, "op": kind}) + "\n"
+            stdout = json.dumps({"nodes": [], "tasks": [], "root": None, "run_id": None, "checklist": "0 changed node(s)"}, indent=1) + "\n" + json.dumps({"ok": True, "op": kind}) + "\n"
         else:
             stdout = json.dumps({"ok": True, "op": kind}) + "\n"
         return subprocess.CompletedProcess(args=args, returncode=0, stdout=stdout, stderr="")

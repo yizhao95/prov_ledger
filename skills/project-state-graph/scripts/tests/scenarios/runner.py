@@ -224,13 +224,15 @@ def close(ws: Workspace, plan_id: str, task: dict) -> dict:
     if not child:
         row = ws.read_orch("SELECT status, review_state, review_skip_reason FROM Plans WHERE plan_id = ?", plan_id)[0]
         return {"closed": row["status"], "review_state": row["review_state"], "review_skipped": row["review_skip_reason"],
-                "slots": 0, "filled": 0, "unstated": 0, "reviewed": False}
+                "nodes": 0, "tasks": 0, "unstated": 0, "reviewed": False}
     reasons = task.get("reasons", "unstated")
-    if isinstance(reasons, dict):
+    if isinstance(reasons, dict) or reasons not in ("stub", "unstated"):
         f = ws.root / f"reasons-{task['name']}.json"
-        # DP phase 1: a scenario author's sentence is an interpretation (asserted) — only a
-        # recorded utterance span could be stated, and no scenario speaks as the user
-        f.write_text(json.dumps([{"qualified_name": k, "interpretation": v} for k, v in reasons.items()], ensure_ascii=False))
+        # one reason per task (step 3a). A scenario author's sentence is an
+        # interpretation (asserted) — only a recorded utterance span could be
+        # stated, and no scenario speaks as the user. A table is passed as it is.
+        doc = reasons if isinstance(reasons, dict) else {"tasks": [{"interpretation": reasons}]}
+        f.write_text(json.dumps(doc, ensure_ascii=False))
         reasons = str(f)
     cmd = [sys.executable, str(REVIEW_RUN), "--plan-id", plan_id, "--project", ws.project, "--json",
            "--reasons", reasons]

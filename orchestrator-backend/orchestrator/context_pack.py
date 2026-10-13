@@ -212,10 +212,29 @@ def _retired_declarations(conn, psg, project: str, qn: str | None) -> list[dict]
     return out
 
 
-def _records(conn, project: str, anchors: list[str]) -> list[dict]:
+def _records(conn, project: str, anchors: list[str], psg=None) -> list[dict]:
+    """The live records of these anchors, newest first: the rows written on the
+    node, and — with a graph (`psg`, a path or an open connection) — the task
+    reasons of the plans that changed it, each marked `task_of` its plan
+    (task-level redesign, step 3a)."""
     if not anchors:
         return []
-    ph = ",".join("?" * len(anchors))
+    rows = _record_rows(conn, project, "r.node_key", list(anchors))
+    if psg is not None:
+        from . import reasons
+        tasks = reasons.task_reasons_for(conn, psg, anchors)
+        have = {r["id"] for r in rows}
+        extra = _record_rows(conn, project, "r.id", [i for i in tasks if i not in have])
+        for r in extra:
+            r["task_of"] = tasks[r["id"]]
+        rows = sorted(rows + extra, key=lambda r: r["id"], reverse=True)
+    return rows
+
+
+def _record_rows(conn, project: str, column: str, values: list) -> list[dict]:
+    if not values:
+        return []
+    ph = ",".join("?" * len(values))
     return [dict(r) for r in conn.execute(
         f"SELECT r.id, r.node_key, r.plan_id, r.step_id, r.role, r.tier, r.evidence_level, r.rule_id, r.state, r.superseded_by, r.supersedes, "
         f"       r.recorded_by, r.significance_eff AS significance, r.occurred_at, r.statement, "
@@ -229,7 +248,7 @@ def _records(conn, project: str, anchors: list[str]) -> list[dict]:
         f"       CASE WHEN r.verbatim_utterance_id IS NOT NULL AND (r.interpretation IS NOT NULL OR r.statement IS NOT NULL) "
         f"            THEN substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start) END AS quoted "
         f"FROM change_reason_v r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "
-        f"WHERE r.project = ? AND r.node_key IN ({ph}) AND {provenance.live('r')} ORDER BY r.id DESC", (project, *anchors))]
+        f"WHERE r.project = ? AND {column} IN ({ph}) AND {provenance.live('r')} ORDER BY r.id DESC", (project, *values))]
 
 
 def _slim(r: dict) -> dict:
@@ -252,6 +271,7 @@ def _slim(r: dict) -> dict:
             # like `text` and, like `text`, saying how much was cut — a new field
             # that truncated in silence would be FL-154 a second time.
             **({"corrects": provenance.supersedes_ids(r["supersedes"])} if r.get("supersedes") else {}),
+            **({"task_of": r["task_of"]} if r.get("task_of") else {}),
             **({"quoted": (r["quoted"] or "")[:CAP_TEXT],
                 "quoted_chars": len(r["quoted"] or ""),
                 "quoted_cut": max(0, len(r["quoted"] or "") - CAP_TEXT)} if r.get("quoted") else {})}
@@ -313,7 +333,7 @@ def build(conn, *, project: str, targets: list[str], psg_db_path: str | None = N
             tp = TargetPack(qualified_name=qn, node_key=key, status="existing" if key else "new")
             tp.identity_chain = _identity_chain(psg, key, qn)
             anchors = ([key] if key else []) + tp.identity_chain
-            recs = _records(conn, project, anchors)
+            recs = _records(conn, project, anchors, psg)
             cons = [r for r in recs if r["role"] == "constraint" and r["state"] == "active" and r["superseded_by"] is None]
             rej = [r for r in recs if r["role"] == "rejected_path"]
             # An `unstated` row is a SLOT, not a reason: it has no words by

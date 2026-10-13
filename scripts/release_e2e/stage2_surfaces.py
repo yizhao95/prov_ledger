@@ -536,14 +536,12 @@ def main() -> int:
          "kind 3/4 · an expectation has an observed outcome to contradict its claim"),
         (shape["failed_steps_in_completed_plans"] >= 1,
          "kind 4/4 · a FAILED step sits inside a plan that closed COMPLETED"),
-        (shape["unstated"] >= 1,
-         "at least one slot nobody ever explained is `unstated`"),
-        (bool(facts.get("never_explained")),
-         "the unexplained slot has a name a question can use"),
     ):
         t.record(OK if need else FAIL, label,
                  "" if need else "without it the questions that go looking for it prove nothing "
                                  "and stage 3's grading is meaningless")
+    for ok, label, detail in DP.absence_checks(facts):
+        t.record(OK if ok else FAIL, label, "" if ok else detail)
     for ok, label, detail in DP.root_checks(facts):
         t.record(OK if ok else FAIL, label, "" if ok else detail)
 

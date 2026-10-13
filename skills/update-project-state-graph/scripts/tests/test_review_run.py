@@ -133,7 +133,7 @@ def test_happy_path_locks_sha_before_refresh_and_fills_stub_reasons(ws):
     assert p.returncode == 0, p.stdout + p.stderr
     out = _json_tail(p)
     assert out["closed"] == "COMPLETED" and out["verdict"] is True
-    assert out["slots"] == 1 and out["filled"] == 1 and out["unstated"] == 0
+    assert (out["nodes"], out["tasks"], out["unstated"]) == (1, 1, 0)       # one reason for the plan's task (step 3a)
     assert out["refreshed_sha"] == head
     assert ws.plan(plan_id) == ("COMPLETED", "reviewed")
     # step 0: the lock line names the PRE-refresh sha and sits in the review step's log
@@ -144,7 +144,7 @@ def test_happy_path_locks_sha_before_refresh_and_fills_stub_reasons(ws):
     assert child_status == "COMPLETED"
     assert "tests skipped" in child_log.lower()            # no --tests given -> logged, not silent
     (nk, text), = ws.reasons(plan_id)
-    assert text.startswith("scenario:") and "node_changed" in text
+    assert nk is None and text.startswith("scenario:") and "node_changed" in text
 
 
 def test_tests_command_failure_fails_the_review(ws):
@@ -158,33 +158,38 @@ def test_tests_command_failure_fails_the_review(ws):
     assert status == "FAILED" and "boom" in log
 
 
-def test_reasons_unstated_writes_null_for_every_slot(ws):
+def test_reasons_unstated_writes_one_unstated_task(ws):
     ws.change(BODY_CHANGE)
     plan_id = ws.needs_review_plan()
     p = ws.review_run(plan_id, "--reasons", "unstated")
     assert p.returncode == 0, p.stdout + p.stderr
     out = _json_tail(p)
-    assert (out["slots"], out["filled"], out["unstated"]) == (1, 0, 1)
-    assert [t for _, t in ws.reasons(plan_id)] == [None]
+    assert (out["nodes"], out["tasks"], out["unstated"]) == (1, 1, 1)
+    assert ws.reasons(plan_id) == [(None, None)]
     assert ws.plan(plan_id) == ("COMPLETED", "reviewed")
 
 
-def test_reasons_file_unknown_key_exits_6_then_resumes(ws, tmp_path):
+def test_reasons_file_unknown_node_exits_6_then_resumes(ws, tmp_path):
     ws.change(BODY_CHANGE)
     plan_id = ws.needs_review_plan()
-    p = ws.review_run(plan_id, "--reasons", "ask")               # look at the checklist first
+    p = ws.review_run(plan_id, "--reasons", "ask")               # look at the nodes and the root first
     assert p.returncode == 6, p.stdout + p.stderr
-    assert "pipeline.run" in (p.stdout + p.stderr)
+    assert "pipeline.run" in (p.stdout + p.stderr) and "tasks" in (p.stdout + p.stderr)
     assert ws.step(f"{plan_id}-REVIEW.1")[0] == "IN_PROGRESS"
+    old = tmp_path / "old.json"                                   # the per-node list of before step 3a
+    old.write_text(json.dumps([{"qualified_name": "pipeline.run", "interpretation": "x"}]))
+    p = ws.review_run(plan_id, "--reasons", str(old))
+    assert p.returncode == 6 and '{"tasks"' in (p.stdout + p.stderr), p.stdout + p.stderr
     bad = tmp_path / "bad.json"
-    bad.write_text(json.dumps([{"qualified_name": "pipeline.nope", "text": "x"}]))
+    bad.write_text(json.dumps({"bundle": "one review", "tasks": [{"interpretation": "a"},
+                                                                 {"interpretation": "b", "nodes": ["pipeline.nope"]}]}))
     p = ws.review_run(plan_id, "--reasons", str(bad))
     assert p.returncode == 6, p.stdout + p.stderr
     assert "pipeline.nope" in (p.stdout + p.stderr)
     assert ws.step(f"{plan_id}-REVIEW.1")[0] == "IN_PROGRESS"     # nothing closed, nothing written
     assert ws.reasons(plan_id) == []
     good = tmp_path / "good.json"
-    good.write_text(json.dumps([{"qualified_name": "pipeline.run", "text": "loosened for the test"}]))
+    good.write_text(json.dumps({"tasks": [{"interpretation": "loosened for the test"}]}))
     runs_before = ws.runs()
     p = ws.review_run(plan_id, "--reasons", str(good))          # resumes at 4c: no second refresh
     assert p.returncode == 0, p.stdout + p.stderr
@@ -264,7 +269,7 @@ def test_resume_redoes_the_refresh_when_the_registry_is_behind_head(ws):
     assert out["closed"] == "COMPLETED" and out["verdict"] is True and out["refreshed_sha"] == head
     assert ws.runs() == runs_before + 1                          # the refresh happened exactly once
     assert ws.registered_sha() == head
-    assert out["slots"] == 1 and out["filled"] == 1
+    assert out["nodes"] == 1 and out["tasks"] == 1
     status, log = ws.step(f"{plan_id}-REVIEW.1")
     assert status == "COMPLETED" and "[resume]" in log and "refresh" in log.lower()
 
@@ -322,11 +327,11 @@ def test_as_recovery_reruns_the_review_under_a_recovery_sub_step(ws):
     p = ws.review_run(plan_id, "--reasons", "stub", "--as-recovery", f"{child}.1")     # resume at 4c as the same sub-step
     assert p.returncode == 0, p.stdout + p.stderr
     out = _json_tail(p)
-    assert out["closed"] == "COMPLETED" and out["slots"] == 1 and out["filled"] == 1
+    assert out["closed"] == "COMPLETED" and out["nodes"] == 1 and out["tasks"] == 1
     assert ws.runs() == runs_before + 1 and ws.registered_sha() == head
     assert ws.plan(plan_id) == ("COMPLETED", "reviewed")
     assert ws.step(f"{child}.1")[0] == "COMPLETED" and ws.step(child)[0] == "FAILED"
-    assert [t for _, t in ws.reasons(plan_id)] and all(t for _, t in ws.reasons(plan_id))   # stated, not backstopped
+    assert [t for _, t in ws.reasons(plan_id)] and all(t for _, t in ws.reasons(plan_id))   # written, not backstopped
     assert "[REVIEW LOCK]" in ws.step(f"{child}.1")[1]
 
 

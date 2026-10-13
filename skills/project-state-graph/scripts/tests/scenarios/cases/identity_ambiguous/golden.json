@@ -257,17 +257,7 @@
    "type": "identity_ambiguous"
   },
   {
-   "node": "pkg.pipeline.norm_a",
-   "plan": "t1",
-   "run": 2,
-   "source": "agent",
-   "text": "scenario: node_added",
-   "text_is": "stated",
-   "tier": "asserted",
-   "type": "reason"
-  },
-  {
-   "node": "pkg.pipeline.norm_b",
+   "node": null,
    "plan": "t1",
    "run": 2,
    "source": "agent",

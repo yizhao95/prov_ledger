@@ -58,9 +58,10 @@ def spoken(conn):
     return {"utterance": uid, "reference": ref}
 
 
-def _fill(conn, psg, uid, span=(0, 26), node_key="nk_a"):
-    return reasons.fill(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg,
-                        reasons=[{"node_key": node_key, "utterance_id": uid, "span": list(span)}])
+def _fill(conn, psg, uid, span=(0, 26)):
+    """A stated task reason (close-time reasons are per task since step 3a)."""
+    return reasons.fill_tasks(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg,
+                              tasks=[{"utterance_id": uid, "span": list(span)}])
 
 
 def _links(conn, reference_id):
@@ -69,9 +70,8 @@ def _links(conn, reference_id):
         "ORDER BY COALESCE(reason_id, 0), COALESCE(utterance_id, 0)", (reference_id,))]
 
 
-def _reason_of(conn, node_key="nk_a"):
-    return conn.execute("SELECT id FROM change_reason WHERE plan_id = 'P1' AND node_key = ? ORDER BY id DESC LIMIT 1",
-                        (node_key,)).fetchone()[0]
+def _reason_of(conn):
+    return conn.execute("SELECT id FROM change_reason WHERE plan_id = 'P1' ORDER BY id DESC LIMIT 1").fetchone()[0]
 
 
 # ── (a) the pointer follows the words ───────────────────────────────────────
@@ -176,24 +176,26 @@ def test_words_carrying_no_pointer_carry_nothing_and_raise_nothing(conn, psg):
 
 
 def test_an_asserted_answer_carries_nothing_because_it_quotes_nobody(conn, psg, spoken):
-    reasons.fill(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg,
-                 reasons=[{"node_key": "nk_a", "interpretation": "EMEA excluded from the Q3 rollup"}])
+    reasons.fill_tasks(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg,
+                       tasks=[{"interpretation": "EMEA excluded from the Q3 rollup"}])
     rid = _reason_of(conn)
     assert conn.execute("SELECT COUNT(*) FROM reference_link WHERE reason_id = ?", (rid,)).fetchone()[0] == 0
     assert pv.get_reason(conn, rid)["evidence_level"] == "task_context"
 
 
 def test_an_unstated_answer_carries_nothing(conn, psg, spoken):
-    reasons.fill(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg,
-                 reasons=[{"node_key": "nk_a", "unstated": True}])
+    reasons.fill_tasks(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg,
+                       tasks=[{"unstated": True}])
     rid = _reason_of(conn)
     assert conn.execute("SELECT COUNT(*) FROM reference_link WHERE reason_id = ?", (rid,)).fetchone()[0] == 0
 
 
 def test_two_reasons_quoting_the_same_words_each_get_their_own_link(conn, psg, spoken):
-    _fill(conn, psg, spoken["utterance"], node_key="nk_a")
-    _fill(conn, psg, spoken["utterance"], node_key="nk_b")
-    rids = {_reason_of(conn, "nk_a"), _reason_of(conn, "nk_b")}
+    out = reasons.fill_tasks(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg, bundle="one review",
+                             tasks=[{"utterance_id": spoken["utterance"], "span": [0, 26]},
+                                    {"utterance_id": spoken["utterance"], "span": [0, 26], "nodes": ["nk_b"]}])
+    rids = set(out["reason_ids"])
+    assert len(rids) == 2
     got = {l["reason_id"] for l in _links(conn, spoken["reference"]) if l["reason_id"]}
     assert got == rids
     for rid in rids:
@@ -240,8 +242,9 @@ def test_reference_hits_still_find_a_pointer_anchored_to_the_reason(conn, spoken
 
 
 def test_a_pointer_carried_across_is_not_counted_twice(conn, psg, spoken):
-    _fill(conn, psg, spoken["utterance"])
-    rid = _reason_of(conn)
+    # a node-anchored reason (as written before 036): locate reads node-anchored reasons
+    rid = pv.insert_reason(conn, project="proj", plan_id="P1", node_key="nk_a", kind="technical",
+                           verbatim=(spoken["utterance"], 0, 26), recorded_by="agent")
     hits = [h for h in locate._reference_hits(conn, "proj", ["q3"], 20) if h[0] == rid]
     assert len(hits) == 1, hits
 

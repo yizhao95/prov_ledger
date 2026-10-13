@@ -197,14 +197,14 @@ def test_one_task_through_publish_run_steps_close_and_collect(tmp_path):
     task = {"name": "t1", "goal": "loosen the qty filter", "declared_targets": ["pkg.pipeline.clean"],
             "change": {"files": {"pkg/pipeline.py": src.replace("df.qty > 0", "df.qty > 5")}},
             "expectations": [{"target": "pkg.pipeline.clean", "target_kind": "node", "claim": "fewer rows dropped", "channel": "graph"}],
-            "reasons": {"pkg.pipeline.clean": "loosened for Q3"}}
+            "reasons": "loosened for Q3"}
     result = runner.run_scenario(ws, {"scenario": {"name": "unit"}, "tasks": [task]})
     t1 = result["tasks"][0]
-    assert t1["name"] == "t1" and t1["close"]["closed"] == "COMPLETED" and t1["close"]["slots"] == 1
+    assert t1["name"] == "t1" and t1["close"]["closed"] == "COMPLETED" and t1["close"]["nodes"] == 1
     norm = result["norm"]
     errs = runner.check_expect(norm, {
         "events": [{"plan": "t1", "type": "node_changed", "node": "pkg.pipeline.clean", "changed": ["struct_sig"]},
-                   {"plan": "t1", "type": "reason", "node": "pkg.pipeline.clean", "text_is": "stated", "text": "loosened for Q3"},
+                   {"plan": "t1", "type": "reason", "node": None, "text_is": "stated", "text": "loosened for Q3"},   # the task's
                    {"plan": "t1", "type": "expectation", "target": "pkg.pipeline.clean", "channel": "graph"},
                    {"plan": "t1", "type": "plan", "closed": "COMPLETED", "review_state": "reviewed", "project": "scn", "project_source": "cwd"},
                    {"plan": "t1", "type": "review_log", "step": "REVIEW", "tag": "[REVIEW LOCK]"}],

@@ -1,16 +1,17 @@
-"""reasons — close-time, closed-form capture of WHY a plan changed each data point.
+"""reasons — close-time capture of WHY a plan was done, once per task.
 
-Spec §2.8 + decision provenance phase 1. When a registered-project plan
-closes, the nodes its runs changed (psg_bridge.changed_node_keys) become a
-closed checklist. The review agent answers each slot with exactly one of
-three shapes — a span of the user's recorded words (stated), an
-interpretation with optional references (asserted), or an explicit
-`unstated` — and the tier follows the shape, never the sender (A2/A4: the
-old free-text shape is refused). Whatever is left unanswered at close is
-backstopped as an `unstated` change_reason by the system so the gap is
-visible (state `unknown` when the project closes in pending mode). Deviation
-justifications and failure reasons become `rejected_path` rows anchored to
-the changed node their step talked about. Nothing here ever blocks a close.
+Spec §2.8 + decision provenance, reshaped by the task-level redesign (step 3a):
+a plan is a task, and its close records why the task was done — the root, what
+was seen along the way, what was not chosen — with exactly one of three shapes:
+a span of the user's recorded words (stated), an interpretation with optional
+references (asserted), or an explicit `unstated`. The tier follows the shape,
+never the sender. When a plan did several things, each gets its own reason, the
+changed nodes are assigned to one of them, and one sentence says why they share
+a plan. The nodes reach their task's reason through the state graph's history
+(covering_task_reasons); nothing is copied onto them. A plan nobody explained is
+backstopped with one `unstated` task reason by the system. Failed steps and
+deviations become `rejected_path` rows (rule R6). Nothing here ever blocks a
+close.
 """
 from __future__ import annotations
 
@@ -108,82 +109,211 @@ def _answer_kind(item: dict) -> str:
     return "unstated"
 
 
+PER_NODE_SHAPE = ("close-time reasons are per task now: send tasks: [{interpretation | utterance_id+span | unstated, "
+                  "nodes?, refs?, because?}] (and a bundle sentence when there are several), not one item per node_key")
+
+
 def fill(conn, *, project: str, plan_id: str, run_id: int | None, reasons: list[dict],
          source: str = "agent", step_id: str | None = None, psg_db_path: str | None = None) -> dict:
-    """Record the answers into change_reason. Each item is exactly one of
-      {node_key, utterance_id, span:[s,e]}        -> stated   (a span of the user's recorded words)
-      {node_key, interpretation, refs?:[ref_id]}  -> asserted (the agent's or a person's reading)
-      {node_key, unstated: true}                  -> unstated (an explicit gap)
-    Any shape may add because: [reason_id, ...] — the records this change
-    leaned on — which become influence rows (via reason_because).
-    The old {node_key, text} shape is refused (FillInputError, exit 2) — free
-    text can no longer become stated, whoever sends it (A2/A4). Keys outside
-    the plan's change set are refused all-or-nothing; the shapes are checked
-    before anything is written."""
-    kinds = [_answer_kind(r) for r in reasons]                     # shape errors first, nothing written
+    """The per-node close (one reason per changed node) is gone (task-level
+    redesign, step 3a): a plan's reasons are per task, see fill_tasks."""
+    raise FillInputError(PER_NODE_SHAPE)
+
+
+# ── task-level redesign, step 3a: one reason per task ─────────────────────────
+
+def _task_kind(item) -> str:
+    """stated | asserted | unstated for one task, or FillInputError."""
+    if not isinstance(item, dict):
+        raise FillInputError("a task is an object: {interpretation | utterance_id+span | unstated, nodes?, refs?, because?}")
+    if "node_key" in item:
+        raise FillInputError(PER_NODE_SHAPE)
+    nodes = item.get("nodes")
+    if nodes is not None and not (isinstance(nodes, list) and all(isinstance(n, str) and n for n in nodes)):
+        raise FillInputError("a task's nodes are a list of node keys or qualified names")
+    return _answer_kind({**item, "node_key": "task"})
+
+
+def _changed(psg, plan_id: str) -> list[dict]:
+    return psg_bridge.changed_node_keys(psg, plan_id) if psg else []
+
+
+def fill_tasks(conn, *, project: str, plan_id: str, run_id: int | None, tasks: list[dict], bundle: str | None = None,
+               source: str = "agent", step_id: str | None = None, psg_db_path: str | None = None) -> dict:
+    """Record why the plan was done, once per task. Each task is exactly one of
+      {utterance_id, span:[s,e]}        -> stated   (a span of the user's recorded words)
+      {interpretation, refs?:[ref_id]}  -> asserted (a reading: the root, what was seen, what was not chosen)
+      {unstated: true}                  -> unstated (nobody said)
+    plus because: [reason_id, ...] (influence, via reason_because). One task
+    covers every node the plan changed. Several tasks name their nodes — node
+    keys or qualified names of the plan's changed nodes, each in one task — all
+    but one, which takes the rest; a `bundle` sentence then says why they share
+    the plan. Everything is checked before anything is written; a node the plan
+    did not change comes back in unknown_nodes and nothing is written."""
+    if not isinstance(tasks, list) or not tasks:
+        raise FillInputError("a close needs at least one task")
+    kinds = [_task_kind(t) for t in tasks]
+    several = len(tasks) > 1
+    if several:
+        if not (isinstance(bundle, str) and bundle.strip()):
+            raise FillInputError("several tasks in one plan need a bundle sentence: why they share the plan")
+        if sum(1 for t in tasks if not t.get("nodes")) > 1:
+            raise FillInputError("with several tasks, every task but one names its nodes; the one that does not takes the rest")
     psg = psg_db_path if psg_db_path is not None else psg_bridge.db_path_for(project)
-    changed = {c["node_key"] for c in psg_bridge.changed_node_keys(psg, plan_id)}
-    unknown = [r.get("node_key") for r in reasons if r.get("node_key") not in changed]
+    changed = _changed(psg, plan_id)
+    by_name = {c["node_key"]: c["node_key"] for c in changed}
+    by_name.update({c["qualified_name"]: c["node_key"] for c in changed if c.get("qualified_name")})
+    unknown, seen, assigned = [], {}, []
+    for i, t in enumerate(tasks):
+        keys = []
+        for n in (t.get("nodes") or []) if several else []:
+            k = by_name.get(n)
+            if k is None:
+                unknown.append(n)
+                continue
+            if k in seen and seen[k] != i:
+                raise FillInputError(f"{k} is named by two tasks; a node belongs to one")
+            seen[k] = i
+            keys.append(k)
+        assigned.append(keys)
+    out = {"tasks": 0, "stated": 0, "asserted": 0, "unstated": 0, "adopted": 0, "unknown_nodes": unknown, "reason_ids": []}
     if unknown:
-        return {"filled": 0, "stated": 0, "asserted": 0, "unstated": 0, "adopted": 0, "unknown_keys": unknown}
+        return out
     recorded_by = source if source in provenance.RECORDED_BY else "agent"
-    counts = {"stated": 0, "asserted": 0, "unstated": 0}
+    by = "human" if recorded_by == "human" else "agent"
     with db.transaction(conn):
-        for r, kind in zip(reasons, kinds):
-            common = dict(project=project, plan_id=plan_id, node_key=r["node_key"], kind=r.get("kind", "technical"),
+        for t, kind, keys in zip(tasks, kinds, assigned):
+            common = dict(project=project, plan_id=plan_id, node_key=None, kind=t.get("kind", "technical"),
                           run_id=run_id, step_id=step_id, recorded_by=recorded_by, commit=False)
-            if kind == "stated":
-                s, e = r["span"]
-                provenance.insert_reason(conn, verbatim=(int(r["utterance_id"]), int(s), int(e)), **common)
-            elif kind == "asserted":
-                provenance.insert_reason(conn, interpretation=r["interpretation"].strip(),
-                                         refs=[int(x) for x in (r.get("refs") or [])], **common)
-            else:
-                provenance.insert_reason(conn, **common)
-            counts[kind] += 1
-            for cited in r.get("because") or ():
+            try:
+                if kind == "stated":
+                    s, e = t["span"]
+                    rid = provenance.insert_reason(conn, verbatim=(int(t["utterance_id"]), int(s), int(e)), **common)
+                elif kind == "asserted":
+                    rid = provenance.insert_reason(conn, interpretation=t["interpretation"].strip(),
+                                                   refs=[int(x) for x in (t.get("refs") or [])], **common)
+                else:
+                    rid = provenance.insert_reason(conn, **common)
+            except ValueError as e:                 # a span outside its utterance, injected text, a bad ref
+                raise FillInputError(str(e)) from None
+            out["reason_ids"].append(rid)
+            out[kind] += 1
+            out["tasks"] += 1
+            for k in keys:
+                conn.execute("INSERT INTO reason_node (reason_id, node_key) VALUES (?, ?)", (rid, k))
+            for cited in t.get("because") or ():
                 if provenance.get_reason(conn, int(cited)) is None:
                     raise FillInputError(f"because: reason {cited} does not exist")
-                conn.execute("INSERT INTO influence (reason_id, project, plan_id, step_id, node_key, via, by) VALUES (?, ?, ?, ?, ?, 'reason_because', ?)",
-                             (int(cited), project, plan_id, step_id, r["node_key"], "human" if recorded_by == "human" else "agent"))
-                counts["adopted"] = counts.get("adopted", 0) + 1
-    return {"filled": counts["stated"] + counts["asserted"], **{k: counts.get(k, 0) for k in ("stated", "asserted", "unstated", "adopted")}, "unknown_keys": []}
+                conn.execute("INSERT INTO influence (reason_id, project, plan_id, step_id, node_key, via, by) "
+                             "VALUES (?, ?, ?, ?, NULL, 'reason_because', ?)", (int(cited), project, plan_id, step_id, by))
+                out["adopted"] += 1
+        if several:
+            conn.execute("INSERT INTO plan_bundle (plan_id, basis, recorded_by) VALUES (?, ?, ?)",
+                         (plan_id, bundle.strip(), recorded_by))
+    return out
+
+
+def _live_task_reasons(conn, plan_id: str) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM change_reason WHERE plan_id = ? AND role = 'reason' AND node_key IS NULL "
+        "AND superseded_by IS NULL ORDER BY id", (plan_id,))]
+
+
+def covering_task_reasons(conn, node_key: str, plan_ids) -> list[int]:
+    """The live task reasons, among these plans, that answer for this node: the
+    task the node was assigned to, else the plan's task that names no nodes.
+    A reason that corrects an assigned one inherits its assignment."""
+    out: list[int] = []
+    for pid in dict.fromkeys(plan_ids):
+        live = _live_task_reasons(conn, pid)
+        if not live:
+            continue
+        def nodes_of(rid):
+            ids = [rid] + [r[0] for r in conn.execute("SELECT id FROM change_reason WHERE superseded_by = ?", (rid,))]
+            return {r[0] for r in conn.execute(
+                f"SELECT node_key FROM reason_node WHERE reason_id IN ({','.join('?' * len(ids))})", ids)}
+        assigned = {r["id"]: nodes_of(r["id"]) for r in live}
+        mine = [rid for rid, ns in assigned.items() if node_key in ns]
+        out += mine or [rid for rid, ns in assigned.items() if not ns]
+    return out
+
+
+def task_reasons_for(conn, psg, node_keys) -> dict[int, str]:
+    """{reason_id: plan_id}: the live task reasons that answer for any of these
+    nodes, through the plans whose runs changed them (psg_bridge.plans_that_changed).
+    The one path every reader takes; `psg` is a path or an open connection."""
+    out: dict[int, str] = {}
+    for key, plans in psg_bridge.plans_that_changed(psg, node_keys).items():
+        for pid in plans:
+            for rid in covering_task_reasons(conn, key, [pid]):
+                out.setdefault(rid, pid)
+    return out
+
+
+def task_slots(conn, project: str, plan_id: str, psg_db_path: str | None, draft: bool = False) -> dict:
+    """What the agent needs to write the plan's task reasons: the nodes it
+    changed (to assign, when it did several things), its root and the root's
+    words, the task reasons already written, and optionally draft sentences."""
+    from . import roots
+    root = roots.root_of(conn, plan_id)
+    out = {"nodes": [dict(c) for c in _changed(psg_db_path, plan_id)],
+           "root": {"root_plan_id": root, "words": roots._words(conn, root)} if root else None,
+           "tasks": [{"reason_id": r["id"], "tier": r["tier"],
+                      "text": r["interpretation"] or r["statement"],
+                      "nodes": sorted(x[0] for x in conn.execute("SELECT node_key FROM reason_node WHERE reason_id = ?", (r["id"],)))}
+                     for r in _live_task_reasons(conn, plan_id)]}
+    if draft:
+        out["draft"] = _draft_sentences(conn, project, plan_id, psg_db_path)      # `draft` here is the flag
+    return out
 
 
 PREVIEW_CHARS = 120
 
 
-def draft(conn, project: str, plan_id: str, psg_db_path: str | None, per_slot: int = 2) -> list[dict]:
-    """For every open slot, the candidate utterances (plan window + session): an
-    R0 literal hit scores 10 and proposes that sentence as the span; plain
-    token overlap proposes the whole utterance. Deterministic, top `per_slot`;
-    each candidate is ready to be sent back as a stated answer."""
+def draft(conn, project: str, plan_id: str, psg_db_path: str | None, limit: int = 3) -> list[dict]:
+    """Candidate sentences for the plan's task reason, from the words recorded
+    in the plan's window and session (never text Claude Code injected): a
+    sentence that names a changed node scores 10, plus its token overlap with
+    the plan's goal and the changed nodes' names. Deterministic; each is ready
+    to send back as a stated task."""
     from . import triggers
     ctx = triggers._ctx(conn, project, plan_id, psg_db_path)
-    utts = triggers.candidate_utterances(ctx)
-    out = []
-    for slot in slots_for_plan(conn, project, plan_id, psg_db_path):
-        qn = slot.get("qualified_name") or ""
-        node = ctx.touched.get(slot["node_key"]) or {"node_key": slot["node_key"], "qualified_name": qn, "file_path": None}
+    plan = db.get_plan(conn, plan_id) or {}
+    changed = [n for n in ctx.touched.values() if set(n.get("event_types") or []) - triggers.PASSIVE_EVENTS]
+    keys = _tokens(plan.get("original_goal"), plan.get("user_query"))
+    for n in changed:
+        qn = n.get("qualified_name") or ""
         local = qn.split(".")[-1].split(":")[-1]
-        keys = _tokens(local, local.replace("_", " "), qn.split(".")[-2] if "." in qn else "")
-        pats = [triggers._literal(n) for n in triggers.r0_names(node)]
-        cands = []
-        for u in utts:
-            # R0 first: a sentence that names the node literally is the answer, scored above any token overlap
-            r0 = None
-            for s, e in triggers.sentences(u["text"]):
-                if any(p.search(u["text"][s:e]) for p in pats):
-                    r0 = (s, e)
-                    break
-            score = len(keys & _tokens(u["text"])) + (10 if r0 else 0)
-            if score:
-                span = list(r0) if r0 else [0, len(u["text"])]
-                cands.append({"utterance_id": u["id"], "span": span, "score": score, "kind": "r0" if r0 else "overlap",
-                              "preview": u["text"][span[0]:span[0] + PREVIEW_CHARS]})
-        cands.sort(key=lambda c: (-c["score"], c["utterance_id"]))
-        out.append({"node_key": slot["node_key"], "qualified_name": qn, "candidates": cands[:per_slot]})
-    return out
+        keys |= _tokens(local, local.replace("_", " "), qn.split(".")[-2] if "." in qn else "")
+    pats = [triggers._literal(x) for n in changed for x in triggers.r0_names(n)]
+    cands = []
+    for u in triggers.candidate_utterances(ctx):
+        best = None
+        for s, e in triggers.sentences(u["text"]):
+            sent = u["text"][s:e]
+            score = (10 if any(p.search(sent) for p in pats) else 0) + len(keys & _tokens(sent))
+            if score and (best is None or score > best[0]):
+                best = (score, s, e)
+        if best:
+            score, s, e = best
+            cands.append({"utterance_id": u["id"], "span": [s, e], "score": score,
+                          "kind": "names_a_node" if score >= 10 else "overlap",
+                          "preview": u["text"][s:s + PREVIEW_CHARS].strip()})
+    cands.sort(key=lambda c: (-c["score"], c["utterance_id"]))
+    return cands[:limit]
+
+
+_draft_sentences = draft
+
+
+def task_text(slots: dict) -> str:
+    """One log line for a task_slots() result: the changed nodes and the task
+    reasons written so far (the [REASON SLOTS] line of a reopened close)."""
+    names = [n.get("qualified_name") or n["node_key"] for n in slots["nodes"]]
+    tasks = [f"#{t['reason_id']} {t['tier']}" + (f" ({len(t['nodes'])} node(s))" if t["nodes"] else "")
+             for t in slots["tasks"]]
+    return (f"{len(names)} changed node(s)" + (": " + ", ".join(names) if names else "")
+            + f"; {len(tasks)} task reason(s)" + (": " + ", ".join(tasks) if tasks else " (the close records one unstated)"))
 
 
 
@@ -247,20 +377,20 @@ def _without_row(found: list[dict]) -> list[dict]:
 
 def backstop_unstated(conn, *, project: str, plan_id: str, psg_db_path: str | None,
                       commit: bool = False, state: str = "active") -> int:
-    """Every changed node without any reason row gets an explicit `unstated`
-    change_reason from the system — the gap is recorded, never papered over.
-    `state="unknown"` is the pending close mode (nobody was asked yet)."""
-    have = _reason_keys(conn, plan_id)
-    n = 0
-    for c in psg_bridge.changed_node_keys(psg_db_path, plan_id):
-        if c["node_key"] in have:
-            continue
-        provenance.insert_reason(conn, project=project, plan_id=plan_id, node_key=c["node_key"], kind="technical",
-                                 run_id=c["run_id"], recorded_by="system", state=state, commit=False)
-        n += 1
+    """A plan whose task nobody explained gets one explicit `unstated` task
+    reason from the system — the gap is recorded, never papered over (task-level
+    redesign, step 3a: one per task, not one per changed node). `state="unknown"`
+    is the pending close mode (nobody was asked yet). A plan or a session that
+    changed no node gets nothing. Returns 1 or 0."""
+    changed = _changed(psg_db_path, plan_id)
+    if not changed or _live_task_reasons(conn, plan_id):      # nothing changed: no task to explain
+        return 0
+    run_id = max(c["run_id"] for c in changed)
+    provenance.insert_reason(conn, project=project, plan_id=plan_id, node_key=None, kind="technical",
+                             run_id=run_id, recorded_by="system", state=state, commit=False)
     if commit:
         conn.commit()
-    return n
+    return 1
 
 
 def rejected_paths(conn, *, project: str, plan_id: str, psg_db_path: str | None,

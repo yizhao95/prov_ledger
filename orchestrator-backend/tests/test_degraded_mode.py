@@ -126,7 +126,7 @@ def _refresh_run(world, sid="sess-d1"):
     c.commit(); c.close()
 
 
-def test_after_the_refresh_the_rules_run_and_what_is_lost_is_explicit(world, monkeypatch, capsys):
+def test_after_the_refresh_the_close_runs_and_what_is_lost_is_explicit(world, monkeypatch, capsys):
     _session(world, monkeypatch, capsys)
     _refresh_run(world)
     conn = db.open_db(world["db"])
@@ -137,8 +137,7 @@ def test_after_the_refresh_the_rules_run_and_what_is_lost_is_explicit(world, mon
     assert psg_bridge._query(str(world["graph"]), "SELECT trigger FROM analysis_run WHERE id = 2")[0][0] == "session"
     pid = session.session_plan_id("sess-d1")
     tiers = {r[0] for r in conn.execute("SELECT tier FROM change_reason WHERE plan_id = ? AND role = 'reason'", (pid,))}
-    assert tiers and tiers <= {"derived", "stated", "unstated"}                          # never asserted: nobody interpreted anything
-    assert "stated" in tiers                                                             # R0: "make load_orders keep only paid rows" names the node
+    assert tiers == {"unstated"}               # nobody explained the session's task; R0 no longer quotes per node (step 3a)
     assert conn.execute("SELECT COUNT(*) FROM headline WHERE session_id = 'sess-d1'").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM influence").fetchone()[0] == 0              # nothing was adopted — nobody answered
     assert conn.execute("SELECT COUNT(*) FROM headline_response").fetchone()[0] == 0
