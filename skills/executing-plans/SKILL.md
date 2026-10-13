@@ -213,27 +213,37 @@ sqlite3 "${ORCH_DB:-$HOME/skill-workspace/orchestrator.db}" \
 
 Every `provledger` read is listed in [`docs/cli.md`](../../docs/cli.md). The dashboard at http://localhost:8765 is the visual equivalent.
 
-### 🧭 Close-time reasons: answer WHY, point at the words (DP phase 1)
+### 🧭 Close-time reasons: one per task — why it was done, who asked, what was not chosen
 
-When a registered-project plan closes, `reason-slots.sh` lists the data
-points the plan changed. For **each node answer two questions: why not the
-other way? who asked for it?** — not what the step did. Three answer shapes,
-and the tier is decided by the shape, never by you:
+A plan is a task. When a registered-project plan closes, record **why the task
+was done** once — not what each function now does (git and the code show
+that). `reason-slots.sh` lists the nodes the plan changed, its root and the
+root's words, and the task reasons already written. Answer three questions:
+why this task, who asked for it, what was not chosen. Three shapes, and the
+tier is decided by the shape, never by you:
 
-| you send | tier | when |
+| you send in `tasks` | tier | when |
 |---|---|---|
-| `{"node_key": "nk_…", "utterance_id": 42, "span": [0, 31]}` | **stated** | the user's recorded words say it — point at them (`reason-slots.sh` with `"draft": true` proposes spans) |
-| `{"node_key": "nk_…", "interpretation": "…", "refs": [7]}` | **asserted** | your reading of it; `refs` are `reference` ids (an email, a ticket, a verbal exchange registered with `provledger note`) |
-| `{"node_key": "nk_…", "unstated": true}` | **unstated** | you do not know — say so; never invent |
+| `{"utterance_id": 42, "span": [0, 31]}` | **stated** | the user's recorded words say it — point at them (`reason-slots.sh` with `"draft": true` proposes sentences) |
+| `{"interpretation": "…", "refs": [7]}` | **asserted** | your reading of it; `refs` are `reference` ids (an email, a ticket, a verbal exchange registered with `provledger note`) |
+| `{"unstated": true}` | **unstated** | nobody said — say so; never invent |
 
-The old `{"node_key", "text"}` shape is refused (exit 2): free text cannot
-become *stated*, whoever sends it. Ask ONCE for all slots; the user pressing
-enter accepts the draft. `provledger-extensions.json` → `reasons.close_mode`
-= `ask` (default) or `pending` (slots are recorded as unstated/unknown for a
-later `provledger why --pending`).
+**When the plan did several things**, send one task each: every task but one
+names its `nodes` (node keys or qualified names from `reason-slots`), the one
+without takes the rest, and `bundle` is one sentence on why they share the
+plan. A node belongs to one task. Nodes are only assigned — never written
+about one by one.
 
-- ✅ good: `{"node_key": "nk_1a2b", "utterance_id": 42, "span": [0, 41]}` where utterance 42 reads *"please keep fiscal weeks, finance reconciles weekly"* — the reason IS the user's sentence.
-- ❌ bad: `{"node_key": "nk_1a2b", "interpretation": "changed load_orders to group by fiscal week"}` — that describes the change, not why it beat calendar weeks or who wanted it.
+The old per-node `reasons` list and the `{"text"}` shape are refused (exit 2):
+free text cannot become *stated*, whoever sends it. Ask the user ONCE; pressing
+enter accepts the draft. A plan nobody explained gets one `unstated` task
+reason at close. `provledger-extensions.json` → `reasons.close_mode` = `ask`
+(default) or `pending` (that row is `unknown`, for a later `provledger why
+--pending`).
+
+- ✅ good: `{"tasks": [{"utterance_id": 42, "span": [0, 41]}]}` where utterance 42 reads *"please keep fiscal weeks, finance reconciles weekly"* — the reason IS the user's sentence.
+- ✅ good: `{"interpretation": "the window includes two holidays, so last year's same weeks were added as a comparison; a holiday flag was not chosen because nobody maintains the calendar"}` — the root, what was seen, what was not chosen.
+- ❌ bad: `{"interpretation": "changed load_orders to group by fiscal week"}` — that describes the change, not why it was done or who wanted it.
 
 ### 📰 Headline responses and `because` (DP phase 2)
 
@@ -241,8 +251,8 @@ later `provledger why --pending`).
 |---|---|---|
 | `scripts/headline-respond.sh` | a blocking finding in the plan headline needs an answer (or you proceed past it on purpose) | `{plan_id, finding_id, action: revise\|proceed, rationale?, cites?: [reason_id], by?: agent\|human}` — the finding's record and every cited id become `influence(via=headline_response)`; a second answer to the same finding exits 2 |
 
-Every `reason-fill` answer shape may carry `"because": [reason_id, …]` — the
-records this change leaned on (a constraint you kept, a rejected path you
+Every `reason-fill` task may carry `"because": [reason_id, …]` — the
+records this task leaned on (a constraint you kept, a rejected path you
 avoided). Each id becomes `influence(via=reason_because)`, and the result
 reports `adopted`. Cite what you actually used; `provledger why <qn>` prints the
 ids.

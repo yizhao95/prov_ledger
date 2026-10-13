@@ -1,4 +1,5 @@
-"""orchestrator.reasons — close-time closed-form reason capture (E1-1 / E1-2 / E1-3)."""
+"""orchestrator.reasons — close-time reason capture (E1-2 / E1-3); the per-task close is in
+test_task_reasons.py and test_close_task_level.py."""
 import json
 import sys
 from pathlib import Path
@@ -71,44 +72,6 @@ def _close(conn, plan_id, registry):
     return api.review_and_complete(conn, plan_id, registry_path=registry)
 
 
-def test_slots_and_checklist_are_closed_form(conn, psg_with_plan):
-    slots = reasons.slots_for_plan(conn, "proj", "P1", psg_with_plan)
-    assert [s["node_key"] for s in slots] == ["nk_a", "nk_b", "nk_c"]
-    text = reasons.checklist_text(slots)
-    assert "3 data point(s)" in text and "unstated" in text
-    for i, s in enumerate(slots, 1):
-        assert f"{i}. {s['qualified_name']}" in text and s["node_key"] in text
-    assert "column" in text and "node_changed" in text
-    assert "nothing to explain" in reasons.checklist_text([])
-    # a filled slot disappears from the checklist
-    reasons.fill(conn, project="proj", plan_id="P1", run_id=2, reasons=[{"node_key": "nk_b", "interpretation": "dedupe"}], psg_db_path=psg_with_plan)
-    assert [s["node_key"] for s in reasons.slots_for_plan(conn, "proj", "P1", psg_with_plan)] == ["nk_a", "nk_c"]
-
-
-def test_e1_1_close_creates_one_reason_slot_per_changed_node_and_records_unstated(conn, psg_with_plan, registry):
-    plan_id, review = _seed_registered_plan(conn, "P1", registry=registry)
-    r = reasons.fill(conn, project="proj", plan_id=plan_id, run_id=2, psg_db_path=psg_with_plan,
-                     reasons=[{"node_key": "nk_a", "interpretation": "financial weeks"}, {"node_key": "nk_b", "unstated": True}])
-    assert r == {"filled": 1, "stated": 0, "asserted": 1, "unstated": 1, "adopted": 0, "unknown_keys": []}
-    out = _close(conn, plan_id, registry)
-    from orchestrator import provenance as pv
-    rows = [x for x in pv.reasons_for_plan(conn, plan_id) if x["role"] == "reason"]
-    assert {x["node_key"]: x["interpretation"] for x in rows} == {"nk_a": "financial weeks", "nk_b": None, "nk_c": None}
-    assert {x["recorded_by"] for x in rows if x["node_key"] == "nk_c"} == {"system"}       # backstop, visible, not fabricated
-    assert {x["tier"] for x in rows if x["node_key"] == "nk_c"} == {"unstated"}
-    assert {x["tier"] for x in rows if x["node_key"] == "nk_a"} == {"asserted"}             # free text is never stated
-    assert out["plan_status"] == "COMPLETED" and out["unstated_backstopped"] == 1        # never blocked
-    assert db.get_plan(conn, plan_id)["status"] == "COMPLETED" and db.get_step(conn, review)["status"] == "COMPLETED"
-    assert reasons.unstated_ratio(conn, "proj", plan_id) == {"slots": 3, "unstated": 2, "ratio": round(2 / 3, 4)}
-
-
-def test_fill_rejects_keys_outside_the_change_set(conn, psg_with_plan):
-    r = reasons.fill(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg_with_plan,
-                     reasons=[{"node_key": "nk_a", "interpretation": "ok"}, {"node_key": "nk_zzz", "interpretation": "x"}])
-    assert r == {"filled": 0, "stated": 0, "asserted": 0, "unstated": 0, "adopted": 0, "unknown_keys": ["nk_zzz"]}
-    assert conn.execute("SELECT COUNT(*) FROM change_reason").fetchone()[0] == 0           # all-or-nothing
-
-
 def test_e1_2_deviation_justification_lands_on_changed_node(conn, psg_with_plan, registry):
     plan_id, review = _seed_registered_plan(conn, "P1", steps=("CODE: rewrite load_orders filter",), registry=registry,
                                             deviation=("TimeSeriesSplit leaked future rows", "use GroupKFold"))
@@ -149,7 +112,7 @@ def test_close_is_idempotent_for_reasons(conn, psg_with_plan, registry):
     count = lambda: conn.execute("SELECT COUNT(*) FROM change_reason WHERE plan_id=?", (plan_id,)).fetchone()[0]
     n = count()
     api.review_and_complete(conn, plan_id, registry_path=registry)       # already terminal: no-op
-    assert count() == n == 3
+    assert count() == n == 1                                              # one unstated task reason (step 3a)
 
 
 # ── DP phase 1 Task 4: three answer shapes, one tier each ────────────────────
@@ -161,38 +124,38 @@ def _utt(conn, text="please keep fiscal weeks for load_orders, finance reconcile
 
 
 def test_fill_three_shapes_one_tier_each(conn, psg_with_plan):
+    """One task per shape; with several tasks in a plan they name their nodes
+    and a bundle sentence says why they share it (step 3a)."""
     u = _utt(conn)
     ref = pv.insert_reference(conn, project="proj", kind="verbal", label="standup Tue", occurred_at="2026-09-15 09:00:00")
-    r = reasons.fill(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg_with_plan, source="human", reasons=[
-        {"node_key": "nk_a", "utterance_id": u, "span": [0, 24]},
-        {"node_key": "nk_b", "interpretation": "finance wants weekly grain", "refs": [ref]},
-        {"node_key": "nk_c", "unstated": True},
+    r = reasons.fill_tasks(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg_with_plan, source="human",
+                           bundle="one review covered all three", tasks=[
+        {"utterance_id": u, "span": [0, 24], "nodes": ["nk_a"]},
+        {"interpretation": "finance wants weekly grain", "refs": [ref], "nodes": ["nk_b"]},
+        {"unstated": True},
     ])
-    assert r == {"filled": 2, "stated": 1, "asserted": 1, "unstated": 1, "adopted": 0, "unknown_keys": []}
-    rows = {x["node_key"]: x for x in pv.reasons_for_plan(conn, "P1")}
-    assert rows["nk_a"]["tier"] == "stated" and rows["nk_a"]["evidence_level"] == "verbal" and rows["nk_a"]["recorded_by"] == "human"
-    assert rows["nk_b"]["tier"] == "asserted" and rows["nk_b"]["evidence_level"] == "verbal"       # a human interpretation is still asserted
-    assert rows["nk_c"]["tier"] == "unstated" and rows["nk_c"]["interpretation"] is None
+    assert (r["tasks"], r["stated"], r["asserted"], r["unstated"], r["unknown_nodes"]) == (3, 1, 1, 1, [])
+    rows = {x["id"]: x for x in pv.reasons_for_plan(conn, "P1")}
+    st, asr, un = (rows[i] for i in r["reason_ids"])
+    assert st["tier"] == "stated" and st["evidence_level"] == "verbal" and st["recorded_by"] == "human"
+    assert asr["tier"] == "asserted" and asr["evidence_level"] == "verbal"       # a human interpretation is still asserted
+    assert un["tier"] == "unstated" and un["interpretation"] is None
     text = conn.execute("SELECT text FROM utterance WHERE id=?", (u,)).fetchone()[0]
-    assert text[rows["nk_a"]["verbatim_start"]:rows["nk_a"]["verbatim_end"]] == "please keep fiscal weeks"
-    assert reasons.slots_for_plan(conn, "proj", "P1", psg_with_plan) == []
-    assert reasons.unstated_ratio(conn, "proj", "P1") == {"slots": 3, "unstated": 1, "ratio": round(1 / 3, 4)}
+    assert text[st["verbatim_start"]:st["verbatim_end"]] == "please keep fiscal weeks"
 
 
 def test_fill_refuses_the_old_text_shape_and_writes_nothing(conn, psg_with_plan):
+    def fill(tasks):
+        return reasons.fill_tasks(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg_with_plan, tasks=tasks)
     with pytest.raises(reasons.FillInputError, match='"text" is not accepted'):
-        reasons.fill(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg_with_plan,
-                     reasons=[{"node_key": "nk_a", "interpretation": "fine"}, {"node_key": "nk_b", "text": "weekly grain"}])
-    assert conn.execute("SELECT COUNT(*) FROM change_reason").fetchone()[0] == 0
+        fill([{"text": "weekly grain"}])
     with pytest.raises(reasons.FillInputError, match="exactly one"):
-        reasons.fill(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg_with_plan,
-                     reasons=[{"node_key": "nk_a", "interpretation": "x", "unstated": True}])
+        fill([{"interpretation": "x", "unstated": True}])
     with pytest.raises(reasons.FillInputError):
-        reasons.fill(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg_with_plan, reasons=[{"node_key": "nk_a"}])
+        fill([{}])
     u = _utt(conn)
     with pytest.raises(ValueError, match="outside"):
-        reasons.fill(conn, project="proj", plan_id="P1", run_id=2, psg_db_path=psg_with_plan,
-                     reasons=[{"node_key": "nk_a", "utterance_id": u, "span": [0, 9999]}])
+        fill([{"utterance_id": u, "span": [0, 9999]}])
     assert conn.execute("SELECT COUNT(*) FROM change_reason").fetchone()[0] == 0
 
 
@@ -202,16 +165,13 @@ def test_draft_candidates_are_scored_and_previewed(conn, psg_with_plan):
     a = _utt(conn, "load_orders should keep paid orders only; the clean step drops nulls " + "x" * 200)
     b = _utt(conn, "unrelated chatter about the weather")
     c = _utt(conn, "load_orders load_orders load_orders — really, load orders")
-    d = pv.insert_utterance(conn, session_id="s", project="other", plan_id=None, text="load_orders in another project",
-                            occurred_at="2026-09-15 10:00:00")
-    out = {x["node_key"]: x for x in reasons.draft(conn, "proj", "P1", psg_with_plan)}
-    assert set(out) == {"nk_a", "nk_b", "nk_c"}
-    cands = out["nk_a"]["candidates"]
-    assert [x["utterance_id"] for x in cands] == [a, c] or [x["utterance_id"] for x in cands] == [c, a]
-    assert all(x["score"] >= 1 and x["span"] == [0, len(conn.execute("SELECT text FROM utterance WHERE id=?", (x["utterance_id"],)).fetchone()[0])] for x in cands)
+    d = pv.insert_utterance(conn, session_id="s-other", project="other", plan_id=None, text="load_orders in another project",
+                            occurred_at="2026-09-15 10:00:00")          # another project, another session
+    cands = reasons.draft(conn, "proj", "P1", psg_with_plan)                  # one list for the task (step 3a)
+    ids = [x["utterance_id"] for x in cands]
+    assert set(ids) == {a, c} and all(x["score"] >= 10 and x["kind"] == "names_a_node" for x in cands)
     assert len(next(x for x in cands if x["utterance_id"] == a)["preview"]) == 120
-    assert b not in [x["utterance_id"] for x in cands] and d not in [x["utterance_id"] for x in cands]
-    assert out["nk_b"]["candidates"] and out["nk_b"]["candidates"][0]["utterance_id"] == a          # "clean" matches nk_b
+    assert b not in ids and d not in ids
 
 
 def test_close_mode_pending_backstops_unknown_without_asking(conn, psg_with_plan, registry, tmp_path):
@@ -222,5 +182,5 @@ def test_close_mode_pending_backstops_unknown_without_asking(conn, psg_with_plan
     assert extensions.load(None).reasons_close_mode == "ask"
     n = reasons.backstop_unstated(conn, project="proj", plan_id="P1", psg_db_path=psg_with_plan, commit=True, state="unknown")
     rows = pv.reasons_for_plan(conn, "P1")
-    assert n == 3 and all(r["tier"] == "unstated" and r["state"] == "unknown" and r["recorded_by"] == "system" for r in rows)
+    assert n == 1 and len(rows) == 1 and rows[0]["node_key"] is None and all(r["tier"] == "unstated" and r["state"] == "unknown" and r["recorded_by"] == "system" for r in rows)
     assert conn.execute("SELECT COUNT(*) FROM trigger_log WHERE plan_id='P1' AND verdict='ask'").fetchone()[0] == 0

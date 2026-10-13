@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# reason-fill.sh — deterministic flow for the reason-fill op: recording one reason per changed node (unstated -> NULL).
+# reason-fill.sh — deterministic flow for the reason-fill op: recording why the plan was done, one reason per task.
 # Composes input as JSON/YAML, this script validates + writes via the orchestrator.
 # See ../update-input.example.json (and ../update-input.schema.json) for the input shape.
 #

@@ -54,7 +54,7 @@ def test_018_tables_views_and_triggers_exist(conn):
     ({"tier": "asserted", "interpretation": None, "statement": None}, "CHECK"),              # asserted without a text
     ({"tier": "derived", "interpretation": "r", "rule_id": None}, "CHECK"),                  # derived without a rule id
     ({"tier": "unstated", "interpretation": "something"}, "CHECK"),                           # unstated carrying text
-    ({"node_key": None, "role": "reason"}, "CHECK"),                                          # a reason without an anchor
+    ({"node_key": None, "role": "constraint", "statement": "keep it"}, "CHECK"),            # a constraint without an anchor (036: a task's reason may have none)
     ({"kind": "nope"}, "CHECK"),
     ({"recorded_by": "model"}, "CHECK"),
 ])

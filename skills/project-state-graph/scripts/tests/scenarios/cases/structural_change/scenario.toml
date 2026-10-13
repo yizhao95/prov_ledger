@@ -1,5 +1,5 @@
 # A structural change: a new node dedupe() wired between clean and split.
-# dedupe is added, main (the wiring) is changed, both get a reason slot;
+# dedupe is added, main (the wiring) is changed, one reason covers the task;
 # nothing is removed and the untouched upstream stays clean.
 [scenario]
 name = "structural_change"
@@ -9,7 +9,7 @@ fixture = "pipeline_repo"
 name = "t1"
 goal = "drop duplicate ids before splitting"
 declared_targets = ["pkg.pipeline.main", "pkg.pipeline.dedupe"]
-reasons = { "pkg.pipeline.dedupe" = "new step: duplicate ids double-counted revenue", "pkg.pipeline.main" = "wires dedupe between clean and split" }
+reasons = "duplicate ids double-counted revenue, so a dedupe step now runs between clean and split"
 [tasks.change.replace]
 "pkg/pipeline.py" = [
   ['''def split(df: list, test_size: float = TEST_SIZE) -> tuple:''', '''def dedupe(df: list) -> list:
@@ -33,8 +33,7 @@ def split(df: list, test_size: float = TEST_SIZE) -> tuple:'''],
 events = [
   { plan = "t1", type = "node_added", node = "pkg.pipeline.dedupe" },
   { plan = "t1", type = "node_changed", node = "pkg.pipeline.main", changed = ["struct_sig"] },
-  { plan = "t1", type = "reason", node = "pkg.pipeline.dedupe", text_is = "stated" },
-  { plan = "t1", type = "reason", node = "pkg.pipeline.main", text_is = "stated" },
+  { plan = "t1", type = "reason", text_is = "stated" },                 # one reason for the task, no node (step 3a)
   { plan = "t1", type = "node_matched", node = "pkg.pipeline.clean" },
   { plan = "t1", type = "node_matched", node = "pkg.pipeline.split" },
   { plan = "t1", type = "plan", closed = "COMPLETED", review_state = "reviewed" },

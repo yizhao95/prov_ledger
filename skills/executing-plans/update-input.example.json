@@ -127,16 +127,27 @@
     "draft": true
   },
 
-  "reason_fill__one_of_each_shape": {
+  "reason_fill__one_task": {
     "_use_with": "scripts/reason-fill.sh",
-    "_why": "One answer per slot from reason-slots; run_id comes from the slots. The shape decides the tier: span = stated, interpretation = asserted, unstated = unstated.",
+    "_why": "One reason for the plan's task; run_id comes from reason-slots. The shape decides the tier: span = stated, interpretation = asserted, unstated = unstated.",
     "plan_id": "deep-health-20260514153045",
     "project": "deep-health-app",
     "run_id": 12,
-    "reasons": [
-      {"node_key": "nk_1a2b", "utterance_id": 42, "span": [0, 41]},
-      {"node_key": "nk_3c4d", "interpretation": "disk threshold follows the ops runbook linked in the ticket", "refs": [7], "because": [31]},
-      {"node_key": "nk_5e6f", "unstated": true}
+    "tasks": [
+      {"utterance_id": 42, "span": [0, 41], "because": [31]}
+    ]
+  },
+
+  "reason_fill__two_tasks_in_one_plan": {
+    "_use_with": "scripts/reason-fill.sh",
+    "_why": "The plan did two things: the second names its nodes, the first takes the rest, and bundle says why they share the plan.",
+    "plan_id": "deep-health-20260514153045",
+    "project": "deep-health-app",
+    "run_id": 12,
+    "bundle": "both came out of the same on-call review",
+    "tasks": [
+      {"interpretation": "the probe timed out under load; the ops runbook linked in the ticket sets the threshold, a fixed retry count was not chosen", "refs": [7]},
+      {"unstated": true, "nodes": ["app.health.disk_probe"]}
     ]
   },
 

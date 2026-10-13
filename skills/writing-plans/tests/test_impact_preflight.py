@@ -639,3 +639,21 @@ def test_dp2_impact_context_carries_the_pack_and_records_hits_under_the_plan(gra
                                             project="proj", orch_conn=orch_db, plan_id="PX")
     assert orch_db.execute("SELECT COUNT(*) FROM read_hit").fetchone()[0] == pack["shown"]        # same plan, same moment: not counted twice
     assert ctx["approx_tokens"] >= pack["approx_tokens"]
+
+
+def test_a_task_reason_reaches_the_symbol_its_plan_changed(graph_db_with_history, orch_db):
+    """Task-level redesign (step 3a): a plan's task reason has no node; the
+    symbol reaches it through its history (P0b changed pipeline.process). A
+    task reason of a plan that never changed it does not come along."""
+    from orchestrator import provenance
+    mine = provenance.insert_reason(orch_db, project="proj", plan_id="P0b", node_key=None, kind="technical",
+                                    interpretation="the window was set by the reviewer", recorded_by="agent")
+    provenance.insert_reason(orch_db, project="proj", plan_id="P9", node_key=None, kind="technical",
+                             interpretation="another plan's task", recorded_by="agent")
+    ctx = impact_preflight.compute_impact_context(graph_db_with_history, "tweak process", ["pipeline.process"],
+                                                  project="proj", orch_conn=orch_db, record_hits=False)
+    sym = next(s for s in ctx["symbols"] if s["name"] == "pipeline.process")
+    task = [r for r in sym["reasons"] if r.get("task_of")]
+    assert [(r["text"], r["task_of"]) for r in task] == [("the window was set by the reviewer", "P0b")]
+    assert "another plan's task" not in [r["text"] for r in sym["reasons"]]
+    assert mine

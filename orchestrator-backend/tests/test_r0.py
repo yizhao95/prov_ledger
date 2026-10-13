@@ -135,9 +135,8 @@ def test_draft_ranks_r0_hits_first_with_the_sentence_span(conn, tmp_path):
     _plan(conn)
     a = _utt(conn, "the weekly totals and the rollup feel off")                 # token overlap only
     b = _utt(conn, "keep weekly_totals on fiscal weeks. thanks")                # literal R0 hit
-    out = {x["node_key"]: x for x in reasons.draft(conn, "proj", PLAN, graph)}
-    cands = out["nk_a"]["candidates"]
-    assert [c["utterance_id"] for c in cands] == [b, a] and cands[0]["score"] >= 10 and cands[0]["kind"] == "r0"
+    cands = reasons.draft(conn, "proj", PLAN, graph)                           # one list for the task (step 3a)
+    assert [c["utterance_id"] for c in cands] == [b, a] and cands[0]["score"] >= 10 and cands[0]["kind"] == "names_a_node"
     t = conn.execute("SELECT text FROM utterance WHERE id=?", (b,)).fetchone()[0]
     assert t[cands[0]["span"][0]:cands[0]["span"][1]] == "keep weekly_totals on fiscal weeks."
     assert cands[1]["span"] == [0, len(conn.execute("SELECT text FROM utterance WHERE id=?", (a,)).fetchone()[0])]

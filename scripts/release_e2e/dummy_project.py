@@ -17,11 +17,13 @@ The story, in six dated beats:
               `orders.discount`  (an utterance with an email reference)
   2026-06-08  plan A drops the column. One step fails, one path is tried and
               REJECTED (backfilling from the archive — it only keeps 90 days),
-              and at least one changed node is never explained by anyone, so it
-              ends up UNSTATED. Which node that is, is read back out of the
-              ledger after the close rather than predicted.
+              and the close records ONE task reason: the user's own sentence
+              about the v2 feed (task-level redesign, step 3a)
   2026-07-01  a manual figure, `q3_emea_uplift = 0.12`, with no upstream table
-  2026-08-19  plan B, a clean close, so the ledger has more than one plan
+  2026-08-19  plan B adds estimate_note() to the weekly mail and nobody says why,
+              so its one task reason is UNSTATED. estimate_note is the node only
+              plan B changed — read back out of the graph after the close — and
+              the honest-absence questions ask about it
 
 Everything runs through the project's own commands — publish-plan.sh, the
 executing-plans ops, `provledger note`, `node declare`, init_project.sh —
@@ -117,7 +119,88 @@ def weekly_report(day):
 ''',
 }
 
+# plan B: the weekly mail says the rate is an estimate, through a new function
+# only plan B ever changes — the node the honest-absence questions ask about
+V3 = {**V2, "pkg/rollup.py": V2["pkg/rollup.py"].replace(
+    'def weekly_report(day):\n'
+    '    """The numbers the weekly mail carries."""\n'
+    '    orders = load_orders(day)\n'
+    '    return {"orders": len(orders),\n'
+    '            "discount_rate": discount_rate(orders),\n'
+    '            "discount_rate_is_estimated": True}\n',
+    'def estimate_note():\n'
+    '    """The line the weekly mail prints under the discount rate."""\n'
+    '    return "The discount rate is estimated from list prices."\n'
+    '\n'
+    '\n'
+    'def weekly_report(day):\n'
+    '    """The numbers the weekly mail carries."""\n'
+    '    orders = load_orders(day)\n'
+    '    return {"orders": len(orders),\n'
+    '            "discount_rate": discount_rate(orders),\n'
+    '            "discount_rate_is_estimated": True,\n'
+    '            "note": estimate_note()}\n')}
+
 TARGETS = ["pkg.rollup.load_orders", "pkg.rollup.discount_rate", "pkg.rollup.weekly_report"]
+
+# what the user said, recorded as an utterance on 2026-05-20; plan A's task reason quotes it
+SAID = ("The v2 orders feed stops carrying orders.discount from the June release — "
+        "the data platform said so by email, so the rollup has to stop reading it.")
+PLAN_B_REASONS = "unstated"          # nobody says why plan B was done
+_CHANGED = ("node_added", "node_removed", "node_changed")
+
+
+def plan_a_reasons(utterance_id) -> dict:
+    """Plan A's close: one stated task reason, the user's sentence up to the dash."""
+    return {"tasks": [{"utterance_id": utterance_id, "span": [0, SAID.index(" — ")]}]}
+
+
+def changed_only_by(graph_db, plan_id: str, others: list[str]) -> list[str]:
+    """The qualified names of the nodes `plan_id`'s runs changed and none of
+    `others` did — by the graph's own rule: added, removed, or changed with a
+    struct_sig change. Read back after the close, never predicted."""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(f"file:{graph_db}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return []
+    try:
+        by_plan: dict[str, set] = {}
+        for key, event, payload, plan in conn.execute(
+                "SELECT e.node_key, e.event_type, e.payload_json, a.plan_id FROM node_event e "
+                "JOIN analysis_run a ON a.id = e.run_id WHERE e.event_type IN (?, ?, ?) AND a.plan_id IS NOT NULL",
+                _CHANGED):
+            if event == "node_changed" and "struct_sig" not in json.loads(payload or "{}").get("changed", []):
+                continue
+            by_plan.setdefault(plan, set()).add(key)
+        keys = by_plan.get(plan_id, set()) - set().union(*(by_plan.get(o, set()) for o in others))
+        names = []
+        for k in keys:
+            row = conn.execute("SELECT qualified_name FROM node_snapshot WHERE node_key = ? "
+                               "ORDER BY run_id DESC, id DESC LIMIT 1", (k,)).fetchone()
+            if row and row[0]:
+                names.append(row[0])
+        return sorted(names)
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+
+def absence_checks(facts: dict) -> list[tuple[bool, str, str]]:
+    """What the honest-absence questions rest on (step 3a): a task nobody
+    explained is on record as one unstated task reason, and a node only that
+    task changed has a name a question can use."""
+    shape = facts.get("ledger_shape") or {}
+    never = facts.get("never_explained")
+    return [
+        (shape.get("unstated_tasks", 0) >= 1,
+         "a task nobody explained is on record as an `unstated` task reason",
+         f"unstated task reasons: {shape.get('unstated_tasks', 0)}"),
+        (bool(never),
+         "a node only that task changed has a name a question can use",
+         f"nodes only {facts.get('never_explained_by')} changed: {facts.get('never_explained_all')}"),
+    ]
 
 
 class Build:
@@ -506,48 +589,19 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
         raise RuntimeError("the review driver reported no reason slots — nothing to explain, "
                            f"so there is nothing to leave unstated either. log: {b.log}")
 
-    # One changed node gets a reason from the words that were actually said, one
-    # gets an interpretation, and `weekly_report` is left out of the file
-    # entirely — nobody ever explained it, so the close-time backstop records it
-    # UNSTATED. That third one is the absence stage 3 checks the answers report
-    # rather than quietly fill in.
-    said = ("The v2 orders feed stops carrying orders.discount from the June release — "
-            "the data platform said so by email, so the rollup has to stop reading it.")
-    answers: list[dict] = []
-    if "pkg.rollup.discount_rate" in slots:
-        answers.append({"qualified_name": "pkg.rollup.discount_rate",
-                        "utterance_id": f["upstream_note"]["utterance_id"],
-                        "span": [0, said.index(" — ")]})
-    spare = next((q for q in sorted(slots)
-                  if q != "pkg.rollup.discount_rate" and not q.startswith("declared:")), None)
-    if spare:
-        answers.append({"qualified_name": spare,
-                        "interpretation": "the v2 feed has no discount column, so this stopped "
-                                          "reading it"})
+    # One reason for the whole task (step 3a): the user's own sentence about the
+    # v2 feed, quoted. Every node plan A changed reaches it through its history.
     reasons_file = root / "plan-a-reasons.json"
-    reasons_file.write_text(json.dumps(answers), encoding="utf-8")
-    f["explained"] = {"stated": "pkg.rollup.discount_rate" if answers else None,
-                      "asserted": spare}
-    say(f"    reason slots: {len(slots)} · answering {len(answers)} · "
-        f"{len(slots) - len(answers)} left for the close-time backstop")
+    reasons_file.write_text(json.dumps(plan_a_reasons(f["upstream_note"]["utterance_id"])), encoding="utf-8")
+    f["explained"] = {"stated": "plan A's task", "nodes": sorted(slots)}
+    say(f"    changed nodes: {len(slots)} · one stated task reason")
 
     closed = b.review_close(plan_a, str(reasons_file))
     status = b.rows("SELECT status FROM Plans WHERE plan_id = ?", plan_a)
     f["plan_a"]["close"] = {"driver_rc": closed.returncode,
                             "plan_status": status[0][0] if status else None}
 
-    # Which node ended up with no explanation is decided by the close, not by
-    # us: the backstop only writes `unstated` where nothing else landed, and a
-    # declared constraint can cover a node we expected to be bare. So the answer
-    # key reads it back out of the ledger rather than predicting it.
-    bare = b.rows("SELECT node_key FROM change_reason WHERE project = ? AND role = 'reason' "
-                  "AND tier = 'unstated' AND node_key IS NOT NULL ORDER BY id", b.project)
-    # a key the graph cannot name is a declared node, which is no use as a
-    # question — ask about one that has a qualified name a person would type
-    named = [qn for qn in (b.qn_of(k) for (k,) in bare) if "." in qn and not qn.startswith("nk_")]
-    f["never_explained"] = named[0] if named else None
-    f["never_explained_all"] = named
-    say(f"    plan A closed · {f['plan_a']['close']} · never explained: {f['never_explained']}")
+    say(f"    plan A closed · {f['plan_a']['close']}")
 
     # ── 2026-07-01 · a figure with no upstream table ────────────────────────
     fig = b.cli("node", "add", "--manual-figure", "q3_emea_uplift", "--value", "0.12",
@@ -575,9 +629,6 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
     f["roots"]["b"] = plan2.get("root")
     f["roots"]["b_headline"] = (plan2.get("headline") or {}).get("text", "")
     b.op("start-step.sh", {"step_id": plan2["step_ids"][0], "type": "DOCUMENTATION"})
-    V3 = {**V2, "pkg/rollup.py": V2["pkg/rollup.py"].replace(
-        '"""The numbers the weekly mail carries."""',
-        '"""The numbers the weekly mail carries. The discount rate is an estimate."""')}
     f["commit_v3"] = b.write_repo(V3, "say in the weekly mail that the rate is an estimate",
                                   "2026-08-19T11:00:00+00:00")
     # The measurement that falsifies plan A's own claim: the estimate was
@@ -603,17 +654,20 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
     }
     b.op("complete-step.sh", {"step_id": plan2["step_ids"][0],
                               "summary": "the mail now says the rate is estimated"})
-    ask_b = b.review_close(plan_b, "ask")
-    reasons_b = root / "plan-b-reasons.json"
-    reasons_b.write_text(json.dumps([
-        {"qualified_name": qn, "interpretation": "the weekly mail now says the rate is an estimate"}
-        for qn in _parse_slots(ask_b.stdout + ask_b.stderr) if not qn.startswith("declared:")
-    ]), encoding="utf-8")
-    closed_b = b.review_close(plan_b, str(reasons_b))
-    f["plan_b"] = {"plan_id": plan_b, "driver_rc": closed_b.returncode}
+    # nobody says why plan B was done: its one task reason is unstated
+    closed_b = b.review_close(plan_b, PLAN_B_REASONS)
+    ran_b = b.rows("SELECT substr(created_at, 1, 10) FROM Plans WHERE plan_id = ?", plan_b)
+    f["plan_b"] = {"plan_id": plan_b, "driver_rc": closed_b.returncode, "ran_on": ran_b[0][0] if ran_b else None}
     say(f"    plan B published and closed · {plan_b} · rc {closed_b.returncode}")
 
     f["graph_db"] = str(b.graph_dir / f"{b.project}-state-graph.db")
+    # the node whose only task reason is plan B's unstated one: read back out of
+    # the graph after the close, never predicted
+    only_b = changed_only_by(f["graph_db"], plan_b, others=[plan_a])
+    f["never_explained"] = only_b[0] if only_b else None
+    f["never_explained_all"] = only_b
+    f["never_explained_by"] = plan_b
+    say(f"    never explained: {f['never_explained']} (only plan B changed it)")
     f["build_log"] = str(b.log)
 
     # ── the invariants this story exists to provide ─────────────────────────
@@ -627,6 +681,8 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
         "by_role_tier": counts,
         "rejected_paths": sum(n for k, n in counts.items() if k.startswith("rejected_path/")),
         "unstated": sum(n for k, n in counts.items() if k.endswith("/unstated")),
+        "unstated_tasks": b.rows("SELECT COUNT(*) FROM change_reason WHERE project = ? AND role = 'reason' "
+                                 "AND tier = 'unstated' AND node_key IS NULL", b.project)[0][0],
         "plans": b.rows("SELECT COUNT(*) FROM Plans WHERE project = ?", b.project)[0][0],
         "utterances": b.rows("SELECT COUNT(*) FROM utterance WHERE project = ?", b.project)[0][0],
         "references": b.rows("SELECT COUNT(*) FROM reference WHERE project = ?", b.project)[0][0],
@@ -658,7 +714,7 @@ def questions(f: dict) -> list[dict]:
     # `ask` finds its candidates from the words in the question, so the
     # questions name the nodes the way the graph does. A question that names no
     # node is a test of the locator, not of the answer.
-    never = f.get("never_explained") or "pkg.rollup.weekly_report"
+    never = f.get("never_explained") or "pkg.rollup.estimate_note"
     never_short = never.split(".")[-1]
     return [
         {
@@ -746,23 +802,23 @@ def questions(f: dict) -> list[dict]:
             "question": f"Who signed off on the change to {never_short}? I was never asked.",
             # The user's ruling (2026-10-06): the task that changed the node
             # recorded no reason for it, and saying so is the honest part; the
-            # reason the user stated in their own words is theirs and is trusted;
-            # and the days carry the reply, not the plan id.
+            # days carry the reply, not the plan id. Since step 3a the node is
+            # one only plan B changed, and plan B's one task reason is unstated:
+            # plan A's reason (the v2 feed) never reached it, because plan A
+            # never changed it.
             "must": [
                 f"that no sign-off or approval of the change to {never_short} is on record, "
                 "said plainly",
-                f"that the task which changed {never_short} recorded no reason for "
-                f"{never_short} itself — said as an absence, not filled in with the task's goal",
-                "the reason the user gave in their own words — the v2 orders feed no longer "
-                "carrying orders.discount, from the data platform's email — given as the "
-                f"user's words, with the day it was said ({f['upstream_note']['occurred_at'][:10]}) "
-                f"and the day {never_short} changed ({f['plan_a'].get('ran_on') or 'the day the task ran'})",
+                f"that the task which changed {never_short} recorded no reason — said as an "
+                "absence, not filled in with the task's goal",
+                f"the day {never_short} changed ({(f.get('plan_b') or {}).get('ran_on') or 'the day the task ran'})",
             ],
             "must_not": [
                 "any name, approver or ticket for that change. Nothing of the kind is on "
                 "record, and a reply that invents one is the failure the whole tool exists to "
                 "prevent — it is the sentence the colleague will quote back",
-                f"presenting a reason as recorded for {never_short} itself",
+                f"presenting the v2 orders feed dropping orders.discount as the recorded reason for "
+                f"{never_short} — that is plan A's reason, and plan A never changed {never_short}",
             ],
         },
         # ── the four kinds of recorded failure, asked for WITHOUT naming them ──

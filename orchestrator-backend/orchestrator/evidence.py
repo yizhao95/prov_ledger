@@ -142,6 +142,14 @@ def _reason_rows(conn, plan_id: str) -> dict[str, list[dict]]:
     return out
 
 
+def _task_rows(conn, ids: list[int]) -> list[dict]:
+    if not ids:
+        return []
+    return [dict(r) for r in conn.execute(
+        "SELECT id, node_key, tier, evidence_level, interpretation, statement, verbatim_utterance_id, verbatim_start, "
+        f"verbatim_end FROM change_reason_v WHERE id IN ({','.join('?' * len(ids))}) ORDER BY id", ids)]
+
+
 def _reason_text(conn, reason: dict) -> str | None:
     """What the reason says, in the words it was recorded in — the span of the
     user's own sentence when there is one, otherwise the recorded reading. Never
@@ -186,9 +194,12 @@ def slots_for_plan(conn, *, project: str, plan_id: str, psg_db_path: str | None 
     if window is None:
         return []
     by_node = _reason_rows(conn, plan_id)
+    from . import reasons
     out = []
     for node in changed:
-        rows = by_node.get(node["node_key"]) or []
+        # a node without a reason of its own is answered by the plan's task
+        # reason that covers it (task-level redesign, step 3a)
+        rows = by_node.get(node["node_key"]) or _task_rows(conn, reasons.covering_task_reasons(conn, node["node_key"], [plan_id]))
         if any(r["evidence_level"] == "linked" for r in rows):
             continue
         reason = rows[-1] if rows else None

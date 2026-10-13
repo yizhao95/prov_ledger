@@ -54,14 +54,15 @@ PY=~/skill-workspace/.venv/bin/python
 $PY skills/update-project-state-graph/scripts/review_run.py --plan-id <plan> --project <name> --dry-run
 # 2. run it: lock -> gates -> refresh (PROVLEDGER_* attribution) -> tests -> selfcheck -> checklist
 $PY .../review_run.py --plan-id <plan> --project <name> --tests "<suite command>" --reasons ask
-#    exit 6 + the closed checklist; REVIEW.1 stays IN_PROGRESS
-# 3. answer every slot in one sentence ("unstated" when you do not know), then resume at 4c
+#    exit 6 + the changed nodes and the plan's root; REVIEW.1 stays IN_PROGRESS
+# 3. write why the task was done (one task; several only when the plan did several things),
+#    then resume at 4c
 $PY .../review_run.py --plan-id <plan> --project <name> --reasons reasons.json     # -> complete-step REVIEW.1
 ```
 
 | Flag | Meaning |
 |---|---|
-| `--reasons stub\|unstated\|ask\|<file.json>` | `stub` = "scenario: <event_types>" per slot (scenario tests only); `unstated` = every slot NULL; `ask` = print the checklist and stop (exit 6, resumable); file = `[{qualified_name\|node_key, text}]`, an unknown key exits 6 and writes nothing |
+| `--reasons stub\|unstated\|ask\|<file.json>` | one reason per task. `stub` = one "scenario: <event_types>" task (scenario tests only); `unstated` = one unstated task; `ask` = print the changed nodes and the root and stop (exit 6, resumable); file = `{"tasks": [{interpretation \| utterance_id+span \| unstated, nodes?, refs?, because?}], "bundle"?}` as `reason-fill` takes it — the old per-node list, a shape `reason-fill` refuses and a node the plan did not change exit 6 and write nothing |
 | `--tests "<cmd>"` | the 4b re-test, run inside the repo; omitted = logged as *tests skipped*, never silent |
 | `--accept-signature "<reason>"` | may override the `signature` gate **only** (FL-018 additive kwargs); the reason is written into the REVIEW.1 log and summary; any other failing gate still fails |
 | `--accept-stale "<reason>"` | may override the `stale_references` gate **only** — a definition that moved and is re-exported (the graph does not follow imports); logged the same way. It combines with `--accept-signature`; a failing gate that neither covers still fails |
@@ -70,7 +71,7 @@ $PY .../review_run.py --plan-id <plan> --project <name> --reasons reasons.json  
 | `--timeout-graph <seconds>` | ceiling on the `init_project.sh` refresh; default **4800** s |
 | `--dry-run` | steps 0–3, nothing written (no lock line, no start-step, no refresh). Its report **names every gate it did not evaluate** — `dirty_working_tree`, `graph_refresh`, `tests`, `selfcheck` (4b) and `close_reasons` (4c) — so a dry-run PASS can never be read as a real-run PASS. A dirty working tree passes the dry run and FAILs the real one (FL-134) |
 | `--as-recovery <step>` | an attempt FAILED: run 1–4c **as** that PENDING retry. The retry is a **child of the attempt it retries** (`REVIEW.1.1`, then `REVIEW.1.1.1`) — never a sibling; the driver refuses a sibling of an unrecovered attempt (exit 6) and names the step to nest under (FL-138) |
-| `--json` | machine-readable result as the last stdout line: `{verdict, gates, range, refreshed_sha, slots, filled, unstated, closed}`, plus `{dry_run, not_evaluated}` on a dry run |
+| `--json` | machine-readable result as the last stdout line: `{verdict, gates, range, refreshed_sha, nodes, tasks, unstated, closed}`, plus `{dry_run, not_evaluated}` on a dry run |
 | `--registry <projects.json>` | isolated registry (tests / scenarios); defaults to `PSG_REGISTRY_PATH` or `~/skill-workspace/project-graphs/projects.json` |
 
 **Time ceilings (every subprocess has one).** The review rebuilds the whole graph
@@ -141,14 +142,17 @@ bash skills/project-state-graph/scripts/init_project.sh --name <project> --repo 
 
 ```bash
 bash skills/executing-plans/scripts/reason-slots.sh <in.json>   # {plan_id, project}
-#   -> prints a CLOSED checklist: the N data points this plan's runs changed
-#      (function / class / column node_keys). Answer each in one sentence;
-#      write "unstated" when you do not know — never invent.
-bash skills/executing-plans/scripts/reason-fill.sh <in.json>    # {plan_id, project, run_id, reasons: [{node_key, text}]}
+#   -> the nodes this plan's runs changed, the plan's root and its words, the
+#      task reasons already written, and the run_id to send back.
+#      Write why the TASK was done — who asked, what was seen, what was not
+#      chosen — once; "unstated" when nobody said. Never invent.
+bash skills/executing-plans/scripts/reason-fill.sh <in.json>    # {plan_id, project, run_id, tasks: [...], bundle?}
+#   -> several tasks only when the plan did several things: every task but one
+#      names its nodes, and bundle says why they share the plan
 bash skills/executing-plans/scripts/complete-step.sh <in.json>  # the child <plan>-REVIEW.1
-#   -> at close the system backstops every unanswered key as unstated (NULL,
-#      source=system) and turns deviation justifications into rejected_path
-#      rows. Missing reasons never block the close; they stay visible.
+#   -> at close a plan nobody explained gets one unstated task reason
+#      (source=system), and failed steps become rejected_path rows (R6).
+#      Missing reasons never block the close; they stay visible.
 ```
 
 `init_project.sh` no longer deletes the DB before rebuilding: `node_snapshot` /
@@ -172,13 +176,13 @@ label, a time and a link.
 ### Step 1 · fill the reason from what the user said in this task's window
 
 This is 4c above, and it happens **first**. Only what the user said in this
-task's window can become a reason:
+task's window can become a stated reason:
 
-| What you have | What you write | Tier |
+| What you have | What you write in `tasks` | Tier |
 |---|---|---|
-| The user's own words name this node | `{"node_key": "nk_…", "utterance_id": 42, "span": [0, 31]}` | `stated` |
-| The user said something related but never named it, or the plan itself says what was being done | `{"node_key": "nk_…", "interpretation": "…"}` | `asserted` |
-| The user said nothing about it | `{"node_key": "nk_…", "unstated": true}` | `unstated` |
+| The user's own words say why the task was done | `{"utterance_id": 42, "span": [0, 31]}` | `stated` |
+| The user said something related, or the plan itself says what was being done | `{"interpretation": "…"}` | `asserted` |
+| The user said nothing about it | `{"unstated": true}` | `unstated` |
 
 Reporting the task faithfully is not a guess: "the plan says to exclude EMEA from
 the rollup" is a restatement and belongs as `asserted`. Your own theory about

@@ -18,14 +18,14 @@ goal = "loosen the qty filter"
 declared_targets = ["pkg.pipeline.clean"]
 change = { replace = { "pkg/pipeline.py" = [['r["qty"] > MIN_QTY', 'r["qty"] >= MIN_QTY']] } }
 expectations = [ { target = "pkg.pipeline.clean", target_kind = "node", claim = "fewer rows dropped", channel = "graph" } ]
-reasons = { "pkg.pipeline.clean" = "loosened for Q3" }
+reasons = "loosened for Q3"
 
 [[tasks]]
 name = "t2"
 goal = "revert the filter change"
 declared_targets = ["pkg.pipeline.clean"]
 change = { revert_to = "t0" }
-reasons = { "pkg.pipeline.clean" = "Q3 returns are handled upstream now; back to the baseline filter" }
+reasons = "Q3 returns are handled upstream now; back to the baseline filter"
 
 [[tasks]]
 name = "t3"

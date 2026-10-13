@@ -417,7 +417,7 @@
    "via": "qualname"
   },
   {
-   "node": "pkg.pipeline.clean",
+   "node": null,
    "plan": "t1",
    "run": 3,
    "source": "agent",
@@ -427,7 +427,7 @@
    "type": "reason"
   },
   {
-   "node": "pkg.pipeline.clean",
+   "node": null,
    "plan": "t2",
    "run": 4,
    "source": "agent",

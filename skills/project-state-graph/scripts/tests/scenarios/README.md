@@ -49,7 +49,8 @@ declared_targets = ["pkg.pipeline.clean"]
 change = { files = { "pkg/pipeline.py" = "..." } }   # or { generated = "rename_variable" } / { revert_to = "t0" }
                                                      # or { replace = { "pkg/pipeline.py" = [["old", "new"], ...] } }
 expectations = [ { target = "pkg.pipeline.clean", target_kind = "node", claim = "fewer rows dropped", channel = "graph" } ]
-reasons = "stub"                                     # "stub" | "unstated" | { "pkg.pipeline.clean" = "loosened for Q3" }
+reasons = "stub"                                     # "stub" | "unstated" | "loosened for Q3" (the task's one reason)
+                                                     # | { tasks = [...], bundle = "..." } as reason-fill takes it
 tests = "python3 -m pytest -q tests"                 # optional: review_run.py --tests
 project = "none"                                     # optional: opt out of attribution (project_none_skipped only)
 

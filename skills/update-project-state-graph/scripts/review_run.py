@@ -4,10 +4,11 @@ review (SKILL.md steps 0–4c). The agent no longer walks the flow by hand: it
 chooses the test command, decides a signature override and supplies reasons.
 
     python3 review_run.py --plan-id P --project X [--registry projects.json]
-        [--reasons stub|unstated|ask|<file.json>]   # stub: "scenario: <event_types>" per slot;
-                                                # unstated: every slot NULL;
-                                                # ask: print the checklist, exit 6, resume later;
-                                                # json: [{node_key|qualified_name, text}, ...]
+        [--reasons stub|unstated|ask|<file.json>]   # one reason per task (step 3a). stub: one
+                                                # "scenario: <event_types>" task; unstated: one
+                                                # unstated task; ask: print the changed nodes and
+                                                # the root, exit 6, resume later; json:
+                                                # {"tasks": [...], "bundle"?} as reason-fill takes it
         [--tests "<command>"]                   # 4b re-test, run in the repo; absent -> logged as skipped
         [--timeout-tests 600] [--timeout-graph 4800] # seconds; a breach FAILS the step (write scripts: 60s)
         [--accept-signature "<reason>"]         # may override ONLY the signature gate; reason is logged
@@ -23,18 +24,18 @@ Flow: 0 lock registered_sha (append-log on <plan>-REVIEW, then start-step
 <plan>-REVIEW.1) · 1–3 resolve_range / changed_symbols / full_verdict ·
 4a gaps -> fail-step REVIEW.1 (exit 1) · 4b refresh (init_project.sh with
 PROVLEDGER_* attribution) -> --tests -> selfcheck · 4c reason-slots ->
-reason-fill -> complete-step REVIEW.1 (exit 0).
+reason-fill (one reason per task) -> complete-step REVIEW.1 (exit 0).
 
 Every write goes through the executing-plans shell scripts (single write path).
 If REVIEW.1 is already IN_PROGRESS the driver resumes: at 4c when the registry
-already points at HEAD (a previous run stopped in 4c, e.g. exit 6 on an unknown
-reasons key), otherwise from step 1 (a previous run died before its refresh).
+already points at HEAD (a previous run stopped in 4c, e.g. exit 6 on a node the
+plan did not change), otherwise from step 1 (a previous run died before its refresh).
 
 Exit codes: 0 the plan closed COMPLETED · 1 it did not — closed FAILED (a refresh
 / tests timeout closes FAILED here too), left short of COMPLETED by a close-time
 refusal or an unfinished sibling recovery step, or a failing --dry-run verdict ·
 5 a write script failed (including its 60s timeout) · 6 bad input (unknown
-project / reasons key / file, or an --as-recovery step of the wrong shape).
+project / reasons file or a task reason-fill refuses, or an --as-recovery step of the wrong shape).
 Exit 0 never means anything but "this plan is COMPLETED".
 
 The refresh and the test command run in their own process group, and a timeout
@@ -179,7 +180,7 @@ class Driver:
         self.log: list[str] = []
         self.manual: list[str] = []
         self.result: dict = {"plan_id": self.plan, "project": self.project, "verdict": None, "gates": {},
-                             "range": None, "refreshed_sha": None, "slots": 0, "filled": 0,
+                             "range": None, "refreshed_sha": None, "nodes": 0, "tasks": 0,
                              "unstated": 0, "closed": None}
 
     # ── plumbing ─────────────────────────────────────────────────────────────
@@ -492,23 +493,27 @@ class Driver:
     def close_with_reasons(self) -> None:
         a = self.a
         _, slots_out, _ = self.op("reason-slots", {"plan_id": self.plan, "project": self.project})
-        slots = slots_out.get("slots", [])
-        self.result["slots"] = len(slots)
-        self.say(f"[4c] reason-slots: {len(slots)} slot(s)\n{slots_out.get('checklist', '')}")
-        answers = self.answers(slots)
-        filled = unstated = 0
-        if answers:
-            run_id = max(int(s["run_id"]) for s in slots)
-            _, fill_out, _ = self.op("reason-fill", {"plan_id": self.plan, "project": self.project, "run_id": run_id,
-                                                     "step_id": self.child, "reasons": answers})
-            filled, unstated = int(fill_out.get("filled", 0)), int(fill_out.get("unstated", 0))
-        self.result["filled"] = filled
-        self.result["unstated"] = len(slots) - filled
-        self.say(f"[4c] reason-fill: filled={filled} unstated={self.result['unstated']} (source {a.reasons})")
+        nodes = slots_out.get("nodes", [])
+        self.result["nodes"] = len(nodes)
+        self.say(f"[4c] reason-slots: {slots_out.get('checklist', '')}")
+        payload = self.tasks(slots_out) if nodes else None
+        written = unstated = 0
+        if payload:
+            code, fill_out, text = self.op("reason-fill", {"plan_id": self.plan, "project": self.project,
+                                                           "run_id": slots_out.get("run_id"), "step_id": self.child,
+                                                           **payload}, ok_codes=(0, 2, 6))
+            if code:
+                # bad input, nothing written: the agent fixes the file and re-runs (resumes at 4c)
+                _die(f"reason-fill refused the --reasons input (exit {code}): {text.strip()[-600:]}\n"
+                     f"{self.child} left IN_PROGRESS; re-run with a corrected file to resume at 4c", 6)
+            written, unstated = int(fill_out.get("tasks", 0)), int(fill_out.get("unstated", 0))
+        self.result["tasks"] = written
+        self.result["unstated"] = unstated
+        self.say(f"[4c] reason-fill: tasks={written} unstated={unstated} (source {a.reasons})")
         for line in self.manual:
             self.say(line)                 # re-emitted at the tail: log_context keeps the last 50 lines
         summary = (f"review PASS via review_run.py: gates={self.result['gates'] or 'resumed'}, "
-                   f"refreshed_sha={(self.result['refreshed_sha'] or '')[:10]}, slots={len(slots)}, filled={filled}"
+                   f"refreshed_sha={(self.result['refreshed_sha'] or '')[:10]}, nodes={len(nodes)}, tasks={written}"
                    + ("; " + "; ".join(self.manual) if self.manual else ""))
         self.op("complete-step", {"step_id": self.child, "summary": summary, "log_context": "\n".join(self.log)})
         rows = self.read("SELECT status FROM Plans WHERE plan_id = ?", self.plan)
@@ -523,53 +528,39 @@ class Driver:
             self.finish(1)
         self.finish(0)
 
-    def answers(self, slots: list[dict]) -> list[dict]:
-        """Answers for reason-fill. `stub` / `unstated` are the deterministic
-        modes of the tests; a file holds [{node_key|qualified_name, interpretation
-        | utterance_id+span | unstated}] — the legacy `text` key is accepted here
-        and sent as interpretation (asserted), never as stated."""
+    def tasks(self, slots_out: dict) -> dict:
+        """The reason-fill payload, one reason per task (task-level redesign,
+        step 3a). `stub` / `unstated` are the deterministic modes of the tests;
+        a file holds {"tasks": [{interpretation | utterance_id+span | unstated,
+        nodes?, refs?, because?}], "bundle"?} and is passed through as it is —
+        reason-fill decides what it accepts. `ask` prints the nodes and the root
+        and stops (exit 6)."""
         mode = self.a.reasons
+        nodes = slots_out.get("nodes", [])
         if mode == "stub":
-            return [{"node_key": s["node_key"], "interpretation": f"scenario: {'/'.join(s['event_types'])}"} for s in slots]
+            seen = list(dict.fromkeys(t for n in nodes for t in n.get("event_types", [])))
+            return {"tasks": [{"interpretation": f"scenario: {'/'.join(seen)}"}]}
         if mode == "unstated":
-            return [{"node_key": s["node_key"], "unstated": True} for s in slots]
+            return {"tasks": [{"unstated": True}]}
         if mode == "ask":
-            # the agent wants to see the closed checklist before answering: stop
-            # here with REVIEW.1 IN_PROGRESS; the next run resumes at 4c.
-            _die("--reasons ask: answer these slots in a JSON file of "
-                 "[{qualified_name|node_key, interpretation | utterance_id+span | unstated}] and re-run with --reasons <file>\n"
-                 + "\n".join(f"  {s['qualified_name']} ({'/'.join(s['event_types'])}) [{s['node_key']}]" for s in slots)
+            # the agent wants to see what changed before answering: stop here with
+            # REVIEW.1 IN_PROGRESS; the next run resumes at 4c.
+            root = slots_out.get("root")
+            _die("--reasons ask: write why this plan's task was done in a JSON file of "
+                 '{"tasks": [{interpretation | utterance_id+span | unstated, nodes?, refs?, because?}], "bundle"?} '
+                 "(several tasks: every task but one names its nodes; bundle says why they share the plan) "
+                 "and re-run with --reasons <file>\n"
+                 + (f"  root: {root['root_plan_id']}: {root.get('words') or ''}\n" if root else "  root: none recorded\n")
+                 + "\n".join(f"  {n['qualified_name']} ({'/'.join(n['event_types'])}) [{n['node_key']}]" for n in nodes)
                  + f"\n{self.child} left IN_PROGRESS, no second refresh", 6)
         try:
-            items = json.loads(Path(mode).read_text())
+            doc = json.loads(Path(mode).read_text())
         except (OSError, ValueError) as e:
             _die(f"--reasons must be stub, unstated or a JSON file: {e}", 6)
-        if not isinstance(items, list):
-            _die("--reasons file must hold a list of {node_key|qualified_name, interpretation|utterance_id+span|unstated}", 6)
-        by_key = {s["node_key"]: s for s in slots}
-        by_qn = {s["qualified_name"]: s for s in slots}
-        out, unknown = [], []
-        for it in items:
-            key = it.get("node_key") or by_qn.get(it.get("qualified_name", ""), {}).get("node_key")
-            if key not in by_key:
-                unknown.append(it.get("node_key") or it.get("qualified_name"))
-                continue
-            if it.get("utterance_id") is not None and it.get("span"):
-                ans = {"node_key": key, "utterance_id": it["utterance_id"], "span": list(it["span"])}
-            elif it.get("unstated") or str(it.get("interpretation", it.get("text", ""))).strip().lower() in ("", "unstated", "unknown"):
-                ans = {"node_key": key, "unstated": True}
-            else:
-                ans = {"node_key": key, "interpretation": str(it.get("interpretation") or it.get("text")).strip()}
-                if it.get("refs"):
-                    ans["refs"] = list(it["refs"])
-            if it.get("because"):                      # DP phase 2: the records this answer leaned on → influence(reason_because)
-                ans["because"] = [int(x) for x in it["because"]]
-            out.append(ans)
-        if unknown:
-            _die(f"unknown reason key(s) {unknown} — only this plan's open slots are accepted:\n"
-                 + "\n".join(f"  {s['qualified_name']} [{s['node_key']}]" for s in slots)
-                 + f"\n{self.child} left IN_PROGRESS; re-run with a corrected file to resume at 4c", 6)
-        return out
+        if not (isinstance(doc, dict) and isinstance(doc.get("tasks"), list)):
+            _die('--reasons file must hold {"tasks": [{interpretation | utterance_id+span | unstated, nodes?, refs?, '
+                 'because?}], "bundle"?} — close-time reasons are per task, not one item per node', 6)
+        return {k: doc[k] for k in ("tasks", "bundle") if k in doc}
 
 
 def main() -> None:

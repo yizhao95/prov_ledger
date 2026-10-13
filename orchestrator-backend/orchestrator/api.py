@@ -13,7 +13,7 @@ import sqlite3
 import string
 from datetime import datetime, timezone
 
-from . import significance, checks, circuit_breakers, constraints, db, outcomes, psg_bridge, reasons, state_machine, telemetry, triggers
+from . import significance, checks, circuit_breakers, constraints, db, external_trigger, outcomes, psg_bridge, reasons, state_machine, telemetry
 from .circuit_breakers import HardStop, SoftStop  # noqa: F401  re-export
 from .state_machine import InvalidTransitionError, StepStatus  # noqa: F401
 
@@ -584,21 +584,20 @@ def _close_reviewed(conn: sqlite3.Connection, plan_id: str, review_step_id: str,
                 conn, review_step_id,
                 f"[REVIEW REOPENED] sha check skipped: registry sha={registered!r}, repo HEAD={head!r} "
                 f"(repo {repo!r}) — cannot verify the refresh (FL-030)")
-        slots = reasons.slots_for_plan(conn, project, plan_id, psg_db) if psg_db else []
         telemetry.append_step_log(
             conn, review_step_id,
-            f"[REASON SLOTS] {len(slots)} open before the reopened close"
-            + (": " + reasons.checklist_text(slots) if slots else
-               ("" if psg_db else " (state graph unavailable)")))
+            "[REASON SLOTS] before the reopened close: "
+            + (reasons.task_text(reasons.task_slots(conn, project, plan_id, psg_db)) if psg_db
+               else "(state graph unavailable)"))
     close_mode = _close_mode(project, registry_path)
     with db.transaction(conn):
-        # DP phase 1 (Task 5): the deterministic rules first — a node a rule
-        # recognises gets a derived reason and is never asked about (C1); the
-        # rest of the changed nodes are logged as ask / silent (C2, C4).
-        triggered = triggers.evaluate(conn, project=project, plan_id=plan_id, psg_db_path=psg_db,
-                                      ask=(close_mode != "pending"),
-                                      external_mode=_external_trigger_mode(project, registry_path),
-                                      commit=False) if psg_db else {}
+        # Task-level redesign (step 3a): the agent wrote the task's reason before
+        # the close; R0-R5 no longer write a reason per node. The external
+        # trigger still logs its verdict on every external candidate, and a plan
+        # nobody explained gets one unstated task reason.
+        triggered = {"external": external_trigger.evaluate_external(
+            conn, project=project, plan_id=plan_id, psg_db_path=psg_db,
+            mode=_external_trigger_mode(project, registry_path), commit=False)} if psg_db else {}
         n_unstated = reasons.backstop_unstated(
             conn, project=project, plan_id=plan_id, psg_db_path=psg_db, commit=False,
             state="unknown" if close_mode == "pending" else "active") if psg_db else 0

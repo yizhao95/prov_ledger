@@ -432,47 +432,45 @@ def _op_finish_plan(conn, data: dict) -> dict:
 
 
 def _op_reason_slots(conn, data: dict) -> dict:
-    """The closed-form checklist for a plan under review (spec §2.8): the nodes
-    its runs changed that have no reason yet, plus what the rules already
-    filled (rule_id + basis) so the agent sees it. `"draft": true` adds, per
-    open slot, the recorded utterances that mention the node — ready to be
-    sent back as stated answers. Exit 6 when the project has no usable state
+    """What the agent needs to write a plan's close-time reasons, one per task
+    (spec §2.8, task-level redesign step 3a): the nodes its runs changed (to
+    assign, when the plan did several things), its root and the root's words,
+    the task reasons already written, and the run_id to send back. `"draft":
+    true` adds candidate sentences from the user's recorded words, ready to be
+    sent back as a stated task. Exit 6 when the project has no usable state
     graph — the agent must know it cannot fill anything."""
     _require(data, "plan_id", "project")
     psg_db = psg_bridge.db_path_for(data["project"])
     if not psg_db or not os.path.exists(psg_db):
         _die(f"no state graph registered (or built) for project {data['project']!r}", code=6)
-    slots = reasons.slots_for_plan(conn, data["project"], data["plan_id"], psg_db)
-    out = {"plan_id": data["plan_id"], "project": data["project"], "slots": slots,
-           "checklist": reasons.checklist_text(slots), "auto_filled": reasons.auto_filled(conn, data["plan_id"])}
-    if data.get("draft"):
-        out["draft"] = reasons.draft(conn, data["project"], data["plan_id"], psg_db)
-    return out
+    got = reasons.task_slots(conn, data["project"], data["plan_id"], psg_db, draft=bool(data.get("draft")))
+    return {"plan_id": data["plan_id"], "project": data["project"],
+            "run_id": max((n["run_id"] for n in got["nodes"]), default=None), **got,
+            "checklist": reasons.task_text(got)}
 
 
 def _op_reason_fill(conn, data: dict) -> dict:
-    """Record one answer per changed node — each exactly one of
-    {node_key, utterance_id, span:[s,e]} (stated), {node_key, interpretation,
-    refs?} (asserted), {node_key, unstated: true}. The old {node_key, text}
-    shape exits 2 (nothing written): free text cannot become stated. Keys
-    outside the plan's change set are refused (exit 6, nothing written)."""
-    _require(data, "plan_id", "project", "run_id", "reasons")
-    if not isinstance(data["reasons"], list) or not data["reasons"]:
-        _die("'reasons' must be a non-empty list of answers")
+    """Record why the plan was done, once per task — each task exactly one of
+    {utterance_id, span:[s,e]} (stated), {interpretation, refs?} (asserted),
+    {unstated: true}, plus because?, and nodes? when the plan did several things
+    (every task but one names its nodes; `bundle` says why they share the plan).
+    The old per-node `reasons` list and the {text} shape exit 2 (nothing
+    written). A node the plan did not change exits 6 (nothing written)."""
+    if "reasons" in data:
+        _die(reasons.PER_NODE_SHAPE, code=2)
+    _require(data, "plan_id", "project", "run_id", "tasks")
     psg_db = psg_bridge.db_path_for(data["project"])
     if not psg_db or not os.path.exists(psg_db):
         _die(f"no state graph registered (or built) for project {data['project']!r}", code=6)
     try:
-        r = reasons.fill(conn, project=data["project"], plan_id=data["plan_id"], run_id=int(data["run_id"]),
-                         reasons=data["reasons"], source=data.get("source", "agent"),
-                         step_id=data.get("step_id"), psg_db_path=psg_db)
-    except reasons.FillInputError as e:
+        r = reasons.fill_tasks(conn, project=data["project"], plan_id=data["plan_id"], run_id=int(data["run_id"]),
+                               tasks=data["tasks"], bundle=data.get("bundle"), source=data.get("source", "agent"),
+                               step_id=data.get("step_id"), psg_db_path=psg_db)
+    except ValueError as e:                      # FillInputError, a span outside its utterance, an unknown reference
         _die(str(e), code=2)
-    except ValueError as e:                      # a span outside its utterance, an unknown utterance / reference
-        _die(str(e), code=2)
-    if r["unknown_keys"]:
+    if r["unknown_nodes"]:
         print(json.dumps(r, indent=2))
-        _die(f"unknown node_key(s) for this plan: {r['unknown_keys']} — only the checklist's keys are accepted", code=6)
+        _die(f"node(s) this plan did not change: {r['unknown_nodes']} — only reason-slots' nodes are accepted", code=6)
     return r
 
 

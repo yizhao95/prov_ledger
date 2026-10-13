@@ -171,7 +171,7 @@
     },
     {
       "title": "reason-slots",
-      "description": "Read the close-time checklist for a registered-project plan: the changed nodes that still need a reason, plus what the rules already filled. Exit 6 when the project has no built state graph.",
+      "description": "Read what a registered-project plan's close-time reasons need, one per task: the changed nodes (to assign when the plan did several things), the plan's root and its words, the task reasons already written, and the run_id to send back. Exit 6 when the project has no built state graph.",
       "type": "object",
       "required": ["plan_id", "project"],
       "additionalProperties": false,
@@ -179,36 +179,36 @@
       "properties": {
         "plan_id": {"type": "string", "minLength": 1},
         "project": {"type": "string", "minLength": 1},
-        "draft":   {"type": "boolean", "description": "Also propose, per open slot, recorded utterances that mention the node — ready to send back as stated answers."}
+        "draft":   {"type": "boolean", "description": "Also propose sentences from the user's recorded words — ready to send back as a stated task."}
       }
     },
     {
       "title": "reason-fill",
-      "description": "Record one answer per changed node. The tier follows from the answer's shape. The old {node_key, text} shape exits 2; a node_key outside the plan's change set exits 6; nothing is written on either.",
+      "description": "Record why the plan was done, one reason per task. The tier follows from the task's shape. The old per-node `reasons` list and the {text} shape exit 2; a node the plan did not change exits 6; nothing is written on either.",
       "type": "object",
-      "required": ["plan_id", "project", "run_id", "reasons"],
+      "required": ["plan_id", "project", "run_id", "tasks"],
       "additionalProperties": false,
       "patternProperties": {"^_": {}},
       "properties": {
         "plan_id": {"type": "string", "minLength": 1},
         "project": {"type": "string", "minLength": 1},
-        "run_id":  {"type": "integer", "description": "The run the slots came from (reason-slots output)."},
+        "run_id":  {"type": "integer", "description": "The run reason-slots reported."},
         "step_id": {"type": "string"},
         "source":  {"enum": ["human", "agent", "system"], "description": "Who is answering. Defaults to 'agent'."},
-        "reasons": {
+        "bundle":  {"type": "string", "minLength": 1, "description": "Required with two or more tasks: one sentence on why they share this plan."},
+        "tasks": {
           "type": "array",
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["node_key"],
             "properties": {
-              "node_key":       {"type": "string", "minLength": 1},
               "utterance_id":   {"type": "integer", "description": "stated: with span, points at the user's recorded words."},
               "span":           {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2, "description": "stated: [start, end] character offsets inside the utterance."},
-              "interpretation": {"type": "string", "description": "asserted: your reading of why."},
+              "interpretation": {"type": "string", "description": "asserted: why this task was done — the root, what was seen, what was not chosen."},
               "refs":           {"type": "array", "items": {"type": "integer"}, "description": "asserted: reference ids (an email, a ticket, a note registered with `provledger note`)."},
-              "unstated":       {"const": true, "description": "unstated: nobody knows; say so."},
-              "because":        {"type": "array", "items": {"type": "integer"}, "description": "Any shape: reason ids this change leaned on; each becomes influence(via=reason_because)."},
+              "unstated":       {"const": true, "description": "unstated: nobody said; say so."},
+              "nodes":          {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "With several tasks: the node keys or qualified names (from reason-slots) this task changed. Every task but one names its nodes; that one takes the rest."},
+              "because":        {"type": "array", "items": {"type": "integer"}, "description": "Any shape: reason ids this task leaned on; each becomes influence(via=reason_because)."},
               "kind":           {"enum": ["technical", "organizational", "mixed"], "description": "Defaults to 'technical'."}
             }
           }

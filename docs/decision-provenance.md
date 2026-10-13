@@ -68,30 +68,39 @@ plan that closed.
    plan. Empty prompts and slash commands are skipped. The hook never writes
    stdout and never fails loudly; failures are counted by `selfcheck
    hook_failures`.
-2. **Close-time fill** (`reason-slots.sh` / `reason-fill.sh`): for each node
-   the plan changed, one answer of exactly one shape —
-   `{node_key, utterance_id, span}` (stated), `{node_key, interpretation,
-   refs?}` (asserted), `{node_key, unstated: true}`. The old `{node_key,
-   text}` shape exits 2. `reason-slots.sh` with `"draft": true` proposes the
-   utterances that mention the node. The prompt to answer is *why not the
-   other way, and who asked for it* — not what the step did.
-3. **The rules** (`orchestrator/triggers.py`): before anyone is asked, R1–R6
-   run over every node the plan's runs touched; a hit writes a `derived`
-   reason with the rule id and its basis, and the node is not asked about.
+2. **Close-time fill, one per task** (`reason-slots.sh` / `reason-fill.sh`):
+   a plan is a task, and its close records why the task was done — once, not
+   once per changed node. Each task is exactly one shape —
+   `{utterance_id, span}` (stated), `{interpretation, refs?}` (asserted),
+   `{unstated: true}` — plus `because?`. A plan that did several things sends
+   one task each: every task but one names its `nodes` (the plan's changed
+   nodes, each in one task; the one without takes the rest), and a `bundle`
+   sentence says why they share the plan. The per-node `reasons` list and the
+   `{text}` shape exit 2. `reason-slots.sh` lists the changed nodes, the
+   plan's root (`plan_root`) and its words, and the task reasons already
+   written; with `"draft": true` it proposes sentences from the user's
+   recorded words. The prompt is *why this task, who asked, what was not
+   chosen* — not what the step did. A plan nobody explained gets one
+   `unstated` task reason from the system; `provledger-extensions.json` →
+   `reasons.close_mode` = `pending` records it as `unknown`.
 
-   | id | rule |
-   |---|---|
-   | R1 | a test failed then passed in this plan and names the node's file |
-   | R2 | the previous review of this project failed a gate on the node |
-   | R3 | a drift decision on a dataset the node reads fell in the plan window |
-   | R4 | pure refactor: identity kept, renamed or moved, struct_sig unchanged |
-   | R5 | an active constraint is anchored on the node |
-   | R6 | a failed step recovered by a deviation → a `rejected_path` (command + error tail) |
-
-   Every verdict is one `trigger_log` row: `auto` (a rule filled it), `ask`
-   (nothing recognised the change; it becomes a slot), `silent` (the project
-   closes in `pending` mode). `provledger-extensions.json` →
-   `reasons.close_mode` chooses `ask` (default) or `pending`.
+   A task reason has no `node_key` (migration 036). A node reaches it through
+   the state graph's history: the runs that added, removed or structurally
+   changed the node carry the plan id (`psg_bridge.plans_that_changed`), and
+   the plan's task reason that covers the node — the task it was assigned to in
+   `reason_node`, else the task that names no nodes — is read with the node's
+   own records and shown as `task reason of <plan>`
+   (`reasons.task_reasons_for`, the one path every read takes). `plan_bundle`
+   holds the sentence on why several tasks share a plan. Nothing is copied
+   onto the nodes.
+3. **Rejected paths** (rule R6, `orchestrator/reasons.py`): a failed step
+   recovered by a deviation becomes a `derived` `rejected_path` (command +
+   error tail), anchored on a changed node only when the step names it
+   explicitly. Rules R0–R5, which wrote a reason per changed node (the user's
+   sentence naming it, a test that failed then passed, a failed gate, a drift
+   decision, a pure refactor, an anchored constraint), no longer run at close
+   (0.4.8); the rows they wrote earlier stay and read as before. The external
+   trigger (§14) still logs one `trigger_log` verdict per external candidate.
 4. **After the fact** (`provledger note`):
 
    ```bash
@@ -149,7 +158,7 @@ places, and only four (NORTH-STAR: "do not overreach"):
 |---|---|---|
 | **publish** | `context_pack.build` — one bounded read per target (identity chain, constraints, rejected paths, reasons, prior claims, the card) trimmed to a token budget in a fixed order (reasons → rejected paths → neighbour constraints → constraints), cuts shown as counts; `checks.headline` — the two-layer check printed as the plan headline, stored as a new `headline` row every time | `read_hit(moment='plan')` per record shown |
 | **edit** (PreToolUse: Edit / Write / MultiEdit) | the active constraints anchored on the lines about to change and one hop downstream, injected as `additionalContext` (statements only, ≤ 600 chars, ending with `provledger why <qn>`); not one byte when nothing anchors there; nothing opened for a file outside every registered repo | `read_hit(moment='edit', injected_chars)` |
-| **close** | rules R0–R6, the unstated backstop, `close_headline` (proceeded / unanswered blocking findings → survival expectations) | `change_reason`, `expectations` |
+| **close** | R6 rejected paths, the external-trigger log, one `unstated` task reason when nobody wrote one, `close_headline` (proceeded / unanswered blocking findings → survival expectations) | `change_reason`, `expectations` |
 | **why** (`provledger why <qn|nk_…|file:line>`) | the same pack, printed: `node · downstream n · history m · constraints k (j active) · rejected r · pending p`, then each record as `#id · tier · source level · when · shown n · adopted by <plan>`; `--impact`, `--all`, `--pending`, `--never-read` (constraints nobody was ever shown), `--search` (FTS5, LIKE when unavailable and it says so) | `read_hit(moment='why')` |
 
 **Adopted** is written by exactly three paths, all of which cite a record id: a
@@ -161,8 +170,8 @@ dozens of times a day.
 
 **Never blocking.** `publish` exits 0 whatever the headline says; PreToolUse
 touches `permissionDecision` only for a human constraint declared `block: true`
-in the extensions file, which is also the one exit-5 path of publish. R0 makes
-the user's own sentence naming a node its stated reason before any other rule.
+in the extensions file, which is also the one exit-5 path of publish. A task
+reason is `stated` only when the agent points at the user's recorded words.
 
 ### 8.1 · Cost — what provledger costs a plan
 
@@ -187,9 +196,9 @@ session (`session_run`, the one table that may be UPDATEd) and, when the repo
 is registered, the session published no plan, the tree moved since the graph
 was built, `reasons.session_refresh` is not `off` and no refresh is running,
 queues `init_project.sh --trigger session --session-id <sid> --notify-orch-db`
-in the background. When it reports back, R0–R6 run over the session's changed
-nodes under the placeholder plan `session:<sid>`, the rest is backstopped
-`unstated`, and a headline is stored for the session — never printed.
+in the background. When it reports back, the session's task is recorded under
+the placeholder plan `session:<sid>` as one `unstated` task reason, and a
+headline is stored for the session — never printed.
 
 What is lost is explicit, never silent (`test_degraded_mode.py`, marker
 `degraded`):
@@ -197,7 +206,7 @@ What is lost is explicit, never silent (`test_degraded_mode.py`, marker
 | with the skills | hooks only |
 |---|---|
 | a plan with steps, deviations, a review | `session_run` with `refresh_state ∈ skipped/queued/done/failed` and the reason |
-| reasons answered at close (stated / asserted / unstated) | only `derived` (rules), `stated` (R0) and `unstated` — never `asserted`: nobody interpreted anything |
+| task reasons answered at close (stated / asserted / unstated) | one `unstated` task reason — never `asserted` or `stated`: nobody said or interpreted anything |
 | headline printed and answered; `influence` rows | `headline(session_id)` stored, `headline_response` and `influence` empty |
 | records shown at plan / close | only the edit hook's injection is `read_hit` |
 
@@ -253,6 +262,9 @@ hint × verdict confusion matrix; selfcheck lists `significance_disagreements`
 (hint major, verdict minor) — believed, but on the record (I14).
 
 ### 9.3 · R0 sees the words that caused the plan
+
+(R0 no longer runs at close since 0.4.8: the agent points at the user's words
+for the task's reason — §4.)
 
 Phase 2 ended with zero real R0 hits for two reasons that were in the design.
 The sentence that causes a plan is said **before** the plan exists, so the

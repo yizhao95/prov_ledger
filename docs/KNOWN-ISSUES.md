@@ -98,8 +98,8 @@ nodes are the exception: retiring a declaration does surface as
 first review.** The review refresh calls `init_project.sh` with `--name` and
 `--repo` but not `--out-dir`, so the graph is rebuilt in
 `~/skill-workspace/project-graphs/` instead of the registered path. Every node
-then looks newly added and you get a reason slot for each one. Register
-projects in the default location until this is fixed.
+then looks newly added, so the plan's task reason is shown on every node of the
+project. Register projects in the default location until this is fixed.
 
 **Every review refresh rebuilds the whole graph.** Refresh cost tracks the size
 of the repository, not the size of your change: on this repository four

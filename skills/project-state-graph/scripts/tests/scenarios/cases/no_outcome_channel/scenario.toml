@@ -11,7 +11,7 @@ declared_targets = ["pkg.pipeline.clean"]
 change = { replace = { "pkg/pipeline.py" = [['''    df = [r for r in df if r["qty"] > MIN_QTY]
     df = [r for r in df if r.get("label")]''', '''    df = [r for r in df if r["qty"] > MIN_QTY and r.get("label")]''']] } }
 expectations = [ { target = "latency", target_kind = "metric", claim = "clean() gets faster", channel = "metric:latency" } ]
-reasons = { "pkg.pipeline.clean" = "single pass over the rows" }
+reasons = "single pass over the rows"
 
 [[tasks]]
 name = "t2"

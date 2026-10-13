@@ -114,8 +114,8 @@ def test_supersede_is_the_only_update_and_keeps_the_old_row(conn):
 
 
 def test_reason_validation(conn):
-    with pytest.raises(ValueError, match="node_key"):
-        _reason(conn, node_key=None, interpretation="x")
+    with pytest.raises(ValueError, match="node_key"):           # a constraint names its code (a task reason may float, 036)
+        _reason(conn, node_key=None, role="constraint", statement="x")
     r = _reason(conn, node_key=None, role="rejected_path", interpretation="tried X, failed")
     assert pv.get_reason(conn, r)["role"] == "rejected_path"
     with pytest.raises(ValueError, match="rationale"):
@@ -124,3 +124,16 @@ def test_reason_validation(conn):
         _reason(conn, kind="emotional", interpretation="x")
     assert [x["id"] for x in pv.reasons_for_plan(conn, "P1", role="rejected_path")] == [r]
     assert pv.reasons_for_node(conn, "nk_zzz") == []
+
+
+def test_a_task_reason_has_no_node_but_a_constraint_must_name_one(conn):
+    """Task-level redesign, step 3a: a plan's reason belongs to the task; the
+    nodes reach it through the state graph's history. A constraint is a rule
+    about named code, so it still names its node."""
+    rid = pv.insert_reason(conn, project="p", plan_id="P", node_key=None, kind="technical",
+                           interpretation="the reviewer fixed the evaluation window", recorded_by="agent")
+    row = pv.get_reason(conn, rid)
+    assert (row["node_key"], row["role"], row["tier"]) == (None, "reason", "asserted")
+    with pytest.raises(ValueError, match="reason and a rejected_path may float"):
+        pv.insert_reason(conn, project="p", plan_id="P", node_key=None, kind="organizational", role="constraint",
+                         statement="keep the weekly grain", recorded_by="human")

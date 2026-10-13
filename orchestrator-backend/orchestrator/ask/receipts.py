@@ -189,7 +189,9 @@ def _record_text(kind: str, node: str, r: dict) -> str:
     body = f' · "{_clip(r.get("text") or "")}"' if r.get("text") else ""
     # FL-238: the rows this one corrects are not in the material; say which they were
     fixed = (" · corrects " + ", ".join(f"#{i}" for i in r["corrects"])) if r.get("corrects") else ""
-    return f"{ROLE_LABEL[kind]} on {node} · {who}{body}{fixed} · {shown}"
+    where = (f"task reason of {r['task_of']}, which changed {node}" if r.get("task_of")
+             else f"{ROLE_LABEL[kind]} on {node}")
+    return f"{where} · {who}{body}{fixed} · {shown}"
 
 
 def graph_events_line(count: int) -> str:

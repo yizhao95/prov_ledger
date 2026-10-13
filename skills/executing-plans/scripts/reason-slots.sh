@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# reason-slots.sh — deterministic flow for the reason-slots op: the closed-form reason checklist of a plan under review.
+# reason-slots.sh — deterministic flow for the reason-slots op: what a plan's per-task close-time reasons need.
 # Composes input as JSON/YAML, this script validates + writes via the orchestrator.
 # See ../update-input.example.json (and ../update-input.schema.json) for the input shape.
 #

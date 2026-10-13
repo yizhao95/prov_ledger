@@ -94,8 +94,7 @@ def test_the_reason_draft_proposes_nothing_from_a_handback(conn, tmp_path):
     graph = _graph(tmp_path, {"nk_a": "pkg.rollup.weekly_totals"})
     _plan(conn)
     _utt(conn, HANDBACK)
-    out = {x["node_key"]: x for x in reasons.draft(conn, "proj", PLAN, graph)}
-    assert out["nk_a"]["candidates"] == []
+    assert reasons.draft(conn, "proj", PLAN, graph) == []          # one list for the task (step 3a)
 
 
 def test_the_hook_and_the_rules_share_one_predicate():

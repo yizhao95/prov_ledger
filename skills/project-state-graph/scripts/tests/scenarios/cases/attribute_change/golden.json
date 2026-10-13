@@ -245,7 +245,7 @@
    "via": "qualname"
   },
   {
-   "node": "pkg.pipeline.clean",
+   "node": null,
    "plan": "t1",
    "run": 2,
    "source": "agent",
