@@ -74,3 +74,12 @@ def test_q4_and_q7_ask_about_the_node_only_plan_b_changed_and_keep_plan_a_out_of
     q7 = " ".join(qs["Q7-receipts-absence"]["must"])
     assert "2026-10-13" in q7 and "orders.discount" not in q7          # B's day; A's words are not this node's reason
     assert any("v2" in m and "estimate_note" in m for m in qs["Q7-receipts-absence"]["must_not"])
+
+
+def test_the_question_node_is_a_code_node_not_a_declared_figure():
+    """A figure declared between plan A and plan B enters the graph in plan B's
+    refresh, so it is one of the nodes only plan B changed — but nobody types
+    `declared:…` into a question about why code changed."""
+    names = ["declared:q3-emea-uplift", "nk_0123abcd", "pkg.rollup.estimate_note"]
+    assert DP.question_node(names) == "pkg.rollup.estimate_note"
+    assert DP.question_node(["declared:q3-emea-uplift"]) is None

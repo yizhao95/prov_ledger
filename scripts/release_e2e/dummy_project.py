@@ -187,6 +187,14 @@ def changed_only_by(graph_db, plan_id: str, others: list[str]) -> list[str]:
         conn.close()
 
 
+def question_node(names: list[str]) -> str | None:
+    """The first name a person would type into a question about code: a dotted
+    qualified name. A declared node (`declared:…`) or a bare key is no use — and
+    a figure declared between two plans enters the graph in the next plan's
+    refresh, so it is among the nodes only that plan changed."""
+    return next((n for n in names if "." in n and not n.startswith(("declared:", "nk_"))), None)
+
+
 def absence_checks(facts: dict) -> list[tuple[bool, str, str]]:
     """What the honest-absence questions rest on (step 3a): a task nobody
     explained is on record as one unstated task reason, and a node only that
@@ -664,7 +672,7 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
     # the node whose only task reason is plan B's unstated one: read back out of
     # the graph after the close, never predicted
     only_b = changed_only_by(f["graph_db"], plan_b, others=[plan_a])
-    f["never_explained"] = only_b[0] if only_b else None
+    f["never_explained"] = question_node(only_b)
     f["never_explained_all"] = only_b
     f["never_explained_by"] = plan_b
     say(f"    never explained: {f['never_explained']} (only plan B changed it)")
