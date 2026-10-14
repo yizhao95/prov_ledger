@@ -238,6 +238,28 @@ def covering_task_reasons(conn, node_key: str, plan_ids) -> list[int]:
     return out
 
 
+def task_nodes(conn, psg, reason_id: int) -> list[str]:
+    """The nodes a reason answers for — the inverse of covering_task_reasons. A
+    node's reason answers for its node; a task reason for the nodes its plan
+    changed that it covers (reason_node, or all of them for a plan's only task);
+    a reason a later one corrected, for what the correction covers."""
+    row = conn.execute("SELECT id, plan_id, node_key, role, superseded_by FROM change_reason WHERE id = ?",
+                       (reason_id,)).fetchone()
+    seen: set[int] = set()
+    while row is not None and row[4] is not None and row[0] not in seen:
+        seen.add(row[0])
+        row = conn.execute("SELECT id, plan_id, node_key, role, superseded_by FROM change_reason WHERE id = ?",
+                           (row[4],)).fetchone()
+    if row is None:
+        return []
+    if row[2] is not None:
+        return [row[2]]
+    if row[3] != "reason" or not row[1]:
+        return []
+    keys = [c["node_key"] for c in psg_bridge.changed_node_keys(psg, row[1]) if c.get("node_key")]
+    return [k for k in keys if row[0] in covering_task_reasons(conn, k, [row[1]])]
+
+
 def task_reasons_for(conn, psg, node_keys) -> dict[int, str]:
     """{reason_id: plan_id}: the live task reasons that answer for any of these
     nodes, through the plans whose runs changed them (psg_bridge.plans_that_changed).

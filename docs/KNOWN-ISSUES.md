@@ -99,8 +99,7 @@ of the repository, not the size of your change: on this repository (about
 21,700 nodes and 82,400 edges) a full refresh takes about 25 seconds, whether
 the task touched three files or thirty. Each refresh also appends a snapshot row
 and an event for every node, changed or not, and first copies the whole previous
-graph to `provledger.<commit>.db` beside it. Nothing removes those copies, so the
-project's graph directory grows with every reviewed commit.
+graph to `provledger.<commit>.db` beside it; the newest five copies are kept.
 
 ## Reasons, ledger and export
 
@@ -119,6 +118,13 @@ reference labels.
 through the ledger's question box deliberately records no `read_hit` — a
 question is not a plan. The side effect is that a constraint you have only ever
 seen there still appears in `provledger why --never-read`.
+
+**A question in Chinese reaches English records only through `--also`.** Han
+text is matched by pairs of adjacent characters against what was recorded in
+Chinese — the user's words and any Chinese reason or source label. Reasons and
+code names recorded in English are reached through the English words passed with
+`--also`, which the `/ledger` and `/receipts` skills add. Japanese kana and
+Korean are not matched yet.
 
 **Full-text search covers only part of the ledger.** FTS5 indexes the
 interpretation and statement of a reason. Utterance text and reference labels
@@ -163,8 +169,12 @@ conftest loads and in what order `sys.path` is extended. Two test file names
 also collide across suites.
 
 **claude.ai and Cowork do not install the plugin.** The plugin puts `provledger` on
-the session's PATH through a top-level `bin/` directory, and those two refuse a
-plugin that has one. Install it with the Claude Code CLI (`claude plugin install`).
+the session's PATH through a top-level `bin/` directory, and both refuse a plugin
+that has one
+([platform support](https://claude.com/docs/plugins/platform-support)). Without
+`bin/` it would still record nothing in claude.ai chat, which ignores a plugin's
+hooks; Cowork loads hooks, but that path has not been tried. Install it in Claude
+Code: the terminal, the IDE extensions or the desktop app's Code tab.
 
 **A session's end can still go unrecorded under heavy concurrent writing.** The
 ledger runs in WAL, so reading never holds a write up, and a prompt or a tool
@@ -180,7 +190,8 @@ copy can miss them. Use `sqlite3 orchestrator.db ".backup copy.db"`, or
 `provledger`'s own `db.copy_ledger` from Python. The `-wal` and `-shm` files
 beside the ledger are SQLite's and belong to it.
 
-**The session that installs the plugin does not count itself.** Hooks load when
-a session starts, so the session in which you install provLedger records no
-tool calls and no utterances. Start a new session before reading any
-measurement, and run `metrics baseline --write` there.
+**A session records nothing before the plugin loads into it.** Hooks load when a
+session starts, or when `/reload-plugins` runs (closing the `/plugin` panel runs
+it). In the session where you install provLedger, the tool calls and words before
+that moment are not recorded, and the session is counted from there. Start a new
+session before reading any measurement, and run `metrics baseline --write` there.

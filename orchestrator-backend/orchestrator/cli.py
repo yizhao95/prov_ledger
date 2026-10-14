@@ -992,7 +992,7 @@ def _ask_cmd(args) -> int:
     conn = _open()
     try:
         doc = ask_mod.run(conn, project=project, question=args.question, runner=runner, model=args.model,
-                          runner_name=runner_name, lang=args.lang, timeout_s=args.timeout)
+                          runner_name=runner_name, lang=args.lang, timeout_s=args.timeout, also=args.also)
         if args.export:
             from .ask import card
             with open(args.export, "w", encoding="utf-8") as f:
@@ -1044,13 +1044,13 @@ def _receipts_cmd(args) -> int:
     try:
         if verb == "candidates":
             doc = receipts_mod.candidates(conn, project=project, challenge=" ".join(rest),
-                                          cap=args.cap, lang=args.lang)
+                                          cap=args.cap, lang=args.lang, also=args.also)
             _print(receipts_mod.candidates_as_json(doc), args.json, receipts_mod.render_candidates(doc))
             return 0
         if verb == "facts":
             doc = receipts_mod.facts(conn, project=project, chosen=rest, lang=args.lang)
         else:
-            doc = receipts_mod.assemble(conn, project=project, challenge=verb, lang=args.lang)
+            doc = receipts_mod.assemble(conn, project=project, challenge=verb, lang=args.lang, also=args.also)
         _print(receipts_mod.as_json(doc), args.json, receipts_mod.render_text(doc))
         return 0
     finally:
@@ -1437,6 +1437,7 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--json", action="store_true", help="machine-readable answer, fact table included as text")
     a.add_argument("--export", default=None, metavar="FILE", help="also write the evidence card (markdown) here")
     a.add_argument("--no-model", action="store_true", help="no model at all: print the fact table, the absences and the scope")
+    a.add_argument("--also", default=None, metavar="WORDS", help="English words to match besides the question's own — for a question asked in another language, the subject in English and any identifiers")
     a.add_argument("--model", default=os.environ.get(ASK_MODEL_ENV) or None, metavar="NAME",
                    help=f"model for the headless claude runner (default: ${ASK_MODEL_ENV}, else the runner's own); "
                         "when one model declines the answer says so and stops — no model is substituted for another")
@@ -1473,6 +1474,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"`receipts candidates`: how many candidates to hand over (default {receipts_mod.CANDIDATE_CAP}); "
                          "the number matched and the number cut are printed either way")
     rc.add_argument("--lang", default="en", choices=["en", "zh"], help="the language of the scope line")
+    rc.add_argument("--also", default=None, metavar="WORDS", help="English words to match besides the question's own — for a question asked in another language, the subject in English and any identifiers")
     v = sub.add_parser("verify", help="walk the three hash chains and, with --against-notes, the git anchors they must agree with (exit 3 on a broken chain)")
     v.add_argument("--against-notes", action="store_true", help="also compare the chain heads with the anchors in refs/notes/provledger")
     v.add_argument("--project", default=None, help="registered project whose repo holds the notes (default: the one containing the cwd)")

@@ -100,6 +100,9 @@ claude plugin marketplace add yizhao95/prov_ledger
 claude plugin install provledger@provledger
 ```
 
+Inside a session already running, `/plugin install provledger@provledger` and then
+`/reload-plugins` load it there, and recording starts from that moment.
+
 Or only the core library, to read and write a ledger from your own code (no hooks, skills or dashboard; see [`INSTALL.md` §5b](INSTALL.md)):
 
 ```bash

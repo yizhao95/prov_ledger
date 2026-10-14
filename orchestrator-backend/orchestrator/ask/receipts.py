@@ -290,7 +290,7 @@ def cap_line(matched: int, shown: int, cap: int, lang: str = "en") -> str:
 
 
 def candidates(conn, *, project: str, challenge: str, psg_db_path: str | None = None,
-               cap: int = CANDIDATE_CAP, lang: str = "en") -> dict:
+               cap: int = CANDIDATE_CAP, lang: str = "en", also: str | None = None) -> dict:
     """The nodes the challenge's own words touch — the list a model picks from.
 
     Broad and honest: every candidate keeps the matcher that found it (`why`) and
@@ -302,7 +302,7 @@ def candidates(conn, *, project: str, challenge: str, psg_db_path: str | None = 
     from .. import psg_bridge
 
     psg = psg_db_path if psg_db_path is not None else psg_bridge.db_path_for(project)
-    pool = locate.candidates(conn, psg, challenge, project=project, limit=10 ** 9)
+    pool = locate.candidates(conn, psg, challenge, project=project, limit=10 ** 9, also=also)
     shown = pool[:max(0, int(cap))]
     truncated = {"candidates": len(pool) - len(shown)} if len(pool) > len(shown) else {}
     return {"project": project, "challenge": challenge, "lang": lang, "cap": int(cap),
@@ -342,7 +342,8 @@ def facts(conn, *, project: str, chosen: list[str], psg_db_path: str | None = No
 
 # ── the one-shot form: still here, and honest about what it is ───────────────
 
-def assemble(conn, *, project: str, challenge: str, psg_db_path: str | None = None, lang: str = "en") -> dict:
+def assemble(conn, *, project: str, challenge: str, psg_db_path: str | None = None, lang: str = "en",
+             also: str | None = None) -> dict:
     """`provledger receipts "<challenge>"` — both reads in one, picked by score.
 
     Kept because it is documented and people run it. It takes the top
@@ -353,7 +354,7 @@ def assemble(conn, *, project: str, challenge: str, psg_db_path: str | None = No
     """
     from . import locate
 
-    first = candidates(conn, project=project, challenge=challenge, psg_db_path=psg_db_path, lang=lang)
+    first = candidates(conn, project=project, challenge=challenge, psg_db_path=psg_db_path, lang=lang, also=also)
     picked = [c["qn"] for c in first["candidates"][:locate.FALLBACK_TOP]]
     doc = facts(conn, project=project, chosen=picked, psg_db_path=psg_db_path, challenge=challenge,
                 lang=lang, picked_by="score", matched=first["matched"], truncated=first["truncated"])

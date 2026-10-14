@@ -12,7 +12,13 @@ Inside a Claude Code session:
 ```text
 /plugin marketplace add yizhao95/prov_ledger
 /plugin install provledger@provledger
+/reload-plugins
 ```
+
+`/reload-plugins` loads the plugin into the session you are in (closing the
+`/plugin` panel runs it for you), so recording starts there and then; what the
+session did before it is not recorded. Without it, the plugin loads in your next
+session.
 
 Or from a shell:
 
@@ -26,7 +32,9 @@ Dependencies install themselves on first session: a background `SessionStart`
 bootstrap builds **one** venv at `~/skill-workspace/.venv` (override with
 `PROVLEDGER_VENV`) and installs `requirements.txt`. It is idempotent — warm
 sessions are a no-op — and re-installs when `requirements.txt` or
-`orchestrator-backend/pyproject.toml` changes, so a plugin update reaches the venv. Launch the dashboard with `/provledger-dashboard`, or
+`orchestrator-backend/pyproject.toml` changes, so a plugin update reaches the venv. In a session that
+loaded the plugin with `/reload-plugins`, the first `provledger` call runs the
+same bootstrap. Launch the dashboard with `/provledger-dashboard`, or
 `bash orchestrator-webapp/launch_dashboard.sh` (port 8765 by default,
 `PROVLEDGER_DASH_PORT` to change it, `PROVLEDGER_WEBAPP_DIR` to point at a
 checkout other than the script's own).

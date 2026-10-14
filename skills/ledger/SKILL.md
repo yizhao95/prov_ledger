@@ -54,8 +54,16 @@ depends on: `ask`, `ask submit`, `graph`, `why`, `record`, `plan`, and the
 
 ```bash
 provledger ask "<the user's question, verbatim>" --json --no-model \
+  [--also "<the subject in English, with any identifiers>"] \
   [--project <name>]          # omit inside a registered repo; it is inferred from the cwd
 ```
+
+When the question is not in English, add `--also` with its subject in English
+and any code names you can tell it is about. The question itself still goes in
+verbatim: the user's own words were recorded in their language and are matched
+in it, while most reasons and every code name are in English and are reached
+through `--also`. Without it, an empty table may only mean the words did not
+meet — not that nothing was recorded.
 
 `--no-model`: you are the model, so no second one is spawned. The JSON gives
 `ask_id`, `facts_text` (the fact table, legend first), `absences`, `scope_line`,

@@ -33,4 +33,12 @@ fi
 ARCHIVE="${DIR}/provledger.${SHA}.db"
 cp "$DB" "$ARCHIVE"
 echo "    cold archive: ${ARCHIVE}"
+
+# Keep the newest KEEP copies (2026-10-14). Nothing removed them before, and a
+# repository reviewed 144 times held 19 GB of copies nothing reads. Only
+# provledger.*.db in this directory goes; the live graph is <name>-state-graph.db.
+KEEP=5
+ls -1t "${DIR}"/provledger.*.db 2>/dev/null | tail -n +$((KEEP + 1)) | while IFS= read -r old; do
+    rm -f -- "$old" && echo "    removed old archive: ${old}"
+done
 exit 0

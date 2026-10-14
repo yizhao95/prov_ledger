@@ -77,6 +77,10 @@ ALLOWED: dict[str, str] = {
         "Node template: Chinese only inside `lang == 'zh'` branches.",
 
     # ── the two backend modules that are bilingual on purpose ───────────────
+    "orchestrator-backend/orchestrator/ask/locate.py":
+        "Holds the common Chinese characters and character pairs (question "
+        "words, particles) a Chinese question is stripped of before matching "
+        "(FL-152); the ones being dropped have to be spelled out.",
     "orchestrator-backend/orchestrator/ask/scope.py":
         "`scope.line(lang='zh')` renders the same scope sentence in Chinese "
         "for the ?lang=zh pages; the English branch sits right next to it.",
@@ -91,6 +95,10 @@ ALLOWED: dict[str, str] = {
     # storage, the page and the answer filter without being mangled or dropped.
     "orchestrator-backend/tests/test_ask_facts.py":
         "Asserts the Chinese scope line that scope.line(lang='zh') produces.",
+    "orchestrator-backend/tests/test_ask_cjk.py":
+        "Asks /ledger questions in Chinese and pins that they reach the records "
+        "that quote the user's Chinese words (FL-152); the questions and the "
+        "quoted words have to be Chinese.",
     "orchestrator-backend/tests/test_ask_model_path.py":
         "Pins that the answer filter never deletes a correct sentence because "
         "of the script it is written in (Chinese, Japanese, Korean).",

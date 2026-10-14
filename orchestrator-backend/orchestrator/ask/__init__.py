@@ -153,7 +153,7 @@ def runner_trace(chosen: dict, summary: dict, candidates: int) -> dict:
 
 def run(conn, *, project: str, question: str, psg_db_path: str | None = None, runner=None, summary_runner=None,
         model: str | None = None, runner_name: str | None = None, lang: str = "en", record: bool = True,
-        timeout_s: float | None = None) -> dict:
+        timeout_s: float | None = None, also: str | None = None) -> dict:
     """One question end to end. `runner` picks the nodes, `summary_runner` writes
     the paragraph (defaults to `runner`); `runner=None` is the degraded mode.
 
@@ -172,7 +172,7 @@ def run(conn, *, project: str, question: str, psg_db_path: str | None = None, ru
     # runner's own default. Never a second model after the first declines.
     model = runner_mod.model_for(model)
     psg = psg_db_path if psg_db_path is not None else psg_bridge.db_path_for(project)
-    pool = locate.candidates(conn, psg, question, project=project, limit=10 ** 9)
+    pool = locate.candidates(conn, psg, question, project=project, limit=10 ** 9, also=also)
     cands = pool[:locate.MAX_CANDIDATES]
     truncated = {"candidates": len(pool) - len(cands)} if len(pool) > len(cands) else {}
     chosen = locate.choose(question, cands, runner=runner, model=model, timeout_s=timeout_s)
