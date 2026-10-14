@@ -44,6 +44,27 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   `reason_node` (which task a node was assigned to) and `plan_bundle` (why
   several tasks share a plan).
 
+### Fixed
+
+- **A plan's close no longer waits 20–40 minutes for the graph refresh.** The
+  analyzers committed after every row they wrote, and the graph is a
+  rollback-journal database, so each commit waited on the disk twice. On this
+  repository a refresh writes about 100,000 rows; on WSL it took 21.6 minutes,
+  almost all of it in those waits. The analyzers now commit every 2,000 row
+  changes and once before the history layer, whose providers read the graph on
+  a connection of their own. On a copy of the same graph the refresh took
+  25 seconds and wrote the same nodes, edges, snapshots, events and cards; a
+  reader polling the graph during it waited at most 1.4 seconds (its timeout is
+  5). `sql_refs`, `api_refs` and `data_model` committed their own updates per
+  row too, and go through the same batching.
+
+### Documents
+
+- `docs/KNOWN-ISSUES.md`: the refresh-cost entry has the new timing and says
+  the graph directory keeps a full copy of the graph per reviewed commit; the
+  entry about projects registered outside the default directory is gone (fixed
+  in 0.4.5).
+
 ## 0.4.7 — 2026-10-09
 
 ### Added

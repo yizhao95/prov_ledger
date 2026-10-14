@@ -102,7 +102,7 @@ def _merge_assumed_schema(conn: sqlite3.Connection, node_id: int,
     meta["assumed_schema"] = existing
     conn.execute("UPDATE node SET metadata_json=? WHERE id=?",
                  (json.dumps(meta), node_id))
-    conn.commit()
+    store.wrote(conn)
 
 
 def _http_call(node) -> Optional[tuple]:

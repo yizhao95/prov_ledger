@@ -20,7 +20,8 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import sqlite3
-from typing import Optional
+from contextlib import contextmanager
+from typing import Iterator, Optional
 
 TOOL_VERSION = "0.4.7"
 
@@ -193,6 +194,45 @@ def stamp_run(conn: sqlite3.Connection, run_id: int) -> None:
     conn.commit()
 
 
+# FL-247: the writers below committed after every row. The graph is a
+# rollback-journal database, so every commit writes a journal and waits on fsync
+# twice; a refresh of a ~100k-row graph spent 21 of its 22 minutes in those
+# waits. Inside `batched(conn)` they commit once COMMIT_EVERY row changes have
+# built up since the last commit (conn.total_changes, so an analyzer's own
+# UPDATEs count too): a reader is never held out for longer than one batch takes
+# to write. Outside it they commit per row, as before.
+COMMIT_EVERY = 2000
+_BATCHED: dict[int, int] = {}   # id(conn) -> conn.total_changes at its last commit
+
+
+@contextmanager
+def batched(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """Commit the writers' rows in batches until the block ends, then commit
+    the rest — also when the block raises, as per-row commits kept every row
+    written before a failure. A nested block leaves the outer one in charge."""
+    if id(conn) in _BATCHED:
+        yield conn
+        return
+    _BATCHED[id(conn)] = conn.total_changes
+    try:
+        yield conn
+    finally:
+        del _BATCHED[id(conn)]
+        conn.commit()
+
+
+def wrote(conn: sqlite3.Connection) -> None:
+    """Commit a write the way the writers do: at once outside a batch, every
+    COMMIT_EVERY changes inside one. An analyzer that writes a row itself (an
+    UPDATE) calls this instead of conn.commit()."""
+    last = _BATCHED.get(id(conn))
+    if last is None:
+        conn.commit()
+    elif conn.total_changes - last >= COMMIT_EVERY:
+        conn.commit()
+        _BATCHED[id(conn)] = conn.total_changes
+
+
 def _get_or_create(conn: sqlite3.Connection, table: str, name: str) -> int:
     row = conn.execute(
         f"SELECT id FROM {table} WHERE name = ?", (name,)
@@ -200,7 +240,7 @@ def _get_or_create(conn: sqlite3.Connection, table: str, name: str) -> int:
     if row is not None:
         return int(row[0])
     cur = conn.execute(f"INSERT INTO {table} (name) VALUES (?)", (name,))
-    conn.commit()
+    wrote(conn)
     return int(cur.lastrowid)
 
 
@@ -241,7 +281,7 @@ def add_node(
             int(nullable) if isinstance(nullable, bool) else nullable,
         ),
     )
-    conn.commit()
+    wrote(conn)
     return int(cur.lastrowid)
 
 
@@ -264,7 +304,7 @@ def add_edge(
             md.get("confidence"),  # PSG-D1: mirror into an indexed column
         ),
     )
-    conn.commit()
+    wrote(conn)
     return int(cur.lastrowid)
 
 

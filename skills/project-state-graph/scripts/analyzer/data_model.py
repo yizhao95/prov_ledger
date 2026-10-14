@@ -94,7 +94,7 @@ class _Ctx:
                 col_id,
             ),
         )
-        self.conn.commit()
+        store.wrote(self.conn)
 
 
 def _json(d: dict) -> str:
