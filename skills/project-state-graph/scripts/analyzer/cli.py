@@ -102,25 +102,29 @@ def run(repo_path: str, project: str, db_path: str, build_cards: bool = True,
                              extensions_json=json.dumps(ext_fp, sort_keys=True) if ext_fp else None)
     store.reset_graph(conn)  # PSG-C1: idempotent rebuild — clear prior graph rows
     try:
-        file_map = walker.walk(conn, repo_path)
-        py_ast.analyze(conn, repo_path, file_map)
-        unresolved.analyze(conn, repo_path, file_map)
-        dataflow.analyze(conn, repo_path, file_map)
-        dataflow_types.analyze(conn, repo_path, file_map)
-        data_model.analyze(conn, repo_path, file_map)
-        pipeline.analyze(conn, repo_path, file_map)
-        sql_refs.analyze(conn, repo_path, file_map)
-        api_refs.analyze(conn, repo_path, file_map)
-        routes.analyze(conn, repo_path, file_map)
-        ts_polyglot.analyze(conn, repo_path, file_map)
-        ml_overlay.analyze(conn, repo_path, file_map)
-        de_overlay.analyze(conn, repo_path, file_map)
-        leakage.analyze(conn, repo_path, file_map)  # Phase 4.1 silent-failure gate
-        profiles.analyze(conn, repo_path, file_map)
-        # DP phase 2c (spec §18): what the user declared is part of this project
-        # too. It enters the graph here, before the snapshot, so the declared
-        # provider sees it and its changes are computed like everybody else's.
-        declared_report = declared_nodes.analyze(conn, repo_path, project)
+        # FL-247: the analyzers write in batches. The block ends, and commits,
+        # before the cards and the history layer: its providers read the graph
+        # through a connection of their own and must see every row.
+        with store.batched(conn):
+            file_map = walker.walk(conn, repo_path)
+            py_ast.analyze(conn, repo_path, file_map)
+            unresolved.analyze(conn, repo_path, file_map)
+            dataflow.analyze(conn, repo_path, file_map)
+            dataflow_types.analyze(conn, repo_path, file_map)
+            data_model.analyze(conn, repo_path, file_map)
+            pipeline.analyze(conn, repo_path, file_map)
+            sql_refs.analyze(conn, repo_path, file_map)
+            api_refs.analyze(conn, repo_path, file_map)
+            routes.analyze(conn, repo_path, file_map)
+            ts_polyglot.analyze(conn, repo_path, file_map)
+            ml_overlay.analyze(conn, repo_path, file_map)
+            de_overlay.analyze(conn, repo_path, file_map)
+            leakage.analyze(conn, repo_path, file_map)  # Phase 4.1 silent-failure gate
+            profiles.analyze(conn, repo_path, file_map)
+            # DP phase 2c (spec §18): what the user declared is part of this project
+            # too. It enters the graph here, before the snapshot, so the declared
+            # provider sees it and its changes are computed like everybody else's.
+            declared_report = declared_nodes.analyze(conn, repo_path, project)
         if build_cards:
             cards.build_symbol_cards(conn)  # also builds consistency cards
         # History layer (spec §2.5): snapshot this rebuild's rows (selected by

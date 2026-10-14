@@ -94,17 +94,13 @@ gone from the card — never triggers the one warning most worth having. Declare
 nodes are the exception: retiring a declaration does surface as
 `removed_upstream`, because declarations are append-only.
 
-**A project registered outside the default directory loses its history on the
-first review.** The review refresh calls `init_project.sh` with `--name` and
-`--repo` but not `--out-dir`, so the graph is rebuilt in
-`~/skill-workspace/project-graphs/` instead of the registered path. Every node
-then looks newly added, so the plan's task reason is shown on every node of the
-project. Register projects in the default location until this is fixed.
-
 **Every review refresh rebuilds the whole graph.** Refresh cost tracks the size
-of the repository, not the size of your change: on this repository four
-instrumented runs took 12.5–13 minutes each with a 122–125 MB peak, whether the
-task touched three files or thirty.
+of the repository, not the size of your change: on this repository (about
+21,700 nodes and 82,400 edges) a full refresh takes about 25 seconds, whether
+the task touched three files or thirty. Each refresh also appends a snapshot row
+and an event for every node, changed or not, and first copies the whole previous
+graph to `provledger.<commit>.db` beside it. Nothing removes those copies, so the
+project's graph directory grows with every reviewed commit.
 
 ## Reasons, ledger and export
 
