@@ -23,7 +23,7 @@ import re
 import sqlite3
 
 from . import runner as R
-from .. import why as why_mod
+from .. import reasons as reasons_mod, why as why_mod
 
 MAX_CANDIDATES = 40
 MAX_CHOSEN = 8
@@ -77,6 +77,30 @@ def question_files(question: str) -> list[str]:
     return [m.group(0) for m in _FILE.finditer(question or "")]
 
 
+# FL-152: a question asked in Chinese gave question_tokens nothing — no
+# candidates, an empty fact table, and the ledger skill reads an empty table as
+# the answer. Han text has no spaces, so a word is not a token here: any two
+# adjacent characters are. A pair with a particle or a question word in it says
+# nothing about the subject and would match half the ledger, so it is dropped.
+_CJK_RUN = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
+CJK_COMMON_CHARS = frozenset("的了吗呢吧啊么什这那个是们为")
+CJK_COMMON_PAIRS = frozenset({"怎样", "如何", "一下", "可以", "因为", "所以", "没有", "有没", "现在", "时候",
+                              "还是", "已经", "就是", "当初", "之前", "之后", "以前", "以后", "我们", "你们"})
+
+
+def question_cjk(question: str) -> list[str]:
+    """Adjacent character pairs of the question's Han runs, in order, unique,
+    common pairs out: `为什么按标价估算` -> `按标`, `标价`, `价估`, `估算`."""
+    out: list[str] = []
+    for run in _CJK_RUN.findall(question or ""):
+        for i in range(len(run) - 1):
+            pair = run[i:i + 2]
+            if pair in out or pair in CJK_COMMON_PAIRS or CJK_COMMON_CHARS & set(pair):
+                continue
+            out.append(pair)
+    return out
+
+
 # ── the matchers (all code, all literal) ─────────────────────────────────────
 
 def _text_hits(conn, project: str, tokens: list[str], limit: int) -> list[dict]:
@@ -99,14 +123,15 @@ def _text_hits(conn, project: str, tokens: list[str], limit: int) -> list[dict]:
 
 
 def _utterance_hits(conn, project: str, tokens: list[str], limit: int) -> list[tuple[int, str, int]]:
-    """(reason_id, node_key, utterance_id) where the quoted words contain a token."""
+    """(reason_id, node_key, utterance_id) where the quoted words contain a token;
+    node_key is None for a task reason (the caller expands it to its nodes)."""
     if not tokens:
         return []
     where = " OR ".join("u.text LIKE ?" for _ in tokens)
     params = [project] + [f"%{t}%" for t in tokens] + [limit]
     return [(r[0], r[1], r[2]) for r in conn.execute(
         f"SELECT r.id, r.node_key, u.id FROM change_reason r JOIN utterance u ON u.id = r.verbatim_utterance_id "
-        f"WHERE r.project = ? AND r.node_key IS NOT NULL AND ({where}) ORDER BY r.id DESC LIMIT ?", params)]
+        f"WHERE r.project = ? AND ({where}) ORDER BY r.id DESC LIMIT ?", params)]
 
 
 def _reference_hits(conn, project: str, tokens: list[str], limit: int) -> list[tuple[int, str, int, str]]:
@@ -129,7 +154,7 @@ def _reference_hits(conn, project: str, tokens: list[str], limit: int) -> list[t
         f"SELECT DISTINCT r.id, r.node_key, f.id, f.label FROM reference_link l "
         f"JOIN reference f ON f.id = l.reference_id "
         f"JOIN change_reason r ON r.id = l.reason_id OR r.verbatim_utterance_id = l.utterance_id "
-        f"WHERE r.project = ? AND r.node_key IS NOT NULL AND ({where}) ORDER BY r.id DESC LIMIT ?", params)]
+        f"WHERE r.project = ? AND ({where}) ORDER BY r.id DESC LIMIT ?", params)]
 
 
 # `node_snapshot` holds one row per node PER RUN — on this repo, ~2,900 nodes over
@@ -272,15 +297,31 @@ def _metric_hits(conn, project: str, tokens: list[str], literals: list[str], lim
     return out
 
 
-def candidates(conn, psg_db_path: str | None, question: str, *, project: str, limit: int = MAX_CANDIDATES) -> list[dict]:
+def candidates(conn, psg_db_path: str | None, question: str, *, project: str, limit: int = MAX_CANDIDATES,
+               also: str | None = None) -> list[dict]:
     """Every node the question literally touches, with the matcher that found it.
+
+    `also` is words the asker adds to the question's own — the agent's English
+    for a question asked in another language — and is matched like them.
 
     Returns `[{node_key, qn, why, score, records, latest}]`, best match first,
     at most `limit` entries (the caller reports the cap in the scope line)."""
-    tokens = question_tokens(question)
-    literals = question_literals(question)
-    files = question_files(question)
+    text = f"{question}\n{also}" if also else question
+    tokens = question_tokens(text)
+    literals = question_literals(text)
+    files = question_files(text)
+    pairs = question_cjk(question)
     pool: dict[str, dict] = {}
+    task_nodes: dict[int, list[str]] = {}
+
+    def nodes_of(reason_id: int, node_key: str | None) -> list[str]:
+        """A reason's own node, or — for a task reason, which has none — the
+        nodes it answers for (FL-242: a match on it used to reach nothing)."""
+        if node_key:
+            return [node_key]
+        if reason_id not in task_nodes:
+            task_nodes[reason_id] = reasons_mod.task_nodes(conn, psg_db_path, reason_id)
+        return task_nodes[reason_id]
 
 
     def add(node_key: str | None, qn: str | None, why: str, score: int, record_id: int | None = None) -> None:
@@ -299,13 +340,46 @@ def candidates(conn, psg_db_path: str | None, question: str, *, project: str, li
             e["records"].append(record_id)
 
     # 1 · full text over the ledger: the reasons themselves, the words they quote, the sources they link
-    for row in _text_hits(conn, project, tokens, TEXT_LIMIT):
-        if row.get("node_key"):
-            add(row["node_key"], None, f"text match: reason #{row['id']}", SCORE_TEXT, row["id"])
-    for reason_id, node_key, utt_id in _utterance_hits(conn, project, tokens, TEXT_LIMIT):
-        add(node_key, None, f"text match: utterance #{utt_id} quoted by #{reason_id}", SCORE_TEXT, reason_id)
-    for reason_id, node_key, ref_id, label in _reference_hits(conn, project, tokens, TEXT_LIMIT):
-        add(node_key, None, f"text match: source #{ref_id} ({label[:60]}) linked from #{reason_id}", SCORE_TEXT, reason_id)
+    def text(reason_rows, utterance_rows, reference_rows) -> None:
+        for row in reason_rows:
+            for k in nodes_of(row["id"], row.get("node_key")):
+                add(k, None, f"text match: reason #{row['id']}", SCORE_TEXT, row["id"])
+        for reason_id, node_key, utt_id in utterance_rows:
+            for k in nodes_of(reason_id, node_key):
+                add(k, None, f"text match: utterance #{utt_id} quoted by #{reason_id}", SCORE_TEXT, reason_id)
+        for reason_id, node_key, ref_id, label in reference_rows:
+            for k in nodes_of(reason_id, node_key):
+                add(k, None, f"text match: source #{ref_id} ({label[:60]}) linked from #{reason_id}", SCORE_TEXT,
+                    reason_id)
+
+    text(_text_hits(conn, project, tokens, TEXT_LIMIT), _utterance_hits(conn, project, tokens, TEXT_LIMIT),
+         _reference_hits(conn, project, tokens, TEXT_LIMIT))
+    # the Han pairs: substring matches, one pair at a time. A record counts once,
+    # as an English one does however many words it shares, and only when it
+    # shares two pairs of a question that has three or more — one pair in common
+    # is as often a coincidence as not (a long utterance holds 计划 or 还能
+    # whatever it is about), and scoring per pair let such utterances outrank
+    # every English match.
+    if pairs:
+        need = 2 if len(pairs) >= 3 else 1
+        shared: dict[tuple, set[str]] = {}
+        found: dict[tuple, tuple] = {}
+        for pair in pairs:
+            for row in why_mod._like_query(conn, project, pair, TEXT_LIMIT):
+                k = ("reason", row["id"])
+                found[k] = ([row], [], [])
+                shared.setdefault(k, set()).add(pair)
+            for hit in _utterance_hits(conn, project, [pair], TEXT_LIMIT):
+                k = ("utterance", hit[0], hit[2])
+                found[k] = ([], [hit], [])
+                shared.setdefault(k, set()).add(pair)
+            for hit in _reference_hits(conn, project, [pair], TEXT_LIMIT):
+                k = ("source", hit[0], hit[2])
+                found[k] = ([], [], [hit])
+                shared.setdefault(k, set()).add(pair)
+        for k, got in shared.items():
+            if len(got) >= need:
+                text(*found[k])
 
     # 1b · the metrics the question names. Their own namespace: a metric is not a
     # graph node, and `facts` matches metrics and metric-targeted expectations

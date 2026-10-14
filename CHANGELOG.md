@@ -57,13 +57,39 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   reader polling the graph during it waited at most 1.4 seconds (its timeout is
   5). `sql_refs`, `api_refs` and `data_model` committed their own updates per
   row too, and go through the same batching.
+- **A question asked in Chinese finds what was recorded** (FL-152). `/ledger`
+  and `/receipts` matched only ASCII words, so a question in Chinese found no
+  candidate and the fact table came back empty, which the ledger skill reads as
+  "nothing recorded". Han text is now matched by pairs of adjacent characters,
+  with question words and particles left out; a record counts once, and needs
+  two shared pairs when the question has three or more. `provledger ask` and
+  `receipts candidates` take `--also "<English words>"`, and both skills add the
+  subject in English when the question is in another language, because most
+  reasons and every code name are recorded in English. On a copy of this
+  repository's ledger, a Chinese question that found no candidate finds 12, and
+  with `--also` the three nodes about recovered steps rank 4th, 12th and 13th.
+- **A question reaches the nodes of a task reason** (FL-242). Since task
+  reasons (migration 036) the reason a question matches most often has no node
+  of its own, and the matchers dropped it; a source hung on one was not found by
+  its label either. A matched task reason now leads to the nodes it answers for:
+  the nodes assigned to it, or every node its plan changed for a plan's only task.
+- **A session that loads the plugin with `/reload-plugins` can run
+  `provledger`.** It never ran the `SessionStart` bootstrap, so `provledger` said
+  there was no venv; the first call now runs the same bootstrap. INSTALL and the
+  README say to run `/reload-plugins` after installing inside a session.
+- **Graph archives no longer pile up.** Every refresh copies the whole graph to
+  `provledger.<sha>.db` beside it, and nothing removed the copies (19 GB for this
+  repository). `archive_db.sh` keeps the newest five, and its own checks now run
+  in the psg suite.
 
 ### Documents
 
 - `docs/KNOWN-ISSUES.md`: the refresh-cost entry has the new timing and says
-  the graph directory keeps a full copy of the graph per reviewed commit; the
-  entry about projects registered outside the default directory is gone (fixed
-  in 0.4.5).
+  each refresh keeps a full copy of the previous graph, the newest five of them;
+  the entry about projects registered outside the default directory is gone
+  (fixed in 0.4.5); the install-session entry says what `/reload-plugins`
+  changes; the claude.ai / Cowork entry says what each refuses or ignores; a new
+  entry says a Chinese question reaches English records only through `--also`.
 
 ## 0.4.7 — 2026-10-09
 

@@ -55,10 +55,49 @@ def test_without_the_console_script_it_runs_the_module(tmp_path: Path) -> None:
     assert proc.returncode == 4
 
 
-def test_without_a_venv_it_says_what_builds_one(tmp_path: Path) -> None:
-    proc = _run(tmp_path / "nothing-here", "ask", "q")
+def _plugin(tmp_path: Path, bootstrap: str) -> Path:
+    """A plugin tree with the real wrapper and a stand-in bootstrap.sh."""
+    root = tmp_path / "plugin"
+    (root / "bin").mkdir(parents=True)
+    (root / "scripts").mkdir()
+    (root / "bin" / "provledger").write_text(WRAPPER.read_text())
+    (root / "bin" / "provledger").chmod(0o755)
+    (root / "scripts" / "bootstrap.sh").write_text("#!/usr/bin/env bash\n" + bootstrap)
+    return root
+
+
+def _run_in(root: Path, venv: Path, *args: str) -> subprocess.CompletedProcess:
+    env = {**os.environ, "PROVLEDGER_VENV": str(venv)}
+    return subprocess.run([str(root / "bin" / "provledger"), *args], capture_output=True, text=True, env=env,
+                          timeout=30)
+
+
+def test_without_a_venv_it_runs_the_bootstrap_once_then_the_command(tmp_path: Path) -> None:
+    """The session that installed the plugin never ran its SessionStart
+    bootstrap; after /reload-plugins its hooks record, and `provledger` must
+    work too instead of saying there is no venv."""
+    root = _plugin(tmp_path, """echo "bootstrap ran"
+mkdir -p "$PROVLEDGER_VENV/bin"
+cat > "$PROVLEDGER_VENV/bin/provledger" <<'STUB'
+#!/usr/bin/env bash
+printf "console:"; printf "[%s]" "$@"; echo
+STUB
+chmod +x "$PROVLEDGER_VENV/bin/provledger"
+""")
+    venv = tmp_path / "venv"
+    proc = _run_in(root, venv, "ask", "q")
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "console:[ask][q]", "the bootstrap's own output stays off stdout"
+    assert "bootstrap ran" in proc.stderr
+    again = _run_in(root, venv, "why", "x")
+    assert again.stdout.strip() == "console:[why][x]" and "bootstrap ran" not in again.stderr
+
+
+def test_without_a_venv_a_failed_bootstrap_says_so(tmp_path: Path) -> None:
+    root = _plugin(tmp_path, 'echo "no network" >&2; exit 1\n')
+    proc = _run_in(root, tmp_path / "nothing-here", "ask", "q")
     assert proc.returncode == 127
-    assert "bootstrap" in proc.stderr
+    assert "bootstrap" in proc.stderr and "no network" in proc.stderr
 
 
 def test_failed_tool_calls_have_a_hook() -> None:

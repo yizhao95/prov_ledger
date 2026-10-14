@@ -22,7 +22,7 @@ Builds `<name>-state-graph.db` (SQLite code/data graph + append-only node histor
 - scenarios: `$PY -m pytest tests/test_scenarios.py tests/test_scenario_runner.py -q`
 - corpus: `$PY -m pytest tests/test_corpus_*.py -q`
 - rest: `$PY -m pytest tests -q --ignore=tests/test_scenarios.py --ignore=tests/test_scenario_runner.py --ignore-glob='tests/test_corpus_*.py'`
-- outside pytest: `bash tests/test_cold_archive.sh`. Opt-in LLM test: `-m llm_consistency`.
+- `tests/test_cold_archive.sh` runs inside pytest through `tests/test_archive_retention.py`. Opt-in LLM test: `-m llm_consistency`.
 
 ## Rules
 - Scenarios run the whole plugin (publish-plan → run-step → review_run.py → backend); changes there can

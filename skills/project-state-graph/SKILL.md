@@ -146,7 +146,8 @@ Two low-cost protections run automatically during `init_project.sh`:
   path** — the raw material for future version-over-version provenance ("how did
   this symbol change across versions?") and the ledger's fuzzy search. The delta
   logic can come later; the snapshots **cannot be captured retroactively**.
-  Non-fatal: a failed archive never blocks the rebuild.
+  Only the newest five copies are kept; older ones are removed when a new one is
+  made. Non-fatal: a failed archive never blocks the rebuild.
 - **C-2 · dtype coverage as a tracked metric.** Every data gate is exactly as
   strong as dtype coverage — a `data_var` left `dtype=unknown` makes its check
   pass through silently (green where it is actually blind). `selfcheck.py` now

@@ -117,8 +117,13 @@ task's steps, failures and logs (`provledger plan`).
 **Where to start when the code does not point anywhere:**
 
 ```bash
-provledger receipts candidates "<what the colleague said, verbatim>" --project <name> [--cap N]
+provledger receipts candidates "<what the colleague said, verbatim>" --project <name> [--cap N] \
+  [--also "<the subject in English, with any identifiers>"]
 ```
+
+When the challenge is not in English, add `--also` with its subject in English
+and any identifiers: recorded words match in their own language, reasons and
+code names are mostly English.
 
 An entry point: nodes whose text, names or literals match, each with `why` (which
 matcher found it) and a `score`. **Read `why`, not `score`**: a match on a common
