@@ -24,6 +24,14 @@ The story, in six dated beats:
               so its one task reason is UNSTATED. estimate_note is the node only
               plan B changed — read back out of the graph after the close — and
               the honest-absence questions ask about it
+  2026-09-01  plan C adds rerun_week() for on-call, under a root of its own
+
+After each close the story runs the evidence pass the review skill documents
+(step 3b): the team's meeting notes are a local file in the sandbox, the
+stand-in for a host agent's own notes tool. Plan A's root is found there — the
+data platform sync of 2026-05-19, with who said it and the passage — and hung on
+the user's sentence; plan B continues that root, so it has nothing to look for;
+plan C searches and finds nothing, and says so in evidence_log.
 
 Everything runs through the project's own commands — publish-plan.sh, the
 executing-plans ops, `provledger note`, `node declare`, init_project.sh —
@@ -141,7 +149,81 @@ V3 = {**V2, "pkg/rollup.py": V2["pkg/rollup.py"].replace(
     '            "discount_rate_is_estimated": True,\n'
     '            "note": estimate_note()}\n')}
 
+# plan C: a small tidy-up under its own root, nothing to do with the feed
+V4 = {**V3, "pkg/runbook.py": '''"""What on-call runs by hand."""
+
+from pkg.rollup import weekly_report
+
+
+def rerun_week(day):
+    """Re-run one week of the rollup, for on-call."""
+    return weekly_report(day)
+'''}
+
 TARGETS = ["pkg.rollup.load_orders", "pkg.rollup.discount_rate", "pkg.rollup.weekly_report"]
+
+# The team's meeting notes, a local file in the sandbox: the stand-in for the
+# host agent's own notes tool. One section holds the source of plan A's root;
+# the other is about something else, so a search has something to miss.
+NOTES = """# Team meeting notes
+
+## 2026-05-19 15:00 · data platform sync
+
+Present: the data platform lead, the analytics engineer.
+
+the data platform lead: From the June release the v2 orders feed no longer carries orders.discount; the weekly rollup and every other consumer must stop reading it before then.
+
+the analytics engineer: Noted. We will look at estimating the rate instead.
+
+## 2026-07-02 10:00 · reporting stand-up
+
+the analytics engineer: The weekly mail went out on time; no incidents this week.
+"""
+
+
+def search_notes(text: str, hints: list[str]) -> dict | None:
+    """The stand-in search: the passage of `text` in which the most hints
+    appear, two at least, with its section's date and title and the speaker
+    before the colon. Deterministic; None when nothing matches."""
+    best = None
+    for section in text.split("\n## ")[1:]:
+        head, _, body = section.partition("\n")
+        when, _, title = head.partition(" · ")
+        for para in (x.strip() for x in body.split("\n\n")):
+            who, colon, words = para.partition(": ")
+            if not colon or not words:
+                continue
+            score = sum(1 for h in hints if h and h.lower() in words.lower())
+            if score >= 2 and (best is None or score > best[0]):
+                best = (score, {"label": f"{title.strip()}, {when.strip()[:10]}", "occurred_at": when.strip(),
+                                "said_by": who.strip(), "excerpt": words.strip()})
+    return best[1] if best else None
+
+
+def plan_c_reasons() -> dict:
+    """Plan C's close: one asserted task."""
+    return {"tasks": [{"interpretation": "add rerun_week() so on-call can re-run a single week by hand"}]}
+
+
+def evidence_checks(facts: dict) -> list[tuple[bool, str, str]]:
+    """What the evidence pass must show (step 3b): plan A's root found in the
+    notes and hung on the user's sentence, plan B with nothing to look for, plan
+    C searched and recorded as found_nothing."""
+    ev = facts.get("evidence") or {}
+    a, b, c = ev.get("a") or {}, ev.get("b") or {}, ev.get("c") or {}
+    said = (facts.get("upstream_note") or {}).get("utterance_id")
+    hung = [x for x in a.get("attached") or [] if said is not None and x.get("utterance_id") == said]
+    return [
+        (bool(hung) and all(x.get("said_by") for x in hung),
+         "plan A's evidence pass found its root in the meeting notes and hung the passage on the user's sentence",
+         f"{a}"),
+        (b.get("slots") == 0,
+         "plan B had nothing to look for: the root it continues already has a linked source",
+         f"{b}"),
+        (c.get("slots", 0) >= 1 and c.get("found_nothing", 0) >= 1 and not c.get("attached"),
+         "plan C searched the notes, found nothing, and evidence_log says found_nothing",
+         f"{c}"),
+    ]
 
 # what the user said, recorded as an utterance on 2026-05-20; plan A's task reason quotes it
 SAID = ("The v2 orders feed stops carrying orders.discount from the June release — "
@@ -346,6 +428,36 @@ class Build:
                         "--project", self.project, "--reasons", reasons],
                        cwd=self.repo, allow_fail=True)
 
+    def evidence_pass(self, plan_id: str, notes: Path) -> dict:
+        """The review skill's evidence pass, with the notes file as the only
+        tool: list the slots, search, hang what is found where the slot says
+        (with who said it and their words), log every slot's ending."""
+        slots = self.cli("review", "evidence-slots", "--plan", plan_id, "--project", self.project,
+                         "--json")["slots"]
+        text = notes.read_text(encoding="utf-8")
+        out = {"slots": len(slots), "attached": [], "found_nothing": 0}
+        for slot in slots:
+            words = " ".join(x for x in ((slot.get("root") or {}).get("words"), slot.get("task")) if x)
+            hit = search_notes(text, slot["hints"] + [w for w in words.split() if "." in w or any(c.isdigit() for c in w)])
+            if hit is None:
+                self.cli("review", "evidence-log", "--plan", plan_id, "--reason", str(slot["reason_id"]),
+                         "--outcome", "found_nothing", "--tool-hint", "notes:grep", "--json")
+                out["found_nothing"] += 1
+                continue
+            anchor = slot["attach_to"]
+            flag, value = (("--utterance", anchor["utterance_id"]) if "utterance_id" in anchor
+                           else ("--reason", anchor["reason_id"]))
+            ref = self.cli("reference", "add", flag, str(value), "--kind", "meeting",
+                           "--uri", f"team-notes/{notes.name}#{hit['occurred_at'][:10]}",
+                           "--label", hit["label"], "--occurred-at", hit["occurred_at"],
+                           "--said-by", hit["said_by"], "--excerpt", hit["excerpt"],
+                           "--project", self.project, "--json")
+            self.cli("review", "evidence-log", "--plan", plan_id, "--reason", str(slot["reason_id"]),
+                     "--outcome", "attached", "--tool-hint", "notes:grep", "--json")
+            out["attached"].append({"reference_id": ref.get("reference_id"), "said_by": ref.get("said_by"),
+                                    "excerpt": ref.get("excerpt"), **anchor})
+        return out
+
     def qn_of(self, node_key: str) -> str:
         """The qualified name behind a node_key, from the project's graph."""
         import sqlite3
@@ -514,13 +626,20 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
     b.op("record-metric.sh", {"name": "discount_rate_pct", "value": 8.1, "unit": "percent",
                               "project": b.project, "source": "release-e2e"})
 
+    # ── the team's meeting notes, outside the repo: the evidence pass's only tool
+    notes = root / "team-notes" / "meetings.md"
+    notes.parent.mkdir(parents=True, exist_ok=True)
+    notes.write_text(NOTES, encoding="utf-8")
+    f["notes"] = str(notes)
+
     # ── 2026-06-08 · plan A: drop the column ────────────────────────────────
     plan = b.publish({
         "goal": "Stop reading orders.discount: the v2 upstream feed no longer carries it",
         "prefix": f"{PROJECT_BASE}-a",
         "project": b.project,
         "user_query": "The v2 feed drops orders.discount. Get it out of the rollup.",
-        "root": {"kind": "new", "basis": "the v2 upstream feed no longer carries orders.discount"},
+        "root": {"kind": "new", "utterance_id": f["upstream_note"]["utterance_id"],
+                 "basis": "the v2 upstream feed no longer carries orders.discount"},
         "declared_targets": TARGETS,
         "skills": [{"name": "writing-plans", "source": "iron-law"}],
         "expectations": [
@@ -610,6 +729,9 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
                             "plan_status": status[0][0] if status else None}
 
     say(f"    plan A closed · {f['plan_a']['close']}")
+    f["evidence"] = {"a": b.evidence_pass(plan_a, notes)}
+    say(f"    plan A evidence pass · {len(f['evidence']['a']['attached'])} passage(s) hung, "
+        f"{f['evidence']['a']['found_nothing']} found nothing")
 
     # ── 2026-07-01 · a figure with no upstream table ────────────────────────
     fig = b.cli("node", "add", "--manual-figure", "q3_emea_uplift", "--value", "0.12",
@@ -667,6 +789,30 @@ def build(root: Path, under_test: Path, python: str, nonce: str, say=print) -> d
     ran_b = b.rows("SELECT substr(created_at, 1, 10) FROM Plans WHERE plan_id = ?", plan_b)
     f["plan_b"] = {"plan_id": plan_b, "driver_rc": closed_b.returncode, "ran_on": ran_b[0][0] if ran_b else None}
     say(f"    plan B published and closed · {plan_b} · rc {closed_b.returncode}")
+    f["evidence"]["b"] = b.evidence_pass(plan_b, notes)
+    say(f"    plan B evidence pass · {f['evidence']['b']['slots']} slot(s)")
+
+    # ── 2026-09-01 · plan C: a tidy-up under a root of its own ──────────────
+    plan3 = b.publish({
+        "goal": "Let on-call re-run a single week of the rollup by hand",
+        "prefix": f"{PROJECT_BASE}-c",
+        "project": b.project,
+        "user_query": "Give on-call a way to re-run one week.",
+        "root": {"kind": "new", "basis": "on-call needs to re-run a single week"},
+        "declared_targets": ["pkg.rollup.weekly_report"],
+        "steps": [{"description": "CODE: add rerun_week() in pkg/runbook.py", "type": "CODE"}],
+    })
+    plan_c = plan3["plan_id"]
+    b.op("start-step.sh", {"step_id": plan3["step_ids"][0], "type": "CODE"})
+    f["commit_v4"] = b.write_repo(V4, "add rerun_week for on-call", "2026-09-01T09:30:00+00:00")
+    b.op("complete-step.sh", {"step_id": plan3["step_ids"][0], "summary": "rerun_week() added"})
+    reasons_c = root / "plan-c-reasons.json"
+    reasons_c.write_text(json.dumps(plan_c_reasons()), encoding="utf-8")
+    closed_c = b.review_close(plan_c, str(reasons_c))
+    f["plan_c"] = {"plan_id": plan_c, "driver_rc": closed_c.returncode}
+    f["evidence"]["c"] = b.evidence_pass(plan_c, notes)
+    say(f"    plan C published and closed · {plan_c} · rc {closed_c.returncode} · evidence: "
+        f"{f['evidence']['c']['found_nothing']} found nothing")
 
     f["graph_db"] = str(b.graph_dir / f"{b.project}-state-graph.db")
     # the node whose only task reason is plan B's unstated one: read back out of

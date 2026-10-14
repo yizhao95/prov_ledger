@@ -121,6 +121,24 @@ def runner_default_check(t: Tally, cli, project: str, question: str) -> None:
 
 
 # ── the dashboard ────────────────────────────────────────────────────────────
+def evidence_read_check(t: Tally, cli, facts: dict) -> None:
+    """The passage plan A's evidence pass found reaches the fact table a reader
+    is given — checked in the rendered text, where a renderer that drops a
+    field would show (step 3b)."""
+    hung = ((facts.get("evidence") or {}).get("a") or {}).get("attached") or []
+    needle = (hung[0].get("excerpt") or "")[:60] if hung else ""
+    rc, out = cli(["receipts", "facts", "pkg.rollup.discount_rate", "--project", facts["project"], "--json"])
+    try:
+        text = json.loads(out).get("facts_text") or ""
+    except ValueError:
+        text = ""
+    ok = bool(needle) and needle in text and (hung[0].get("said_by") or "") in text
+    t.record(OK if ok else FAIL, "the meeting passage behind plan A's root is in the fact table for discount_rate, "
+                                 "with who said it",
+             "" if ok else f"rc={rc}; passage {needle!r} {'found' if needle and needle in text else 'not found'} "
+                           f"in {len(text)} characters of fact table")
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -544,6 +562,8 @@ def main() -> int:
         t.record(OK if ok else FAIL, label, "" if ok else detail)
     for ok, label, detail in DP.root_checks(facts):
         t.record(OK if ok else FAIL, label, "" if ok else detail)
+    for ok, label, detail in DP.evidence_checks(facts):
+        t.record(OK if ok else FAIL, label, "" if ok else detail)
 
     def cli(args: list[str], env: dict | None = None) -> tuple[int, str]:
         e = dict(os.environ)
@@ -584,6 +604,7 @@ def main() -> int:
                  f"answers below are not the ones the product would produce")
 
     runner_default_check(t, cli, facts["project"], qs[0]["question"])
+    evidence_read_check(t, cli, facts)
 
     step("/ledger and /receipts, answered by a stand-in for the session model")
     ok, why = SM.available()

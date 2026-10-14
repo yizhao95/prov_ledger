@@ -128,19 +128,32 @@ def get_utterance(conn, utterance_id: int) -> dict | None:
 
 # ── reference ─────────────────────────────────────────────────────────────────
 
+# Who said it and the passage they said (migration 037): the passage, never the
+# document. The schema holds the same bounds; these name them before it does.
+SAID_BY_MAX = 200
+EXCERPT_MAX = 2000
+
+
 def insert_reference(conn, *, project: str, kind: str, label: str, occurred_at: str, uri: str | None = None,
-                     visibility: str = "shareable", commit: bool = True) -> int:
+                     visibility: str = "shareable", said_by: str | None = None, excerpt: str | None = None,
+                     commit: bool = True) -> int:
     """verifiability is decided here: verbal → 'verbal' (no uri by definition),
-    a uri → 'linked', otherwise 'unreachable' until someone finds the link."""
+    a uri → 'linked', otherwise 'unreachable' until someone finds the link.
+    `said_by` and `excerpt` are optional and enter the chain with the row."""
     if kind not in REFERENCE_KINDS:
         raise ValueError(f"reference kind must be one of {REFERENCE_KINDS}, got {kind!r}")
     if kind == "verbal" and uri:
         raise ValueError("a verbal reference has no uri")
     if not label or len(label) > 512:
         raise ValueError("a reference label is 1..512 characters (a pointer, not a body)")
+    if said_by is not None and not 1 <= len(said_by) <= SAID_BY_MAX:
+        raise ValueError(f"said_by is 1..{SAID_BY_MAX} characters: who said it, not what")
+    if excerpt is not None and not 1 <= len(excerpt) <= EXCERPT_MAX:
+        raise ValueError(f"an excerpt is 1..{EXCERPT_MAX} characters: the passage, not the document")
     verifiability = "verbal" if kind == "verbal" else ("linked" if uri else "unreachable")
     row = {"project": project, "kind": kind, "uri": uri, "label": label, "occurred_at": occurred_at,
-           "registered_at": _db_now(conn), "verifiability": verifiability, "visibility": visibility, "last_checked": None}
+           "registered_at": _db_now(conn), "verifiability": verifiability, "visibility": visibility, "last_checked": None,
+           "said_by": said_by, "excerpt": excerpt}
     rid = _insert_chained(conn, "reference", row)
     if commit:
         conn.commit()
@@ -388,7 +401,12 @@ def supersedes_ids(value) -> list[int]:
 # who hashes in the old form can therefore only claim 'unknown', while claiming
 # any real origin needs the current form and so needs every later row re-hashed.
 # Downgrading a record into worthlessness is possible; upgrading one is not.
-_PRE_COLUMN = {"utterance": ("origin", "unknown")}
+#
+# 037 added two columns to reference (said_by, excerpt), both NULL on every
+# older row; those rows replay with both left out. The same argument holds: an
+# old-form row can only claim it carried no passage.
+_PRE_COLUMN = {"utterance": (("origin", "unknown"),),
+               "reference": (("said_by", None), ("excerpt", None))}
 
 
 def verify_chain(conn, table: str) -> dict:
@@ -408,8 +426,8 @@ def verify_chain(conn, table: str) -> dict:
         if row["prev_hash"] == prev and chain_hash(prev, row) == row["hash"]:
             prev = row["hash"]
             continue
-        if older is not None and row.get(older[0]) == older[1] and row["prev_hash"] == prev:
-            body = canonical(row, exclude=(older[0],))
+        if older is not None and all(row.get(c) == v for c, v in older) and row["prev_hash"] == prev:
+            body = canonical(row, exclude=tuple(c for c, _ in older))
             if hashlib.sha256((body + (prev or "")).encode("utf-8")).hexdigest() == row["hash"]:
                 pre += 1
                 prev = row["hash"]

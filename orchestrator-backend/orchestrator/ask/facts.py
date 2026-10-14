@@ -62,10 +62,16 @@ def numbers_in(text: str) -> set[str]:
 # ── per-record decoration ────────────────────────────────────────────────────
 
 def _references(conn, reason_id: int) -> list[dict]:
-    return [{"cite": f"#r{r[0]}", "kind": r[1], "label": r[2], "uri": r[3], "last_checked": r[4]}
-            for r in conn.execute(
-        "SELECT f.id, f.kind, f.label, f.uri, f.last_checked FROM reference_link l "
-        "JOIN reference f ON f.id = l.reference_id WHERE l.reason_id = ? ORDER BY f.id", (reason_id,))]
+    """Every source that backs the record, through evidence.sources_for_reason —
+    a task reason's root's words and root plan included (step 3b)."""
+    from .. import evidence
+    return [{"cite": f"#r{s['reference_id']}", "kind": s["kind"], "label": s["label"], "uri": s["uri"],
+             "last_checked": s["last_checked"],
+             **({"via": s["via"]} if s["via"] != "reason" else {}),
+             **({"said_by": s["said_by"]} if s["said_by"] else {}),
+             **({"excerpt": s["excerpt"]} if s["excerpt"] else {}),
+             **({"excerpt_withheld": True} if s["excerpt_withheld"] else {})}
+            for s in evidence.sources_for_reason(conn, reason_id)]
 
 
 def _shown_and_adopted(conn, reason_ids: list[int]) -> dict[int, dict]:
@@ -133,6 +139,7 @@ def _record(conn, r: dict, stats: dict) -> dict:
             # FL-238: the rows this one corrects; they are not in the table
             **({"corrects": provenance.supersedes_ids(r["supersedes"])} if r.get("supersedes") else {}),
             **({"task_of": r["task_of"]} if r.get("task_of") else {}),
+            **({"per_node_close": True} if r.get("per_node_close") else {}),
             "shown": shown, "adopted_by": sorted(adopted), "merged": len(merged), "merged_ids": merged,
             "plans": sorted(r.get("plans") or ([r["plan_id"]] if r.get("plan_id") else [])),
             "references": _references(conn, r["id"])}
@@ -321,8 +328,12 @@ LEGEND = (
     "task that changed it is the task's, not this node's reason\n"
     "  task reason of <plan>  why the task of the plan that changed this node was done, recorded once "
     "for the whole task — say \"<plan> changed it; that task was done because …\"\n"
-    "  [#N] a record · [#rN] a source: a pointer (label, time, link), never its body — say \"a link "
-    "to …\", and \"never checked\" or when it was last checked · [#iN] a plan that changed because of a record · "
+    "  per-node record, before task reasons  the close wrote one sentence per changed node until "
+    "task reasons existed — say it was recorded about this node at the time, not as the task's reason\n"
+    "  [#N] a record · [#rN] a source: a pointer (label, time, link), never the whole body — say \"a link "
+    "to …\", and \"never checked\" or when it was last checked; `said by <who>: \"…\"` is the passage "
+    "that person said, kept word for word — quote it as theirs; `backs the root's words` means the "
+    "source backs why the task's root was set, not this node directly · [#iN] a plan that changed because of a record · "
     "[#eN] a change in the project graph · [#xN] / [#oN] an expectation and its outcome · "
     "[#mN] a measured value · [scope] an absence, computed over the range searched — reproduce it "
     "word for word\n"
@@ -334,14 +345,24 @@ def _source_line(ref: dict, indent: str) -> str:
     """A source is a pointer. Saying so on the line itself: an agent shown only
     `email · <label>` called a never-checked email "attached"."""
     held = "link only" if ref.get("uri") else "label only"
+    if ref.get("excerpt"):
+        held = ("link and" if ref.get("uri") else "label and") + " the passage — the rest of the body is not in the ledger"
+    else:
+        held += " — the body is not in the ledger"
     checked = f"last checked {str(ref['last_checked'])[:10]}" if ref.get("last_checked") else "never checked"
-    return (f"{indent}    source [{ref['cite']}] {ref['kind']} · {ref['label']}"
-            + (f" · {ref['uri']}" if ref.get("uri") else "")
-            + f" · {held} — the body is not in the ledger · {checked}")
+    via = f" · backs the {ref['via']}" if ref.get("via") else ""
+    line = (f"{indent}    source [{ref['cite']}] {ref['kind']} · {ref['label']}"
+            + (f" · {ref['uri']}" if ref.get("uri") else "") + f"{via} · {held} · {checked}")
+    if ref.get("excerpt"):
+        line += f'\n{indent}      said by {ref.get("said_by") or "(not named)"}: "{ref["excerpt"]}"'
+    elif ref.get("excerpt_withheld"):
+        line += f"\n{indent}      said by {ref.get('said_by') or '(not named)'}: (the passage is marked personal and does not travel)"
+    return line
 
 
 def _fmt_record(r: dict, indent: str = "  ") -> list[str]:
     task = f" · task reason of {r['task_of']}" if r.get("task_of") else ""
+    task += " · per-node record, before task reasons" if r.get("per_node_close") else ""
     head = f"{indent}[{r['cite']}] {r['tier']}{task} · {r.get('evidence_level') or '?'} · {(r.get('occurred_at') or '')[:10]}"
     plans = r.get("plans") or ([r["plan_id"]] if r.get("plan_id") else [])
     if plans:
