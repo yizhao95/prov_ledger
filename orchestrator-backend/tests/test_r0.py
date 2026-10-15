@@ -61,6 +61,7 @@ def _span_text(conn, r):
     return t[r["verbatim_start"]:r["verbatim_end"]]
 
 
+@pytest.mark.r0_r5
 def test_r0_local_name_hit_is_stated_with_the_sentence_as_span(conn, tmp_path):
     graph = _graph(tmp_path, keys=("nk_a",))
     _plan(conn)
@@ -74,6 +75,7 @@ def test_r0_local_name_hit_is_stated_with_the_sentence_as_span(conn, tmp_path):
     assert [(x[0], x[1]) for x in conn.execute("SELECT rule_id, verdict FROM trigger_log WHERE plan_id=?", (PLAN,))] == [("R0", "auto")]
 
 
+@pytest.mark.r0_r5
 def test_r0_short_or_stopword_local_names_never_hit(conn, tmp_path):
     graph = _graph(tmp_path, keys=("nk_b",))          # local name `run`: a stopword and 3 chars
     _plan(conn)
@@ -88,6 +90,7 @@ def test_r0_short_or_stopword_local_names_never_hit(conn, tmp_path):
     assert r2["by_rule"]["R0"] == 0 and r2["ask"] == 1
 
 
+@pytest.mark.r0_r5
 def test_r0_a_sentence_naming_four_nodes_is_generic(conn, tmp_path):
     graph = _graph(tmp_path)
     _plan(conn)
@@ -99,6 +102,7 @@ def test_r0_a_sentence_naming_four_nodes_is_generic(conn, tmp_path):
     assert r["ask"] == 4                                                            # generic sentences do not answer for them
 
 
+@pytest.mark.r0_r5
 def test_r0_file_basename_hits(conn, tmp_path):
     graph = _graph(tmp_path, keys=("nk_a", "nk_c"))
     _plan(conn)
@@ -109,6 +113,7 @@ def test_r0_file_basename_hits(conn, tmp_path):
     assert _span_text(conn, st["nk_a"]) == "rollup.py must stay pure." and _span_text(conn, st["nk_c"]) == "clean.py can grow."
 
 
+@pytest.mark.r0_r5
 def test_r0_partial_token_overlap_and_user_query_do_not_count(conn, tmp_path):
     graph = _graph(tmp_path, keys=("nk_a",))
     _plan(conn, user_query="weekly_totals should keep fiscal weeks")     # Plans.user_query is not an utterance
@@ -119,6 +124,7 @@ def test_r0_partial_token_overlap_and_user_query_do_not_count(conn, tmp_path):
     assert triggers.r0_user_words(ctx, ctx.touched["nk_a"]) is None
 
 
+@pytest.mark.r0_r5
 def test_r0_same_session_utterance_without_plan_counts(conn, tmp_path):
     graph = _graph(tmp_path, keys=("nk_c",))
     _plan(conn)
@@ -142,6 +148,7 @@ def test_draft_ranks_r0_hits_first_with_the_sentence_span(conn, tmp_path):
     assert cands[1]["span"] == [0, len(conn.execute("SELECT text FROM utterance WHERE id=?", (a,)).fetchone()[0])]
 
 
+@pytest.mark.r0_r5
 def test_cli_reasons_ask_basis_groups_by_plan_and_node_type(conn, tmp_path, monkeypatch):
     graph = _graph(tmp_path, keys=("nk_a", "nk_c"))
     reg = tmp_path / "projects.json"

@@ -318,6 +318,7 @@ def test_the_external_switch_refuses_a_value_that_is_neither_off_nor_on(tmp_path
     assert "external_trigger" in str(e.value)
 
 
+@pytest.mark.r0_r5
 def test_the_code_rules_answer_first_and_the_judge_only_sees_what_is_left(ledger, tmp_path):
     """One close, two paths: the analyzer's node is judged by R0–R6 and logged
     path='code'; the deck's number is in no snapshot at all and is judged by the

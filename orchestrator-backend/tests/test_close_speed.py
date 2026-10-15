@@ -12,6 +12,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+import pytest
+
 from orchestrator import provenance as pv, psg_bridge, triggers
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -59,6 +61,7 @@ def test_the_analyzer_and_the_test_schema_carry_the_same_indexes():
         assert stmt in store and stmt in copy, stmt
 
 
+@pytest.mark.r0_r5
 def test_the_close_computes_the_plans_changed_nodes_once(conn, tmp_path, monkeypatch):
     graph = _graph(tmp_path)
     conn.execute("INSERT INTO Plans (plan_id, original_goal, status, project, project_source, created_at) VALUES "

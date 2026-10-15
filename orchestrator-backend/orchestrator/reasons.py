@@ -57,13 +57,15 @@ def _reason_keys(conn, plan_id: str) -> set[str]:
 # ── the checklist ────────────────────────────────────────────────────────────
 
 def slots_for_plan(conn, project: str, plan_id: str, psg_db_path: str | None) -> list[dict]:
-    """Changed nodes of the plan that have no `reason` row yet."""
+    """Changed nodes of the plan that have no `reason` row yet.
+    No product caller since task reasons (036); see the triggers module docstring (FL-243)."""
     have = _reason_keys(conn, plan_id)
     return [c for c in psg_bridge.changed_node_keys(psg_db_path, plan_id) if c["node_key"] not in have]
 
 
 def checklist_text(slots: list[dict]) -> str:
-    """Closed-form: exactly these N data points, numbered, nothing else to invent."""
+    """Closed-form: exactly these N data points, numbered, nothing else to invent.
+    No product caller since task reasons (036); see the triggers module docstring (FL-243)."""
     if not slots:
         return ("This change touched no data points at all (no node_changed / node_added / "
                 "node_removed), so there is nothing to explain.")
@@ -446,6 +448,7 @@ def unstated_ratio(conn, project: str, plan_id: str) -> dict:
 
 
 def auto_filled(conn, plan_id: str) -> list[dict]:
-    """Reasons a rule filled for the plan (rule_id + basis) — shown in the checklist."""
+    """Reasons a rule filled for the plan (rule_id + basis) — shown in the checklist.
+    No product caller since task reasons (036); see the triggers module docstring (FL-243)."""
     from . import triggers
     return triggers.auto_filled(conn, plan_id)

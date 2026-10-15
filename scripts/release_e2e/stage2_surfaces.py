@@ -436,6 +436,16 @@ S4_TOOLS = ("Bash(provledger:*)", "Bash(mktemp:*)", "Bash(cat:*)", "Read", "Grep
 SLASH = {"ask": "ledger", "receipts": "receipts"}
 
 
+def receipts_reads(reads: list[str]) -> tuple[str, str]:
+    """A real /receipts session must have read the ledger through `receipts
+    facts`. SKILL.md starts from the code (grep, `why <file>:<line>`) and keeps
+    `receipts candidates` for a challenge the code points nowhere from, so
+    whether candidates ran is reported, not required (rc048d, Q7)."""
+    ran = [any(r.startswith(f"receipts {w}") for r in reads) for w in ("candidates", "facts")]
+    return (OK if ran[1] else FAIL,
+            f"facts {'ran' if ran[1] else 'never ran'}; candidates {'ran' if ran[0] else 'never ran'}")
+
+
 def real_answer(q: dict, s: PS.Transcript) -> dict:
     """One question's real-path record: the session's final answer, the
     material its own `provledger` reads printed (the only evidence stage 3
@@ -509,10 +519,8 @@ def real_sessions(t: Tally, facts: dict, qs: list[dict]) -> list[dict]:
                      f"{label}: the question is in ask_log and the draft went through `ask submit`",
                      f"ask_log {'grew' if grew else 'did not grow'}; submit {'ran' if submitted else 'never ran'}")
         else:
-            both = [any(r.startswith(f"receipts {w}") for r in reads) for w in ("candidates", "facts")]
-            t.record(OK if all(both) else FAIL,
-                     f"{label}: it ran the two reads SKILL.md requires, `receipts candidates` and `receipts facts`",
-                     f"candidates {'ran' if both[0] else 'never ran'}; facts {'ran' if both[1] else 'never ran'}")
+            status, detail = receipts_reads(reads)
+            t.record(status, f"{label}: it read the ledger through `receipts facts`, as SKILL.md says", detail)
         needle = q.get("needle")
         if needle:      # evidence, not a verdict: stage 3 marks whether the answer used it
             seen = needle.lower() in a["material"].lower()

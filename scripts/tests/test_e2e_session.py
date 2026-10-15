@@ -419,3 +419,19 @@ def test_past_the_limit_the_judge_is_told_what_was_cut(S3, monkeypatch):
     material = "x" * (S3.MATERIAL_LIMIT + 500)
     prompt = _judge_prompt(S3, monkeypatch, {"material": material})
     assert "500 of" in prompt and "not shown" in prompt
+
+
+# ── /receipts: what the real session must have read ─────────────────────────
+
+def test_receipts_needs_facts_and_reports_candidates(S2):
+    """skills/receipts/SKILL.md starts from the code: grep, `why <file>:<line>`,
+    then `receipts facts`. `receipts candidates` is where to start when the code
+    points nowhere, so a session that found the node through the code and never
+    ran it followed the skill (rc048d, Q7)."""
+    from e2elib import FAIL, OK
+    status, detail = S2.receipts_reads(["why pkg/rollup.py:17", "receipts facts pkg.rollup.estimate_note"])
+    assert status == OK and "candidates never ran" in detail
+    status, detail = S2.receipts_reads(['receipts candidates "who signed off?"', "receipts facts pkg.x"])
+    assert status == OK and "candidates ran" in detail
+    assert S2.receipts_reads(['receipts candidates "who signed off?"'])[0] == FAIL
+    assert S2.receipts_reads([])[0] == FAIL

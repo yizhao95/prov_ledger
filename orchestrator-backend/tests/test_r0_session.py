@@ -46,6 +46,7 @@ def _plan(conn, session_id=None, created="2026-09-16 10:00:00"):
     conn.commit()
 
 
+@pytest.mark.r0_r5
 def test_words_said_in_the_plans_session_before_the_plan_existed_are_candidates(conn, tmp_path):
     g = _graph(tmp_path)
     _plan(conn, session_id="sess-1")
@@ -58,6 +59,7 @@ def test_words_said_in_the_plans_session_before_the_plan_existed_are_candidates(
     assert "weekly_totals" in conn.execute("SELECT substr(text, ?+1, ?-?) FROM utterance WHERE id=?", (row[1], row[2], row[1], u)).fetchone()[0]
 
 
+@pytest.mark.r0_r5
 def test_words_from_another_session_outside_the_window_are_not_candidates(conn, tmp_path):
     g = _graph(tmp_path)
     _plan(conn, session_id="sess-1")
@@ -68,6 +70,7 @@ def test_words_from_another_session_outside_the_window_are_not_candidates(conn, 
     assert conn.execute("SELECT COUNT(*) FROM change_reason WHERE plan_id=? AND rule_id='R0'", (PLAN,)).fetchone()[0] == 0
 
 
+@pytest.mark.r0_r5
 def test_a_file_name_anchors_to_every_node_changed_in_that_file_and_not_to_the_untouched_one(conn, tmp_path):
     g = _graph(tmp_path)                                                    # pkg/m.py: nk_b nk_c nk_d nk_e changed, nk_f untouched
     _plan(conn, session_id="sess-1")
@@ -82,6 +85,7 @@ def test_a_file_name_anchors_to_every_node_changed_in_that_file_and_not_to_the_u
     assert "nk_f" not in rows and not any(k == "nk_f" for k, _, _ in logs)   # untouched → not anchored, not ambiguous
 
 
+@pytest.mark.r0_r5
 def test_local_name_rule_is_unchanged_a_generic_sentence_stays_ambiguous(conn, tmp_path):
     g = _graph(tmp_path)
     _plan(conn, session_id="sess-1")
@@ -113,6 +117,7 @@ def test_plans_session_column_exists_and_session_plan_still_works(conn, tmp_path
 
 # ── DP phase 2b Task 0b: a rule never anchors to a node the plan merely matched ──
 
+@pytest.mark.r0_r5
 def test_rules_never_anchor_to_a_node_the_plan_only_matched(conn, tmp_path):
     """dp2b-t1 for real: the user's sentence said 'plan / step / merge' and R0 pinned it to
     methods named plan / step / merge that the review had merely matched. A node whose

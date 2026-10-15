@@ -892,7 +892,10 @@ def questions(f: dict) -> list[dict]:
             "question": "When was discount_rate's change first explained, and under which plan?",
             "must": [
                 f"the date on the record: {f['upstream_note']['occurred_at'][:10]}",
-                f"the plan it belongs to: {f['plan_a']['plan_id']}",
+                f"which plan: the {f['upstream_note']['occurred_at'][:10]} words were recorded under no plan, "
+                f"and the first plan whose task reason carries them is {f['plan_a']['plan_id']} — naming "
+                f"{f['plan_a']['plan_id']} as the plan is right; saying the {f['upstream_note']['occurred_at'][:10]} "
+                "record was filed under it is not",
             ],
             "must_not": ["a date that is not on any record shown"],
         },
