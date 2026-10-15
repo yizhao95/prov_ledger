@@ -166,7 +166,9 @@ A reason says **what kind of statement** it is. Evidence says **how checkable**
 it is. They are two dimensions and they never move each other: attaching an email
 to a reason does not change its tier, it only raises its source level. Evidence
 sits exactly where a test sits — a test does not change what the code does, it
-changes your confidence that it does it.
+changes your confidence that it does it. A found source can still give a task its
+reason: your reading of it, written as a new `asserted` row beside the source
+(step 3).
 
 **provLedger searches nothing.** It hands you a list; you search with *your* own
 communication tools and *your* own credentials, and write back what you found.
@@ -198,6 +200,15 @@ has a linked source is not a slot; nothing is left to find. Search **inside the
 slot's `window`** for its `hints` with whatever tools this host gives you (mail,
 chat, meeting notes, a tracker). No such tool? Log `not_searched`; nothing
 breaks, the source level just stays lower.
+
+Those tools are MCP connectors: the ones this host already has, or the ones a
+connector plugin brings, such as Anthropic's `enterprise-search`
+(knowledge-work-plugins: Slack, Notion, Atlassian, Asana and others, each behind
+the user's own sign-in). Call each connector's own search with the slot's window
+and hints. Do not take a synthesized answer instead (that plugin's `/search`):
+it merges hits, lists only the top few once there are many, and its source list
+carries no links — every hit has to arrive here as its own pointer, with its
+link.
 
 ```bash
 # the to-check list: one slot per task — the task, its nodes, its root and the
@@ -234,11 +245,34 @@ that were in flight and `not_searched` for the ones that never started, and
 leave the reasons as they are. A passage on a `--visibility personal` source
 stays in the ledger and is not shown by any read.
 
+### Step 3 · when a found source says why, write the task's reading of it
+
+A source that says why the task was done — the mail that set the scope, the
+meeting note with the decision — gives the task its reason, when the task's
+reason is `unstated` or a reading of the plan. Write your reading of it as a
+correction of the task's reason, through `reason-fill.sh`:
+
+```json
+{"plan_id": "<plan_id>", "project": "<name>", "run_id": <run>,
+ "tasks": [{"supersedes": <the slot's reason_id>,
+            "interpretation": "<why, as the source says it>",
+            "refs": [<every reference id it rests on>]}]}
+```
+
+The new row is `asserted`: your reading, with the passage, who said it and the
+link beside it in the reference, so a reader can hold one against the other.
+Write it from the passages you attached and cite each of them; a reading with no
+reference behind it is a guess. The old row stays, points at the new one, and
+its pointers come along. A `stated` task is not replaced by a reading — the
+user's words stay, and a source that disagrees is attached with
+`--stance contradicts`.
+
 ### The four rules
 
-1. **Attaching evidence never changes a tier.** A pointer raises
+1. **Attaching evidence never changes a row's tier.** A pointer raises
    `evidence_level` (`unstated` / `task_context` → `verbal` → `linked`) and
-   nothing else. Never re-fill a reason as `stated` because you found an email:
+   nothing else; a reading you write from a source is a new row (step 3), and it
+   is `asserted`. Never write a reason as `stated` because you found an email:
    `stated` means *the user's own words*, and a span into their `utterance` is the
    only way to get it. A passage someone said in a meeting is evidence with
    `--said-by`, not the user's words.
@@ -249,17 +283,15 @@ stays in the ledger and is not shown by any read.
    never discarded.** Evidence is allowed to fail, the same way a test is. A
    contradicting source does not demote the reason's tier — the user still said
    what they said — it tells the reader the two disagree.
-4. **When both steps come up empty, the task stays `unstated`, and you never
-   guess.** A pointer found in a mailbox is *evidence*, not a reason: you may not
-   read a reason out of an email and fill it in. The task's `unstated` row is
-   already there (step 1 or the close wrote it); hang the pointer on it and leave
-   the reason blank, and the page then says "there is a source that may be
-   related, but nobody said this task was done because of it", which is far more
-   honest than a sentence that reads well. When it matters, ask the user once:
-   show them the pointer and ask "is this why?". If they answer, that answer is
-   **their words** — record it with `provledger note` (or the hook records it) and
-   correct the task's reason as `stated` with a span into it. If they do not
-   answer, or say no, it stays blank.
+4. **A reason comes from the user's words or from a source you attached, and
+   you never guess.** When the user said nothing and nothing was found, the task
+   stays `unstated`. When a source was found but does not say why — it names the
+   change, not its cause — attach it and leave the reason as it is; the page then
+   says "there is a source that may be related, but nobody said this task was
+   done because of it", which is far more honest than a sentence that reads
+   well. When the user says why later, that is **their words**: record it with
+   `provledger note` (or the hook records it) and correct the task's reason with
+   `supersedes` and a span into those words — it becomes `stated`.
 
 **Every slot gets an `evidence_log` row, including the ones you never searched.**
 That row is the answer to "why is this one blank" — nobody looked, the window
@@ -339,6 +371,7 @@ philosophy as the rest of the reviewer: **report and FAIL, never auto-fix**.
 | The whole flow, deterministically | `scripts/review_run.py --plan-id P --project X [--tests ...] [--reasons ...]` |
 | Which tasks still need a source for their root, and where to look | `provledger review evidence-slots --plan <id> --json` |
 | Hang one pointer where the slot says | `provledger reference add --utterance <id> \| --reason <id> --kind meeting --uri … --label … --occurred-at … --said-by … --excerpt …` |
+| Write the task's reading of a found source | `executing-plans/scripts/reason-fill.sh` with `tasks: [{supersedes: <reason_id>, interpretation, refs}]` |
 | Record what became of a slot | `provledger review evidence-log --plan <id> --reason <id> --outcome …` |
 
 Run the helpers with the same `PY` as `review_run.py` above; they are stdlib
@@ -370,7 +403,9 @@ only.
 | Closing COMPLETED without refreshing the graph | A clean review MUST refresh the graph + re-run tests first. |
 | Building the graph from scratch here | Wrong skill — that's `project-state-graph`. |
 | Skipping the close | The plan stays stuck in NEEDS_REVIEW. Always finalize the child step (`complete-step`/`fail-step` on `<plan>-REVIEW.1`). |
-| Reading a reason out of an email you found | That is a guess, and a guess that looks sourced is worse than a blank. Attach the pointer to the `unstated` row and leave the reason empty. |
+| Writing a reading from a source you did not attach | A reading rests on the passages beside it. Attach every hit first, then `supersedes` with `refs` naming them; with nothing attached it is a guess, and a guess that reads well is worse than a blank. |
+| Taking a synthesized search answer as the hits | It merges hits, keeps the top few and drops the links. Search with the connector's own tools and attach each hit with its link. |
+| Replacing a `stated` task with a reading of a source | The user's words stay; `reason-fill` refuses it. A source that disagrees is attached with `--stance contradicts`. |
 | Pasting the whole document into `--excerpt` | Keep the passage that says why, word for word, and who said it; the link holds the rest. 2000 characters is a ceiling, not a target. |
 | Re-filling a reason as `stated` because evidence turned up | `stated` means the user's own words. Evidence moves `evidence_level`, never the tier. |
 | Dropping a source that contradicts the reason | Attach it with `--stance contradicts`. Evidence is allowed to fail. |

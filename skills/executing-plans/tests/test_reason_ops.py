@@ -108,6 +108,26 @@ def test_reason_fill_several_tasks_assign_nodes_and_need_a_bundle(seeded_plan, t
     assert _rows(tmp_db, "SELECT plan_id, basis FROM plan_bundle") == [(pid, "both came out of the same review")]
 
 
+def test_reason_fill_supersedes_corrects_a_task_reason_and_a_second_correction_exits_2(seeded_plan, tmp_db, run_script_fn, psg_registry):
+    """A source found after the close: the agent's reading of it supersedes the
+    task's unstated reason. A row that was already corrected is not corrected
+    again (exit 2, nothing written)."""
+    base = {"plan_id": seeded_plan["plan_id"], "project": "demo", "run_id": 2}
+    r = run_script_fn("reason-fill", {**base, "tasks": [{"unstated": True}]}, tmp_db, env_extra=psg_registry)
+    assert r.returncode == 0, r.stderr
+    (old,) = _payload(r)["reason_ids"]
+    r = run_script_fn("reason-fill", {**base, "tasks": [{"supersedes": old, "interpretation": "the mail set the grain"}]},
+                      tmp_db, env_extra=psg_registry)
+    assert r.returncode == 0, r.stderr
+    got = _payload(r)
+    assert got["superseded"] == [old] and got["asserted"] == 1
+    assert _rows(tmp_db, "SELECT superseded_by FROM change_reason WHERE id = ?", old) == [(got["reason_ids"][0],)]
+    r = run_script_fn("reason-fill", {**base, "tasks": [{"supersedes": old, "interpretation": "again"}]},
+                      tmp_db, env_extra=psg_registry)
+    assert r.returncode == 2 and "already" in r.stderr
+    assert _rows(tmp_db, "SELECT COUNT(*) FROM change_reason") == [(2,)]
+
+
 def test_reason_slots_draft_proposes_sentences_for_the_task(seeded_plan, tmp_db, run_script_fn, psg_registry):
     pid = seeded_plan["plan_id"]
     _utt(tmp_db, pid, "load must keep paid orders only")

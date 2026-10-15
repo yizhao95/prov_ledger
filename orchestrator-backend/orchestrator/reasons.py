@@ -133,7 +133,43 @@ def _task_kind(item) -> str:
     nodes = item.get("nodes")
     if nodes is not None and not (isinstance(nodes, list) and all(isinstance(n, str) and n for n in nodes)):
         raise FillInputError("a task's nodes are a list of node keys or qualified names")
+    old = item.get("supersedes")
+    if old is not None and (not isinstance(old, int) or isinstance(old, bool)):
+        raise FillInputError("supersedes is the id of the task reason this one corrects")
     return _answer_kind({**item, "node_key": "task"})
+
+
+def _check_corrections(conn, *, project: str, plan_id: str, tasks: list[dict], kinds: list[str]) -> dict[int, dict]:
+    """{old id: old row} for a call whose tasks each correct a live task reason of
+    this plan. The correction answers for the same task, so it names no nodes; and
+    only the user's words may replace the user's words, so a stated row is
+    superseded only by a stated one."""
+    olds = [t.get("supersedes") for t in tasks]
+    if any(o is None for o in olds):
+        raise FillInputError("a call either writes the plan's task reasons or is a correction (every task "
+                             "names supersedes), not both")
+    if len(set(olds)) != len(olds):
+        raise FillInputError("a task reason is corrected once per call; one id is named twice in supersedes")
+    if any(t.get("nodes") for t in tasks):
+        raise FillInputError("a correction answers for the task it supersedes and names no nodes")
+    out = {}
+    for old, kind in zip(olds, kinds):
+        row = conn.execute("SELECT * FROM change_reason WHERE id = ?", (old,)).fetchone()
+        if row is None:
+            raise FillInputError(f"supersedes: reason {old} does not exist")
+        if row["role"] != "reason" or row["node_key"] is not None:
+            raise FillInputError(f"supersedes: reason {old} is not a task reason (it names node {row['node_key']})"
+                                 if row["node_key"] else f"supersedes: reason {old} is a {row['role']}, not a task reason")
+        if row["plan_id"] != plan_id or row["project"] != project:
+            raise FillInputError(f"supersedes: reason {old} is a task reason of plan {row['plan_id']}, not {plan_id}")
+        if row["superseded_by"] is not None:
+            raise FillInputError(f"supersedes: reason {old} was already superseded by {row['superseded_by']}; "
+                                 f"correct that one instead")
+        if row["tier"] == "stated" and kind != "stated":
+            raise FillInputError(f"supersedes: reason {old} quotes the user's words; only the user's words "
+                                 f"(utterance_id + span) may replace it")
+        out[old] = dict(row)
+    return out
 
 
 def _changed(psg, plan_id: str) -> list[dict]:
@@ -151,11 +187,19 @@ def fill_tasks(conn, *, project: str, plan_id: str, run_id: int | None, tasks: l
     keys or qualified names of the plan's changed nodes, each in one task — all
     but one, which takes the rest; a `bundle` sentence then says why they share
     the plan. Everything is checked before anything is written; a node the plan
-    did not change comes back in unknown_nodes and nothing is written."""
+    did not change comes back in unknown_nodes and nothing is written.
+
+    A call whose every task carries supersedes: <id> is a correction: each new
+    row answers for the task the old one did (its nodes, through superseded_by;
+    its kind unless given), takes the pointers hung on the old row, and the old
+    row points at it. That is how a source found after the close becomes the
+    task's reading, and how the user's later words replace a reading."""
     if not isinstance(tasks, list) or not tasks:
         raise FillInputError("a close needs at least one task")
     kinds = [_task_kind(t) for t in tasks]
-    several = len(tasks) > 1
+    olds = (_check_corrections(conn, project=project, plan_id=plan_id, tasks=tasks, kinds=kinds)
+            if any(t.get("supersedes") is not None for t in tasks) else {})
+    several = len(tasks) > 1 and not olds
     if several:
         if not (isinstance(bundle, str) and bundle.strip()):
             raise FillInputError("several tasks in one plan need a bundle sentence: why they share the plan")
@@ -178,14 +222,17 @@ def fill_tasks(conn, *, project: str, plan_id: str, run_id: int | None, tasks: l
             seen[k] = i
             keys.append(k)
         assigned.append(keys)
-    out = {"tasks": 0, "stated": 0, "asserted": 0, "unstated": 0, "adopted": 0, "unknown_nodes": unknown, "reason_ids": []}
+    out = {"tasks": 0, "stated": 0, "asserted": 0, "unstated": 0, "adopted": 0, "unknown_nodes": unknown,
+           "reason_ids": [], "superseded": []}
     if unknown:
         return out
     recorded_by = source if source in provenance.RECORDED_BY else "agent"
     by = "human" if recorded_by == "human" else "agent"
     with db.transaction(conn):
         for t, kind, keys in zip(tasks, kinds, assigned):
-            common = dict(project=project, plan_id=plan_id, node_key=None, kind=t.get("kind", "technical"),
+            old = olds.get(t.get("supersedes"))
+            common = dict(project=project, plan_id=plan_id, node_key=None,
+                          kind=t.get("kind", old["kind"] if old else "technical"),
                           run_id=run_id, step_id=step_id, recorded_by=recorded_by, commit=False)
             try:
                 if kind == "stated":
@@ -198,6 +245,12 @@ def fill_tasks(conn, *, project: str, plan_id: str, run_id: int | None, tasks: l
                     rid = provenance.insert_reason(conn, **common)
             except ValueError as e:                 # a span outside its utterance, injected text, a bad ref
                 raise FillInputError(str(e)) from None
+            if old:
+                for ref_id, stance in conn.execute("SELECT reference_id, stance FROM reference_link WHERE reason_id = ? "
+                                                   "ORDER BY reference_id", (old["id"],)).fetchall():
+                    provenance.link_reference(conn, rid, ref_id, stance=stance, commit=False)
+                provenance.supersede(conn, old["id"], rid, commit=False)
+                out["superseded"].append(old["id"])
             out["reason_ids"].append(rid)
             out[kind] += 1
             out["tasks"] += 1

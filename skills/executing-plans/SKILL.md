@@ -234,6 +234,15 @@ without takes the rest, and `bundle` is one sentence on why they share the
 plan. A node belongs to one task. Nodes are only assigned — never written
 about one by one.
 
+**Correcting a task reason later** (a source the evidence pass found after the
+close, the user's later words): send `reason-fill` again with every task naming
+`"supersedes": <task reason id>` — e.g. `{"supersedes": 40, "interpretation":
+"…", "refs": [9]}`. The new row answers for the old row's task (its nodes, its
+kind), takes the pointers hung on it, and the old row points at it; readers show
+the new one. A correction names no `nodes` and needs no `bundle`. A `stated` row
+is replaced only by a `stated` task: only the user's words replace the user's
+words.
+
 The old per-node `reasons` list and the `{"text"}` shape are refused (exit 2):
 free text cannot become *stated*, whoever sends it. Ask the user ONCE; pressing
 enter accepts the draft. A plan nobody explained gets one `unstated` task
