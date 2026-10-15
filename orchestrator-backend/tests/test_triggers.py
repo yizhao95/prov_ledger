@@ -75,6 +75,7 @@ def _log_rows(conn):
 
 
 # ── R1 ────────────────────────────────────────────────────────────────────────
+@pytest.mark.r0_r5
 def test_r1_test_fixed_hit(conn, graph):
     _plan(conn)
     _log(conn, f"{PLAN}-A", "FAILED", "pytest -q\n1 failed\nFAILED tests/test_m.py::test_a_fn")
@@ -85,6 +86,7 @@ def test_r1_test_fixed_hit(conn, graph):
     assert "P1-A" in pv.reasons_for_plan(conn, PLAN)[0]["interpretation"]
 
 
+@pytest.mark.r0_r5
 def test_r1_test_fixed_miss_when_nothing_failed_first(conn, graph):
     _plan(conn)
     _log(conn, f"{PLAN}-B", "COMPLETED", "pytest -q\n3 passed (a_fn)")
@@ -93,6 +95,7 @@ def test_r1_test_fixed_miss_when_nothing_failed_first(conn, graph):
 
 
 # ── R2 ────────────────────────────────────────────────────────────────────────
+@pytest.mark.r0_r5
 def test_r2_gate_response_hit_and_miss(conn, graph):
     conn.execute("INSERT INTO Plans (plan_id, original_goal, status, project, project_source, created_at) VALUES "
                  "('P0', 'g', 'COMPLETED', 'proj', 'declared', '2026-09-15 09:00:00')")
@@ -110,6 +113,7 @@ def test_r2_gate_response_hit_and_miss(conn, graph):
 
 
 # ── R3 ────────────────────────────────────────────────────────────────────────
+@pytest.mark.r0_r5
 def test_r3_upstream_drift_hit_and_miss(conn, graph):
     _plan(conn)
     import sqlite3
@@ -131,6 +135,7 @@ def test_r3_upstream_drift_hit_and_miss(conn, graph):
 
 
 # ── R4 ────────────────────────────────────────────────────────────────────────
+@pytest.mark.r0_r5
 def test_r4_pure_refactor_hit_and_miss(conn, tmp_path):
     graph = _graph(tmp_path, changed=("nk_a",), refactor=("nk_r",))
     _plan(conn)
@@ -142,6 +147,7 @@ def test_r4_pure_refactor_hit_and_miss(conn, tmp_path):
 
 
 # ── R5 ────────────────────────────────────────────────────────────────────────
+@pytest.mark.r0_r5
 def test_r5_constraint_covered_hit_and_miss(conn, graph):
     from orchestrator import constraints
     _plan(conn)
@@ -180,6 +186,7 @@ def test_r6_miss_without_failures_or_deviations(conn, graph):
 
 
 # ── C1 / C2 / C4 and idempotence ─────────────────────────────────────────────
+@pytest.mark.r0_r5
 def test_c1_derivable_not_asked(conn, tmp_path):
     graph = _graph(tmp_path, changed=("nk_a",), refactor=("nk_r",))
     _plan(conn)
@@ -191,6 +198,7 @@ def test_c1_derivable_not_asked(conn, tmp_path):
     assert {x[2] for x in _log_rows(conn)} == {"auto"}
 
 
+@pytest.mark.r0_r5
 def test_c2_no_clue_asked(conn, tmp_path):
     graph = _graph(tmp_path, changed=("nk_a", "nk_b"))
     _plan(conn)
@@ -199,6 +207,7 @@ def test_c2_no_clue_asked(conn, tmp_path):
     assert r["ask"] == 2 and [s["node_key"] for s in reasons.slots_for_plan(conn, "proj", PLAN, graph)] == ["nk_a", "nk_b"]
 
 
+@pytest.mark.r0_r5
 def test_c4_every_verdict_logged(conn, tmp_path):
     graph = _graph(tmp_path, changed=("nk_a", "nk_b"), refactor=("nk_r",), added=("nk_n",))
     _plan(conn)
@@ -208,6 +217,7 @@ def test_c4_every_verdict_logged(conn, tmp_path):
     assert {x[0] for x in rows} == {"nk_a", "nk_b", "nk_r", "nk_n"}
 
 
+@pytest.mark.r0_r5
 def test_evaluate_is_idempotent(conn, tmp_path):
     graph = _graph(tmp_path, changed=("nk_a",), refactor=("nk_r",))
     _plan(conn)
@@ -221,12 +231,14 @@ def test_evaluate_is_idempotent(conn, tmp_path):
     assert len(_reasons(conn)) == 1 and len(_log_rows(conn)) == 2
 
 
+@pytest.mark.r0_r5
 def test_pending_mode_logs_silent_not_ask(conn, graph):
     _plan(conn)
     r = triggers.evaluate(conn, project="proj", plan_id=PLAN, psg_db_path=graph, ask=False, commit=True)
     assert r["silent"] == 1 and r["ask"] == 0 and _log_rows(conn) == [("nk_a", None, "silent")]
 
 
+@pytest.mark.r0_r5
 def test_auto_filled_lists_rule_and_basis(conn, tmp_path):
     graph = _graph(tmp_path, refactor=("nk_r",))
     _plan(conn)

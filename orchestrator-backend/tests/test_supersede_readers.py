@@ -103,6 +103,7 @@ def test_the_badge_and_the_graph_counts_count_a_chain_once(conn, chain):
     assert graph_view._record_counts(conn, "proj") == {"nk_a": 1, "nk_x": 1}
 
 
+@pytest.mark.r0_r5
 def test_the_checklist_of_rule_answers_leaves_out_a_corrected_one(conn, chain):
     assert all(r["basis"] != QUOTE for r in triggers.auto_filled(conn, "P1"))
 

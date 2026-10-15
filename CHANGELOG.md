@@ -116,6 +116,14 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   changes; the claude.ai / Cowork entry says what each refuses or ignores; a new
   entry says a Chinese question reaches English records only through `--also`.
 
+### Development
+
+- **The tests of the close rules R0-R5 are skipped, not deleted** (FL-243). Since
+  task reasons no product path runs the rules, and nothing reads what they filled
+  (the reason-slots checklist). The code stays for now; 32 backend tests carry the
+  marker `r0_r5` and `tests/conftest.py` skips them, and the `orchestrator/triggers.py`
+  docstring says what in the module is still live.
+
 ## 0.4.7 — 2026-10-09
 
 ### Added

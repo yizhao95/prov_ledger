@@ -17,6 +17,17 @@ row (C4), so the false-trigger and miss rates can be computed later.
   R6 deviation_recovered a failed step recovered by a deviation → a rejected_path (command + error tail)
 
 Nothing here reads a model; a rule is a function of the ledger and the graph.
+
+No product path calls `evaluate` since task reasons (migration 036): a plan's
+close records one reason per task, so R0-R5 no longer run, and nothing reads
+what they filled — `auto_filled` here, `reasons.slots_for_plan`,
+`reasons.checklist_text` and `reasons.auto_filled`. `provledger reasons
+ask-basis` shows only the trigger_log rows written before. The code stays until
+someone decides whether a later read needs it (FL-243); its tests are marked
+`r0_r5` and skipped by tests/conftest.py, not deleted. Still live here: R6
+(`r6_candidates`, `rejected_paths` at close, `misanchored` for `reasons
+recheck`) and the helpers other modules use — `_ctx`, `candidate_utterances`,
+`sentences`, `r0_names`, `_literal`, `PASSIVE_EVENTS`, `_has_rule_reason`.
 """
 from __future__ import annotations
 
@@ -537,7 +548,9 @@ def evaluate(conn, *, project: str, plan_id: str, psg_db_path: str | None, ask: 
     DP phase 5: the rules go first and the model goes last. Whatever is left
     that lives outside the code — a number in a deck, a figure nobody can trace
     — goes to `external_trigger.evaluate_external`, which judges it only when
-    `external_mode == "on"` and logs its verdict either way."""
+    `external_mode == "on"` and logs its verdict either way.
+
+    No product caller since task reasons (036); see the triggers module docstring (FL-243)."""
     ctx = _ctx(conn, project, plan_id, psg_db_path)
     changed = {c["node_key"] for c in psg_bridge.changed_node_keys(psg_db_path, plan_id)}
     result = {"auto": 0, "ask": 0, "silent": 0, "by_rule": {r.id: 0 for r in RULES}, "nodes": []}
@@ -600,7 +613,8 @@ def evaluate(conn, *, project: str, plan_id: str, psg_db_path: str | None, ask: 
 
 
 def auto_filled(conn, plan_id: str) -> list[dict]:
-    """What the rules filled for a plan — shown in the reason-slots checklist."""
+    """What the rules filled for a plan — shown in the reason-slots checklist.
+    No product caller since task reasons (036); see the triggers module docstring (FL-243)."""
     return [dict(r) for r in conn.execute(
         "SELECT r.node_key, r.rule_id, COALESCE(r.interpretation, substr(u.text, r.verbatim_start + 1, r.verbatim_end - r.verbatim_start)) AS basis "
         "FROM change_reason r LEFT JOIN utterance u ON u.id = r.verbatim_utterance_id "

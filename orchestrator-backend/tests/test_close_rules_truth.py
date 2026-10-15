@@ -80,6 +80,7 @@ def test_an_injected_utterance_is_not_a_candidate(conn, tmp_path, text):
     assert [u["id"] for u in triggers.candidate_utterances(ctx)] == [user]
 
 
+@pytest.mark.r0_r5
 def test_a_handback_naming_a_changed_node_writes_no_stated_reason(conn, tmp_path):
     graph = _graph(tmp_path, {"nk_a": "pkg.rollup.weekly_totals", "nk_b": "pkg.rollup.load_orders"})
     _plan(conn)

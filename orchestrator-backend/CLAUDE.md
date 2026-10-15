@@ -13,7 +13,8 @@ Inside the package: relative imports only.
 - `orchestrator` is not importable from the venv outside pytest: use `PYTHONPATH=orchestrator-backend`.
   CLI: `python -m orchestrator.cli <cmd>`. Hook: `echo '<json>' | python -m orchestrator.hooks <Event>`.
 - Markers: `live` reads the real ledger and is deselected (`PROVLEDGER_LIVE=1 … -m live`, by hand only).
-  Never skip `veto` tests.
+  Never skip `veto` tests. `r0_r5` marks tests of the close rules R0-R5, skipped by `tests/conftest.py`
+  (no product caller since task reasons; `orchestrator/triggers.py` says why, FL-243).
 - No test may call a model: inject a stub `runner`. `--runner claude`, `significance eval` and
   `trigger eval` spawn `claude -p`; manual only.
 

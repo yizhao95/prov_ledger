@@ -19,6 +19,8 @@ from orchestrator import constraints as oc, db, triggers
 sys.path.insert(0, str(Path(__file__).parent))
 import _psg_schema as ps  # noqa: E402
 
+pytestmark = pytest.mark.r0_r5
+
 
 @pytest.fixture
 def graph(tmp_path):
