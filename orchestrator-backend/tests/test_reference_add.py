@@ -1,9 +1,10 @@
 """A2: `provledger reference add` — a pointer to something outside the ledger.
 
 What a reference is: a label, a time, and — when someone can produce one — a
-permalink. What it is not: a copy of the email. The person on the other side of a
-disagreement opening the original is worth more than any excerpt we could quote,
-and it keeps the export surface the size it already is.
+permalink; since step 3b of the task-level redesign also who said it and the
+passage they said (`--said-by`, `--excerpt`), because a link rots and the words
+are what a reader needs. The passage, not the document: at most 2000 characters,
+as much as the agent that found it judged was needed.
 
 provLedger never fetches the uri. Finding the link is the host agent's job, with
 the host agent's credentials; this command only records what it was handed. So a
@@ -264,3 +265,42 @@ def test_a_reference_the_command_wrote_is_append_only_afterwards(conn, anchors):
     ref = json.loads(r.stdout)["reference_id"]
     with pytest.raises(sqlite3.IntegrityError, match="only last_checked may change"):
         conn.execute("UPDATE reference SET label = 'something else' WHERE id = ?", (ref,))
+
+
+# ── (i) who said it and what they said (step 3b) ────────────────────────────
+
+EXCERPT = "From the June release the v2 feed no longer carries orders.discount."
+
+
+def test_said_by_and_excerpt_are_kept_on_the_row(conn, anchors):
+    r = _add(conn, "--utterance", str(anchors["utterance"]), "--uri", "notes/2026-05-19-sync.md",
+             "--said-by", "the platform lead", "--excerpt", EXCERPT, kind="meeting", label="platform sync, 2026-05-19")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert (out["said_by"], out["excerpt"]) == ("the platform lead", EXCERPT)
+    row = _rows(conn)[0]
+    assert (row["said_by"], row["excerpt"]) == ("the platform lead", EXCERPT)
+    assert pv.verify_chain(conn, "reference")["ok"] is True
+
+
+def test_the_excerpt_can_come_from_a_file(conn, anchors, tmp_path):
+    f = tmp_path / "passage.txt"
+    f.write_text(EXCERPT + "\n", encoding="utf-8")
+    r = _add(conn, "--reason", str(anchors["reason"]), "--excerpt-file", str(f))
+    assert r.returncode == 0, r.stderr
+    assert _rows(conn)[0]["excerpt"] == EXCERPT
+
+
+def test_an_excerpt_over_2000_characters_is_refused_naming_the_limit(conn, anchors):
+    r = _add(conn, "--reason", str(anchors["reason"]), "--excerpt", "w" * 2001)
+    assert r.returncode == 2, r.stdout
+    assert "2000" in r.stderr, r.stderr
+    assert _rows(conn) == []
+
+
+def test_excerpt_and_excerpt_file_together_are_refused(conn, anchors, tmp_path):
+    f = tmp_path / "passage.txt"
+    f.write_text(EXCERPT, encoding="utf-8")
+    r = _add(conn, "--reason", str(anchors["reason"]), "--excerpt", EXCERPT, "--excerpt-file", str(f))
+    assert r.returncode == 2, r.stdout
+    assert _rows(conn) == []

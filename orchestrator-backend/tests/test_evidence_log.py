@@ -21,7 +21,7 @@ import pytest
 from orchestrator import db, evidence, provenance as pv
 
 REPO = Path(__file__).resolve().parents[2]
-COLUMNS = ("plan_id", "node_key", "reason_tier", "evidence_level", "searched", "tool_hint",
+COLUMNS = ("plan_id", "node_key", "reason_id", "reason_tier", "evidence_level", "searched", "tool_hint",
            "outcome", "elapsed_ms", "at")
 
 
@@ -235,4 +235,50 @@ def test_recording_needs_both_the_node_and_the_outcome(conn, plan):
     r = _cli(conn, "review", "evidence-log", "--plan", "P1", "--node", "nk_a")
     assert r.returncode == 2, r.stdout
     assert "--outcome" in r.stderr, r.stderr
+    assert _rows(conn) == []
+
+
+# ── (f) a slot is a task since step 3b: the row names the task reason ───────
+
+def _task(conn):
+    return pv.insert_reason(conn, project="proj", plan_id="P1", node_key=None, kind="technical",
+                            interpretation="EMEA excluded from the Q3 rollup", recorded_by="agent")
+
+
+def test_a_task_slot_names_its_reason_and_no_node(conn, plan):
+    rid = _task(conn)
+    evidence.record(conn, plan_id="P1", reason_id=rid, outcome="found_nothing", tool_hint="notes:grep")
+    got = _rows(conn)[0]
+    assert (got["reason_id"], got["node_key"], got["outcome"]) == (rid, None, "found_nothing")
+
+
+def test_the_tier_of_a_task_slot_comes_from_its_reason_when_not_given(conn, plan):
+    rid = _task(conn)
+    evidence.record(conn, plan_id="P1", reason_id=rid, outcome="attached")
+    assert _rows(conn)[0]["reason_tier"] == "asserted"
+
+
+def test_a_row_names_a_node_or_a_task_reason(conn, plan):
+    with pytest.raises(ValueError, match="node_key or reason_id"):
+        evidence.record(conn, plan_id="P1", outcome="found_nothing")
+    with pytest.raises(ValueError, match="no reason 999"):
+        evidence.record(conn, plan_id="P1", reason_id=999, outcome="found_nothing")
+    assert _rows(conn) == []
+
+
+def test_the_command_records_a_task_slots_ending(conn, plan):
+    rid = _task(conn)
+    r = _cli(conn, "review", "evidence-log", "--plan", "P1", "--reason", str(rid), "--outcome", "found_nothing",
+             "--tool-hint", "notes:grep", "--json")
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert (out["reason_id"], out["node_key"], out["outcome"]) == (rid, None, "found_nothing")
+    r = _cli(conn, "review", "evidence-log", "--plan", "P1")
+    assert r.returncode == 0 and f"task #{rid}" in r.stdout, r.stdout
+
+
+def test_an_ending_with_no_anchor_is_refused_with_exit_2(conn, plan):
+    r = _cli(conn, "review", "evidence-log", "--plan", "P1", "--outcome", "found_nothing")
+    assert r.returncode == 2, r.stdout
+    assert "--reason" in r.stderr, r.stderr
     assert _rows(conn) == []

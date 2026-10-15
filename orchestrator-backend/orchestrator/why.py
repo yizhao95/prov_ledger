@@ -72,6 +72,11 @@ def stats_for(conn, reason_ids) -> dict[int, dict]:
     return out
 
 
+# The close wrote one reason per changed node before 0.4.8; those rows stay and
+# say what they are, so a sentence about one function is not read as a task's reason.
+PER_NODE_MARK = "per-node record, before task reasons"
+
+
 def _line(rec: dict, st: dict) -> str:
     """One record, and — when the pack cut its text — how much is missing and
     the read that has the rest (FL-154).
@@ -85,6 +90,7 @@ def _line(rec: dict, st: dict) -> str:
     cut = rec.get("text_cut") or 0
     tail = f"\n    … [+{cut} chars cut of {rec.get('text_chars')} — `provledger record #{rec['id']}` reads it whole]" if cut else ""
     task = f" · task reason of {rec['task_of']}" if rec.get("task_of") else ""
+    task += f" · {PER_NODE_MARK}" if rec.get("per_node_close") else ""
     return (f"#{rec['id']} · {rec['tier']}{task} · {LEVEL_LABELS.get(rec.get('evidence_level'), rec.get('evidence_level') or '?')} · "
             f"{(rec.get('occurred_at') or '')[:16]} · shown {st.get('shown', 0)} · {adopted}{_corrects(rec)}\n    {text}{tail}")
 

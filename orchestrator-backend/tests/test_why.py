@@ -83,7 +83,9 @@ def test_summary_line_is_fixed_and_counts_everything_even_what_is_not_shown(conn
     conn.commit()
     text = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, record=False)["text"]
     assert f"#{ids['c1']} · asserted · task context · " in text and "shown 1 · adopted by P9" in text
-    assert f"#{ids['r2']} · stated · verbal · " in text and text.count("shown 0 · not adopted") >= 3
+    # r2 is an agent's per-node reason: the old close's kind of record (step 3b marks it)
+    assert f"#{ids['r2']} · stated · per-node record, before task reasons · verbal · " in text
+    assert text.count("shown 0 · not adopted") >= 3
     assert "rename load to load_orders" in text                                 # the stated span, verbatim
     # FL-153: the folded line states the TOTAL callers, not what the cap kept, and
     # the command it names is the one that actually prints the names.

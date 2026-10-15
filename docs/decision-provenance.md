@@ -19,12 +19,12 @@ neutral on purpose — source, context, traceable — never blame.
 | table | holds | written by |
 |---|---|---|
 | `utterance` | the user's words, verbatim, with `occurred_at`, the DB's `recorded_at`, and `origin` — which door they came in through: hook / human_cli / agent_cli / import / unknown (migration 030) | the `UserPromptSubmit` hook, `provledger note` |
-| `reference` | a pointer to a source — kind (email / meeting / chat / ticket / doc / commit / verbal / other), label ≤ 512, optional uri, `verifiability` linked / verbal / unreachable | `provledger note --ref`, the ledger import |
+| `reference` | a pointer to a source — kind (email / meeting / chat / ticket / doc / commit / verbal / other), label ≤ 512, optional uri, `verifiability` linked / verbal / unreachable; since migration 037 optionally `said_by` (≤ 200) and `excerpt` (≤ 2000): who said it and the passage they said | `provledger note --ref`, `provledger reference add`, the ledger import |
 | `change_reason` | why a node changed: `role` reason / rejected_path / constraint, `tier`, an optional verbatim span, `interpretation` / `statement` / `rationale`, `occurred_at` vs `recorded_at`, `recorded_by` human / agent / system, `rule_id` | `reason-fill.sh`, the rules, the backstop, `note --node`, the migration |
 | `reference_link` | what a reason, or a sentence, points at: `reason_id` **xor** `utterance_id`, plus `stance` supports / contradicts / context | with the reason, or `provledger reference add` |
 | `reference_check` | someone opened a pointer on a date and it was there, or it was not: `verdict` ok / gone / moved / no_access (migration 030) | `provledger reference mark` |
 | `trigger_log` | every rule verdict: auto / ask / silent, with its basis | `triggers.evaluate` |
-| `evidence_log` | what became of each evidence slot, so a blank can explain itself: `outcome` attached / found_nothing / timed_out / not_searched, with `searched`, `tool_hint`, `elapsed_ms` and the tier and level it landed at (migration 031). Not hash-chained — it is a log OF the records' making, like `trigger_log` beside it | `provledger review evidence-log` |
+| `evidence_log` | what became of each evidence slot, so a blank can explain itself: `outcome` attached / found_nothing / timed_out / not_searched, with `searched`, `tool_hint`, `elapsed_ms` and the tier and level it landed at (migration 031); a slot is a task reason (`reason_id`) since migration 037, a changed node (`node_key`) before. Not hash-chained — it is a log OF the records' making, like `trigger_log` beside it | `provledger review evidence-log` |
 | `tool_call_log` | one row per tool call (phase 0); `failed` marks a call that failed (migration 032) | the `PostToolUse` and `PostToolUseFailure` hooks |
 
 All of them are append-only: no DELETE, and the only UPDATEs the triggers
@@ -948,6 +948,17 @@ The claim comes from the task, from the user's own words, or from nowhere. The
 evidence comes from written communication — an email, a meeting note, a chat, a
 ticket — and is found by the host agent using its own tools, never by provLedger.
 
+Since 0.4.9 (task-level redesign, step 3b) evidence is looked for once per
+task: `provledger review evidence-slots` lists one slot per task reason of the
+plan, and what the host agent looks for is the source of the task's **root** —
+the meeting or the mail where the cause was set. A found source hangs on the
+root's words (the user's sentence the plan's root points at) when there is one,
+otherwise on the root plan's task reason, otherwise on the task's own; a task
+whose root already has a linked source is not a slot. `evidence.sources_for_reason`
+is the one read of what backs a record — the reason itself, the words it
+quotes, and for a task reason its root's words and the root plan's task reasons
+— and every surface that prints a source reads it there.
+
 Evidence sits where a test sits. A test does not change what the code does; it
 changes how much you can rely on the claim about what the code does. Likewise,
 an email does not change what was decided; it changes how checkable that
@@ -972,13 +983,15 @@ they typed.
 
 ### 13.1 · What provLedger will not do
 
-It does not fetch. `reference add` records a label, a time and a link; a test
-reads `cli.py` and `provenance.py` and fails if a network call appears in
-either. Credentials, permissions and privacy stay between you and whichever
-tool your agent already has. The ledger holds **pointers, never bodies** — the
-`reference` table has capped the label at 512 characters since migration 018,
-and the reason is that your counterpart opening the original is stronger than
-your excerpt of it.
+It does not fetch. `reference add` records a label, a time, a link and, when
+the agent keeps it, who said it and the passage they said; a test reads `cli.py`
+and `provenance.py` and fails if a network call appears in either. Credentials,
+permissions and privacy stay between you and whichever tool your agent already
+has. The ledger holds **pointers and passages, never bodies**: the label is
+capped at 512 characters (migration 018) and the passage at 2000 (migration
+037), as much as a reader needs to see why — the link still holds the original,
+and your counterpart opening it is stronger than any passage. A passage on a
+`personal` source stays in the ledger and is not shown by any read.
 
 ### 13.2 · A pointer that stops opening
 

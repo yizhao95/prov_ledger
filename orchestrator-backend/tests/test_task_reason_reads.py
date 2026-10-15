@@ -101,9 +101,10 @@ def test_the_context_pack_carries_the_task_reason_marked_with_its_plan(conn, wor
     assert [(r["text"], r.get("task_of")) for r in tp.reasons] == [(MAIN, "P")]
 
 
-def test_evidence_slots_hang_a_source_on_the_task_reason(conn, world):
-    slots = {s["node_key"]: s for s in evidence.slots_for_plan(conn, project="proj", plan_id="P", psg_db_path=world["graph"])}
-    assert (slots["nk_a"]["reason_id"], slots["nk_b"]["reason_id"]) == (world["main"], world["side"])
+def test_evidence_slots_are_the_tasks_each_with_the_nodes_it_covers(conn, world):
+    slots = evidence.slots_for_plan(conn, project="proj", plan_id="P", psg_db_path=world["graph"])
+    assert [(s["reason_id"], s["nodes"]) for s in slots] == [(world["main"], ["pkg.m.load_orders"]),
+                                                             (world["side"], ["pkg.m.clean"])]
 
 
 def test_a_corrected_task_reason_is_replaced_by_its_correction(conn, world):

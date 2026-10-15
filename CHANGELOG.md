@@ -37,12 +37,37 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   marked `task reason of <plan>`. With several tasks, only the task the node
   was assigned to. A node a plan only matched does not get its reason.
 
+- **Evidence is looked for once per task.** `provledger review evidence-slots`
+  lists one slot per task reason of the plan — the task, the nodes it covers,
+  its root and the root's words, the plan's window, the identifiers to search on
+  — instead of one per changed node. What the host agent looks for is the source
+  of the task's root, and the slot says where a found source hangs: the root's
+  words (`reference add --utterance`) when the plan's root names them, otherwise
+  a task reason. A task whose root already has a linked source is not a slot.
+  Slots are no longer ranked by significance; `PROVLEDGER_EVIDENCE_SLOTS` still
+  caps them. `review evidence-log` takes `--reason <id>`; `--node` still records
+  a slot from before.
+- **A source keeps who said it and the passage they said.** `reference add
+  --said-by … --excerpt …` (or `--excerpt-file`): the passage, word for word, at
+  most 2000 characters. The `/ledger` fact table and the `/receipts` timeline
+  print it under the source as `said by <who>: "…"`, and say when a source backs
+  the task's root rather than the node. A passage on a `personal` source is not
+  shown.
+- **Per-node close records say what they are.** A reason the close wrote about
+  one node before task reasons (rules R0–R5, per-node answers, the per-node
+  unstated backstop) is marked `per-node record, before task reasons` in
+  `provledger why`, the `/ledger` fact table and the `/receipts` timeline.
+
 ### Migration
 
 - 036 rebuilds `change_reason` so a reason may have no node (a constraint still
   names one), keeping every row, id and hash; it adds the append-only tables
   `reason_node` (which task a node was assigned to) and `plan_bundle` (why
   several tasks share a plan).
+- 037 adds `reference.said_by` and `reference.excerpt` (both inside the hash
+  chain for new rows; older rows verify in their own form) and rebuilds
+  `evidence_log` so a row may name a task reason (`reason_id`) instead of a
+  node, keeping every row.
 
 ### Fixed
 

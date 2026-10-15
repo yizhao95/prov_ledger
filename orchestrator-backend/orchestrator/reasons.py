@@ -213,6 +213,16 @@ def fill_tasks(conn, *, project: str, plan_id: str, run_id: int | None, tasks: l
     return out
 
 
+def per_node_close_record(row: dict) -> bool:
+    """A reason the close wrote about one node, before task reasons (0.4.8):
+    rules R0-R5, the agent's per-node answers, the per-node unstated backstop,
+    and the corrections recheck wrote of them. A person's note on a node and the
+    external trigger's row are not that — they still name one node on purpose."""
+    from . import external_trigger
+    return (row.get("role") == "reason" and row.get("node_key") is not None
+            and row.get("recorded_by") in ("agent", "system") and row.get("rule_id") != external_trigger.RULE_ID)
+
+
 def _live_task_reasons(conn, plan_id: str) -> list[dict]:
     return [dict(r) for r in conn.execute(
         "SELECT * FROM change_reason WHERE plan_id = ? AND role = 'reason' AND node_key IS NULL "

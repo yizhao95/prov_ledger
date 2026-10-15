@@ -163,9 +163,10 @@ def _note(args) -> int:
 
 # ── reference: a pointer to something outside the ledger (A2) ────────────────
 # A reference is a label, a time and — when someone can produce one — a permalink.
-# It is never a copy of the email: the other side of a disagreement opening the
-# original beats any excerpt we could quote, and a ledger full of mail bodies is a
-# governance problem nobody asked for.
+# Since step 3b of the task-level redesign it also keeps who said it and the
+# passage they said (--said-by, --excerpt): a link rots, and the words are what a
+# reader needs. The passage, never the document — at most 2000 characters, as much
+# as the agent that found it chose to keep; a `personal` passage does not travel.
 #
 # Nothing in here fetches anything. Locating the source is the host agent's job,
 # with the host agent's credentials (its own msgraph / gmail / file tools); this
@@ -213,11 +214,20 @@ def _reference_add(args) -> int:
         if args.utterance is not None and provenance.get_utterance(conn, args.utterance) is None:
             print(f"provledger reference add: no utterance {args.utterance} in this ledger", file=sys.stderr)
             return 2
+        excerpt = args.excerpt
+        if args.excerpt_file:
+            try:
+                with open(args.excerpt_file, encoding="utf-8") as fh:
+                    excerpt = fh.read().strip()
+            except OSError as e:
+                print(f"provledger reference add: --excerpt-file: {e}", file=sys.stderr)
+                return 2
         try:
             with db.transaction(conn):
                 ref = provenance.insert_reference(conn, project=project, kind=args.kind, label=args.label,
                                                   occurred_at=at, uri=args.uri or None,
-                                                  visibility=args.visibility, commit=False)
+                                                  visibility=args.visibility, said_by=args.said_by or None,
+                                                  excerpt=excerpt or None, commit=False)
                 provenance.link_reference(conn, args.reason, ref, utterance_id=args.utterance,
                                           stance=args.stance, commit=False)
         except ValueError as e:
@@ -230,6 +240,7 @@ def _reference_add(args) -> int:
         out = {"reference_id": ref, "project": project, "kind": args.kind, "label": args.label,
                "uri": args.uri or None, "occurred_at": at, "verifiability": verifiability,
                "visibility": args.visibility, "stance": args.stance,
+               "said_by": args.said_by or None, "excerpt": excerpt or None,
                "reason_id": args.reason, "utterance_id": args.utterance}
         _print(out, args.json, f"reference {ref}: {args.kind} · {args.label} · {verifiability}"
                                + (f" · {args.stance}" if args.stance != "supports" else ""))
@@ -341,18 +352,20 @@ def _review_evidence_slots(args) -> int:
             return 2
         slots = evidence.slots_for_plan(conn, project=project, plan_id=args.plan,
                                         psg_db_path=psg_bridge.db_path_for(project))
-        out = {"plan_id": args.plan, "project": project, "cap": evidence.slot_cap(), "slots": slots,
-               "attach_with": ('provledger reference add --reason <id> --kind email|chat|meeting|ticket '
-                               '--uri <permalink> --label "<subject · who>" --occurred-at <when> '
-                               '[--stance contradicts]')}
+        out = {"plan_id": args.plan, "project": project, "cap": evidence.slot_cap(), "slots": slots}
         _print(out, args.json,
-               "\n".join(f"{s['significance_level']:<6} {s['significance']:>6}  {s['node']}\n"
-                          f"       what changed: {s['what_changed']}\n"
-                          f"       window: {s['window'][0]} .. {s['window'][1]}\n"
+               "\n".join(f"task #{s['reason_id']} ({s['tier']}) · {len(s['nodes'])} node(s)"
+                          + (f": {', '.join(s['nodes'])}" if s["nodes"] else "") + "\n"
+                          f"       task: {s['task'] or 'nobody said why'}\n"
+                          + (f"       root: {s['root']['words'] or '-'} (plan {s['root']['root_plan_id']})\n"
+                             if s["root"] else "       root: not recorded\n")
+                          + f"       window: {s['window'][0]} .. {s['window'][1]}\n"
                           f"       hints: {', '.join(s['hints'])}\n"
-                          f"       reason: {s['reason_id'] if s['reason_id'] is not None else 'none yet'}"
-                          f" ({s['reason_tier'] or 'no row'})" for s in slots)
-               or f"plan {args.plan}: nothing to explain (no changed data point without a checkable source)")
+                          + "".join(f"       already: [#r{x['reference_id']}] {x['kind']} · {x['label']} "
+                                    f"({x['verifiability']}, via {x['via']})\n" for x in s["sources"])
+                          + f"       attach: {s['attach_with']}\n"
+                          f"       log: {s['log_with']}" for s in slots)
+               or f"plan {args.plan}: nothing to look for (no task whose root still lacks a checkable source)")
         return 0
     finally:
         conn.close()
@@ -364,30 +377,36 @@ def _review_evidence_log(args) -> int:
     from . import evidence
     conn = _open()
     try:
-        if args.node or args.outcome:
-            if not (args.node and args.outcome):
-                print("provledger review evidence-log: recording an ending needs both --node and --outcome",
-                      file=sys.stderr)
+        if args.node or args.reason is not None or args.outcome:
+            if not args.outcome:
+                print("provledger review evidence-log: recording an ending needs --outcome", file=sys.stderr)
+                return 2
+            if not (args.node or args.reason is not None):
+                print("provledger review evidence-log: recording an ending needs the slot: --reason <task reason id> "
+                      "(or --node for a slot from before task reasons)", file=sys.stderr)
                 return 2
             try:
-                rid = evidence.record(conn, plan_id=args.plan, node_key=args.node, outcome=args.outcome,
+                rid = evidence.record(conn, plan_id=args.plan, node_key=args.node, reason_id=args.reason,
+                                      outcome=args.outcome,
                                       reason_tier=args.reason_tier, evidence_level=args.evidence_level,
                                       tool_hint=args.tool_hint, elapsed_ms=args.elapsed_ms)
             except (ValueError, sqlite3.IntegrityError) as e:
                 print(f"provledger review evidence-log: {e}", file=sys.stderr)
                 return 2
             row = conn.execute("SELECT * FROM evidence_log WHERE id = ?", (rid,)).fetchone()
-            out = {"evidence_log_id": rid, "plan_id": args.plan, "node_key": args.node, "outcome": args.outcome,
+            out = {"evidence_log_id": rid, "plan_id": args.plan, "node_key": args.node, "reason_id": args.reason,
+                   "outcome": args.outcome,
                    "searched": bool(row["searched"]), "reason_tier": row["reason_tier"],
                    "evidence_level": row["evidence_level"], "tool_hint": row["tool_hint"],
                    "elapsed_ms": row["elapsed_ms"], "at": row["at"]}
-            _print(out, args.json, f"evidence_log {rid}: {args.node} · {args.outcome}"
+            _print(out, args.json, f"evidence_log {rid}: {args.node or f'task #{args.reason}'} · {args.outcome}"
                                    f"{' · ' + row['tool_hint'] if row['tool_hint'] else ''}")
             return 0
         entries = evidence.log_for_plan(conn, args.plan)
         _print({"plan_id": args.plan, "entries": entries}, args.json,
                "\n".join(f"{e['at']}  {e['outcome']:<14} searched={bool(e['searched'])!s:<5} "
-                          f"{e['reason_tier'] or 'no reason row'}/{e['evidence_level'] or '-'}  {e['node_key']}"
+                          f"{e['reason_tier'] or 'no reason row'}/{e['evidence_level'] or '-'}  "
+                          f"{e['node_key'] or 'task #' + str(e['reason_id'])}"
                           f"{'  via ' + e['tool_hint'] if e['tool_hint'] else ''}" for e in entries)
                or f"plan {args.plan}: no evidence work recorded")
         return 0
@@ -1318,6 +1337,13 @@ def build_parser() -> argparse.ArgumentParser:
                      help="what this source does to the reason. A source that disagrees is recorded as disagreeing; "
                           "dropping it is not an option (default: supports)")
     rfa.add_argument("--visibility", default="shareable", choices=["personal", "shareable"])
+    rfa.add_argument("--said-by", default=None, dest="said_by", metavar="WHO",
+                     help="who said it, as the source names them (at most 200 characters)")
+    words = rfa.add_mutually_exclusive_group()
+    words.add_argument("--excerpt", default=None, metavar="TEXT",
+                       help="the passage they said, word for word — as much as is needed, at most 2000 characters")
+    words.add_argument("--excerpt-file", default=None, dest="excerpt_file", metavar="PATH",
+                       help="read the passage from a file (UTF-8), for text a shell would mangle")
     rfp = rfs.add_parser("pending", help="the pointers worth opening: linked ones never checked, or checked too long "
                                          "ago. Unreachable and verbal rows are never listed — there is nothing to open")
     rfp.add_argument("--older-than-days", dest="older_than_days", type=int, default=30, metavar="N",
@@ -1525,9 +1551,10 @@ def build_parser() -> argparse.ArgumentParser:
                                        "of each look. provLedger never searches — it hands the list to the host agent, "
                                        "which owns the tools and the credentials")
     rvs = rv.add_subparsers(dest="sub", required=True)
-    rvs_slots = rvs.add_parser("evidence-slots", help="the changed data points of one plan that still have no checkable "
-                                                      "source: node, what changed, the plan's own time window, the "
-                                                      "identifiers to search on, and how significant the change is")
+    rvs_slots = rvs.add_parser("evidence-slots", help="the tasks of one plan whose root still has no checkable source: "
+                                                      "the task, its nodes, its root and the root's words, the plan's "
+                                                      "own time window, the identifiers to search on, and where a "
+                                                      "source that turns up hangs")
     rvs_slots.add_argument("--plan", required=True, help="the plan whose close this is")
     rvs_slots.add_argument("--project", default=None, help="the registered project (default: the plan's own, else the cwd's)")
     rvs_slots.add_argument("--json", action="store_true")
@@ -1536,7 +1563,9 @@ def build_parser() -> argparse.ArgumentParser:
                                                   "blank' — nobody looked, the window held nothing, or the look ran out "
                                                   "of time")
     rvs_log.add_argument("--plan", required=True)
-    rvs_log.add_argument("--node", default=None, help="the node_key whose slot this was")
+    rvs_log.add_argument("--reason", type=int, default=None, metavar="ID",
+                         help="the task reason whose slot this was (the slot's reason_id)")
+    rvs_log.add_argument("--node", default=None, help="the node_key of a slot from before task reasons")
     rvs_log.add_argument("--outcome", default=None, choices=list(_evidence_outcomes()),
                          help="attached (a pointer was hung) | found_nothing (searched, the window held nothing) | "
                               "timed_out (the look started and ran out of time) | not_searched (never entered a search)")

@@ -170,8 +170,8 @@ changes your confidence that it does it.
 
 **provLedger searches nothing.** It hands you a list; you search with *your* own
 communication tools and *your* own credentials, and write back what you found.
-No token, no mailbox and no permalink contents ever enter the ledger — only a
-label, a time and a link.
+No token and no mailbox ever enter the ledger, and no document — only a label,
+a time, a link and, when you keep it, the passage someone said and who said it.
 
 ### Step 1 · fill the reason from what the user said in this task's window
 
@@ -189,47 +189,50 @@ the rollup" is a restatement and belongs as `asserted`. Your own theory about
 *why* is not in the task and not in the user's words, and there is nowhere to put
 it.
 
-### Step 2 · search your own communication tools and attach what you find
+### Step 2 · search your own tools for where each task's cause was set
 
-For each slot the command below gives you, search **inside its `window`** for its
-`hints` — email, chat, meeting notes, tickets, whatever you have. No such tool on
-this host? Skip it; nothing breaks, the source level just stays lower.
-
-A pointer hangs on a reason, so step 1 must have left a row for it: the slot's
-`reason_id` is the one to pass, and a slot still showing `"reason_id": null` has
-not been filled yet — go back and fill it, `{"unstated": true}` included.
+One slot per task of the plan (task-level redesign, step 3b): what you look for
+is the source of the task's **root** — the meeting, mail, chat or ticket where
+the cause was set — not a source per changed function. A task whose root already
+has a linked source is not a slot; nothing is left to find. Search **inside the
+slot's `window`** for its `hints` with whatever tools this host gives you (mail,
+chat, meeting notes, a tracker). No such tool? Log `not_searched`; nothing
+breaks, the source level just stays lower.
 
 ```bash
-# the to-check list: node, what changed, this plan's own time window, the
-# identifiers to search on, the reason id to hang a pointer on, significance
+# the to-check list: one slot per task — the task, its nodes, its root and the
+# root's words, this plan's own window, the identifiers to search on, the
+# sources already there, and where a found source hangs (attach_to / attach_with)
 provledger review evidence-slots --plan <plan_id> --json
 
-# one pointer per hit, hung on the reason the slot names
-provledger reference add --reason <reason_id> \
-  --kind email|chat|meeting|ticket|doc|commit \
-  --uri <permalink> --label "<subject · who>" --occurred-at "<when>"
+# one pointer per hit, hung where the slot says: the root's words
+# (--utterance) when the root names them, otherwise a task reason (--reason).
+# Keep who said it and the passage they said, word for word — as much as a
+# reader needs, at most 2000 characters; the passage, never the document
+provledger reference add --utterance <id> \
+  --kind meeting|email|chat|ticket|doc|commit --uri <permalink> \
+  --label "<what it is · when>" --occurred-at "<when>" \
+  --said-by "<who said it>" --excerpt "<their words>"   # or --excerpt-file <path>
 
 # a hit that disagrees with the reason — recorded, never discarded
-provledger reference add --reason <reason_id> --kind email \
-  --uri <permalink> --label "<subject · who>" --occurred-at "<when>" \
-  --stance contradicts
+provledger reference add --reason <reason_id> --kind email --uri <permalink> \
+  --label "<subject · who>" --occurred-at "<when>" --stance contradicts
 
-# what became of each slot — write one row per slot, always
-provledger review evidence-log --plan <plan_id> --node <node_key> \
+# what became of each slot — one row per slot, always
+provledger review evidence-log --plan <plan_id> --reason <reason_id> \
   --outcome attached|found_nothing|timed_out|not_searched \
-  [--reason-tier stated|asserted|derived|unstated] \
-  [--evidence-level linked|verbal|task_context|unstated] \
   [--tool-hint "<which tool looked>"] [--elapsed-ms <n>]
 
 # read it back later: "why is this one blank?"
 provledger review evidence-log --plan <plan_id> --json
 ```
 
-At most `PROVLEDGER_EVIDENCE_SLOTS` slots (default 5) come back, in descending
-significance — that is the cost gate. The whole evidence pass has its own budget
-(4800 s by default); when it runs out, log `timed_out` for the slots that were in
-flight and `not_searched` for the ones that never started, and leave the reasons
-as they are.
+At most `PROVLEDGER_EVIDENCE_SLOTS` slots (default 5) come back, in the order
+the tasks were recorded — that is the cost gate. The whole evidence pass has its
+own budget (4800 s by default); when it runs out, log `timed_out` for the slots
+that were in flight and `not_searched` for the ones that never started, and
+leave the reasons as they are. A passage on a `--visibility personal` source
+stays in the ledger and is not shown by any read.
 
 ### The four rules
 
@@ -237,7 +240,8 @@ as they are.
    `evidence_level` (`unstated` / `task_context` → `verbal` → `linked`) and
    nothing else. Never re-fill a reason as `stated` because you found an email:
    `stated` means *the user's own words*, and a span into their `utterance` is the
-   only way to get it.
+   only way to get it. A passage someone said in a meeting is evidence with
+   `--said-by`, not the user's words.
 2. **Attach every hit, not the best one.** Three emails and a meeting → four
    `reference add` calls. Picking the most convincing one is editing the record;
    the table is many-to-many precisely so you do not have to choose.
@@ -245,19 +249,16 @@ as they are.
    never discarded.** Evidence is allowed to fail, the same way a test is. A
    contradicting source does not demote the reason's tier — the user still said
    what they said — it tells the reader the two disagree.
-4. **When both steps come up empty, write `unstated`, and never guess.** A
-   pointer found in a mailbox is *evidence*, not a reason: you may not read a
-   reason out of an email and fill it in. Write the gap as a row first —
-   `{"node_key": "nk_…", "unstated": true}` through `reason-fill`, which is what
-   gives the slot a `reason_id` — then hang the pointer on that `unstated` row and
-   leave the reason itself blank. A gap deserves to be a row rather than an
-   absence, and the page then says "there is a source that may be related, but
-   nobody said this change was because of it", which is far more honest than a
-   sentence that reads well. Only when the slot's
-   `significance_level` is `major` is it worth interrupting the user once: show
-   them the pointer and the change and ask "is this the reason?". If they answer,
-   that answer is **their words** — record it with `provledger note` (or the hook
-   records it) and fill the slot as `stated` with a span into it. If they do not
+4. **When both steps come up empty, the task stays `unstated`, and you never
+   guess.** A pointer found in a mailbox is *evidence*, not a reason: you may not
+   read a reason out of an email and fill it in. The task's `unstated` row is
+   already there (step 1 or the close wrote it); hang the pointer on it and leave
+   the reason blank, and the page then says "there is a source that may be
+   related, but nobody said this task was done because of it", which is far more
+   honest than a sentence that reads well. When it matters, ask the user once:
+   show them the pointer and ask "is this why?". If they answer, that answer is
+   **their words** — record it with `provledger note` (or the hook records it) and
+   correct the task's reason as `stated` with a span into it. If they do not
    answer, or say no, it stays blank.
 
 **Every slot gets an `evidence_log` row, including the ones you never searched.**
@@ -336,9 +337,9 @@ philosophy as the rest of the reviewer: **report and FAIL, never auto-fix**.
 | Refresh the deep graph | `project-state-graph/scripts/init_project.sh` |
 | Close the plan (drive the child step) | `executing-plans/scripts/complete-step.sh` / `fail-step.sh` on `<plan>-REVIEW.1` |
 | The whole flow, deterministically | `scripts/review_run.py --plan-id P --project X [--tests ...] [--reasons ...]` |
-| What still needs a source, and where to look | `provledger review evidence-slots --plan <id> --json` |
-| Hang one pointer on a reason | `provledger reference add --reason <id> --kind email --uri … --label … --occurred-at …` |
-| Record what became of a slot | `provledger review evidence-log --plan <id> --node <key> --outcome …` |
+| Which tasks still need a source for their root, and where to look | `provledger review evidence-slots --plan <id> --json` |
+| Hang one pointer where the slot says | `provledger reference add --utterance <id> \| --reason <id> --kind meeting --uri … --label … --occurred-at … --said-by … --excerpt …` |
+| Record what became of a slot | `provledger review evidence-log --plan <id> --reason <id> --outcome …` |
 
 Run the helpers with the same `PY` as `review_run.py` above; they are stdlib
 only.
@@ -370,6 +371,7 @@ only.
 | Building the graph from scratch here | Wrong skill — that's `project-state-graph`. |
 | Skipping the close | The plan stays stuck in NEEDS_REVIEW. Always finalize the child step (`complete-step`/`fail-step` on `<plan>-REVIEW.1`). |
 | Reading a reason out of an email you found | That is a guess, and a guess that looks sourced is worse than a blank. Attach the pointer to the `unstated` row and leave the reason empty. |
+| Pasting the whole document into `--excerpt` | Keep the passage that says why, word for word, and who said it; the link holds the rest. 2000 characters is a ceiling, not a target. |
 | Re-filling a reason as `stated` because evidence turned up | `stated` means the user's own words. Evidence moves `evidence_level`, never the tier. |
 | Dropping a source that contradicts the reason | Attach it with `--stance contradicts`. Evidence is allowed to fail. |
 | Leaving a slot out of `evidence_log` because nothing happened | Nothing happening is the row worth having — `not_searched` is why it is blank. |

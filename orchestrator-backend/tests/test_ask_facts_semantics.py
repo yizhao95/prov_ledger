@@ -130,5 +130,7 @@ def test_the_legend_says_how_to_put_each_record_into_words():
     assert "recorded as the understanding" in legend and "not an agreement" in legend
     assert "nobody said why" in legend
     assert "the goal of the task that changed it is the task's" in legend
-    assert "never its body" in legend and "never checked" in legend
+    assert "never the whole body" in legend and "never checked" in legend
+    # since step 3b a source may keep the passage someone said: quoted as theirs
+    assert "said by <who>" in legend and "quote it as theirs" in legend
     assert "word for word" in legend, "an absence is reproduced, never rewritten"

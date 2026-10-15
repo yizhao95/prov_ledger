@@ -217,11 +217,14 @@ def _records(conn, project: str, anchors: list[str], psg=None) -> list[dict]:
     node, and — with a graph (`psg`, a path or an open connection) — the task
     reasons of the plans that changed it, each marked `task_of` its plan
     (task-level redesign, step 3a)."""
+    from . import reasons
     if not anchors:
         return []
     rows = _record_rows(conn, project, "r.node_key", list(anchors))
+    for r in rows:
+        # the old close's sentence about one node, not a task's reason (step 3b)
+        r["per_node_close"] = reasons.per_node_close_record(r)
     if psg is not None:
-        from . import reasons
         tasks = reasons.task_reasons_for(conn, psg, anchors)
         have = {r["id"] for r in rows}
         extra = _record_rows(conn, project, "r.id", [i for i in tasks if i not in have])
@@ -272,6 +275,7 @@ def _slim(r: dict) -> dict:
             # that truncated in silence would be FL-154 a second time.
             **({"corrects": provenance.supersedes_ids(r["supersedes"])} if r.get("supersedes") else {}),
             **({"task_of": r["task_of"]} if r.get("task_of") else {}),
+            **({"per_node_close": True} if r.get("per_node_close") else {}),
             **({"quoted": (r["quoted"] or "")[:CAP_TEXT],
                 "quoted_chars": len(r["quoted"] or ""),
                 "quoted_cut": max(0, len(r["quoted"] or "") - CAP_TEXT)} if r.get("quoted") else {})}

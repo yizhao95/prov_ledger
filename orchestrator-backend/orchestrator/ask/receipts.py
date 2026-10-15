@@ -178,9 +178,12 @@ def _source_text(ref: dict, extra: dict) -> str:
     checked = f"checked {str(extra['last_checked'])[:10]}" if extra.get("last_checked") else "never checked"
     if verifiability != "linked":
         checked = "nothing to open"
-    held = "link only" if ref.get("uri") else "label only"
-    return (f'source · {ref.get("kind")} · "{_clip(ref.get("label") or "")}" · {held} — the body is not in '
-            f'the ledger · {verifiability}, {checked}')
+    held = ("link" if ref.get("uri") else "label") + (" and the passage — the rest of the body is not in the ledger"
+                                                       if ref.get("excerpt") else " only — the body is not in the ledger")
+    via = f" · backs the {ref['via']}" if ref.get("via") else ""
+    words = (f' · said by {ref.get("said_by") or "(not named)"}: "{_clip(ref["excerpt"])}"' if ref.get("excerpt") else "")
+    return (f'source · {ref.get("kind")} · "{_clip(ref.get("label") or "")}"{via}{words} · {held} · '
+            f'{verifiability}, {checked}')
 
 
 def _record_text(kind: str, node: str, r: dict) -> str:
@@ -191,6 +194,8 @@ def _record_text(kind: str, node: str, r: dict) -> str:
     fixed = (" · corrects " + ", ".join(f"#{i}" for i in r["corrects"])) if r.get("corrects") else ""
     where = (f"task reason of {r['task_of']}, which changed {node}" if r.get("task_of")
              else f"{ROLE_LABEL[kind]} on {node}")
+    if r.get("per_node_close"):
+        where += " (per-node record, before task reasons)"
     return f"{where} · {who}{body}{fixed} · {shown}"
 
 
