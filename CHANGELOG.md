@@ -8,6 +8,39 @@ merge dates of the phase PRs. FL-nnn is an entry in the project's internal
 deferred-work ledger, which is not published; the part of it that affects
 users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
+## Unreleased
+
+### Changed
+
+- **A source found after the close can give the task its reason.** When the
+  evidence pass finds the mail or the meeting that says why a task was done,
+  the agent writes its reading of it as the task's reason: an `asserted` row
+  whose references carry the link, who said it and the passage. Until now such
+  a task stayed `unstated` with the pointer beside it. A source that does not
+  say why still only attaches, and a `stated` reason is never replaced by a
+  reading.
+- **`reason-fill` corrects a task reason.** A call whose every task names
+  `supersedes: <task reason id>` writes the new row, copies the pointers hung on
+  the old one, and points the old row at it; readers show the new one. It is
+  also how the user's later words (`provledger note`) replace a reading as
+  `stated`. Refused (exit 2, nothing written): a row of another plan, a node's
+  reason, a row already corrected, and a `stated` row replaced by anything but
+  the user's words.
+- **The review skill names connector plugins as the search tools.** Step 2 of
+  the evidence pass searches with the host's MCP connectors (for example the
+  ones Anthropic's `enterprise-search` plugin brings) and attaches each hit with
+  its link; a synthesized search answer is not taken as the hits.
+
+### Fixed
+
+- **`provledger record` printed a source without its words.** A source's
+  `said_by` and passage (stored since 0.4.8) were left out of `record #r<id>`
+  and of the source list of `record #<id>`; both print them now, and a passage
+  on a `personal` source is withheld with a line saying so. A task reason was
+  labelled "a floating rejected path"; it is named a task reason of its plan.
+- `docs/decision-provenance.md` §13 dated the per-task evidence pass to 0.4.9;
+  it shipped in 0.4.8.
+
 ## 0.4.8 — 2026-10-15
 
 ### Changed

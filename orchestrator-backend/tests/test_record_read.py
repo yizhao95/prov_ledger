@@ -91,7 +91,8 @@ def test_a_stated_record_shows_the_utterance_and_the_span_it_quotes(conn, seeded
 def test_the_references_hanging_on_a_record_come_with_their_own_cites(conn, seeded):
     doc = record_read.record(conn, f"#{seeded['long']}")
     assert doc["references"] == [{"cite": f"#r{seeded['verbal']}", "kind": "verbal", "label": "said in standup",
-                                 "uri": None, "stance": "contradicts", "verifiability": "verbal", "last_checked": None}]
+                                 "uri": None, "stance": "contradicts", "verifiability": "verbal", "last_checked": None,
+                                 "said_by": None, "excerpt": None, "visibility": "shareable", "excerpt_withheld": False}]
     assert f"#r{seeded['verbal']}" in record_read.render(doc)
 
 
