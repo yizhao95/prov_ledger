@@ -454,8 +454,11 @@ def _op_reason_fill(conn, data: dict) -> dict:
     {utterance_id, span:[s,e]} (stated), {interpretation, refs?} (asserted),
     {unstated: true}, plus because?, and nodes? when the plan did several things
     (every task but one names its nodes; `bundle` says why they share the plan).
-    The old per-node `reasons` list and the {text} shape exit 2 (nothing
-    written). A node the plan did not change exits 6 (nothing written)."""
+    A call whose every task names `supersedes: <task reason id>` corrects those
+    reasons instead (a source found after the close, the user's later words);
+    the result lists them in `superseded`. The old per-node `reasons` list, the
+    {text} shape and a correction the old row refuses exit 2 (nothing written).
+    A node the plan did not change exits 6 (nothing written)."""
     if "reasons" in data:
         _die(reasons.PER_NODE_SHAPE, code=2)
     _require(data, "plan_id", "project", "run_id", "tasks")

@@ -95,10 +95,11 @@ def _reason(conn, rid: int) -> dict | None:
     # span of the utterance for a `stated` row that has no words of its own.
     doc["text"] = doc.get("interpretation") or doc.get("statement") or (doc["utterance"] or {}).get("quoted") or ""
     doc["text_chars"] = len(doc["text"])
-    doc["references"] = [{"cite": f"#r{r[0]}", "kind": r[1], "label": r[2], "uri": r[3], "stance": r[4],
-                          "verifiability": r[5], "last_checked": r[6]} for r in conn.execute(
-        "SELECT f.id, f.kind, f.label, f.uri, l.stance, f.verifiability, f.last_checked "
-        "FROM reference_link l JOIN reference f ON f.id = l.reference_id "
+    doc["references"] = [_passage({"cite": f"#r{r[0]}", "kind": r[1], "label": r[2], "uri": r[3], "stance": r[4],
+                                   "verifiability": r[5], "last_checked": r[6], "said_by": r[7], "excerpt": r[8],
+                                   "visibility": r[9]}) for r in conn.execute(
+        "SELECT f.id, f.kind, f.label, f.uri, l.stance, f.verifiability, f.last_checked, f.said_by, f.excerpt, "
+        "f.visibility FROM reference_link l JOIN reference f ON f.id = l.reference_id "
         "WHERE l.reason_id = ? ORDER BY f.id", (rid,))]
     doc["shown"] = conn.execute("SELECT COUNT(*) FROM read_hit WHERE reason_id = ?", (rid,)).fetchone()[0]
     doc["shown_by_moment"] = {r[0]: r[1] for r in conn.execute(
@@ -133,14 +134,32 @@ def _utterance(conn, doc: dict) -> dict | None:
 
 # ── a source ─────────────────────────────────────────────────────────────────
 
+def _passage(ref: dict) -> dict:
+    """A passage on a `personal` source stays in the ledger and is not shown by
+    any read (migration 037); the read says it was withheld, the same rule as
+    evidence.sources_for_reason."""
+    ref["excerpt_withheld"] = bool(ref.get("visibility") == "personal" and ref.get("excerpt"))
+    if ref["excerpt_withheld"]:
+        ref["excerpt"] = None
+    return ref
+
+
+def _passage_line(ref: dict) -> str | None:
+    if ref.get("excerpt"):
+        return f"said by {ref.get('said_by') or '(not named)'}: \"{ref['excerpt']}\""
+    if ref.get("excerpt_withheld"):
+        return f"said by {ref.get('said_by') or '(not named)'}: passage withheld (the source is personal)"
+    return f"said by {ref['said_by']}" if ref.get("said_by") else None
+
+
 def _source(conn, rid: int) -> dict | None:
     row = conn.execute("SELECT id, project, kind, uri, label, occurred_at, registered_at, verifiability, "
-                       "visibility, last_checked FROM reference WHERE id = ?", (rid,)).fetchone()
+                       "visibility, last_checked, said_by, excerpt FROM reference WHERE id = ?", (rid,)).fetchone()
     if row is None:
         return None
     cols = ("id", "project", "kind", "uri", "label", "occurred_at", "registered_at", "verifiability",
-            "visibility", "last_checked")
-    doc: dict = dict(zip(cols, row))
+            "visibility", "last_checked", "said_by", "excerpt")
+    doc: dict = _passage(dict(zip(cols, row)))
     doc["cite"] = f"#r{rid}"
     doc["cite_kind"] = "source"
     # Append-only by design: a link that went dead stays dead on that date, and
@@ -183,12 +202,18 @@ def render(doc: dict | None, cite: str | None = None) -> str:
     return _render_source(doc) if doc.get("cite_kind") == "source" else _render_record(doc)
 
 
+def _no_node(doc: dict) -> str:
+    if doc.get("role") == "reason":
+        return f"(no node — a task reason of plan {doc['plan_id']}: it answers for the nodes the plan changed)"
+    return "(no node — a floating rejected path)"
+
+
 def _render_record(doc: dict) -> str:
     level = LEVEL_LABELS.get(doc.get("evidence_level"), doc.get("evidence_level") or "?")
     lines = [f"{doc['cite']} · {doc['role']} · {doc['tier']} · source level {level} · {doc['kind']}"
              + (f" · {doc['state']}" if doc.get("state") != "active" else "")
              + (f" · significance {doc['significance']}" if doc.get("significance") else ""),
-             f"   {doc['node_key'] or '(no node — a floating rejected path)'}"
+             f"   {doc['node_key'] or _no_node(doc)}"
              + (f" · {doc['node_history']}" if doc.get("node_history") else ""),
              f"   plan {doc['plan_id']}" + (f" · step {doc['step_id']}" if doc.get("step_id") else "")
              + (f" · rule {doc['rule_id']}" if doc.get("rule_id") else ""),
@@ -224,6 +249,8 @@ def _render_record(doc: dict) -> str:
                          + (f" · {r['uri']}" if r.get("uri") else "")
                          + f" · {r['verifiability']}"
                          + (f" · last checked {r['last_checked']}" if r.get("last_checked") else " · never checked"))
+            if _passage_line(r):
+                lines.append(f"      {_passage_line(r)}")
     else:
         lines += ["", "── sources · none hang on this record"]
     lines += ["", _footer(doc)]
@@ -234,8 +261,10 @@ def _render_source(doc: dict) -> str:
     lines = [f"{doc['cite']} · source · {doc['kind']} · {doc['verifiability']} · {doc.get('visibility')}",
              f"   {doc['label']}" + (f" · {doc['uri']}" if doc.get("uri") else " · (no uri)"),
              f"   happened {doc['occurred_at']} · registered {doc['registered_at']}"
-             + (f" · last checked {doc['last_checked']}" if doc.get("last_checked") else " · never checked"),
-             ""]
+             + (f" · last checked {doc['last_checked']}" if doc.get("last_checked") else " · never checked")]
+    if _passage_line(doc):
+        lines.append(f"   {_passage_line(doc)}")
+    lines.append("")
     if doc["checks"]:
         lines.append(f"── checks · {len(doc['checks'])} · append-only: a later verdict sits beside the earlier one, never over it")
         for c in doc["checks"]:

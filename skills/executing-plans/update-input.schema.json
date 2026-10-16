@@ -184,7 +184,7 @@
     },
     {
       "title": "reason-fill",
-      "description": "Record why the plan was done, one reason per task. The tier follows from the task's shape. The old per-node `reasons` list and the {text} shape exit 2; a node the plan did not change exits 6; nothing is written on either.",
+      "description": "Record why the plan was done, one reason per task, or correct those reasons (every task names `supersedes`). The tier follows from the task's shape. The old per-node `reasons` list, the {text} shape and a refused correction exit 2; a node the plan did not change exits 6; nothing is written on either.",
       "type": "object",
       "required": ["plan_id", "project", "run_id", "tasks"],
       "additionalProperties": false,
@@ -209,7 +209,8 @@
               "unstated":       {"const": true, "description": "unstated: nobody said; say so."},
               "nodes":          {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "With several tasks: the node keys or qualified names (from reason-slots) this task changed. Every task but one names its nodes; that one takes the rest."},
               "because":        {"type": "array", "items": {"type": "integer"}, "description": "Any shape: reason ids this task leaned on; each becomes influence(via=reason_because)."},
-              "kind":           {"enum": ["technical", "organizational", "mixed"], "description": "Defaults to 'technical'."}
+              "supersedes":     {"type": "integer", "description": "A correction: the id of the live task reason of this plan this task replaces (a source found after the close, the user's later words). Every task of the call names one; a correction names no nodes and answers for the old row's task. A stated row is replaced only by a stated task."},
+              "kind":           {"enum": ["technical", "organizational", "mixed"], "description": "Defaults to 'technical', or to the superseded row's kind."}
             }
           }
         }

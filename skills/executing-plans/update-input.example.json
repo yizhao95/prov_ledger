@@ -151,6 +151,17 @@
     ]
   },
 
+  "reason_fill__correct_from_a_source": {
+    "_use_with": "scripts/reason-fill.sh",
+    "_why": "The evidence pass found the mail where the cause was set, after the close had written the task as unstated. Reference 9 carries the link, who said it and the passage; the reading supersedes task reason 40 and stays asserted (only the user's own words are stated).",
+    "plan_id": "deep-health-20260514153045",
+    "project": "deep-health-app",
+    "run_id": 12,
+    "tasks": [
+      {"supersedes": 40, "interpretation": "the on-call lead asked for a slower probe until the load test is done", "refs": [9]}
+    ]
+  },
+
   "headline_respond__proceed": {
     "_use_with": "scripts/headline-respond.sh",
     "plan_id": "deep-health-20260514153045",

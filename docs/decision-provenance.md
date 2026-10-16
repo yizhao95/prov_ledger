@@ -948,7 +948,7 @@ The claim comes from the task, from the user's own words, or from nowhere. The
 evidence comes from written communication — an email, a meeting note, a chat, a
 ticket — and is found by the host agent using its own tools, never by provLedger.
 
-Since 0.4.9 (task-level redesign, step 3b) evidence is looked for once per
+Since 0.4.8 (task-level redesign, step 3b) evidence is looked for once per
 task: `provledger review evidence-slots` lists one slot per task reason of the
 plan, and what the host agent looks for is the source of the task's **root** —
 the meeting or the mail where the cause was set. A found source hangs on the
@@ -965,21 +965,30 @@ an email does not change what was decided; it changes how checkable that
 decision is. So **attaching evidence never moves a reason's tier**. It raises
 `evidence_level`, which is computed, and nothing else.
 
+A found source can still give a task its reason, as a new row. When the source
+says why the task was done, the agent writes its reading of it as a correction
+of the task's reason (`reason-fill` with `supersedes`): an `asserted` row whose
+references carry the link, who said it and the passage. The old row stays and
+points at the new one (`superseded_by`); readers show the new one.
+
 | the user said it | evidence found | tier | source level |
 |---|---|---|---|
 | yes | yes | `stated` | `linked` |
 | yes | no | `stated` | `verbal` |
-| no | yes | `unstated`, with the pointer attached anyway | `unstated` |
+| no | yes, and it says why | `asserted`: the agent's reading of the source, superseding the task's reason | `linked` |
+| no | yes, but it does not say why | `unstated`, with the pointer attached anyway | `unstated` |
 | no | no | `unstated` | `unstated` |
 
-The third row is the one worth stating plainly: **an agent may not read a reason
-out of an email.** That is a guess, and a guess is worse than a blank, because a
-blank is obviously a blank while a fluent guess looks like grounds. What the
-page shows instead is "there is a pointer here that may be relevant, and nobody
-said this change was because of it". When the change is significant enough, the
-agent asks one question; if the user answers, the answer is *their words*, goes
-through `utterance` with a span, and becomes `stated` like any other sentence
-they typed.
+The third row keeps who said it apart: the reading is the agent's, so it is
+`asserted`, never `stated`, and the reader sees the passage it rests on next to
+it. A reading needs that passage. Without an attached source it would be a
+guess, and a guess is worse than a blank, because a blank is obviously a blank
+while a fluent guess looks like grounds. The fourth row is that blank: "there is
+a pointer here that may be relevant, and nobody said this change was because of
+it". A `stated` reason is not replaced by a reading; a source that disagrees
+with the user's words is attached with `--stance contradicts`. When the user
+says why later, the answer is *their words*: it goes through `utterance` with a
+span, and supersedes the task's reason as `stated`.
 
 ### 13.1 · What provLedger will not do
 
