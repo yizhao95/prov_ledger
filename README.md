@@ -1,39 +1,57 @@
 # provLedger
 
-Lost in a project's decision history? Watching your coding agent walk the same wrong path again?
+**Every change, traced to the decision behind it.**
 
-Someone asks in chat why the churn model splits 70/30 — *wasn't it the other way round?* You scroll back through four months of threads, find three conversations that nearly say it, and give up.
+A Claude Code plugin for data work. While you and your agent change code and data, it keeps the why — your words, the email behind them, the paths tried and dropped — on the things in the project they are about, and answers for the project when you are not there to.
+
+[![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
+![python](https://img.shields.io/badge/python-3.10%2B-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
+
+![The three views in one picture: the project graph with a badge on each node that carries records, one node's timeline with the source of every record, and one task's reason, the rule it was shown before it started and the step that failed on the way](docs/media/readme-three-views.png)
+
+*Graph, Node and Task: three views of one record, one click apart. A drawing with made-up data; the screenshots further down are the real dashboard.*
+
+### "Why did we stop using that data?"
+
+The column is gone, the function that read it is gone, and whoever decided has moved on. `grep` finds nothing, because there is nothing left to find; `git log` shows the commit that took it out, not the email that asked for it. provLedger keeps the history of things that no longer exist — the words, the email and the task that removed them — and when a rule was recorded with them, it puts that rule in front of the next agent that plans to bring them back.
+
+### "Can anyone answer this while I'm away?"
+
+You go on vacation; the questions don't. Give a brand-new agent a fresh install and your ledger, and it answers them: the detail, the history, the words used at the time, each with the record it rests on. Where nothing was recorded, it says so instead of guessing. Every release is checked this way: [`scripts/release-e2e.sh`](scripts/release-e2e.sh) installs the plugin into an empty home, opens a new session for each question about a project that session has never seen, and has a model mark every answer against key points written down in advance. Handing a ledger to someone else is manual for now ([known issues](docs/KNOWN-ISSUES.md)).
+
+The first question, asked on the bundled demo (`bash examples/phantom-uplift/demo-provenance.sh`, step 3 of [§3](#3--five-minutes)):
 
 ```
-$ /ledger why is our train/test split 70/30?
+$ /ledger why did we stop using orders.discount?
 
-  70/30 has been in force since 2026-04-03. Moving to 80/20 was tried on
-  2026-08-14 and rejected: the holdout leaked week-52 promotions, so the
-  lift was the promotion and not the model.          [#94 · your own words]
-
-  The email that settled it is on the record.
-  Sarah Chen, "Q3 rollup scope", 2026-08-14 09:12    [r12 ↗ · checked 6d ago]
-
-  Raised again on 2026-09-17 and dropped without an answer.  [#i9]
-
-  Searched 3 nodes · 2026-04-03 to 2026-09-17 · nothing left out
+The function that read orders.discount, `pkg.rollup.discount_rate`, was
+removed from the project on 2026-10-19. [#e11]
+A person said why, that day: "Drop orders.discount from the rollup —
+upstream said the v2 feed no longer carries it." [#1]
+That reason links to the email it came from, "Re: orders feed v2 schema
+(demo)", which nobody has checked since. [#r1]
+The same day it was recorded as a rule on `pkg.tiles.dashboard_tile`: do
+not depend on orders.discount, because the v2 upstream feed no longer
+provides it. [#2]
+…
+Scope: 3 nodes, 2 constraints, 0 influencing records, 6 changes,
+2026-10-19 to 2026-10-19; 3 candidates, 3 chosen; nothing truncated.
 ```
 
-Every line ends in a record id. The ids are real rows, the search range is counted rather than estimated, and when nothing was recorded the answer says so instead of filling the gap.
+*What the ledger's check printed in that run, wrapped, with the absences and the record links cut (`…`). The demo writes every record on the day you run it, so all its dates are that day.*
 
-**Your project, answering for itself** — across every node, every task and every month it has existed.
+Every line ends in a record id, and the ids are real rows. The scope line counts what was searched, and when nothing was recorded the answer says so instead of filling the gap.
+
+Neither question is about remembering a conversation. provLedger hangs each record on the thing in the project it is about — a function, a column, a task — not on the session it was said in. So a record outlives the code it explains, and an agent that was never there reads the same rows you would.
+
+**Your project, answering for itself** — across every node, every task and every month since you installed it.
 
 ![A task page, the decisions it relied on, the rule behind one of them with the email that carried it, and /ledger answering a question with the record it rests on](docs/media/readme-hook.gif)
 
 *Task → "Decisions relied on" → open the node → the rule with the email → `/ledger`: "why did we stop using orders.discount?" → a cited answer.*
 
-**[Watch it happen →](https://yizhao95.github.io/prov_ledger/walkthrough.html)** — two minutes: a colleague asks why the data stops on 18 September, nobody on the team knows, and the record answers with the incident behind it.
-
-A Claude Code plugin for data work. It keeps what was decided and why — your words, the email, the agent's reading, kept apart and never blended — and puts them in front of whoever is about to change the thing again.
-
-[![PyPI](https://img.shields.io/pypi/v/provledger)](https://pypi.org/project/provledger/)
-![python](https://img.shields.io/badge/python-3.10%2B-blue)
-![license](https://img.shields.io/badge/license-MIT-green)
+**[Watch it happen →](https://yizhao95.github.io/prov_ledger/walkthrough.html)** — two minutes: a colleague asks why the data stops on 18 September, nobody on the team knows, and the record answers with the incident behind it. Install is two commands: [§3](#3--five-minutes).
 
 ---
 

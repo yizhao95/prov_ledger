@@ -159,6 +159,18 @@ targets. A plan that declares eleven targets has been measured at 3,063 tokens
 — over budget by 2%. Writing an honest, complete target list is what pushes it
 over.
 
+**Handing your ledger to someone else is manual.** There is no command for it.
+Copy the ledger as described under "Copy the ledger with SQLite, not `cp`",
+together with each project graph `projects.json` names. `projects.json` stores
+the repository and the graph by absolute path, and a session finds a file's
+project through that path: on a machine where the paths differ, point `repo`
+and `db_path` at that machine's paths, or edits there get no pre-edit reminder
+and plans are not attributed to the project. The ledger does not record who
+typed a prompt, so words typed in the other person's sessions are kept as the
+user's own words and cited that way. The copy holds everything in the ledger,
+`personal` records included; `export` is what leaves them out. Taking the ledger back the same
+way replaces whatever your own copy recorded in the meantime.
+
 ## Packaging and environment
 
 **Run the test suites one at a time** — `bash scripts/run_tests.sh` does.
