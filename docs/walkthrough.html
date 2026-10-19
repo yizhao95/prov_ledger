@@ -596,6 +596,11 @@ img{max-width:100%}
   border:1px solid rgba(42,120,214,.25); border-radius:5px; padding:1px 5px;
 }
 #nd-reach .kv{gap:7px 14px}
+.titlecard .endline{margin:0; font:700 30px/1.22 var(--ui); letter-spacing:-.02em; color:#f4f2ec; max-width:30ch;
+  padding:4px 10px; margin-left:-10px; border-radius:9px; transition:background .35s ease, box-shadow .35s ease}
+.recap{display:flex; flex-direction:column; gap:10px; margin-top:8px}
+.recap .rc{font:500 15px/1.5 var(--ui); color:var(--room-ink); padding-left:13px; border-left:3px solid var(--brand-spark)}
+.titlecard .try{margin-top:14px; font:500 13px/1 var(--mono); color:var(--brand-spark)}
 #nd-reach .kv dd{padding:2px 6px; margin-left:-6px; border-radius:6px; transition:background .3s ease, box-shadow .3s ease}
 .term .draft p.hl-soft{background:rgba(250,178,25,.13) !important; color:#f4f2ec; padding:6px 9px; margin-left:-9px; margin-right:-9px; border-radius:7px}
 </style>
@@ -890,174 +895,21 @@ img{max-width:100%}
                 <div class="axis" id="ax-2"><b id="ax-2-h">across time</b><span id="ax-2-t">one thing, everything that happened to it. Append-only — nothing is overwritten, nothing is deleted.</span></div>
                 <div class="axis" id="ax-3"><b id="ax-3-h">across tasks</b><span id="ax-3-t">what each run read, what it decided, what it rejected, and how it turned out.</span></div>
               </div>
-              <p class="fine" id="tc-fine">A request that sounds new, the record showing it was already tried, and then how that record gets made. The ledger in this walkthrough is a worked example, not a live database.</p>
+              <p class="fine" id="tc-fine">A request that sounds new, and the record showing it was already tried. The ledger in this walkthrough is a worked example, not a live database.</p>
             </div>
           </section>
 
-          <!-- ============ act 2 · measured ============ -->
-          <section class="screen" id="sc-measured">
-            <div class="term">
-              <div class="termscroll"><div class="termpage" id="page-measured">
-                <div class="line"><span class="path">~/q3-rollup</span> <span class="dim">on</span> <span class="blue">main</span> <span class="dim">· 2026-06-30 09:20</span></div>
-                <div class="line"><span class="prompt">&gt;</span> <span id="typed-m"></span><span class="caret" id="caret-m"></span></div>
-
-                <div class="blk reveal" id="m-run">
-                  <div class="line"><span class="ok">●</span> <span id="m-l1">Rebuilding the graph from source · 41 files</span> · <span class="blue">run 47</span></div>
-                  <div class="line dim">  <span id="m-l2">provledger · comparing run 47 with run 46</span></div>
-                  <div class="line dim">  <span id="m-l3">provledger · 611 nodes · 1 404 edges · 188 with records</span></div>
-                </div>
-
-                <div class="panel blue reveal" id="m-counts">
-                  <h4 id="m-ch">measured from the source — not reported by the agent</h4>
-                  <div class="cnt">
-                    <b>changed</b><s>2</s><i>weekly_tile · fx_rate</i>
-                    <b>row count moved</b><s>0</s><i id="m-i2">no table changed size</i>
-                    <b>added</b><s>0</s><i id="m-i3">nothing new in the source</i>
-                    <b>removed</b><s>1</s><i id="m-i4">discount_rate — gone from the source</i>
-                    <b>unchanged</b><s>609</s><i id="m-i5">folded, kept as matches</i>
-                    <b>identity asserted</b><s>0</s><i id="m-i6">nothing needed a model's judgement to be identified</i>
-                  </div>
-                </div>
-
-                <div class="blk reveal" id="m-cut">
-                  <div class="line"><span class="warn">↳</span> <span class="mono">pkg.rollup.discount_rate</span> <span class="dim">·</span> <span id="m-cut-t"><b>removed</b>, counted against run 46 — its records stay where they were</span></div>
-                </div>
-
-                <div class="blk reveal" id="m-cut2">
-                  <div class="line"><span class="prompt">↳</span> <span class="mono">pkg.tiles.weekly_tile</span> <span class="dim">·</span> <span id="m-cut2-t">reads <b>3</b> inputs instead of <b>4</b>, in the same run</span></div>
-                </div>
-
-                <div class="blk reveal" id="m-tail">
-                  <div class="line"><span class="warn">↳</span> <span id="m-tail-t">3 changed data points · <span class="dim">each one now owes a reason, and gets a slot to put it in</span></span></div>
-                </div>
-              </div></div>
-            </div>
-          </section>
-
-          <!-- ============ act 2 · said, then evidenced ============ -->
-          <section class="screen" id="sc-record">
-            <div class="term">
-              <div class="termscroll"><div class="termpage" id="page-record">
-                <div class="line"><span class="path">~/q3-rollup</span> <span class="dim">on</span> <span class="blue">main</span> <span class="dim">· 2026-06-03 10:12</span></div>
-                <div class="line"><span class="prompt">&gt;</span> <span id="typed-s"></span><span class="caret" id="caret-s"></span></div>
-
-                <div class="blk reveal" id="r-hook">
-                  <div class="line"><span class="ok">●</span> UserPromptSubmit → provledger</div>
-                  <div class="line dim">  <span id="r-l2">utterance 31 · recorded verbatim · 2026-06-03 10:12</span></div>
-                </div>
-
-                <div class="panel blue reveal" id="r-origin">
-                  <h4 id="r-oh">the words, and the door they came through</h4>
-                  <dl class="kv2">
-                    <dt id="r-k1">text</dt><dd id="r-text">“take the discount rate off the weekly tile until the v2 feed carries discounts again”</dd>
-                    <dt id="r-k2">tier</dt><dd id="r-v2">stated <span class="dim">— the user's own words, with the span</span></dd>
-                    <dt id="r-k3">origin</dt><dd id="r-v3">hook <span class="badge">captured as you typed it</span></dd>
-                    <dt id="r-k4">role</dt><dd id="r-v4">reason <span class="dim">— why this change was made; the rule it set is kept apart as <span class="cite">#41</span></span></dd>
-                  </dl>
-                  <div class="hint" id="r-origin-note">A note typed in afterwards still records — and still reads <span class="badge sp">entered afterwards</span>. The tier is decided by the entrance, never by what anyone claims.</div>
-                </div>
-
-                <div class="panel reveal quiet" id="r-hint">
-                  <h4 id="r-hh">the hook only ever asks</h4>
-                  <div class="line dim" style="line-height:1.6"><span id="r-hint-t">provledger: that sentence points at an outside source (“the v2 feed”). If you have a tool that can find it, record the pointer:</span> <span class="blue">provledger reference add --utterance 31 --kind email|meeting|chat|ticket|doc|commit --label "&lt;subject · who&gt;" --occurred-at "&lt;when&gt;" --uri &lt;permalink&gt;</span></div>
-                </div>
-
-                <div class="blk reveal" id="r-search">
-                  <div class="line"><span class="ok">●</span> <span id="r-sh1">Searching with the host agent's own mail and calendar tools <span class="dim">· window 2026-05-14 .. 2026-06-03 · hints: v2 feed, orders.discount, data platform</span></span></div>
-                  <div class="line dim">  <span id="r-sh2">2 results · provLedger searched nothing and holds no credentials</span></div>
-                  <div class="line blue">  provledger reference add --utterance 31 --kind email \</div>
-                  <div class="line blue">    --label "Re: orders feed v2 schema · Mei Lin" --occurred-at "2026-05-29 16:05" \</div>
-                  <div class="line blue">    --said-by "Mei Lin, data platform" \</div>
-                  <div class="line blue">    --excerpt "the v2 orders feed stops carrying orders.discount from the June release" \</div>
-                  <div class="line blue">    --uri https://mail.example.com/thread/v2-schema</div>
-                </div>
-
-                <div class="panel blue reveal" id="r-ref">
-                  <h4><span id="r-refh">reference <span class="cite">#r7</span> · email · linked</span></h4>
-                  <dl class="kv2">
-                    <dt id="r-rk1">label</dt><dd>Re: orders feed v2 schema · Mei Lin</dd>
-                    <dt id="r-rk2">occurred at</dt><dd>2026-05-29 16:05</dd>
-                    <dt id="r-rk6">said by</dt><dd id="r-said">Mei Lin, data platform: “the v2 orders feed stops carrying orders.discount from the June release”</dd>
-                    <dt id="r-rk3">link</dt><dd>mail.example.com/thread/v2-schema</dd>
-                    <dt id="r-rk4">stance</dt><dd id="r-stance">supports <span class="dim">— a source that disagrees is recorded as disagreeing, never dropped</span></dd>
-                    <dt id="r-rk5">body</dt><dd id="r-body"><span class="badge rd">not stored</span> <span class="dim">— the pointer and the passage are the record. You open the original yourself.</span></dd>
-                  </dl>
-                  <div class="hint" id="r-refhint">source level for reason <span class="cite">#40</span>: verbal → <span class="badge">linked</span>. The tier does not move: finding the email does not change who said what.</div>
-                </div>
-              </div></div>
-            </div>
-          </section>
-
-          <!-- ============ act 2 · the blank ============ -->
-          <section class="screen" id="sc-blank">
-            <div class="app">
-              <div class="appnav">
-                <span class="navchip">🏠 <span id="nb-home">Home</span></span>
-                <span class="navchip">🎯 <span id="nb-out">Outcomes</span></span>
-                <span class="who" id="nb-who">🧬 Node · read-only</span>
+          <!-- ============ the close: one line ============ -->
+          <section class="screen" id="sc-end">
+            <div class="titlecard">
+              <div class="brand">provLedger</div>
+              <p class="endline" id="en-h">Every change, traced to the decision behind it.</p>
+              <div class="recap">
+                <div class="rc reveal" id="en-1">Built in May, removed in June — and why stayed on record.</div>
+                <div class="rc reveal" id="en-2">Every line of the answer ends in the record it rests on.</div>
+                <div class="rc reveal" id="en-3">Where nothing was recorded, it says so. Nothing is sent for you.</div>
               </div>
-              <div class="pagescroll">
-                <div class="page" id="page-blank">
-                  <div class="col">
-
-                    <div class="card">
-                      <div class="eyebrow">Q3-ROLLUP</div>
-                      <h2 class="h1 mono" style="font-size:16px">pkg.rollup.fx_rate</h2>
-                      <div class="rowmeta">
-                        <span class="pill derived">derived</span>
-                        <span id="bk-meta">upstream 1 · downstream 3</span>
-                        <span id="bk-meta2">6 records · 9 runs</span>
-                      </div>
-                    </div>
-
-                    <div class="card flush">
-                      <div style="padding:14px 16px 4px"><h3 class="h2" id="bk-hist">Change history</h3></div>
-                      <div class="hist">
-                        <div class="hrow">
-                          <div class="when">2026-06-30</div>
-                          <div class="what">
-                            <div class="t" id="bk-row">Changed: the rate is the spot rate on the close date, not the monthly average.</div>
-                            <div class="sub"><span class="mono">run 47</span><span id="bk-row-sub">measured from the source</span></div>
-                          </div>
-                          <div class="right"><span class="pill observed">observed</span></div>
-                        </div>
-                      </div>
-                      <div style="padding:0 16px 16px">
-                        <div class="reasonrow" id="bk-reason">
-                          <span class="none" id="bk-none">No reason recorded.</span>
-                          <span class="pill unstated">unstated</span>
-                          <span class="meta" id="bk-lvl">source level <b>unstated</b></span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div class="card" id="bk-why">
-                      <h3 class="h2" id="bk-why-h">Why this one is blank</h3>
-                      <div class="meta" style="margin-top:6px" id="bk-why-sub">All three sources were tried for this slot. This is what each one returned.</div>
-                      <div class="ladder">
-                        <div class="rung">
-                          <span class="lbl" id="bk-r1">measured</span>
-                          <span id="bk-r1-t">The change itself is on the record: run 47 counted it against run 46.</span>
-                          <span class="pill observed">observed</span>
-                        </div>
-                        <div class="rung empty">
-                          <span class="lbl" id="bk-r2">said</span>
-                          <span id="bk-r2-t">Nothing in this task's window named this node. Nobody was asked: the change scored below the significance threshold.</span>
-                          <span class="pill unstated">unstated</span>
-                        </div>
-                        <div class="rung empty">
-                          <span class="lbl" id="bk-r3">evidenced</span>
-                          <span id="bk-r3-t">Searched with the host agent's own mail and ticket tools, 4 hints, 1.9 s. The window held nothing.</span>
-                          <span class="pill unstated">found_nothing</span>
-                        </div>
-                      </div>
-                      <div class="evcmd">provledger review evidence-log --plan rollup-a --node pkg.rollup.fx_rate</div>
-                      <div class="meta" style="margin-top:10px" id="bk-foot">A gap stays a gap. The log says which of the three came up empty, so “why is this blank” has an answer too.</div>
-                    </div>
-
-                  </div>
-                </div>
-              </div>
+              <p class="try reveal" id="en-try">claude plugin marketplace add yizhao95/prov_ledger</p>
             </div>
           </section>
 
@@ -1084,7 +936,7 @@ img{max-width:100%}
       <button class="play" id="play">❚❚ <span id="play-label">Pause</span></button>
       <button class="play sec" id="restart">↺ <span data-t="restart">Restart</span></button>
       <div class="track" aria-hidden="true"><div class="fill" id="fill"></div></div>
-      <span class="tnum" id="clock">0:00 / 2:20</span>
+      <span class="tnum" id="clock">0:00 / 1:43</span>
     </div>
     <div class="chapters" id="chapters"></div>
   </div>
@@ -1108,7 +960,7 @@ img{max-width:100%}
       sub: "A walkthrough of provLedger: a colleague asks for a discount rate on the weekly tile, and the record shows it was built in May and taken out in June — why, what was tried instead, who said so and how widely it was shared — before the session drafts the reply. The ledger shown is a worked example, not a live database.",
       restart: "Restart", pause: "Pause", play: "Play",
       foot: "Interface wording is the product's own; the ledger shown here is a worked example, not a live database. The dashboard is read-only and opens the database read-only, so it can never block or change what it is showing. The reply is written by the session's own model from the material provLedger assembles — provLedger writes none of it, and nothing is ever sent automatically. The command's name is still provisional.",
-      chapters: ["One project, three axes","The request","Already tried","The tombstone","Why it was dropped","How widely it was shared","The reply","Measured","Said, then evidenced","The blank"],
+      chapters: ["One project, three axes","The request","Already tried","The tombstone","Why it was dropped","How widely it was shared","The reply","In one line"],
       slate: "one function, removed — and what it left behind"
     },
     zh: {
@@ -1116,7 +968,7 @@ img{max-width:100%}
       sub: "provLedger 走查：同事想在周报 tile 上加一个折扣率；账本答出这个功能 5 月做过、6 月拿掉了——为什么、当时试过什么、谁说的、分享到了多大范围——再由会话起草回复。此处账本为示例数据，非实时数据库。",
       restart: "重播", pause: "暂停", play: "播放",
       foot: "界面用词取自产品本身；此处账本为示例数据，非实时数据库。仪表盘只读，并以只读方式打开数据库，因此永远无法阻断或改变它所展示的内容。片中那封回复由当前会话自己的模型、依据 provLedger 汇总的材料写成——provLedger 一个字都不写，也永不自动发出。该命令的名字仍未定。",
-      chapters: ["一个项目，三个维度","那个需求","做过了","那块墓碑","为什么没采用","分享到了多大范围","那封回复","测出来的","你说的，和外部证据","空白那一格"],
+      chapters: ["一个项目，三个维度","那个需求","做过了","那块墓碑","为什么没采用","分享到了多大范围","那封回复","一句话"],
       slate: "一个删掉的函数，和它留下的记录"
     }
   };
@@ -1139,8 +991,8 @@ img{max-width:100%}
     "ax-3-h": ["across tasks","跨任务"],
     "ax-3-t": ["what each run read, what it decided, what it rejected, and how it turned out.",
                "每次工作读了什么、决定了什么、放弃了什么，后来应验没有。"],
-    "tc-fine": ["A request that sounds new, the record showing it was already tried, and then how that record gets made. The ledger in this walkthrough is a worked example, not a live database.",
-                "一个听上去很新的需求，账本说明它早就试过，然后是这份记录到底是怎么做出来的。本片账本为示例数据，非实时数据库。"],
+    "tc-fine": ["A request that sounds new, and the record showing it was already tried. The ledger in this walkthrough is a worked example, not a live database.",
+                "一个听上去很新的需求，账本说明它早就试过。本片账本为示例数据，非实时数据库。"],
 
     /* --- act 1 · the ledger's answer --- */
     "ak-l1": ["provledger · locating records · 11 candidates · 2 nodes chosen","provledger · 定位记录 · 候选 11 · 选中 2 个节点"],
@@ -1256,77 +1108,11 @@ img{max-width:100%}
     "rp-foot": ["↳ 8 sentences · 8 map onto the material · 0 dropped · figures checked against the fact table<br>↳ before you send: confirm with data platform whether the v2 feed carries orders.discount now — nothing on record says so<br>↳ nothing was sent. The draft stops here; the copy-and-paste is yours.",
                 "↳ 8 句 · 8 句都落在材料上 · 剔除 0 句 · 数字与事实表核对一致<br>↳ 发出前：跟数据平台确认 v2 feed 现在是否提供 orders.discount——记录里没有<br>↳ 未发出。草稿停在这里，复制粘贴由你来做。"],
 
-    /* --- act 2 · measured --- */
-    "m-l1": ["Rebuilding the graph from source · 41 files","从源码重建依赖图 · 41 个文件"],
-    "m-l2": ["provledger · comparing run 47 with run 46","provledger · 用 run 47 比对 run 46"],
-    "m-l3": ["provledger · 611 nodes · 1 404 edges · 188 with records","provledger · 611 个节点 · 1 404 条边 · 188 个带记录"],
-    "m-ch": ["measured from the source — not reported by the agent","由源码测出——不是代理自己报的"],
-    "m-i2": ["no table changed size","没有表的行数变化"],
-    "m-i3": ["nothing new in the source","源码里没有新东西"],
-    "m-i4": ["discount_rate — gone from the source","discount_rate——已从源码中消失"],
-    "m-i5": ["folded, kept as matches","折叠，按匹配保留"],
-    "m-i6": ["nothing needed a model's judgement to be identified","没有一个节点需要靠模型判断来认定"],
-    "m-cut-t": ["<b>removed</b>, counted against run 46 — its records stay where they were","<b>已删除</b>，与 run 46 比对得出——它的记录原地保留"],
-    "m-cut2-t": ["reads <b>3</b> inputs instead of <b>4</b>, in the same run","同一次运行里，输入从 <b>4</b> 个变成 <b>3</b> 个"],
-    "m-tail-t": ["3 changed data points · <span class=\"dim\">each one now owes a reason, and gets a slot to put it in</span>",
-                 "3 个数据点变了 · <span class=\"dim\">每一个现在都欠一个理由，也都有一格可以填</span>"],
-
-    /* --- act 2 · said, then evidenced --- */
-    "r-l2": ["utterance 31 · recorded verbatim · 2026-06-03 10:12","话语 31 · 逐字入库 · 2026-06-03 10:12"],
-    "r-oh": ["the words, and the door they came through","原话，以及它是从哪扇门进来的"],
-    "r-k1": ["text","原文"],
-    "r-text": ["“take the discount rate off the weekly tile until the v2 feed carries discounts again”",
-               "「v2 feed 重新带上折扣之前，先把折扣率从周报 tile 上拿掉」"],
-    "r-k2": ["tier","来源层级"],
-    "r-v2": ["stated <span class=\"dim\">— the user's own words, with the span</span>","用户陈述 <span class=\"dim\">— 用户原话，带出处区间</span>"],
-    "r-k3": ["origin","入口"],
-    "r-v3": ["hook <span class=\"badge\">captured as you typed it</span>","钩子 <span class=\"badge\">captured as you typed it</span>"],
-    "r-k4": ["role","角色"],
-    "r-v4": ["reason <span class=\"dim\">— why this change was made; the rule it set is kept apart as <span class=\"cite\">#41</span></span>",
-             "变更原因 <span class=\"dim\">— 本次为什么改；它立下的规则另记为 <span class=\"cite\">#41</span></span>"],
-    "r-origin-note": ["A note typed in afterwards still records — and still reads <span class=\"badge sp\">entered afterwards</span>. The tier is decided by the entrance, never by what anyone claims.",
-                      "事后手工补记照样落账——只是显示 <span class=\"badge sp\">entered afterwards</span>。来源由入口决定，不由自称决定。"],
-    "r-hh": ["the hook only ever asks","钩子只会问，从不自己动手"],
-    "r-hint-t": ["provledger: that sentence points at an outside source (“the v2 feed”). If you have a tool that can find it, record the pointer:",
-                 "provledger：这句话指向了一个外部来源（「v2 feed」）。如果你有工具能找到它，把指针记下来："],
-    "r-sh1": ["Searching with the host agent's own mail and calendar tools <span class=\"dim\">· window 2026-05-14 .. 2026-06-03 · hints: v2 feed, orders.discount, data platform</span>",
-              "用宿主代理自己的邮件与日历工具检索 <span class=\"dim\">· 时间窗 2026-05-14 .. 2026-06-03 · 检索词：v2 feed, orders.discount, data platform</span>"],
-    "r-sh2": ["2 results · provLedger searched nothing and holds no credentials","2 条命中 · provLedger 自己没搜，也不持有任何凭证"],
-    "r-refh": ["reference <span class=\"cite\">#r7</span> · email · linked","出处 <span class=\"cite\">#r7</span> · 邮件 · 可核对链接"],
-    "r-rk1": ["label","标签"], "r-rk2": ["occurred at","发生于"], "r-rk3": ["link","链接"],
-    "r-rk4": ["stance","立场"], "r-rk5": ["body","正文"], "r-rk6": ["said by","谁说的"],
-    "r-said": ["Mei Lin, data platform: “the v2 orders feed stops carrying orders.discount from the June release”",
-               "数据平台 Mei Lin：「v2 订单 feed 从 6 月版本起不再提供 orders.discount」"],
-    "r-stance": ["supports <span class=\"dim\">— a source that disagrees is recorded as disagreeing, never dropped</span>",
-                 "支持 <span class=\"dim\">— 反对的出处就记成反对，绝不丢掉</span>"],
-    "r-body": ["<span class=\"badge rd\">not stored</span> <span class=\"dim\">— the pointer and the passage are the record. You open the original yourself.</span>",
-               "<span class=\"badge rd\">not stored</span> <span class=\"dim\">— 指针和那一句原文就是记录。原件你自己打开。</span>"],
-    "r-refhint": ["source level for reason <span class=\"cite\">#40</span>: verbal → <span class=\"badge\">linked</span>. The tier does not move: finding the email does not change who said what.",
-                  "原因 <span class=\"cite\">#40</span> 的来源等级：原话记录 → <span class=\"badge\">linked</span>。来源层级不动：找到那封邮件并不改变话是谁说的。"],
-
-    /* --- act 2 · the blank --- */
-    "bk-meta": ["upstream 1 · downstream 3","上游 1 · 下游 3"],
-    "bk-meta2": ["6 records · 9 runs","6 条记录 · 9 次分析"],
-    "bk-hist": ["Change history","变更历史"],
-    "bk-row": ["Changed: the rate is the spot rate on the close date, not the monthly average.",
-               "变更：汇率改用结账日即期价，不再用月均价。"],
-    "bk-row-sub": ["measured from the source","由源码测出"],
-    "bk-none": ["No reason recorded.","变更时未记录原因。"],
-    "bk-lvl": ["source level <b>unstated</b>","来源等级 <b>未陈述</b>"],
-    "bk-why-h": ["Why this one is blank","这一格为什么是空白"],
-    "bk-why-sub": ["All three sources were tried for this slot. This is what each one returned.",
-                   "这一格三个来源都试过了。下面是各自的结果。"],
-    "bk-r1": ["measured","测出来的"],
-    "bk-r1-t": ["The change itself is on the record: run 47 counted it against run 46.",
-                "改动本身在册：run 47 与 run 46 比对后量出。"],
-    "bk-r2": ["said","你说的"],
-    "bk-r2-t": ["Nothing in this task's window named this node. Nobody was asked: the change scored below the significance threshold.",
-                "本次任务时间窗内没有一句话点到这个节点。也没有打断用户去问：这次改动的显著性低于阈值。"],
-    "bk-r3": ["evidenced","外部证据"],
-    "bk-r3-t": ["Searched with the host agent's own mail and ticket tools, 4 hints, 1.9 s. The window held nothing.",
-                "用宿主代理自己的邮件与工单工具搜过，4 个检索词，1.9 秒。时间窗里什么都没有。"],
-    "bk-foot": ["A gap stays a gap. The log says which of the three came up empty, so “why is this blank” has an answer too.",
-                "空白就留成空白。日志记着三个来源各自落空在哪一步，所以「为什么是空白」也有答案。"],
+    /* --- the close --- */
+    "en-h": ["Every change, traced to the decision behind it.","每一次改动，都追溯到它背后的那个决定。"],
+    "en-1": ["Built in May, removed in June — and why stayed on record.","5 月做上去，6 月拿掉——为什么，一直留在记录里。"],
+    "en-2": ["Every line of the answer ends in the record it rests on.","回答里的每一句，都落在它依据的那条记录上。"],
+    "en-3": ["Where nothing was recorded, it says so. Nothing is sent for you.","没有记录的地方，它就说没有。也不替你发出任何东西。"],
 
     "cbox-txt": ["Reply","回复"], "csend": ["Send","发送"],
     "ctyping-txt": ["Priya Raman is typing","Priya Raman 正在输入"]
@@ -1381,26 +1167,10 @@ img{max-width:100%}
       r4: "And the one thing to check before building it again.",
       r5: "Nothing is sent. The draft stops in the terminal.",
 
-      /* 08 · measured */
-      m1: "Every run rebuilds the graph from the source and compares it with the one before.",
-      m2: "Nobody typed these numbers.",
-      m3: "30 June: one node is gone, counted against the run before.",
-      m4: "The tile that read it changed in the same run.",
-      m5: "Three changed data points, and each one now owes a reason.",
-
-      /* 09 · said, then evidenced */
-      e1: "The second source is what you said, the morning it was decided.",
-      e2: "<b>origin hook</b> is the only door that can say “captured as you typed it”.",
-      e3: "The third source is outside the code. provLedger says what is missing and does not go looking.",
-      e4: "The host agent's own mail tools find the data platform email, with their own credentials.",
-      e5: "A label, a time, a link, and who said what. Never the body.",
-
-      /* 10 · the blank */
-      b1: "The same three sources, on a slot where all three came up empty.",
-      b2: "The FX rate changed in that same run. Nobody ever said why.",
-      b3: "So it says nobody ever said why.",
-      b4: "It can also say how far each of the three got.",
-      b5: "That is how the record is made — and when it cannot be made, it says so."
+      /* 08 · in one line */
+      c1: "That is the whole of it.",
+      c2: "<b>Every change, traced to the decision behind it.</b>",
+      c3: "A worked example. The plugin is one command away."
     },
     zh: {
       t1: "这是一个项目的记录。",
@@ -1442,23 +1212,9 @@ img{max-width:100%}
       r4: "还有再做一次之前，唯一要确认的那件事。",
       r5: "没有发出。草稿停在终端里。",
 
-      m1: "每一次运行都从源码重建这张图，再跟上一次比。",
-      m2: "这些数字不是谁打进去的。",
-      m3: "6 月 30 日：一个节点没了，与上一次比对得出。",
-      m4: "读它的那个 tile，在同一次运行里也变了。",
-      m5: "三个数据点变了，每一个现在都欠一个理由。",
-
-      e1: "第二个来源是你说的话，拍板那天上午说的。",
-      e2: "<b>origin hook</b> 是唯一能说「captured as you typed it」的那扇门。",
-      e3: "第三个来源在代码之外。provLedger 只说清缺什么，自己不去搜。",
-      e4: "去搜的是宿主代理自己的邮件工具，用它自己的凭证，翻到了数据平台那封邮件。",
-      e5: "一个标签、一个时间、一条链接，还有谁说了什么。正文永不入库。",
-
-      b1: "同样三个来源，这一格三个都落空了。",
-      b2: "同一次运行里汇率也改了。没有人说过为什么。",
-      b3: "于是它就写：没有人说过为什么。",
-      b4: "它还能说清三个来源各自走到了哪一步。",
-      b5: "记录就是这么做出来的——做不出来的时候，它就说做不出来。"
+      c1: "就这些。",
+      c2: "<b>每一次改动，都追溯到它背后的那个决定。</b>",
+      c3: "这是示例数据。插件一条命令就能装上。"
     }
   };
 
@@ -1533,15 +1289,13 @@ img{max-width:100%}
   function tap(){ cursor.classList.remove("tap"); void cursor.offsetWidth; cursor.classList.add("tap"); }
 
   /* ---------- screens ---------- */
-  var SCREENS = { chat:$("sc-chat"), title:$("sc-title"), measured:$("sc-measured"), ask:$("sc-ask"),
-                  record:$("sc-record"), blank:$("sc-blank"), node:$("sc-node"), reply:$("sc-reply") };
+  var SCREENS = { chat:$("sc-chat"), title:$("sc-title"), ask:$("sc-ask"), end:$("sc-end"),
+                  node:$("sc-node"), reply:$("sc-reply") };
   var URLS = {
     chat:     [["Teams · #q3-rollup","Teams · #q3-rollup"], ["chat","聊天"], "var(--brand-blue)"],
     title:    [["provLedger — a worked example","provLedger — 示例数据"], ["walkthrough","走查"], "var(--room-muted)"],
     ask:      [["~/q3-rollup — claude","~/q3-rollup — claude"], ["terminal","终端"], "var(--brand-spark)"],
-    measured: [["~/q3-rollup — claude","~/q3-rollup — claude"], ["terminal","终端"], "var(--brand-spark)"],
-    record:   [["~/q3-rollup — claude","~/q3-rollup — claude"], ["terminal","终端"], "var(--brand-spark)"],
-    blank:    [["127.0.0.1:8765/node/q3-rollup/pkg.rollup.fx_rate","127.0.0.1:8765/node/q3-rollup/pkg.rollup.fx_rate"], ["node · read-only","节点 · 只读"], "var(--brand-green)"],
+    end:      [["provLedger — a worked example","provLedger — 示例数据"], ["walkthrough","走查"], "var(--room-muted)"],
     node:     [["127.0.0.1:8765/node/q3-rollup/pkg.rollup.discount_rate?at=reason:40","127.0.0.1:8765/node/q3-rollup/pkg.rollup.discount_rate?at=reason:40"], ["node · read-only","节点 · 只读"], "var(--brand-green)"],
     reply:    [["~/q3-rollup — claude","~/q3-rollup — claude"], ["terminal","终端"], "var(--brand-spark)"]
   };
@@ -1589,9 +1343,6 @@ img{max-width:100%}
   var TYPE = {
     a: ["/ledger have we tried a discount rate on the weekly tile before?",
         "/ledger 周报 tile 上的折扣率我们以前做过吗？"],
-    m: ["update the project state graph", "更新项目状态图"],
-    s: ["take the discount rate off the weekly tile until the v2 feed carries discounts again",
-        "v2 feed 重新带上折扣之前，先把折扣率从周报 tile 上拿掉"],
     r: ['/receipts "can the weekly tile show a discount rate?"',
         '/receipts "周报 tile 能显示折扣率吗？"']
   };
@@ -1631,24 +1382,24 @@ img{max-width:100%}
   }
 
   /* ---------- reset to frame zero ---------- */
-  var REVEALS = ["m-run","m-counts","m-cut","m-cut2","m-tail","r-hook","r-origin","r-hint","r-search","r-ref",
-                 "ask-locate","ask-ans","ask-next","rp-locate","rp-mat","rp-hand","rp-draft","ax-1","ax-2","ax-3"];
+  var REVEALS = ["ask-locate","ask-ans","ask-next","rp-locate","rp-mat","rp-hand","rp-draft","ax-1","ax-2","ax-3",
+                 "en-1","en-2","en-3","en-try"];
   var LITS = ["msg-q","msg-q2"];
-  var MARKS = ["hrow-hit","hrow-gone","hrow-rej1","hrow-rej2","con-hit","src-mail","src-meet","bk-reason","bk-why",
-               "r-ref","r-body","r-v3","r-said","nd-card","nd-gone","nd-quote","nd-reach","rc-vis","rc-said","rc-shown",
-               "rc-adopt","rc-rcpt","ak-1","ask-next","rp-gaps","rp-instr","rp-d4","m-cut","m-cut2"];
+  var MARKS = ["hrow-hit","hrow-gone","hrow-rej1","hrow-rej2","con-hit","src-mail","src-meet",
+               "nd-card","nd-gone","nd-quote","nd-reach","rc-vis","rc-said","rc-shown",
+               "rc-adopt","rc-rcpt","ak-1","ask-next","rp-gaps","rp-instr","rp-d4","en-h"];
   function reset(){
     window.clearInterval(typeTimer);
     show("chat");
     slate(false);
-    ["a","m","s","r"].forEach(function(k){
+    ["a","r"].forEach(function(k){
       typeTo(k, 0);
       var c = $("caret-" + k); if(c) c.style.display = "";
     });
     REVEALS.forEach(function(id){ var e = $(id); if(e) e.classList.remove("on"); });
     LITS.forEach(function(id){ var e = $(id); if(e) e.classList.remove("lit"); });
     MARKS.forEach(function(id){ var e = $(id); if(e) e.classList.remove("hl","hl-soft","bump","spark"); });
-    ["page-ask","page-measured","page-record","page-blank","page-node","page-reply"].forEach(function(id){ scrollPage(id, 0); });
+    ["page-ask","page-node","page-reply"].forEach(function(id){ scrollPage(id, 0); });
     $("msg-q").classList.add("hid");
     $("msg-q2").classList.add("hid");
     $("chatdim").classList.remove("on");
@@ -1734,34 +1485,18 @@ img{max-width:100%}
     [84400, function(){ scrollTo("page-reply", "rp-d4", 150); sp("rp-d4"); say(C("r4")); }],
     [87600, function(){ say(C("r5")); }],
 
-    /* 08 · measured */
-    [90800, function(){ flag("08", N(7)); show("measured"); startTyping("m"); say(C("m1")); }],
-    [93400, function(){ endTyping("m"); on("m-run"); }],
-    [95200, function(){ on("m-counts"); say(C("m2")); }],
-    [98000, function(){ on("m-cut"); hl("m-cut"); bump("m-cut"); say(C("m3")); }],
-    [100800,function(){ on("m-cut2"); bump("m-cut2"); say(C("m4")); }],
-    [103400,function(){ on("m-tail"); say(C("m5")); }],
-
-    /* 09 · said, then evidenced */
-    [105800,function(){ flag("09", N(8)); show("record"); startTyping("s"); say(C("e1")); }],
-    [109400,function(){ endTyping("s"); on("r-hook"); on("r-origin"); }],
-    [110400,function(){ scrollPage("page-record", 30); sp("r-v3"); say(C("e2")); }],
-    [113200,function(){ on("r-hint"); scrollTo("page-record", "r-origin", 10); say(C("e3")); }],
-    [116000,function(){ on("r-search"); scrollTo("page-record", "r-hint", 10); say(C("e4")); }],
-    [118800,function(){ on("r-ref"); scrollTo("page-record", "r-search", 30); bump("r-ref"); say(C("e5")); }],
-    [121400,function(){ scrollTo("page-record", "r-ref", 40); sp("r-said"); hl("r-body"); }],
-
-    /* 10 · the blank */
-    [123600,function(){ flag("10", N(9)); show("blank"); scrollPage("page-blank", 0); pointAt($("bk-reason"), 0, -40); say(C("b1")); }],
-    [126100,function(){ scrollPage("page-blank", 35); pointAt($("bk-reason")); say(C("b2")); }],
-    [128700,function(){ hl("bk-reason"); say(C("b3")); }],
-    [131300,function(){ scrollPage("page-blank", 75); hl("bk-why"); pointAt($("bk-why"), 0, -30); say(C("b4")); }],
-    [134500,function(){ scrollPage("page-blank", 100); pointAt($("bk-why"), 0, 40); say(C("b5")); }],
-    [137600,function(){ /* hold on the last frame */ }]
+    /* 08 · in one line */
+    [90800, function(){ flag("08", N(7)); show("end"); cursor.style.transform = "translate(1040px,560px)"; say(C("c1")); }],
+    [92000, function(){ on("en-1"); }],
+    [93200, function(){ on("en-2"); }],
+    [94400, function(){ on("en-3"); }],
+    [96200, function(){ sp("en-h"); say(C("c2")); }],
+    [98800, function(){ on("en-try"); say(C("c3")); }],
+    [101500,function(){ /* hold on the last frame */ }]
   ];
-  var DURATION = 139500;
+  var DURATION = 103000;
   var CH = [{at:0},{at:7800},{at:15200},{at:29000},{at:42000},
-            {at:54200},{at:65400},{at:90800},{at:105800},{at:123600}];
+            {at:54200},{at:65400},{at:90800}];
 
   /* ---------- transport ---------- */
   var t0 = 0, elapsed = 0, playing = false, raf = null, cursorIdx = 0;

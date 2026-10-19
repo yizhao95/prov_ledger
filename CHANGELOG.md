@@ -30,8 +30,10 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
   left behind (the decision, the email and the review it rests on, the two
   workarounds tried and dropped), a card says how widely the decision was
   shared (who said it, shareable, shown to three later tasks, adopted by one —
-  and that recipients are not on record), and `/receipts` drafts the reply. The
-  page, `docs/media/walkthrough.mp4` and its cover are re-made from one source.
+  and that recipients are not on record), and `/receipts` drafts the reply. It
+  closes on the headline; the old second act (measured, said then evidenced,
+  the blank) is gone, and README §2 still explains the three sources. The page,
+  `docs/media/walkthrough.mp4` and its cover are re-made from one source.
 - **The README opens on what the tool is for.** The headline, the three views
   in one picture, and the two situations it answers: a change whose code is
   already gone, and a question asked while you are away. Its worked `/ledger`
