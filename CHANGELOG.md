@@ -12,6 +12,12 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
 ### Changed
 
+- **The README opens on what the tool is for.** The headline, the three views
+  in one picture, and the two situations it answers: a change whose code is
+  already gone, and a question asked while you are away. Its worked `/ledger`
+  answer is pasted from a real run on the bundled demo; the one it replaced
+  showed a scope line the product never prints. `docs/KNOWN-ISSUES.md` says
+  what handing a ledger to someone else takes by hand.
 - **A source found after the close can give the task its reason.** When the
   evidence pass finds the mail or the meeting that says why a task was done,
   the agent writes its reading of it as the task's reason: an `asserted` row

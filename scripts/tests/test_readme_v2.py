@@ -3,7 +3,7 @@
 The README is the product's first screen, so the things that make it honest
 are asserted here rather than left to review:
 
-  * the two hook lines are verbatim;
+  * the headline and the two scenario questions are verbatim;
   * every image the page promises is referenced by the path it will live at;
   * sections 0-3 (everything a first-time reader sees) carry no internal
     vocabulary — the framework's rule is that those words appear from
@@ -21,17 +21,26 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 README = REPO / "README.md"
 
-# The opening is where readers were leaving. What replaced it is a worked
-# answer — a real question, real record ids, a counted search range — placed
-# before any claim about what the tool is. These constants pin the parts of it
-# that carry the argument, not its wording.
-HOOK_LINES = (
-    "Lost in a project's decision history? Watching your coding agent walk the same wrong path again?",
+# The opening is where readers were leaving. It now opens on the one-line
+# headline and the two situations that set the tool apart from agent memory —
+# a change whose code is already gone, and a question asked while you are away —
+# then pays them off with a worked answer (a real question, record ids, a
+# counted search range) before any claim about what the tool is. These
+# constants pin the parts that carry the argument, not the prose around them.
+HEADLINE = "Every change, traced to the decision behind it."
+SCENARIO_QUESTIONS = (
+    "Why did we stop using that data?",
+    "Can anyone answer this while I'm away?",
 )
 OPENING_CLAIM = "Your project, answering for itself"
-SCOPE_MARKERS = ("Searched", "nothing left out")
+# The answer is pasted from a real `/ledger` run, so it carries the scope line
+# the way `ask submit` prints it — an earlier README showed a scope wording the
+# product never printed.
+SCOPE_MARKERS = ("Scope:", "nothing truncated")
+THREE_VIEWS = "docs/media/readme-three-views.png"
 
 IMAGES = (
+    THREE_VIEWS,
     "docs/media/readme-hook.gif",
     "docs/media/readme-graph.gif",
     "docs/media/readme-task.png",
@@ -73,21 +82,28 @@ def test_the_first_screen_answers_before_it_claims(readme: str, intro: str) -> N
     block = first_screen[fence:first_screen.index("```", fence + 3)]
     assert "/ledger " in block, "the opening shows the tool being used, not described"
     assert re.search(r"\[#\d+", block), "every claim in the answer carries a record id"
-    assert re.search(r"\[r\d+", block), "the outside source is cited too, with its own id"
+    assert re.search(r"\[#r\d+\]", block), "the outside source is cited too, with its own id"
     for marker in SCOPE_MARKERS:
         assert marker in block, f"the answer must say how far it looked: {marker!r} missing"
 
 
-def test_the_opening_questions_are_paid_off_immediately(readme: str) -> None:
-    """The two questions are what makes a reader recognise themselves, so they
-    stay. What they cannot do is stand alone: a question with nothing behind it
-    is where the reader leaves. So the worked answer has to follow them on the
-    first screen, before any claim about what the tool is."""
-    first_screen = readme.split("\n## 1 · ", 1)[0]
-    for line in HOOK_LINES:
-        assert line in first_screen, f"opening line missing or reworded: {line!r}"
+def test_the_headline_comes_straight_after_the_title(readme: str) -> None:
+    """One line says what the tool does before anything asks for attention."""
+    lines = [ln for ln in readme.splitlines()[1:] if ln.strip()]
+    assert HEADLINE in lines[0], f"the first line after the title is not the headline: {lines[0]!r}"
 
-    last_question = max(first_screen.index(line) for line in HOOK_LINES)
+
+def test_the_two_scenarios_are_paid_off_immediately(readme: str) -> None:
+    """The two situations are what makes a reader recognise themselves, and
+    what no agent memory answers: the code is gone, or the person is. A
+    question with nothing behind it is where the reader leaves, so the worked
+    answer follows them on the first screen, before any claim about what the
+    tool is."""
+    first_screen = readme.split("\n## 1 · ", 1)[0]
+    for question in SCENARIO_QUESTIONS:
+        assert question in first_screen, f"scenario question missing or reworded: {question!r}"
+
+    last_question = max(first_screen.index(q) for q in SCENARIO_QUESTIONS)
     fence = first_screen.index("```")
     assert last_question < fence, "the questions come first, and the answer answers them"
     assert fence < first_screen.index(OPENING_CLAIM), "the answer comes before the claim about it"
@@ -98,8 +114,11 @@ def test_every_promised_image_is_referenced(readme: str, path: str) -> None:
     assert f"({path})" in readme, f"README does not reference {path}"
 
 
-def test_the_hook_image_is_in_the_hook(intro: str) -> None:
-    assert "(docs/media/readme-hook.gif)" in intro.split("\n## 1 · ", 1)[0]
+@pytest.mark.parametrize("path", (THREE_VIEWS, "docs/media/readme-hook.gif"))
+def test_the_first_screen_shows_the_views_and_the_hook(intro: str, path: str) -> None:
+    """The three views in one picture, and the hook GIF, are what the first
+    screen shows; the other images belong to the sections that explain them."""
+    assert f"({path})" in intro.split("\n## 1 · ", 1)[0], f"{path} is not on the first screen"
 
 
 @pytest.mark.parametrize("word", INTERNAL_WORDS)
