@@ -51,7 +51,7 @@ Neither question is about remembering a conversation. provLedger hangs each reco
 
 *Task → "Decisions relied on" → open the node → the rule with the email → `/ledger`: "why did we stop using orders.discount?" → a cited answer.*
 
-**[Watch it happen →](https://yizhao95.github.io/prov_ledger/walkthrough.html)** — two minutes: a colleague asks why the data stops on 18 September, nobody on the team knows, and the record answers with the incident behind it. Install is two commands: [§3](#3--five-minutes).
+**[Watch it happen →](https://yizhao95.github.io/prov_ledger/walkthrough.html)** — two minutes: a colleague asks for a discount rate on the weekly tile, and the record shows it was built in May and taken out in June — why, what was tried instead, and how widely the call was shared — before the reply is drafted. Install is two commands: [§3](#3--five-minutes).
 
 ---
 
@@ -245,4 +245,4 @@ Issues and pull requests are welcome. Good first contributions: run `make demo` 
 
 <video src="https://yizhao95.github.io/prov_ledger/media/walkthrough.mp4" controls muted playsinline width="880" poster="https://yizhao95.github.io/prov_ledger/media/walkthrough-cover.png"></video>
 
-*Two minutes, no narration. Someone asks in chat why the rollup stops on 18 September and nobody still on the team knows. The record does: an upstream incident, the RCA that found it, the call that decided to cut the data — and that the cutoff was only ever meant to be temporary.* Chapters and captions in English or Chinese: **[the walkthrough page](https://yizhao95.github.io/prov_ledger/walkthrough.html)**.
+*Two minutes, no narration. A colleague asks for a discount rate on the weekly tile, which sounds new. The record says it was built in May and taken out on 30 June: the email it rests on, the review that settled it, the two workarounds tried and dropped, who said so and how many later tasks were shown it. Then the session drafts the reply, with the one thing to confirm before sending it.* Chapters and captions in English or Chinese: **[the walkthrough page](https://yizhao95.github.io/prov_ledger/walkthrough.html)**.
