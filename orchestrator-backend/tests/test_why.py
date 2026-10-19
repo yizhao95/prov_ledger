@@ -278,3 +278,161 @@ def test_the_remainder_the_footer_states_is_what_all_actually_reveals(conn, grap
     every = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, all_records=True, record=False)
     printed = len([r for r in every["doc"]["records"] if r["layer"] == "reasons"])
     assert printed == 5 and printed == 3 + folded["doc"]["truncated"]["reasons"]
+
+
+# ── the tombstone: a node the code no longer has says so ────────────────────
+
+def _graph_events(graph, *events, aborted_run=None):
+    c = sqlite3.connect(graph)
+    for run, seq, etype, key in events:
+        if not c.execute("SELECT 1 FROM analysis_run WHERE id = ?", (run,)).fetchone():
+            ps.add_run(c, run, plan_id=f"P{run}")
+        ps.add_event(c, run, seq, etype, key)
+    if aborted_run is not None:
+        c.execute("ALTER TABLE analysis_run ADD COLUMN aborted INTEGER NOT NULL DEFAULT 0")
+        c.execute("UPDATE analysis_run SET aborted = 1 WHERE id = ?", (aborted_run,))
+    c.commit(); c.close()
+
+
+def test_a_removed_node_says_when_it_was_removed(conn, graph):
+    """The code is gone, the records stay: the read says which of the two it is
+    looking at, under the summary line, before any record."""
+    _graph_events(graph, (4, 1, "node_removed", "nk_x"))
+    out = why.why(conn, project="proj", target="pkg.m.clean", psg_db_path=graph, record=False)
+    lines = out["text"].splitlines()
+    assert lines[0].startswith("pkg.m.clean · ")
+    assert lines[1] == "removed on 2026-09-11 (run 4): the code is gone; what was recorded on it stays"
+    assert out["doc"]["summary"]["removed"] == {"run": 4, "at": "2026-09-11"}
+
+
+def test_a_node_that_came_back_is_not_called_removed(conn, graph):
+    _graph_events(graph, (4, 1, "node_removed", "nk_x"), (5, 1, "node_added", "nk_x"))
+    out = why.why(conn, project="proj", target="pkg.m.clean", psg_db_path=graph, record=False)
+    assert "removed on" not in out["text"]
+    assert out["doc"]["summary"]["removed"] is None
+
+
+def test_a_removal_in_an_aborted_run_is_not_a_removal(conn, graph):
+    """A refresh that died before finishing left events nobody may read as observed."""
+    _graph_events(graph, (4, 1, "node_removed", "nk_x"), aborted_run=4)
+    out = why.why(conn, project="proj", target="pkg.m.clean", psg_db_path=graph, record=False)
+    assert "removed on" not in out["text"]
+    assert out["doc"]["summary"]["removed"] is None
+
+
+def test_a_live_node_carries_no_removed_line(conn, graph):
+    out = why.why(conn, project="proj", target="nk_a", psg_db_path=graph, record=False)
+    assert "removed on" not in out["text"]
+    assert out["doc"]["summary"]["removed"] is None
+
+
+# ── --tombstones: what the project removed, rejected and failed, with no target ─
+
+def _failed_step(conn, plan, step, reason, plan_status="COMPLETED"):
+    db.insert_plan(conn, plan, "a task", project="proj", project_source="declared", status=plan_status)
+    db.insert_step(conn, step, plan, "backfill from the archive", 1, status="FAILED")
+    conn.execute("UPDATE Steps SET failure_reason = ? WHERE step_id = ?", (reason, step))
+    conn.commit()
+
+
+def test_tombstones_list_what_was_removed_rejected_and_failed(conn, graph):
+    _seed(conn)                                    # one live rejected path on nk_a
+    old = pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="technical", role="rejected_path",
+                           interpretation="an old wrong reading", rule_id="R6", recorded_by="system")
+    new = pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="technical", role="rejected_path",
+                           interpretation="tried a left join first", recorded_by="agent")
+    pv.supersede(conn, old, new)
+    pv.insert_reason(conn, project="proj", plan_id="P3", node_key="nk_x", kind="technical",
+                     interpretation="clean moved into load_orders", recorded_by="agent")
+    _graph_events(graph, (4, 1, "node_removed", "nk_x"), (4, 2, "node_removed", "nk_i"))
+    _failed_step(conn, "PF", "PF-A", "the archive keeps 90 days; Q1 needs 190")
+
+    out = why.why(conn, project="proj", tombstones_only=True, psg_db_path=graph, record=False)
+    t = out["text"]
+    assert "removed nodes · 2 (1 carrying records)" in t
+    assert "pkg.m.clean · removed on 2026-09-11 (run 4) · 1 record" in t
+    assert "1 more removed with nothing on record (--all lists them)" in t
+    assert "pkg.m.load_orders.inner" not in t     # nothing on record: counted, not named
+    assert "rejected paths · 2" in t
+    assert "tried dropping nulls first" in t and "tried a left join first" in t
+    assert "an old wrong reading" not in t          # superseded: corrected, not a tombstone
+    assert "failed steps · 1" in t
+    assert "PF-A · plan PF (COMPLETED) · backfill from the archive" in t
+    assert "the archive keeps 90 days" not in t     # a title, not the step's log: `plan --step` reads it
+    assert t.splitlines()[-1] == ("read one: provledger why <node> · provledger record #<id> · "
+                                  "provledger plan <plan> --step <step>")
+    doc = out["doc"]
+    assert doc["mode"] == "tombstones"
+    assert [n["qualified_name"] for n in doc["removed"]] == ["pkg.m.clean"]
+    assert doc["removed_without_records"] == 1
+
+    everything = why.why(conn, project="proj", tombstones_only=True, all_records=True, psg_db_path=graph, record=False)["text"]
+    assert "pkg.m.load_orders.inner · removed on 2026-09-11 (run 4) · 0 records" in everything
+
+
+def test_tombstones_leave_out_a_node_that_came_back(conn, graph):
+    _graph_events(graph, (4, 1, "node_removed", "nk_i"), (5, 1, "node_added", "nk_i"))
+    out = why.why(conn, project="proj", tombstones_only=True, all_records=True, psg_db_path=graph, record=False)
+    assert "removed nodes · 0" in out["text"]
+    assert "pkg.m.load_orders.inner" not in out["text"]
+
+
+def test_tombstones_of_an_empty_project_say_so(conn, graph):
+    out = why.why(conn, project="proj", tombstones_only=True, psg_db_path=graph, record=False)
+    assert out["text"].splitlines()[-1] == "nothing removed, rejected or failed is on record for proj"
+
+
+def test_tombstones_show_rejected_paths_as_read_hits(conn, graph):
+    ids = _seed(conn)
+    why.why(conn, project="proj", tombstones_only=True, psg_db_path=graph, session_id="sess-t")
+    hits = conn.execute("SELECT reason_id FROM read_hit WHERE moment = 'why'").fetchall()
+    assert [h[0] for h in hits] == [ids["rj"]]
+
+
+def test_cli_why_tombstones(conn, graph, tmp_path):
+    _seed(conn)
+    reg = tmp_path / "projects.json"
+    reg.write_text('{"projects": [{"name": "proj", "repo": "/x", "db_path": "%s", "commit_sha": "c"}]}' % graph)
+    r = _cli(conn, "why", "--project", "proj", "--tombstones", env_extra={"PSG_REGISTRY_PATH": str(reg)})
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines()[0] == "tombstones · proj"
+    assert "rejected paths · 1" in r.stdout
+
+
+def test_tombstones_cap_both_lists_and_count_the_rest(conn, graph, monkeypatch):
+    """Summaries and counts first: a long list is cut, and the cut says how much."""
+    monkeypatch.setattr(why, "TOMBSTONE_CAP", 1)
+    _seed(conn)
+    pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="technical", role="rejected_path",
+                     interpretation="tried a left join first", recorded_by="agent")
+    for key in ("nk_x", "nk_i"):
+        pv.insert_reason(conn, project="proj", plan_id="P3", node_key=key, kind="technical", interpretation="moved", recorded_by="agent")
+    _graph_events(graph, (4, 1, "node_removed", "nk_x"), (4, 2, "node_removed", "nk_i"))
+    _failed_step(conn, "PF", "PF-A", "x")
+    _failed_step(conn, "PG", "PG-A", "y")
+    t = why.why(conn, project="proj", tombstones_only=True, psg_db_path=graph, record=False)["text"]
+    assert "removed nodes · 2 (2 carrying records)" in t
+    assert "failed steps · 2" in t and " 1 more failed steps (--all lists them)" in t
+    assert " 1 more removed nodes carrying records (--all lists them)" in t
+    assert " 1 more rejected paths (--all lists them)" in t
+    full = why.why(conn, project="proj", tombstones_only=True, all_records=True, psg_db_path=graph, record=False)["text"]
+    assert "more removed" not in full and "more rejected" not in full and "more failed" not in full
+
+
+def test_tombstones_print_titles_not_whole_records(conn, graph):
+    """One line per tombstone; the reads that print one whole are named instead."""
+    long = "tried the archive backfill first " + "because of a long story " * 20
+    rid = pv.insert_reason(conn, project="proj", plan_id="P0", node_key="nk_a", kind="technical", role="rejected_path",
+                           interpretation=long, recorded_by="agent")
+    t = why.why(conn, project="proj", tombstones_only=True, psg_db_path=graph, record=False)["text"]
+    line = next(ln for ln in t.splitlines() if ln.startswith(f" #{rid} "))
+    assert line.startswith(f" #{rid} · nk_a · ") and line.endswith("…")
+    assert len(line) < 160
+    assert long not in t
+
+
+def test_a_rejected_path_of_a_task_names_its_plan(conn, graph):
+    rid = pv.insert_reason(conn, project="proj", plan_id="P9", node_key=None, kind="technical", role="rejected_path",
+                           interpretation="tried one plan per node first", recorded_by="agent")
+    t = why.why(conn, project="proj", tombstones_only=True, psg_db_path=graph, record=False)["text"]
+    assert f" #{rid} · plan P9 · " in t

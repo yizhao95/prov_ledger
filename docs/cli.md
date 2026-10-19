@@ -54,7 +54,7 @@ believed instead of it.
 | `anchor check` | re-read the files; a lost anchor is reported, never re-pointed |
 | `anchor candidates` | propose readings — off by default, and even on it only proposes |
 | `headline show` / `respond` / `ack` | the plan headline; answer one finding (revise / proceed); a person proceeds past one |
-| `why` | one bounded read of a node: history, constraints, rejected paths, prior claims, blast radius (`--impact`, `--all`, `--pending`, `--never-read`, `--search`, `--json`) |
+| `why` | one bounded read of a node: history (with the run that removed it, for a node the code no longer has), constraints, rejected paths, prior claims, blast radius (`--impact`, `--all`, `--pending`, `--never-read`, `--search`, `--tombstones`, `--json`). `--tombstones` with no node lists the project's removed nodes, rejected paths and failed steps, one title line each, capped and counted |
 | `graph` | the project graph, folded to areas with how many nodes carry records; a target plus `--depth N` unfolds it and prints neighbour **names** with their edge type (`--limit`, `--type`, `--include-imports`, `--json`). The fold is pagination, never a judgement about relevance |
 | `record` | one record whole and untruncated — `#12` for a ledger record, `#r3` for a source — with its tier, dates, the words it quotes, its sources, and the task that produced it (`--json`) |
 | `plan` | a task's steps in tree order with their failures and logs (`--step`, `--full`, `--log-chars`, `--json`). The only read that reaches a failure inside a plan whose status is `COMPLETED` because the failure was recovered |

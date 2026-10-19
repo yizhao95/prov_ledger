@@ -10,6 +10,18 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 
 ## Unreleased
 
+### Added
+
+- **`provledger why --tombstones` lists what a project removed, rejected and
+  failed.** With no node to start from: removed nodes (the ones carrying
+  records first, with their record count), rejected paths and failed steps, one
+  title line each with the read that prints one whole; each list is capped at
+  50 and the rest is counted (`--all` lifts it). Nothing is new on record —
+  every row was already kept; there was no read that listed them together.
+- **`why` on a removed node says so.** Under the summary line: "removed on
+  <date> (run N): the code is gone; what was recorded on it stays". Before,
+  the node's removal was folded into its history count.
+
 ### Changed
 
 - **The README opens on what the tool is for.** The headline, the three views
