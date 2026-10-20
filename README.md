@@ -67,6 +67,8 @@ Three months ago someone said, in a meeting, "don't split that dataset randomly 
 
 It keeps one view of a project across nodes (the whole map and what flows through it), across time (what each thing was, and what it became) and across tasks (what every piece of work read, decided and expected). Graph, Node and Task are three angles on that one view, not three pages: they share a single anchor of project, node and point in time, and switching between them keeps it — one anchor, three angles. Around each thing in the map it holds the decisions: why it changed, the rule that still constrains it, and **the paths that were tried and dropped** — the half a diff never shows.
 
+**Nothing is deleted.** A function removed from the code keeps its history and every reason recorded on it, and `provledger why` on it says when it went. A path tried and dropped stays as a rejected path; a step that failed stays in its task even when the task closed green; a prediction stays beside what was later measured; a reason found wrong is superseded, not overwritten. Each is a tombstone — what was there, when it went, and why — and `provledger why --tombstones` lists a project's, one line each, with the read that opens any one of them.
+
 ![A data-flow picture of a real repository, switching between two views: 3,568 nodes folded into modules and laid out in three bands — what is read, what processes it, what is produced — with the count of nodes that carry records changing as the view changes](docs/media/readme-graph.gif)
 
 *Data flow, not a call graph: 3,568 nodes folded into 11 modules, laid out as what gets read, what processes it, and what comes out.*
@@ -84,7 +86,7 @@ When none of them has anything to say, the record says *unstated* and stops ther
 | the question | what answers it |
 |---|---|
 | Why is it this way? | `/ledger`, and every sentence ends in the id of the record it rests on |
-| Have we tried this before? | the rejected paths on the thing you are about to change, surfaced before you edit it |
+| Have we tried this before? | the rejected paths on the thing you are about to change, surfaced before you edit it; `why --tombstones` for the whole project |
 | What would this change reach? | the computed arrows — consumers, and the metric three steps downstream |
 | Someone is asking me to justify this | `/receipts` — the same records as a timeline with their sources, for your own model to write the reply from |
 | I just inherited this project | all of the above, without having been in any of the meetings |

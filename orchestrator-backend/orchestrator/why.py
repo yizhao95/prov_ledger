@@ -186,12 +186,102 @@ def never_read(conn, *, project: str, limit: int = 50) -> list[dict]:
     return [dict(zip(("id", "node_key", "plan_id", "role", "tier", "evidence_level", "recorded_by", "occurred_at", "text"), r)) for r in rows]
 
 
+# ── --tombstones: what the project removed, rejected and failed ─────────────
+
+_REMOVED_KEYS = "SELECT node_key FROM node_event WHERE event_type = 'node_removed'"
+TOMBSTONE_CAP = 50                     # per list; --all lifts it, and what is cut is counted
+
+
+def removed_nodes(psg_db_path: str | None) -> list[dict]:
+    """Every node whose newest event, in a run that finished, is a removal —
+    newest first. A node removed and later added again is alive, not listed."""
+    rows = psg_bridge._query(psg_db_path,
+                             "SELECT e.node_key AS node_key, e.event_type AS event_type, e.run_id AS event_run, "
+                             "e.created_at AS event_at, a.* FROM node_event e JOIN analysis_run a ON a.id = e.run_id "
+                             f"WHERE e.node_key IN ({_REMOVED_KEYS}) ORDER BY e.node_key, e.run_id DESC, e.seq DESC")
+    newest: dict = {}
+    for r in rows:
+        if r["node_key"] in newest or ("aborted" in r.keys() and r["aborted"]):
+            continue
+        newest[r["node_key"]] = r
+    names: dict = {}
+    for r in psg_bridge._query(psg_db_path, "SELECT node_key, qualified_name FROM node_snapshot "
+                                            f"WHERE node_key IN ({_REMOVED_KEYS}) ORDER BY node_key, run_id DESC"):
+        names.setdefault(r["node_key"], r["qualified_name"])
+    out = [{"node_key": k, "qualified_name": names.get(k) or k, "run": r["event_run"], "at": (r["event_at"] or "")[:10]}
+           for k, r in newest.items() if r["event_type"] == "node_removed"]
+    return sorted(out, key=lambda n: (-(n["run"] or 0), n["qualified_name"]))
+
+
+def tombstones(conn, *, project: str, psg_db_path: str | None, limit: int | None = 50) -> dict:
+    """{removed, rejected, failed_steps}: the project's tried-and-dropped work,
+    with no target to start from. Nothing here is deleted anywhere — a removed
+    node keeps its records, a rejected path stays a row, a failed step stays in
+    its plan — so this is a list over what is already kept, not a new record."""
+    counts: dict = {}
+    for key, n in conn.execute(f"SELECT r.node_key, COUNT(*) FROM change_reason_v r WHERE r.project = ? "
+                               f"AND r.node_key IS NOT NULL AND {provenance.live('r')} GROUP BY r.node_key", (project,)):
+        counts[key] = n
+    removed = [dict(n, records=counts.get(n["node_key"], 0) + (counts.get(n["qualified_name"], 0)
+                                                                if n["qualified_name"] != n["node_key"] else 0))
+               for n in removed_nodes(psg_db_path)]
+    rejected = [dict(zip(("id", "node_key", "plan_id", "role", "tier", "evidence_level", "recorded_by", "occurred_at", "text"), r))
+                for r in conn.execute(
+                    "SELECT r.id, r.node_key, r.plan_id, r.role, r.tier, r.evidence_level, r.recorded_by, r.occurred_at, "
+                    "COALESCE(r.interpretation, r.statement) AS text FROM change_reason_v r "
+                    f"WHERE r.project = ? AND r.role = 'rejected_path' AND {provenance.live('r')} ORDER BY r.id DESC", (project,))]
+    failed = [dict(zip(("step_id", "plan_id", "plan_status", "title", "reason"), r)) for r in conn.execute(
+        "SELECT s.step_id, s.plan_id, p.status, s.description, COALESCE(NULLIF(s.failure_reason, ''), s.summary, '') FROM Steps s "
+        "JOIN Plans p ON p.plan_id = s.plan_id WHERE p.project = ? AND s.status = 'FAILED' "
+        "ORDER BY p.created_at DESC, s.plan_id, s.step_id", (project,))]
+    return {"removed": removed, "rejected": rejected if limit is None else rejected[:limit],
+            "rejected_total": len(rejected), "failed_steps": failed if limit is None else failed[:limit],
+            "failed_total": len(failed)}
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+TITLE_CHARS = 100
+
+
+def _title(text: str | None) -> str:
+    """A tombstone's title: its first line, cut at TITLE_CHARS with a mark."""
+    first = (text or "").strip().splitlines()[0] if (text or "").strip() else "(no text recorded)"
+    return first if len(first) <= TITLE_CHARS else first[:TITLE_CHARS].rstrip() + "…"
+
+
+READ_ONE = "read one: provledger why <node> · provledger record #<id> · provledger plan <plan> --step <step>"
+
+
 # ── the main read ────────────────────────────────────────────────────────────
+
+def removed_at(psg_db_path: str | None, node_key: str) -> dict | None:
+    """The node's tombstone: {run, at} when its newest event is a removal, else None.
+
+    Events of a refresh that died before finishing are not observations
+    (FL-028), so a run marked aborted is skipped. Older graphs have no
+    `aborted` column; the run row is read whole so a missing column means
+    "not aborted" instead of a query that fails and reads as "never removed"."""
+    rows = psg_bridge._query(psg_db_path,
+                             "SELECT e.event_type AS event_type, e.run_id AS event_run, e.created_at AS event_at, a.* "
+                             "FROM node_event e JOIN analysis_run a ON a.id = e.run_id "
+                             "WHERE e.node_key = ? ORDER BY e.run_id DESC, e.seq DESC", (node_key,))
+    for r in rows:
+        if "aborted" in r.keys() and r["aborted"]:
+            continue
+        if r["event_type"] == "node_removed":
+            return {"run": r["event_run"], "at": (r["event_at"] or "")[:10]}
+        return None
+    return None
+
 
 def why(conn, *, project: str, target: str | None = None, psg_db_path: str | None = None, impact: bool = False,
         neighbors: bool = False, budget: int = 1500, fmt: str = "md", pending_only: bool = False,
         never_read_only: bool = False, all_records: bool = False, search_query: str | None = None,
-        session_id: str | None = None, plan_id: str | None = None, record: bool = True) -> dict:
+        session_id: str | None = None, plan_id: str | None = None, record: bool = True,
+        tombstones_only: bool = False) -> dict:
     """Returns {"text": <md>, "doc": <json-able>}; writes read_hit(moment='why') for every record shown."""
     psg = psg_db_path if psg_db_path is not None else psg_bridge.db_path_for(project)
     shown: list[int] = []
@@ -216,6 +306,38 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
         for r in rows:
             lines.append(f" {r['node_key'] or '-'} · " + _line(r, st.get(r["id"], {})))
         shown = [r["id"] for r in rows]
+    elif tombstones_only and not target:
+        tb = tombstones(conn, project=project, psg_db_path=psg, limit=None if all_records else TOMBSTONE_CAP)
+        with_records = [n for n in tb["removed"] if n["records"]]
+        listed = tb["removed"] if all_records else with_records[:TOMBSTONE_CAP]
+        quiet = len(tb["removed"]) - len(with_records)
+        doc.update({"mode": "tombstones", "removed": listed, "removed_without_records": quiet,
+                    "rejected": tb["rejected"], "rejected_total": tb["rejected_total"],
+                    "failed_steps": tb["failed_steps"], "failed_total": tb["failed_total"], "records": tb["rejected"]})
+        lines.append(f"tombstones · {project}")
+        lines.append(f"removed nodes · {len(tb['removed'])} ({len(with_records)} carrying records)")
+        for n in listed:
+            lines.append(f" {n['qualified_name']} · removed on {n['at']} (run {n['run']}) · {_plural(n['records'], 'record')}")
+        if not all_records and len(with_records) > len(listed):
+            lines.append(f" {len(with_records) - len(listed)} more removed nodes carrying records (--all lists them)")
+        if quiet and not all_records:
+            lines.append(f" {quiet} more removed with nothing on record (--all lists them)")
+        lines.append(f"rejected paths · {tb['rejected_total']}")
+        for r in tb["rejected"]:
+            where = r["node_key"] or (f"plan {r['plan_id']}" if r["plan_id"] else "-")
+            lines.append(f" #{r['id']} · {where} · {(r['occurred_at'] or '')[:10]} · {_title(r['text'])}")
+        if tb["rejected_total"] > len(tb["rejected"]):
+            lines.append(f" {tb['rejected_total'] - len(tb['rejected'])} more rejected paths (--all lists them)")
+        lines.append(f"failed steps · {tb['failed_total']}")
+        for s in tb["failed_steps"]:
+            lines.append(f" {s['step_id']} · plan {s['plan_id']} ({s['plan_status']}) · {_title(s['title'])}")
+        if tb["failed_total"] > len(tb["failed_steps"]):
+            lines.append(f" {tb['failed_total'] - len(tb['failed_steps'])} more failed steps (--all lists them)")
+        if not tb["removed"] and not tb["rejected_total"] and not tb["failed_total"]:
+            lines.append(f"nothing removed, rejected or failed is on record for {project}")
+        else:
+            lines.append(READ_ONE)
+        shown = [r["id"] for r in tb["rejected"]]
     elif pending_only and not target:
         rows = pending(conn, project=project)
         doc.update({"mode": "pending", "records": rows})
@@ -225,7 +347,7 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
         shown = []                                   # an unstated row has nothing to show
     else:
         if not target:
-            raise ValueError("why needs a target (qualified name, nk_… or file:line) unless --search / --pending / --never-read")
+            raise ValueError("why needs a target (qualified name, nk_… or file:line) unless --search / --pending / --never-read / --tombstones")
         res = resolve_target(psg, target)
         doc["resolved"] = res
         # FL-153: the flags now reach the pack. `--all` lifts the record caps,
@@ -260,9 +382,13 @@ def why(conn, *, project: str, target: str | None = None, psg_db_path: str | Non
             summary = (f"{tp.qualified_name} · downstream {len(tp.output_consumers) + len(tp.lineage_downstream)} · history {history} · "
                        f"constraints {len(cons_all)} ({len(cons_active)} active) · rejected {len(rej_all)} · pending {len(unst)}")
             lines.append(summary)
+            removed = removed_at(psg, tp.node_key) if tp.node_key else None
+            if removed:
+                lines.append(f"removed on {removed['at']} (run {removed['run']}): the code is gone; what was recorded on it stays")
             doc["summary"] = {"qualified_name": tp.qualified_name, "node_key": tp.node_key, "downstream": len(tp.output_consumers) + len(tp.lineage_downstream),
                               "history": history, "constraints": len(cons_all), "constraints_active": len(cons_active),
-                              "rejected_paths": len(rej_all), "pending": len(unst), "identity_chain": tp.identity_chain}
+                              "rejected_paths": len(rej_all), "pending": len(unst), "identity_chain": tp.identity_chain,
+                              "removed": removed}
             if pending_only:
                 recs = {"pending": [dict(r, text=None) for r in unst]}
             elif all_records:

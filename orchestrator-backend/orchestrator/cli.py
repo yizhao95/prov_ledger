@@ -807,7 +807,8 @@ def _why_cmd(args) -> int:
         try:
             out = why.why(conn, project=project, target=args.target, impact=args.impact, neighbors=args.neighbors,
                           budget=args.budget, pending_only=args.pending, never_read_only=args.never_read,
-                          all_records=args.all, search_query=args.search, session_id=args.session, plan_id=args.plan)
+                          all_records=args.all, search_query=args.search, session_id=args.session, plan_id=args.plan,
+                          tombstones_only=args.tombstones)
         except ValueError as e:
             print(f"provledger why: {e}", file=sys.stderr)
             return 2
@@ -1429,6 +1430,8 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--all", action="store_true", help="lift the caps: every constraint, rejected path and reason")
     w.add_argument("--pending", action="store_true", help="the unstated slots (of the target, or of the project without a target)")
     w.add_argument("--never-read", action="store_true", help="active constraints that were never shown to anyone")
+    w.add_argument("--tombstones", action="store_true",
+                   help="what the project removed, rejected and failed: removed nodes, rejected paths, failed steps (no target)")
     w.add_argument("--search", default=None, metavar="WORDS", help="full-text search over reasons and constraints (FTS5, LIKE when unavailable)")
     w.add_argument("--json", action="store_true", help="machine-readable output")
     w.add_argument("--plan", default=None, help=argparse.SUPPRESS)
