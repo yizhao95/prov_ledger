@@ -598,6 +598,7 @@ img{max-width:100%}
 #nd-reach .kv{gap:7px 14px}
 .titlecard .endline{margin:0; font:700 30px/1.22 var(--ui); letter-spacing:-.02em; color:#f4f2ec; max-width:30ch;
   padding:4px 10px; margin-left:-10px; border-radius:9px; transition:background .35s ease, box-shadow .35s ease}
+.titlecard .endsub{margin:0; font:500 18px/1.45 var(--ui); color:var(--room-ink); max-width:46ch}
 .recap{display:flex; flex-direction:column; gap:10px; margin-top:8px}
 .recap .rc{font:500 15px/1.5 var(--ui); color:var(--room-ink); padding-left:13px; border-left:3px solid var(--brand-spark)}
 .titlecard .try{margin-top:14px; font:500 13px/1 var(--mono); color:var(--brand-spark)}
@@ -903,11 +904,10 @@ img{max-width:100%}
           <section class="screen" id="sc-end">
             <div class="titlecard">
               <div class="brand">provLedger</div>
-              <p class="endline" id="en-h">Every change, traced to the decision behind it.</p>
+              <p class="endline" id="en-h">People forget. Your agent doesn't.</p>
+              <p class="endsub reveal" id="en-s">Not just what changed — the decision behind it.</p>
               <div class="recap">
-                <div class="rc reveal" id="en-1">Built in May, removed in June — and why stayed on record.</div>
-                <div class="rc reveal" id="en-2">Every line of the answer ends in the record it rests on.</div>
-                <div class="rc reveal" id="en-3">Where nothing was recorded, it says so. Nothing is sent for you.</div>
+                <div class="rc reveal" id="en-1">Every decision, every tombstone, every name behind them — none of it forgotten.</div>
               </div>
               <p class="try reveal" id="en-try">claude plugin marketplace add yizhao95/prov_ledger</p>
             </div>
@@ -1109,10 +1109,10 @@ img{max-width:100%}
                 "↳ 8 句 · 8 句都落在材料上 · 剔除 0 句 · 数字与事实表核对一致<br>↳ 发出前：跟数据平台确认 v2 feed 现在是否提供 orders.discount——记录里没有<br>↳ 未发出。草稿停在这里，复制粘贴由你来做。"],
 
     /* --- the close --- */
-    "en-h": ["Every change, traced to the decision behind it.","每一次改动，都追溯到它背后的那个决定。"],
-    "en-1": ["Built in May, removed in June — and why stayed on record.","5 月做上去，6 月拿掉——为什么，一直留在记录里。"],
-    "en-2": ["Every line of the answer ends in the record it rests on.","回答里的每一句，都落在它依据的那条记录上。"],
-    "en-3": ["Where nothing was recorded, it says so. Nothing is sent for you.","没有记录的地方，它就说没有。也不替你发出任何东西。"],
+    "en-h": ["People forget. Your agent doesn't.","人会忘。你的 agent 不会。"],
+    "en-s": ["Not just what changed — the decision behind it.","不只记下改了什么，也记下当初为什么这么改。"],
+    "en-1": ["Every decision, every tombstone, every name behind them — none of it forgotten.",
+             "每一个决定、每一块墓碑、每一个拍板的人，都不会被忘掉。"],
 
     "cbox-txt": ["Reply","回复"], "csend": ["Send","发送"],
     "ctyping-txt": ["Priya Raman is typing","Priya Raman 正在输入"]
@@ -1168,8 +1168,8 @@ img{max-width:100%}
       r5: "Nothing is sent. The draft stops in the terminal.",
 
       /* 08 · in one line */
-      c1: "That is the whole of it.",
-      c2: "<b>Every change, traced to the decision behind it.</b>",
+      c1: "People forget.",
+      c2: "<b>Your agent doesn't.</b>",
       c3: "A worked example. The plugin is one command away."
     },
     zh: {
@@ -1212,8 +1212,8 @@ img{max-width:100%}
       r4: "还有再做一次之前，唯一要确认的那件事。",
       r5: "没有发出。草稿停在终端里。",
 
-      c1: "就这些。",
-      c2: "<b>每一次改动，都追溯到它背后的那个决定。</b>",
+      c1: "人会忘。",
+      c2: "<b>你的 agent 不会。</b>",
       c3: "这是示例数据。插件一条命令就能装上。"
     }
   };
@@ -1383,7 +1383,7 @@ img{max-width:100%}
 
   /* ---------- reset to frame zero ---------- */
   var REVEALS = ["ask-locate","ask-ans","ask-next","rp-locate","rp-mat","rp-hand","rp-draft","ax-1","ax-2","ax-3",
-                 "en-1","en-2","en-3","en-try"];
+                 "en-s","en-1","en-try"];
   var LITS = ["msg-q","msg-q2"];
   var MARKS = ["hrow-hit","hrow-gone","hrow-rej1","hrow-rej2","con-hit","src-mail","src-meet",
                "nd-card","nd-gone","nd-quote","nd-reach","rc-vis","rc-said","rc-shown",
@@ -1487,10 +1487,9 @@ img{max-width:100%}
 
     /* 08 · in one line */
     [90800, function(){ flag("08", N(7)); show("end"); cursor.style.transform = "translate(1040px,560px)"; say(C("c1")); }],
-    [92000, function(){ on("en-1"); }],
-    [93200, function(){ on("en-2"); }],
-    [94400, function(){ on("en-3"); }],
-    [96200, function(){ sp("en-h"); say(C("c2")); }],
+    [92600, function(){ sp("en-h"); say(C("c2")); }],
+    [94400, function(){ on("en-s"); }],
+    [96000, function(){ on("en-1"); }],
     [98800, function(){ on("en-try"); say(C("c3")); }],
     [101500,function(){ /* hold on the last frame */ }]
   ];
