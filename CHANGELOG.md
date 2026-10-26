@@ -70,6 +70,13 @@ users is written up in [`docs/KNOWN-ISSUES.md`](docs/KNOWN-ISSUES.md).
 - `docs/decision-provenance.md` §13 dated the per-task evidence pass to 0.4.9;
   it shipped in 0.4.8.
 
+### Removed
+
+- **`docs/media/walkthrough-ux.mp4`.** Nothing linked to it after the
+  walkthrough re-cut, and at 11.2 MB it was the one file over the 5 MiB
+  per-file limit of Anthropic's plugin directory, which stops validating a
+  repository that holds one. Its GitHub Pages URL no longer serves it.
+
 ## 0.4.8 — 2026-10-15
 
 ### Changed
